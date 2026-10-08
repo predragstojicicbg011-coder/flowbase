@@ -178,7 +178,7 @@ describe('what is still owed', () => {
 
   /**
    * The principal is certain and the interest is not. Averaging the unknown
-   * away into one number would make a €50,000 obligation read as if its cost
+   * away into one number would make a 50.000 EUR obligation read as if its cost
    * were known.
    */
   it('still states the principal when the line is unpriced', () => {

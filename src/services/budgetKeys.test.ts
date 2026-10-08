@@ -166,7 +166,7 @@ describe('the keys under a budget row', () => {
     ]
     const ledgerByNode: Record<string, Adjustment[]> = {
       'Sales|Reps': [{
-        id: 'a1', kind: 'adjust', amount_usd: 250,
+        id: 'a1', kind: 'adjust', amount_rsd: 250,
         reason: 'Two more reps', created_at: '2026-01-01T00:00:00Z',
       }],
     }
@@ -183,7 +183,7 @@ describe('the keys under a budget row', () => {
     const seeded = nodes.filter(n => under.includes(n.key)).reduce((s, n) => s + n.seed, 0)
     const movement = under
       .flatMap(k => ledgerByNode[k] || [])
-      .reduce((s, a) => s + a.amount_usd, 0)
+      .reduce((s, a) => s + a.amount_rsd, 0)
     expect(movement).toBe(250)
     expect(parent.budget - seeded).toBe(movement)
   })
@@ -454,7 +454,7 @@ describe('the invariant: the two branches total the same', () => {
       const resolved = (ledger[n.key] || []).map(a => a.kind !== 'set' ? a : {
         ...a,
         kind: 'adjust' as const,
-        amount_usd: a.amount_usd
+        amount_rsd: a.amount_rsd
           - seedForEntry(a as unknown as ClassifiedEntry, seedsByCompany, MONTH),
       })
       return { ...n, seed, ledger: applyLedger(seed, resolved) - seed }
@@ -463,7 +463,7 @@ describe('the invariant: the two branches total the same', () => {
   }
 
   const adjustment = (
-    over: Partial<ClassifiedEntry> & Partial<Adjustment> & { amount_usd: number },
+    over: Partial<ClassifiedEntry> & Partial<Adjustment> & { amount_rsd: number },
   ): ClassifiedEntry => ({
     id: 'a1', kind: 'adjust', reason: 'because', created_at: '2026-01-01T00:00:00Z',
     company_id: CO,
@@ -482,7 +482,7 @@ describe('the invariant: the two branches total the same', () => {
     // skip this entry outright, and its total stayed at 3500 while the
     // department branch read 3650.
     const e = adjustment({
-      level: 'dept_subcategory', amount_usd: 150,
+      level: 'dept_subcategory', amount_rsd: 150,
       department: 'Sales', dept_subcategory: 'Reps',
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
     })
@@ -492,7 +492,7 @@ describe('the invariant: the two branches total the same', () => {
 
   it('agrees after a change recorded at pl_subcategory, which the department branch does not show', () => {
     const e = adjustment({
-      level: 'pl_subcategory', amount_usd: 300,
+      level: 'pl_subcategory', amount_rsd: 300,
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
     })
     expect(branchTotal('pl', [e])).toBe(3800)
@@ -505,7 +505,7 @@ describe('the invariant: the two branches total the same', () => {
     ]
     for (const level of all) {
       const e = adjustment({
-        level, amount_usd: 77,
+        level, amount_rsd: 77,
         pl_category: 'Payroll', pl_subcategory: 'Salaries',
         department: 'Sales', dept_subcategory: 'Reps', expense_description: 'Base pay',
       })
@@ -527,7 +527,7 @@ describe('the invariant: the two branches total the same', () => {
     // It spans two departments, so it names neither.
     expect(stored.department).toBeNull()
 
-    const e = adjustment({ ...stored, level: 'pl_subcategory', amount_usd: 420 })
+    const e = adjustment({ ...stored, level: 'pl_subcategory', amount_rsd: 420 })
 
     // Where the user sees it: on the node it was recorded against in the P&L
     // branch, and under `Unassigned` in the department branch — truthfully,
@@ -551,7 +551,7 @@ describe('the invariant: the two branches total the same', () => {
     // The P&L branch puts it on `Payroll|Salaries|Base pay`, seeded 3000 -
     // Sales and Engineering salaries are one node there.
     const e = adjustment({
-      kind: 'set', level: 'expense_description', amount_usd: 5000,
+      kind: 'set', level: 'expense_description', amount_rsd: 5000,
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
       department: 'Sales', dept_subcategory: 'Reps', expense_description: 'Base pay',
     })
@@ -564,13 +564,13 @@ describe('the invariant: the two branches total the same', () => {
   it('agrees after a set followed by an adjust', () => {
     const s = adjustment({
       id: 'a1', created_at: '2026-01-01T00:00:00Z',
-      kind: 'set', level: 'expense_description', amount_usd: 5000,
+      kind: 'set', level: 'expense_description', amount_rsd: 5000,
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
       department: 'Sales', dept_subcategory: 'Reps', expense_description: 'Base pay',
     })
     const a = adjustment({
       id: 'a2', created_at: '2026-02-01T00:00:00Z',
-      kind: 'adjust', level: 'expense_description', amount_usd: 250,
+      kind: 'adjust', level: 'expense_description', amount_rsd: 250,
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
       department: 'Sales', dept_subcategory: 'Reps', expense_description: 'Base pay',
     })
@@ -584,7 +584,7 @@ describe('the invariant: the two branches total the same', () => {
     // has no history, so the department branch node is unseeded, while the P&L
     // node it shares with Sales and Engineering is seeded 3000.
     const e = adjustment({
-      kind: 'set', level: 'expense_description', amount_usd: 800,
+      kind: 'set', level: 'expense_description', amount_rsd: 800,
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
       department: 'Marketing', dept_subcategory: null, expense_description: 'Base pay',
     })
@@ -600,7 +600,7 @@ describe('the invariant: the two branches total the same', () => {
     // month it resolved to 5000 - 3500 = 1500 and the month read 5000 instead
     // of 8500 — the seeded 3500 vanished behind one unclassified figure.
     const e = adjustment({
-      kind: 'set', level: 'pl_category', amount_usd: 5000,
+      kind: 'set', level: 'pl_category', amount_rsd: 5000,
       pl_category: null, pl_subcategory: null,
       department: null, dept_subcategory: null, expense_description: null,
     })
@@ -613,7 +613,7 @@ describe('the invariant: the two branches total the same', () => {
       ['Opex|Software|Sales|Reps|Seats'], PL)
     expect(stored.department).toBe('Sales')
 
-    const e = adjustment({ ...stored, level: 'pl_subcategory', amount_usd: 60 })
+    const e = adjustment({ ...stored, level: 'pl_subcategory', amount_rsd: 60 })
     expect(nodeKeyForEntry(e, DEPT)).toBe('Sales|Reps')
     expect(branchTotal('pl', [e])).toBe(3560)
     expect(branchTotal('department', [e])).toBe(3560)
@@ -639,7 +639,7 @@ describe('the invariant: a group total is the sum of the companies in it', () =>
   ]
 
   const setOnA = {
-    id: 'a1', kind: 'set', amount_usd: 1200, reason: 'because',
+    id: 'a1', kind: 'set', amount_rsd: 1200, reason: 'because',
     created_at: '2026-01-01T00:00:00Z', company_id: 'A', level: 'department',
     pl_category: null, pl_subcategory: null,
     department: 'Sales', dept_subcategory: null, expense_description: null,
@@ -694,7 +694,7 @@ describe('the invariant: a group total is the sum of the companies in it', () =>
       const resolved = e.kind !== 'set' ? e : {
         ...e,
         kind: 'adjust',
-        amount_usd: e.amount_usd
+        amount_rsd: e.amount_rsd
           - seedForEntry(e as unknown as ClassifiedEntry, seedsByCompany, MONTH),
       }
       if (!ledger[placed.key]) ledger[placed.key] = []

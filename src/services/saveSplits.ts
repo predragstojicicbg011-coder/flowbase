@@ -51,6 +51,16 @@ export async function saveSplits(
   const why = whySplitNotSavable(parent, lines)
   if (why) return { ok: false, lines: 0, message: why }
 
+  // Booked BEFORE anything is removed: a parent without stored rates cannot
+  // be split, and finding that out after the delete would leave the payment
+  // unsplit for no reason.
+  let rows: ReturnType<typeof rowsFor>
+  try {
+    rows = rowsFor(parent, lines)
+  } catch (err) {
+    return { ok: false, lines: 0, message: err instanceof Error ? err.message : String(err) }
+  }
+
   const { error: delErr } = await client
     .from('pl_splits').delete()
     .eq('source', source).eq('source_id', sourceId)
@@ -67,8 +77,8 @@ export async function saveSplits(
     return { ok: true, lines: 0, message: 'Saved as a single expense.' }
   }
 
-  const rows = rowsFor(parent, lines).map(r => ({ ...r, source, source_id: sourceId }))
-  const { data, error: insErr } = await client.from('pl_splits').insert(rows).select('id')
+  const payload = rows.map(r => ({ ...r, source, source_id: sourceId }))
+  const { data, error: insErr } = await client.from('pl_splits').insert(payload).select('id')
 
   if (insErr) {
     return {

@@ -12,6 +12,8 @@ import {
 } from '../services/expenseCharts'
 import { MoversChart, HeatChart, HeatLegend, FacingChart, SIDE_LEFT, SIDE_RIGHT } from './SpendPanels'
 import ExpenseBranches, { type ExpenseBranchNode } from './ExpenseBranches'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { fmtMoney } from '../utils/formatters'
 
 // ── Expense visuals ─────────────────────────────────────────────────────────
 //
@@ -31,8 +33,13 @@ import ExpenseBranches, { type ExpenseBranchNode } from './ExpenseBranches'
 // exact control over a dark palette, hit targets that drill into the tree, and
 // no 300 kB dependency in a bundle that already ships React.
 
-const money = (n: number, dp = 0) =>
-  (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })
+// Money is in the viewer's display currency, which the tree handed in was
+// already summed in; this only names it. Axes use the compact scale with no
+// code — the figures beside them carry it.
+function useMoney() {
+  const { currency } = useDisplayCurrency()
+  return (n: number, dp = 0) => fmtMoney(n, currency, dp)
+}
 
 // ── Key figures ─────────────────────────────────────────────────────────────
 
@@ -53,6 +60,7 @@ interface KeyFigureProps {
 }
 
 export function KeyFigures(p: KeyFigureProps) {
+  const money = useMoney()
   const change = p.total - p.priorTotal
   const changePct = p.priorTotal > 0 ? (change / p.priorTotal) * 100 : null
   const active = p.monthlyTotals.filter(v => v > 0)
@@ -422,6 +430,7 @@ function TrendChart({ series, w, h, normalized, onTip, onSelect, tree, muted }: 
   /** A legend entry under the cursor. Everything else recedes. */
   muted: string | null
 }) {
+  const money = useMoney()
   const PAD = { l: 58, r: 20, t: 16, b: 34 }
   const iw = Math.max(w - PAD.l - PAD.r, 10)
   const ih = Math.max(h - PAD.t - PAD.b, 10)
@@ -511,6 +520,7 @@ function BridgeChart({ steps, w, h, onTip, onSelect, priorLabel, periodLabel }: 
   onSelect: (k: string | null) => void
   priorLabel: string; periodLabel: string
 }) {
+  const money = useMoney()
   const PAD = { l: 58, r: 20, t: 30, b: 46 }
   const iw = Math.max(w - PAD.l - PAD.r, 10)
   const ih = Math.max(h - PAD.t - PAD.b, 10)
@@ -620,6 +630,7 @@ function ParetoChart({ points, w, h, onTip, onSelect }: {
   onTip: (t: Tip) => void
   onSelect: (k: string | null) => void
 }) {
+  const money = useMoney()
   const PAD = { l: 58, r: 46, t: 18, b: 62 }
   const iw = Math.max(w - PAD.l - PAD.r, 10)
   const ih = Math.max(h - PAD.t - PAD.b, 10)

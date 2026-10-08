@@ -4,12 +4,12 @@ import ReconcilePanel from './ReconcilePanel'
 
 // ─── Reconciling in the currency the bill was written in ────────────────────
 //
-// This panel ran entirely in dollars: the input, the Max button, the running
-// totals and the figure it stored. The dollar columns carry two different
-// dates' rates — the invoice's and the payment's — so a dinar payment that
-// settled a dinar bill to the para showed a remainder of a per cent of itself
-// for ever, and what it wrote into `allocated_amount` had been quantised to
-// the whole US cent, worth about a dinar.
+// The input, the Max button and the figure stored are in the bill's own
+// currency. The book columns (RSD, EUR) carry two different dates' rates — the
+// invoice's and the payment's — so settling through them would leave a bill
+// paid in its own currency short by the rate move between the two days. The
+// book figures of a link are derived from the typed one at the INVOICE's
+// stored rates.
 //
 // These tests pin the figures rather than the wording, because the figures are
 // what settles a bill.
@@ -72,20 +72,23 @@ const install = () => {
   ;(global as any).__reconcileClient = stubSupabase(rows, calls)
 }
 
-// A real shape: 134,561.52 RSD booked at 101.7718, paid by a bank line for
-// exactly that many dinars on the same day.
+// A real shape: 134,561.52 RSD on a day the NBS said 117.2 RSD per EUR
+// (134561.52 / 117.2 = 1,148.14 EUR), paid by a bank line for exactly that
+// many dinars on the same day.
 const invoice = (over: Partial<any> = {}) => ({
   id: 'inv1', company_id: 'c1', invoice_number: 'H-1278/2026',
   invoice_date: '2026-08-05', currency: 'RSD',
-  amount: 134561.52, amount_usd: 1322.19,
-  paid_amount: 0, remaining_usd: 1322.19,
+  amount: 134561.52, exchange_rate: 1, eur_rate: 117.2,
+  amount_rsd: 134561.52, amount_eur: 1148.14,
+  paid_amount: 0, remaining_rsd: 134561.52,
   calculated_status: 'unpaid', partner_name: 'Generali', type: 'expense',
   ...over,
 })
 
 const payment = (over: Partial<any> = {}) => ({
   id: 'tx1', company_id: 'c1', type: 'direct', currency: 'RSD',
-  amount: 134561.52, amount_usd: 1322.19, transaction_date: '2026-08-05',
+  amount: 134561.52, exchange_rate: 1, eur_rate: 117.2,
+  amount_rsd: 134561.52, amount_eur: 1148.14, transaction_date: '2026-08-05',
   statement_number: '103',
   partners: { name: 'Generali' }, companies: { name: 'Test Company' },
   banks: { name: 'Intesa' },
@@ -116,12 +119,10 @@ describe('a payment in the same currency as the bill', () => {
     install()
   })
 
-  it('offers the bill in ITS OWN currency, not a round trip through dollars', async () => {
+  it('offers the bill in ITS OWN currency, not a round trip through the book', async () => {
     panel()
     const field = await link()
-    // 134,561.52 exactly. Through the dollar column this was
-    // round(round(134561.52 / 101.7718, 2) * 101.7718, 2) — near enough to
-    // look right and never the same number twice.
+    // 134,561.52 exactly.
     expect(Number(field.value)).toBe(134561.52)
     expect(screen.getByText('RSD')).toBeInTheDocument()
   })
@@ -132,14 +133,15 @@ describe('a payment in the same currency as the bill', () => {
     expect(screen.getByText(/Settles this invoice in full/)).toBeInTheDocument()
   })
 
-  it('STORES WHAT WAS TYPED, and derives the dollars from it', async () => {
+  it('STORES WHAT WAS TYPED, and derives the dinars and euros from it', async () => {
     panel()
     await link()
     fireEvent.click(screen.getByText(/Save & reconcile/))
     await waitFor(() => expect(written()).toBeDefined())
     expect(written()!.payload.allocated_amount).toBe(134561.52)
-    // 134,561.52 at the invoice's own implied rate is its own `amount_usd`.
-    expect(written()!.payload.allocated_amount_usd).toBe(1322.19)
+    // At the invoice's stored rates the whole bill is its own book figures.
+    expect(written()!.payload.allocated_amount_rsd).toBe(134561.52)
+    expect(written()!.payload.allocated_amount_eur).toBe(1148.14)
   })
 
   it('keeps a part payment to the para', async () => {
@@ -155,27 +157,25 @@ describe('a payment in the same currency as the bill', () => {
     panel()
     const field = await link()
     fireEvent.change(field, { target: { value: '100000' } })
-    // 134.561,52 − 100.000,00. Read off the dollar columns this line
-    // disagreed with the rule the status is decided by.
+    // 134.561,52 − 100.000,00, in the bill's own currency.
     expect(await screen.findByText(/Leaves 34\.561,52 RSD still owed/)).toBeInTheDocument()
   })
 })
 
 describe('a bill that something has already settled part of', () => {
   beforeEach(() => {
-    // 100,000 dinars already allocated. The DOLLAR remainder would be
-    // 1322.19 − round(100000 / 101.7718, 2) = 339.62, which at the invoice's
-    // rate converts back to 34,561.55 — three para adrift of the truth.
+    // 100,000 dinars already allocated; 34,561.52 left, read from what the
+    // bill holds in its own currency.
     rows = {
-      transactions: [payment({ amount: 34561.52, amount_usd: 339.59 })],
-      v_invoice_status: [invoice({ paid_amount: 100000, remaining_usd: 339.62, calculated_status: 'partial' })],
+      transactions: [payment({ amount: 34561.52, amount_rsd: 34561.52, amount_eur: 294.89 })],
+      v_invoice_status: [invoice({ paid_amount: 100000, remaining_rsd: 34561.52, calculated_status: 'partial' })],
       invoice_transaction_links: [],
       invoices: [invoice({ paid_amount: 100000 })],
     }
     install()
   })
 
-  it('reads the remainder from what the bill holds, not from the dollar column', async () => {
+  it('reads the remainder from what the bill holds, not from a book column', async () => {
     panel()
     const field = await link()
     expect(Number(field.value)).toBe(34561.52)
@@ -186,7 +186,8 @@ describe('a bill that something has already settled part of', () => {
 describe('when the source and the bill are in different currencies', () => {
   beforeEach(() => {
     rows = {
-      transactions: [payment({ currency: 'EUR', amount: 1150, amount_usd: 1330 })],
+      // 1,150 EUR at the payment date's 117.3 = 134,895 RSD — more than owed.
+      transactions: [payment({ currency: 'EUR', amount: 1150, exchange_rate: 117.3, eur_rate: 117.3, amount_rsd: 134895, amount_eur: 1150 })],
       v_invoice_status: [invoice()],
       invoice_transaction_links: [],
       invoices: [invoice()],
@@ -200,13 +201,61 @@ describe('when the source and the bill are in different currencies', () => {
     expect(Number(field.value)).toBe(134561.52)
   })
 
-  it('falls back to dollars for the totals AND SAYS SO', async () => {
+  it('falls back to dinars (the book) for the totals AND SAYS SO', async () => {
     // A euro payment against a dinar bill has no single currency its totals
     // mean anything in. Converting one into the other would put a figure on
     // screen that is nobody's actual money.
     panel()
     await link()
     expect(screen.getByText(/not all in the same currency/)).toBeInTheDocument()
+    expect(screen.getByText(/Shown in RSD/)).toBeInTheDocument()
+  })
+})
+
+describe('a euro bill paid in euros', () => {
+  // 1,000 EUR at the invoice date's 117.2 = 117,200 RSD; paid at 117.3.
+  const eurInvoice = invoice({
+    currency: 'EUR', amount: 1000, exchange_rate: 117.2, eur_rate: 117.2,
+    amount_rsd: 117200, amount_eur: 1000, remaining_rsd: 117200,
+  })
+  beforeEach(() => {
+    rows = {
+      transactions: [payment({ currency: 'EUR', amount: 1000, exchange_rate: 117.3, eur_rate: 117.3, amount_rsd: 117300, amount_eur: 1000 })],
+      v_invoice_status: [eurInvoice],
+      invoice_transaction_links: [],
+      invoices: [eurInvoice],
+    }
+    install()
+  })
+
+  it('books the link at the INVOICE rate, so it adds up to the bill', async () => {
+    panel()
+    await link()
+    fireEvent.click(screen.getByText(/Save & reconcile/))
+    await waitFor(() => expect(written()).toBeDefined())
+    expect(written()!.payload).toMatchObject({
+      allocated_amount: 1000, allocated_amount_rsd: 117200, allocated_amount_eur: 1000,
+    })
+  })
+})
+
+describe('a bill without stored rates', () => {
+  beforeEach(() => {
+    const bare = invoice({ currency: 'EUR', amount: 1000, exchange_rate: null, eur_rate: null, amount_rsd: null, amount_eur: null })
+    rows = {
+      transactions: [payment({ currency: 'EUR', amount: 1000 })],
+      v_invoice_status: [bare],
+      invoice_transaction_links: [],
+      invoices: [bare],
+    }
+    install()
+  })
+
+  it('says why it cannot be allocated instead of guessing a rate', async () => {
+    panel()
+    fireEvent.click(await screen.findByText('+ Link'))
+    expect(await screen.findByText(/nema exchange_rate/)).toBeInTheDocument()
+    expect(written()).toBeUndefined()
   })
 })
 
@@ -223,7 +272,7 @@ describe('opened from the invoice instead of the payment', () => {
 
   it('still types in the currency of the BILL, though the candidates are payments', async () => {
     // The direction decides which side is the invoice, and getting it round
-    // the wrong way is how a dollar figure once landed in a dinar column.
+    // the wrong way is how a figure once landed in another currency's column.
     panel('invoice', 'inv1')
     const field = await link()
     expect(Number(field.value)).toBe(134561.52)

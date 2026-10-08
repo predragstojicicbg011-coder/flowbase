@@ -23,20 +23,20 @@ describe('claimsFor', () => {
   })
 
   it('never lets a row allocate more than it is paying', () => {
-    // A $300 payment against a $500 invoice leaves $200 for someone else.
+    // A 300 RSD payment against a 500 RSD invoice leaves 200 for someone else.
     expect(claimsFor([row('r1', 300, 'a')], THREE).get('a')!.claimed).toBe(300)
   })
 
   it('spends a row across its invoices in the order they were ticked', () => {
-    // $800 over two $500 invoices: the first is closed, the second half paid.
+    // 800 over two invoices of 500: the first is closed, the second half paid.
     const claims = claimsFor([row('r1', 800, 'a', 'b')], THREE)
     expect(claims.get('a')!.claimed).toBe(500)
     expect(claims.get('b')!.claimed).toBe(300)
   })
 
   it('hands the second row what the first actually left, not a second copy', () => {
-    // THE BUG. Both rows tick invoice `a`; between them they have $1,000, and
-    // `a` is worth $500. The second row must not read as covering it again.
+    // THE BUG. Both rows tick invoice `a`; between them they have 1,000, and
+    // `a` is worth 500. The second row must not read as covering it again.
     const claims = claimsFor([row('r1', 500, 'a'), row('r2', 500, 'a')], THREE)
     expect(claims.get('a')).toEqual({ claimed: 500, rowIds: ['r1'] })
   })
@@ -60,7 +60,7 @@ describe('claimsFor', () => {
 
   it('does not claim a cent that rounding left behind', () => {
     // The poster settles in the invoice's own currency, so a closed invoice
-    // can still show a fraction of a dollar here. It is not an open invoice.
+    // can still show a fraction of a para here. It is not an open invoice.
     const claims = claimsFor([row('r1', 500, 'a')], [inv('a', 500 + EPSILON / 2)])
     expect(claims.get('a')!.claimed).toBeLessThanOrEqual(500 + EPSILON)
     expect(freeForRow(inv('a', 500 + EPSILON / 2), [row('r1', 500, 'a')], 'r2').exhausted).toBe(true)
@@ -128,7 +128,7 @@ describe('claimNotice', () => {
 
   it('says how much is left when the claim is partial', () => {
     expect(claimNotice({ remaining: 300, exhausted: false, claimedBy: ['r2'] }, label))
-      .toBe('$300.00 left — the rest is claimed by line 2')
+      .toBe('300,00 RSD left — the rest is claimed by line 2')
   })
 
   it('lists every claimant rather than just the first', () => {
@@ -137,19 +137,19 @@ describe('claimNotice', () => {
   })
 })
 
-describe('claimNotice in a unit that is not dollars', () => {
+describe('claimNotice in a unit that is not dinars', () => {
   const label = (id: string) => 'line ' + id.replace('r', '')
-  const rsd = (n: number) => `${n.toLocaleString('en-US')} RSD`
+  const eur = (n: number) => `${n.toFixed(2)} EUR`
 
   it('renders the remainder the way the caller has been showing it', () => {
     // The bank statement dialog reasons in the invoice's own currency, so a
-    // dollar sign here would be a lie about what the number is.
-    expect(claimNotice({ remaining: 120000, exhausted: false, claimedBy: ['r2'] }, label, rsd))
-      .toBe('120,000 RSD left — the rest is claimed by line 2')
+    // dinar code here would be a lie about what the number is.
+    expect(claimNotice({ remaining: 120000, exhausted: false, claimedBy: ['r2'] }, label, eur))
+      .toBe('120000.00 EUR left — the rest is claimed by line 2')
   })
 
   it('needs no formatter for the exhausted case, which names no amount', () => {
-    expect(claimNotice({ remaining: 0, exhausted: true, claimedBy: ['r1'] }, label, rsd))
+    expect(claimNotice({ remaining: 0, exhausted: true, claimedBy: ['r1'] }, label, eur))
       .toBe('Already fully covered by line 1 in this batch')
   })
 })
@@ -192,7 +192,7 @@ describe('a row whose amount is not known', () => {
 
   /**
    * The regression this exists for. The bulk import compares claims in
-   * dollars, and the dollar figure is attached by the analysis step. A row
+   * dinars, and the dinar figure is attached by the analysis step. A row
    * that never went through it claimed ZERO — so a line plainly closing a
    * 505,023 RSD invoice spoke for nothing, and that invoice went on being
    * offered to every other line of the statement.

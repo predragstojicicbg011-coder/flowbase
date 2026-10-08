@@ -10,6 +10,9 @@ import DebtPanels from '../components/DebtPanels'
 import { defaultMaturity, revolvingSchedule } from '../services/revolvingCredit'
 import { earliestDue, overdueCount, type DueInstalment } from '../services/debtSchedule'
 import { supabase as db } from '../supabase'
+import { fmtMoney, fmtMoneyCompact, fmtNum } from '../utils/formatters'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { getBookRates, bookAmounts, type BookRates } from '../services/bookAmounts'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Credit {
@@ -60,15 +63,15 @@ interface Installment {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function fmtEUR(n: number): string {
+// A credit's figures are in the credit's own currency — a loan may be indexed
+// to EUR or taken in RSD — and are printed with that currency's code. Only the
+// page's overview adds credits together, and it converts first.
+function fmtIn(n: number, currency: string): string {
   if (n === 0) return '—'
-  return '€' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return fmtMoney(n, currency || 'RSD')
 }
-function fmtEURCompact(n: number): string {
-  if (n === 0) return '—'
-  if (n >= 1000000) return `€${(n / 1000000).toFixed(1)}M`
-  if (n >= 1000) return `€${(n / 1000).toFixed(0)}K`
-  return `€${n.toFixed(0)}`
+function fmtInCompact(n: number, currency: string): string {
+  return fmtMoneyCompact(n, currency || 'RSD')
 }
 function daysUntil(dateStr: string): number {
   return Math.ceil((new Date(dateStr).getTime() - new Date().getTime()) / 86400000)
@@ -290,7 +293,9 @@ export function CreditDialog({ credit, hasSchedule = false, onClose, onSaved }: 
             <Field label="Currency">
               <select style={inp} value={form.currency} onChange={e => set('currency', e.target.value)}>
                 <option value="EUR">EUR</option>
-                <option value="USD">USD</option>
+                <option value="RSD">RSD</option>
+                {/* A loan in dollars is possible but not expected; kept for one written before. */}
+                {form.currency === 'USD' && <option value="USD">USD</option>}
               </select>
             </Field>
             <Field label="Principal amount *">
@@ -393,7 +398,13 @@ export function CreditDialog({ credit, hasSchedule = false, onClose, onSaved }: 
 }
 
 // ─── Edit Interest Dialog ─────────────────────────────────────────────────────
-function EditInstallmentDialog({ installment, onClose, onSaved }: { installment: Installment; onClose: () => void; onSaved: () => void }) {
+function EditInstallmentDialog({ installment, currency, onClose, onSaved }: {
+  installment: Installment
+  /** The credit's currency, which the instalment's figures are in. */
+  currency: string
+  onClose: () => void
+  onSaved: () => void
+}) {
   const [principal, setPrincipal] = useState(installment.principal_amount.toFixed(2))
   const [interest, setInterest] = useState(installment.interest_amount.toFixed(2))
   const [saving, setSaving] = useState(false)
@@ -424,7 +435,7 @@ function EditInstallmentDialog({ installment, onClose, onSaved }: { installment:
 
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '14px', marginBottom: '20px' }}>
           <div>
-            <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.30)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: '6px' }}>Principal (EUR)</div>
+            <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.30)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: '6px' }}>Principal ({currency})</div>
             <input
               autoFocus
               type="number" step="0.01"
@@ -435,7 +446,7 @@ function EditInstallmentDialog({ installment, onClose, onSaved }: { installment:
             />
           </div>
           <div>
-            <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.30)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: '6px' }}>Interest (EUR)</div>
+            <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.30)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: '6px' }}>Interest ({currency})</div>
             <input
               type="number" step="0.01"
               value={interest}
@@ -448,7 +459,7 @@ function EditInstallmentDialog({ installment, onClose, onSaved }: { installment:
 
         <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '12px 14px', marginBottom: '20px', fontSize: '12px', color: '#7A9BB8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>New annuity</span>
-          <span style={{ fontFamily: "'DM Mono',monospace", fontSize: '16px', fontWeight: '600', color: '#E8F1FB' }}>{fmtEUR(newTotal)}</span>
+          <span style={{ fontFamily: "'DM Mono',monospace", fontSize: '16px', fontWeight: '600', color: '#E8F1FB' }}>{fmtIn(newTotal, currency)}</span>
         </div>
 
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
@@ -536,7 +547,7 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
           <div style={{ textAlign: 'right', minWidth: '130px' }}>
             <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.28)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: '4px' }}>Remaining Principal</div>
             <div style={{ fontFamily: "'DM Mono',monospace", fontSize: '16px', fontWeight: '500', color: accentColor }}>
-              {fmtEURCompact(outstandingPrincipal || credit.principal_amount)}
+              {fmtInCompact(outstandingPrincipal || credit.principal_amount, credit.currency)}
             </div>
           </div>
 
@@ -544,7 +555,7 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
           <div style={{ textAlign: 'right', minWidth: '130px' }}>
             <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.28)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: '4px' }}>Total Outstanding</div>
             <div style={{ fontFamily: "'DM Mono',monospace", fontSize: '16px', fontWeight: '500', color: '#E8F1FB' }}>
-              {fmtEURCompact(outstandingTotal)}
+              {fmtInCompact(outstandingTotal, credit.currency)}
             </div>
           </div>
 
@@ -558,7 +569,7 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
                 </div>
                 {nextDue.paid_amount && nextDue.paid_amount > 0 ? (
                   <span style={{ fontSize: '10px', color: '#F5A623', background: 'rgba(245,166,35,0.12)', padding: '1px 6px', borderRadius: '20px', fontWeight: '600' }}>
-                    Partial — €{nextDue.paid_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} paid
+                    Partial — {fmtMoney(nextDue.paid_amount, credit.currency)} paid
                   </span>
                 ) : isOverdue(nextDue.due_date) ? (
                   <span style={{ fontSize: '10px', color: '#FF5B5A', background: 'rgba(255,91,90,0.12)', padding: '1px 6px', borderRadius: '20px', fontWeight: '600' }}>
@@ -632,13 +643,13 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
                         {overdue && <span style={{ marginLeft: '6px', fontSize: '10px', color: '#FF5B5A', background: 'rgba(255,91,90,0.12)', padding: '1px 5px', borderRadius: '10px' }}>overdue</span>}
                       </td>
                       <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '12px', color: inst.principal_amount > 0 ? '#4EA8FF' : 'rgba(255,255,255,0.20)' }}>
-                        {inst.principal_amount > 0 ? inst.principal_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                        {inst.principal_amount > 0 ? fmtNum(inst.principal_amount) : '—'}
                       </td>
                       <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '12px', color: '#F5A623' }}>
-                        {inst.interest_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {fmtNum(inst.interest_amount)}
                       </td>
                       <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '13px', fontWeight: '500', color: '#E8F1FB' }}>
-                        {inst.total_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {fmtNum(inst.total_amount)}
                       </td>
                       <td style={{ padding: '9px 16px' }}>
                         {(() => {
@@ -657,7 +668,7 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
                                     <div style={{ height: '100%', width: `${paidPct}%`, background: '#F5A623', borderRadius: '2px' }} />
                                   </div>
                                   <div style={{ fontSize: '9px', color: '#F5A623', marginTop: '2px', fontFamily: "'DM Mono',monospace" }}>
-                                    €{inst.paid_amount!.toFixed(2)} / €{inst.total_amount.toFixed(2)}
+                                    {fmtMoney(inst.paid_amount!, credit.currency)} / {fmtMoney(inst.total_amount, credit.currency)}
                                   </div>
                                 </div>
                               )}
@@ -682,16 +693,16 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
                 <tfoot>
                   <tr style={{ background: '#060E1A', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
                     <td colSpan={2} style={{ padding: '10px 16px', fontSize: '10px', fontWeight: '700', color: 'rgba(255,255,255,0.30)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                      Total ({filteredInst.length} installments)
+                      Total ({filteredInst.length} installments, {credit.currency})
                     </td>
                     <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '13px', fontWeight: '600', color: '#4EA8FF' }}>
-                      {filteredInst.reduce((s, i) => s + i.principal_amount, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {fmtNum(filteredInst.reduce((s, i) => s + i.principal_amount, 0))}
                     </td>
                     <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '13px', fontWeight: '600', color: '#F5A623' }}>
-                      {filteredInst.reduce((s, i) => s + i.interest_amount, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {fmtNum(filteredInst.reduce((s, i) => s + i.interest_amount, 0))}
                     </td>
                     <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '14px', fontWeight: '700', color: '#E8F1FB' }}>
-                      {filteredInst.reduce((s, i) => s + i.total_amount, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {fmtNum(filteredInst.reduce((s, i) => s + i.total_amount, 0))}
                     </td>
                     <td colSpan={2} />
                   </tr>
@@ -705,6 +716,7 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
       {editingInst && (
         <EditInstallmentDialog
           installment={editingInst}
+          currency={credit.currency}
           onClose={() => setEditingInst(null)}
           // The page owns the data now, so a saved instalment reloads the
           // page's copy — which also keeps the totals and the charts above in
@@ -721,6 +733,27 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
 export default function Credits() {
   const { defaultCompany } = useCompanies()
   const { versions } = useDataRefresh()
+  const { currency: shown } = useDisplayCurrency()
+
+  /**
+   * Today's NBS rates, for the overview only.
+   *
+   * The overview and the charts add credits together, and credits are in
+   * different currencies — an indexed loan in EUR, a dinar loan in RSD. They
+   * are added in the display currency, each credit's figures converted at
+   * today's rate with the same book-amount rule every document uses. A future
+   * instalment has no rate yet; today's is the honest stand-in, and it is
+   * named under the figures. Without a rate, a credit that would need one is
+   * left out of the totals and counted, never added at a guess.
+   */
+  const [rates, setRates] = useState<BookRates | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    getBookRates(new Date().toISOString().slice(0, 10))
+      .then(r => { if (!cancelled) setRates(r) })
+      .catch(() => { if (!cancelled) setRates(null) })
+    return () => { cancelled = true }
+  }, [])
 
   const [credits, setCredits] = useState<Credit[]>([])
   const [loading, setLoading] = useState(true)
@@ -739,13 +772,13 @@ export default function Credits() {
    */
   const [kindTab, setKindTab] = useState<'annuity' | 'revolving'>('annuity')
   /** The outstanding annuity instalments themselves, for the charts. */
-  const [annuityDue, setAnnuityDue] = useState<DueInstalment[]>([])
+  const [annuityDue, setAnnuityDue] = useState<(DueInstalment & { currency: string })[]>([])
   /** Every instalment on the books, fetched once and handed down by credit. */
   const [instalments, setInstalments] = useState<Installment[]>([])
   const [perCreditSums, setPerCreditSums] = useState<Record<string, { principal: number; interest: number }>>({})
 
   // Aggregate stats from DB
-  const [stats, setStats] = useState({ totalOutstanding: 0, totalPrincipal: 0, overdueCount: 0, nextDueDate: '' })
+  const [stats, setStats] = useState({ overdueCount: 0, nextDueDate: '' })
 
   /**
    * The benchmark history, which is what prices the revolving lines.
@@ -800,12 +833,14 @@ export default function Credits() {
     setInstalments(allInst)
 
     const annuitySet = new Set(annuityIds)
+    const currencyOf = new Map(all.map(c => [c.id, (c.currency || 'RSD').toUpperCase()]))
     const instData = allInst.filter(i =>
       i.status === 'outstanding' && annuitySet.has(i.credit_id))
     setAnnuityDue(instData.map(i => ({
       due_date: i.due_date,
       principal_amount: i.principal_amount || 0,
       interest_amount: i.interest_amount || 0,
+      currency: currencyOf.get(i.credit_id) || 'RSD',
     })))
 
     // What each loan still owes, for the By credit panel. Summed here from the
@@ -838,13 +873,11 @@ export default function Credits() {
 
     {
       const today = new Date().toISOString().split('T')[0]
-      const totalOut = instData.reduce((s, i) => s + (i.total_amount || 0), 0)
-      const totalPrin = instData.reduce((s, i) => s + (i.principal_amount || 0), 0)
       // The EARLIEST still to come, worked out rather than taken as the first
       // row found — see `earliestDue`, which is where the reason lives and
-      // where it is tested.
+      // where it is tested. The amounts are summed at render time, in the
+      // display currency: see `inShown`.
       setStats({
-        totalOutstanding: totalOut, totalPrincipal: totalPrin,
         overdueCount: overdueCount(instData, today),
         nextDueDate: earliestDue(instData, today),
       })
@@ -872,13 +905,42 @@ export default function Credits() {
    * revolving tranches' principal and the interest still to run on them.
    *
    * `interest` comes back null when any tranche is unpriced, and that null is
-   * carried into the headline rather than dropped. A €50,000 line whose cost
+   * carried into the headline rather than dropped. A 50.000 EUR line whose cost
    * is not known yet must not be added in as if it were free — the figure
    * shown is then "at least this much", and the card says so.
    */
   const rev = summarise(revolving, resets)
-  const totalObligation = stats.totalOutstanding + rev.principal + (rev.interest ?? 0)
-  const totalPrincipal = stats.totalPrincipal + rev.principal
+
+  /**
+   * A credit's figure in the display currency, at today's NBS rate; the figure
+   * itself when the credit is already in it. Null when it needs a rate there
+   * is none of — and that credit is then left out of the overview, counted.
+   */
+  const inShown = (amount: number, currency: string): number | null => {
+    const c = (currency || 'RSD').toUpperCase()
+    if (c === shown) return amount
+    if (!rates) return null
+    try {
+      const b = bookAmounts(amount, c, rates)
+      return shown === 'RSD' ? b.amount_rsd : b.amount_eur
+    } catch {
+      return null
+    }
+  }
+  /** Credits the overview could not convert, by id. */
+  const unconverted = new Set<string>()
+  const creditCurrency = (id: string) => (credits.find(c => c.id === id)?.currency || 'RSD')
+  const conv = (id: string, amount: number): number | null => {
+    const v = inShown(amount, creditCurrency(id))
+    if (v === null) unconverted.add(id)
+    return v
+  }
+
+  const annuityShown: DueInstalment[] = annuityDue.flatMap(i => {
+    const p = inShown(i.principal_amount, i.currency)
+    const q = inShown(i.interest_amount, i.currency)
+    return p === null || q === null ? [] : [{ due_date: i.due_date, principal_amount: p, interest_amount: q }]
+  })
 
   /**
    * The revolving half of the charts, DERIVED rather than read back.
@@ -890,19 +952,21 @@ export default function Credits() {
    * the bank actually scheduled — is read from the table.
    */
   const thisMonth = new Date().toISOString().slice(0, 7)
-  const revolvingDue: DueInstalment[] = revolving.flatMap(c =>
-    revolvingSchedule({
+  const revolvingDue: DueInstalment[] = revolving.flatMap(c => {
+    const rows = revolvingSchedule({
       principal: c.principal_amount,
       margin: c.rate_margin,
       resets: resets[c.id] || [],
       fromMonth: thisMonth,
       maturity: c.maturity_date || '',
       billingDay: Number((c.disbursement_date || '').slice(8, 10)) || undefined,
-    }).map(r => ({
-      due_date: r.due_date,
-      principal_amount: r.principal_amount,
-      interest_amount: r.interest_amount,
-    })))
+    })
+    return rows.flatMap(r => {
+      const p = conv(c.id, r.principal_amount)
+      const q = conv(c.id, r.interest_amount)
+      return p === null || q === null ? [] : [{ due_date: r.due_date, principal_amount: p, interest_amount: q }]
+    })
+  })
 
   /**
    * A revolving line with no rate still owes its principal on its maturity
@@ -916,27 +980,51 @@ export default function Credits() {
       resets: resets[c.id] || [], fromMonth: thisMonth,
       maturity: c.maturity_date || '',
     }).length === 0 && !!c.maturity_date)
-    .map(c => ({
-      due_date: c.maturity_date as string,
-      principal_amount: c.principal_amount,
-      interest_amount: 0,
-    }))
+    .flatMap(c => {
+      const p = conv(c.id, c.principal_amount)
+      return p === null ? [] : [{ due_date: c.maturity_date as string, principal_amount: p, interest_amount: 0 }]
+    })
 
   const annuityPerCredit = perCreditSums
+  // Each credit in the display currency; a credit that cannot be converted is
+  // left out here and counted in `unconverted`.
   const perCredit = [
-    ...filtered.map(c => ({
-      creditId: c.id, name: c.name, kind: 'annuity' as const,
-      principal: annuityPerCredit[c.id]?.principal || 0,
-      interest: annuityPerCredit[c.id]?.interest || 0,
-    })),
-    ...revolving.map(c => {
+    ...filtered.flatMap(c => {
+      const p = conv(c.id, annuityPerCredit[c.id]?.principal || 0)
+      const q = conv(c.id, annuityPerCredit[c.id]?.interest || 0)
+      return p === null || q === null ? [] : [{
+        creditId: c.id, name: c.name, kind: 'annuity' as const, principal: p, interest: q as number | null,
+      }]
+    }),
+    ...revolving.flatMap(c => {
       const one = summarise([c], { [c.id]: resets[c.id] || [] })
-      return {
-        creditId: c.id, name: c.name, kind: 'revolving' as const,
-        principal: one.principal, interest: one.interest,
-      }
+      const p = conv(c.id, one.principal)
+      const q = one.interest === null ? null : conv(c.id, one.interest)
+      return p === null || (one.interest !== null && q === null) ? [] : [{
+        creditId: c.id, name: c.name, kind: 'revolving' as const, principal: p, interest: q,
+      }]
     }),
   ]
+
+  // The overview, from the converted per-credit figures — the same figures
+  // the By credit bars are drawn from, so the two cannot disagree. The
+  // annuity side counts every annuity credit with an outstanding schedule,
+  // whichever filter is open, as it always has.
+  const annuityTotals = Object.entries(annuityPerCredit).reduce((t, [id, s]) => {
+    const p = conv(id, s.principal)
+    const q = conv(id, s.interest)
+    if (p === null || q === null) return t
+    return { principal: t.principal + p, interest: t.interest + q }
+  }, { principal: 0, interest: 0 })
+  const revolvingTotals = perCredit.filter(c => c.kind === 'revolving')
+    .reduce((t, c) => ({ principal: t.principal + c.principal, interest: t.interest + (c.interest ?? 0) }),
+      { principal: 0, interest: 0 })
+  const totalPrincipal = annuityTotals.principal + revolvingTotals.principal
+  const totalObligation = annuityTotals.principal + annuityTotals.interest
+    + revolvingTotals.principal + revolvingTotals.interest
+  const unconvertedNote = unconverted.size > 0
+    ? `${unconverted.size} credit${unconverted.size === 1 ? '' : 's'} not in ${shown} left out — no NBS rate today`
+    : null
 
   // The background lives in `.app-surface`: an inline colour would paint
   // straight over it.
@@ -968,10 +1056,10 @@ export default function Credits() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '10px', marginBottom: '28px' }}>
         {[
           { label: 'Active Credits', value: loading ? '—' : String(credits.filter(c => c.status === 'active').length), accent: '#4EA8FF', sub: `${filtered.length} annuity · ${revolving.length} revolving` },
-          { label: 'Remaining Principal', value: loading ? '—' : fmtEURCompact(totalPrincipal), accent: '#4EA8FF', sub: 'annuity + revolving' },
+          { label: 'Remaining Principal', value: loading ? '—' : fmtMoneyCompact(totalPrincipal, shown), accent: '#4EA8FF', sub: unconvertedNote || `annuity + revolving, in ${shown} at today's NBS rate` },
           {
             label: 'Total Obligation',
-            value: loading ? '—' : (rev.unpriced > 0 ? '≥ ' : '') + fmtEURCompact(totalObligation),
+            value: loading ? '—' : (rev.unpriced > 0 || unconverted.size > 0 ? '≥ ' : '') + fmtMoneyCompact(totalObligation, shown),
             accent: '#F5A623',
             sub: rev.unpriced > 0
               ? `${rev.unpriced} revolving line${rev.unpriced === 1 ? '' : 's'} not priced yet`
@@ -992,9 +1080,10 @@ export default function Credits() {
           annuity loans cost" instead of "what do I owe". */}
       {!loading && (
         <DebtPanels
-          annuity={annuityDue}
+          annuity={annuityShown}
           revolving={[...revolvingDue, ...revolvingUnpricedDue]}
-          opening={{ annuity: stats.totalPrincipal, revolving: rev.principal }}
+          opening={{ annuity: annuityTotals.principal, revolving: revolvingTotals.principal }}
+          currency={shown}
           credits={perCredit}
           unpriced={rev.unpriced}
         />

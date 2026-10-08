@@ -266,7 +266,7 @@ export function nodeKeyForEntry(entry: ClassifiedEntry, levels: Level[]): string
  * no arrangement of the five levels creates or destroys money — breaks.
  *
  * This is the base that does NOT depend on which branch is open: the seed of
- * the classification the entry itself carries. `amount_usd - seedForEntry(…)`
+ * the classification the entry itself carries. `amount_rsd - seedForEntry(…)` (or the same in EUR)
  * is then a delta, and a delta contributes the same figure to the total on
  * whichever node it lands on, which is exactly why every `adjust` was already
  * safe.
@@ -279,8 +279,8 @@ export function nodeKeyForEntry(entry: ClassifiedEntry, levels: Level[]): string
  *
  * With EVERY column empty that rule has nothing left to say. Nothing is
  * compared, everything matches, and the entry is measured against the whole
- * month's seed — so a `set` for $5,000 against a month seeded $200,000
- * resolves to an adjust of −195,000 and the month reads $5,000. One figure
+ * month's seed — so a `set` for 5.000 RSD against a month seeded 200.000 RSD
+ * resolves to an adjust of −195.000 RSD and the month reads 5.000 RSD. One figure
  * naming no line swallows every line.
  *
  * This is not a hypothetical row. The carry-across in

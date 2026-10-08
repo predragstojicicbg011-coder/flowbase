@@ -27,6 +27,9 @@
 // that tab cannot filter on a column it does not own.
 
 import { DOCUMENT_CURRENCIES } from './bookAmounts'
+import { normaliseDigits } from './entryGroups'
+import { fmtMoney } from '../utils/formatters'
+import { amountField, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 export type Tab = 'invoices' | 'transactions' | 'passthrough'
 
@@ -250,16 +253,28 @@ export interface BuildContext {
   today: string
   /** Partner ids whose name matches the free-text term. */
   partnerIds?: string[]
+  /**
+   * The viewer's display currency. The amount range is typed in it, so it is
+   * applied to that book column — amount_rsd or amount_eur — on every tab.
+   */
+  currency: DisplayCurrency
 }
 
 export function isSet(v: string): boolean {
   return typeof v === 'string' && v.trim() !== ''
 }
 
-/** A filter amount, or null when the box is empty or not a number. */
+/**
+ * A filter amount, or null when the box is empty or not a number.
+ *
+ * Reads the app's own notation (`1.250,50`) as well as `1,250.50` and
+ * `1250.5` — see `normaliseDigits` for the separator rule.
+ */
 export function parseAmount(v: string): number | null {
   if (!isSet(v)) return null
-  const n = Number(String(v).replace(/,/g, '').trim())
+  const t = String(v).trim()
+  if (!/^-?[\d.,\s]+$/.test(t)) return null
+  const n = Number(normaliseDigits(t))
   return Number.isFinite(n) ? n : null
 }
 
@@ -288,8 +303,9 @@ export function buildPredicates(tab: Tab, f: FilterState, ctx: BuildContext): Pr
 
   const lo = on('amountFrom') ? parseAmount(f.amountFrom) : null
   const hi = on('amountTo') ? parseAmount(f.amountTo) : null
-  if (lo !== null) out.push({ op: 'gte', column: 'amount_usd', value: lo })
-  if (hi !== null) out.push({ op: 'lte', column: 'amount_usd', value: hi })
+  const acol = amountField(ctx.currency)
+  if (lo !== null) out.push({ op: 'gte', column: acol, value: lo })
+  if (hi !== null) out.push({ op: 'lte', column: acol, value: hi })
 
   if (on('currency') && isSet(f.currency)) out.push({ op: 'eq', column: 'currency', value: f.currency })
 
@@ -369,8 +385,8 @@ const nameOr = (fn: ((id: string) => string) | undefined, id: string) => {
   return n || id
 }
 
-const money = (n: number) =>
-  '$' + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
+const money = (n: number, currency: DisplayCurrency) =>
+  fmtMoney(n, currency, Number.isInteger(n) ? 0 : 2)
 
 const TITLE: Record<string, string> = {
   expense: 'Expense', revenue: 'Revenue',
@@ -394,8 +410,13 @@ function rangeLabel(prefix: string, from: string, to: string): string {
  * every dropdown. Only fields the tab owns can produce a chip — a value left
  * over in a field the tab does not use is invisible here for the same reason
  * it is absent from `buildPredicates`.
+ *
+ * `currency` only words the amount chip; it defaults to the book currency for
+ * callers that merely count chips.
  */
-export function activeChips(tab: Tab, f: FilterState, names: ChipNames = {}): Chip[] {
+export function activeChips(
+  tab: Tab, f: FilterState, names: ChipNames = {}, currency: DisplayCurrency = 'RSD',
+): Chip[] {
   const out: Chip[] = []
   const on = (field: FilterField) => appliesTo(tab, field)
 
@@ -413,9 +434,9 @@ export function activeChips(tab: Tab, f: FilterState, names: ChipNames = {}): Ch
   const lo = on('amountFrom') ? parseAmount(f.amountFrom) : null
   const hi = on('amountTo') ? parseAmount(f.amountTo) : null
   if (lo !== null || hi !== null) {
-    const label = lo !== null && hi !== null ? `Amount: ${money(lo)} – ${money(hi)}`
-      : lo !== null ? `Amount: ≥ ${money(lo)}`
-        : `Amount: ≤ ${money(hi as number)}`
+    const label = lo !== null && hi !== null ? `Amount: ${money(lo, currency)} – ${money(hi, currency)}`
+      : lo !== null ? `Amount: ≥ ${money(lo, currency)}`
+        : `Amount: ≤ ${money(hi as number, currency)}`
     out.push({ id: 'amount', label, clears: ['amountFrom', 'amountTo'] })
   }
 

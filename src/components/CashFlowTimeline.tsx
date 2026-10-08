@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react'
 import { C, deck, useWidth } from './chartChrome'
 import { niceMax, shortMoney } from '../services/expenseCharts'
 import type { CashMonth, CashTimeline, DatedOutflow } from '../services/cashTimeline'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { fmtMoney } from '../utils/formatters'
 
 // ── The cash line ───────────────────────────────────────────────────────────
 //
@@ -21,7 +23,7 @@ import type { CashMonth, CashTimeline, DatedOutflow } from '../services/cashTime
 // figure, the words in the tooltip, and the fact that the balance is a line
 // and the flows are bars, which no colour confusion can merge.
 //
-// Everything is dollars, so everything is on ONE scale. A balance of 600k over
+// Everything is in one currency, so everything is on ONE scale. A balance of 600k over
 // flows of ±330k sits high in the frame and that is the truth about it.
 //
 // A projected month is drawn at reduced opacity and the month in progress is
@@ -35,14 +37,16 @@ const BALANCE = '#4EA8FF'
 
 const PAD = { l: 62, r: 16, t: 16, b: 46 }
 
-const money = (n: number) =>
-  (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
-const money2 = (n: number) =>
-  (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// The timeline arrives in the viewer's display currency (the loader read each
+// row's own figure in it); these only name it. The axis uses the compact
+// scale without the code.
+const moneyIn = (currency: string, dp: number) => (n: number) => fmtMoney(n, currency, dp)
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 function monthTick(m: string): string {
   const [y, mm] = m.split('-').map(Number)
-  const name = new Date(Date.UTC(y, mm - 1, 1)).toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })
+  const name = MONTH_SHORT[mm - 1] || m
   return mm === 1 ? `${name} '${String(y).slice(2)}` : name
 }
 
@@ -58,6 +62,9 @@ export default function CashFlowTimeline({ timeline, dated, onPickMonth }: {
   dated: Record<string, { total: number; items: DatedOutflow[] }>
   onPickMonth?: (month: string) => void
 }) {
+  const { currency } = useDisplayCurrency()
+  const money = moneyIn(currency, 0)
+  const money2 = moneyIn(currency, 2)
   const [ref, width] = useWidth(900)
   const [tip, setTip] = useState<{ x: number; y: number; body: React.ReactNode } | null>(null)
 
@@ -65,7 +72,7 @@ export default function CashFlowTimeline({ timeline, dated, onPickMonth }: {
   const w = Math.max(480, width)
   const H = 300
 
-  // ONE SCALE, NOT A SYMMETRIC ONE. Everything is dollars, so a dollar is the
+  // ONE SCALE, NOT A SYMMETRIC ONE. Everything is in one currency, so a unit of it is the
   // same number of pixels above the line as below it — that is what "one
   // scale" means, and it is what stops a chart inventing a crossing.
   //
@@ -249,7 +256,7 @@ export default function CashFlowTimeline({ timeline, dated, onPickMonth }: {
         </span>
       </div>
       <div style={st.note}>
-        Everything is on one scale because everything is dollars; a balance given an axis
+        Everything is on one scale because everything is in one currency; a balance given an axis
         of its own is how a chart invents a crossing that is not in the data. The balance
         is walked outward from the cash reading in both directions — it is the only
         measured figure on the line, so it anchors rather than terminates it.

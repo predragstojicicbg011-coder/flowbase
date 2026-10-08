@@ -15,20 +15,32 @@ jest.mock('../supabase', () => {
   }
 })
 
-const rows = () => (jest.requireMock('../supabase') as any).__rows as any[]
+// The day's NBS list, for the EUR figure stored beside the RSD one.
+jest.mock('../services/bookAmounts', () => {
+  const actual = jest.requireActual('../services/bookAmounts')
+  return { ...actual, getBookRates: jest.fn() }
+})
 
-beforeEach(() => { rows().length = 0 })
+const rows = () => (jest.requireMock('../supabase') as any).__rows as any[]
+const getBookRates = () => (jest.requireMock('../services/bookAmounts') as any).getBookRates as jest.Mock
+
+beforeEach(() => {
+  rows().length = 0
+  getBookRates().mockReset()
+  getBookRates().mockResolvedValue({ date: '2026-10-08', eurRate: 117.2, usdRate: 100.1, source: 'nbs' })
+})
 
 const classification = {
   pl_category: 'Payroll', pl_subcategory: 'Salaries',
   department: 'Sales', dept_subcategory: null, expense_description: null,
 }
 
-const open = (over: { current?: number; seed?: number } = {}) => render(
+const open = (over: { current?: number; seed?: number; seedEur?: number | null } = {}) => render(
   <BudgetChangeDialog
     month="2026-11" monthLabel="November 2026"
     level="department" classification={classification}
     rowLabel="Sales" current={over.current ?? 11900} seed={over.seed ?? 11900}
+    seedEur={over.seedEur === undefined ? 101.54 : over.seedEur}
     onClose={() => {}} onSaved={() => {}} />)
 
 const typeFigure = (value: string) => {
@@ -54,8 +66,42 @@ describe('what a budget change records', () => {
     open({ current: 11900, seed: 11900 })
     typeFigure('12400')
     await waitFor(() => expect(rows()).toHaveLength(1))
-    expect(rows()[0].seed_usd).toBe(11900)
-    expect(rows()[0].amount_usd).toBe(500)
+    expect(rows()[0].seed_rsd).toBe(11900)
+    expect(rows()[0].amount_rsd).toBe(500)
+  })
+
+  /**
+   * The EUR reading of the same entry, beside it: the RSD change at the day's
+   * NBS rate (500 / 117.2 = 4.266 → 4.27), against the row's own EUR seed.
+   */
+  it('records the EUR change and the EUR seed beside the RSD ones', async () => {
+    open({ current: 11900, seed: 11900, seedEur: 101.54 })
+    typeFigure('12400')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(rows()[0].amount_eur).toBe(4.27)
+    expect(rows()[0].seed_eur).toBe(101.54)
+    expect('amount_usd' in rows()[0]).toBe(false)
+    expect('seed_usd' in rows()[0]).toBe(false)
+  })
+
+  /** No rate is no guess: both EUR halves left empty, the RSD budget still recorded. */
+  it('records the change in RSD alone when NBS cannot be read', async () => {
+    getBookRates().mockRejectedValue(new Error('Kurs NBS nije dostupan'))
+    open()
+    typeFigure('12400')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(rows()[0].amount_rsd).toBe(500)
+    expect(rows()[0].amount_eur).toBeNull()
+    expect(rows()[0].seed_eur).toBeNull()
+  })
+
+  /** A page with no EUR reading has no EUR seed to record: neither half is written. */
+  it('writes no EUR figure when the page has no EUR seed for the row', async () => {
+    open({ seedEur: null })
+    typeFigure('12400')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(rows()[0].amount_eur).toBeNull()
+    expect(rows()[0].seed_eur).toBeNull()
   })
 
   /**
@@ -68,9 +114,9 @@ describe('what a budget change records', () => {
     open({ current: 11900, seed: 2000 })
     typeFigure('12400')
     await waitFor(() => expect(rows()).toHaveLength(1))
-    expect(rows()[0].seed_usd).toBe(2000)
+    expect(rows()[0].seed_rsd).toBe(2000)
     // Still measured from what the cell read, which is what the owner saw.
-    expect(rows()[0].amount_usd).toBe(500)
+    expect(rows()[0].amount_rsd).toBe(500)
   })
 
   /** A line with nothing seeded against it records a base of zero, which is
@@ -79,7 +125,7 @@ describe('what a budget change records', () => {
     open({ current: 0, seed: 0 })
     typeFigure('3000')
     await waitFor(() => expect(rows()).toHaveLength(1))
-    expect(rows()[0].seed_usd).toBe(0)
+    expect(rows()[0].seed_rsd).toBe(0)
   })
 
   /** Still append-only, still a group line, still carrying the reason. */

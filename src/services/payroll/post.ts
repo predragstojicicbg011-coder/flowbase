@@ -16,6 +16,7 @@
 // been bitten before.
 
 import { checkPlan, planTotal, type PostingPlan, type PlannedInvoice } from './posting'
+import { bookAmountsAtRate, type BookAmounts } from '../bookAmounts'
 import { firstOfMonth } from './timesheets'
 
 export interface PostContext {
@@ -41,10 +42,15 @@ export interface PostContext {
    * deliberately not unique in this database for exactly this kind of reason.
    */
   invoiceNumber?: string | null
+  /** The currency the payroll is posted in — RSD, the currency it is calculated in. */
   currency: string
-  /** RSD per USD, for `amount_usd`. */
-  usdRate: number | null
-  exchangeRate?: number | null
+  /**
+   * RSD per 1 EUR on the payment date (NBS middle rate), for `eur_rate` and
+   * `amount_eur` on every row written. Payroll is booked in dinars at an
+   * exchange_rate of 1; this is only the rate the euro figure beside it is
+   * read at. Missing, nothing is written.
+   */
+  eurRate: number | null
   note?: string | null
 }
 
@@ -90,8 +96,15 @@ export async function postPlan(
   const why = checkPlan(plan)
   if (why) throw new Error(why)
 
-  const toUsd = (n: number) =>
-    context.usdRate && context.usdRate > 0 ? round2(n / context.usdRate) : null
+  // Every row carries its book amounts, worked out the one way the whole
+  // ledger works them out. A missing EUR rate throws here, BEFORE the month
+  // is claimed: a payroll written without its euro figure would be correct in
+  // dinars and missing from every report read in euros.
+  const book = (amount: number): BookAmounts =>
+    bookAmountsAtRate(amount, context.currency, null, context.eurRate)
+  const postingRates = book(0)
+  for (const i of plan.invoices) book(i.amount)
+  for (const t of plan.transactions) book(t.amount)
 
   // 1. Claim the month. This is the guard, and it goes first.
   const { data: posting, error: claimErr } = await client
@@ -101,7 +114,8 @@ export async function postPlan(
       period_month: firstOfMonth(plan.month),
       run_key: plan.runKey,
       posted_on: context.paymentDate,
-      exchange_rate: context.exchangeRate ?? null,
+      exchange_rate: postingRates.exchange_rate,
+      eur_rate: postingRates.eur_rate,
       total_cost: planTotal(plan),
       run_id: context.runId ?? null,
       note: context.note || null,
@@ -125,7 +139,7 @@ export async function postPlan(
   const parent = plan.invoices.find(i => i.kind === 'obligation_parent')
   let parentId: string | null = null
   if (parent) {
-    parentId = await insertInvoice(client, parent, context, postingId, null, toUsd)
+    parentId = await insertInvoice(client, parent, context, postingId, null, book)
     invoiceIds.push(parentId)
   }
 
@@ -133,7 +147,7 @@ export async function postPlan(
     if (invoice.kind === 'obligation_parent') continue
     const id = await insertInvoice(
       client, invoice, context, postingId,
-      invoice.parentRef === 'obligation' ? parentId : null, toUsd)
+      invoice.parentRef === 'obligation' ? parentId : null, book)
     invoiceIds.push(id)
   }
 
@@ -146,8 +160,7 @@ export async function postPlan(
       tx_subtype: 'expense',
       currency: context.currency,
       amount: t.amount,
-      exchange_rate: context.usdRate || null,
-      amount_usd: toUsd(t.amount),
+      ...book(t.amount),
       pl_impact: true,
       pl_category: t.pl_category,
       pl_subcategory: t.pl_subcategory,
@@ -212,7 +225,7 @@ async function insertInvoice(
   context: PostContext,
   postingId: string,
   parentId: string | null,
-  toUsd: (n: number) => number | null,
+  book: (amount: number) => BookAmounts,
 ): Promise<string> {
   const { data, error } = await client.from('invoices').insert({
     company_id: context.companyId,
@@ -235,8 +248,7 @@ async function insertInvoice(
     cf_next_month_est: invoice.cf_type === 'recurring' ? invoice.amount : 0,
     currency: context.currency,
     amount: invoice.amount,
-    exchange_rate: context.usdRate || null,
-    amount_usd: toUsd(invoice.amount),
+    ...book(invoice.amount),
     pl_impact: invoice.pl_impact,
     status: 'unpaid',
     parent_invoice_id: parentId,
@@ -381,4 +393,3 @@ function isUniqueViolation(error: any): boolean {
     || /duplicate key|unique constraint/i.test(error?.message || '')
 }
 
-const round2 = (n: number): number => Math.round(n * 100) / 100

@@ -1,13 +1,13 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
-import { getRate, convertToUSD } from '../services/currencyService'
 import { DIALOG } from './dialogTheme'
 import { obligationRows, obligationTotal, employeesMissingDepartment, PL_CATEGORY } from '../services/payrollAllocation'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
 import { fetchAllPartners } from '../services/allPartners'
-import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
+import { BOOK_CURRENCY, bookAmountsAtRate, getBookRates, type BookAmounts } from '../services/bookAmounts'
+import { fmtNum, fmtEUR } from '../utils/formatters'
 
 interface Props {
   onClose: () => void
@@ -226,7 +226,7 @@ function parsePayrollXlsx(workbook: XLSX.WorkBook, taxMode: TaxMode): { header: 
 
 
 function fmtN(v: number): string {
-  return (v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return fmtNum(v || 0)
 }
 
 function parseSerDate(d: string): string {
@@ -252,8 +252,11 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
   const [parseError, setParseError] = useState('')
   const [fileName, setFileName] = useState('')
   const [progress, setProgress] = useState(0)
-  const [currency, setCurrency] = useState('RSD')
-  const [exchangeRate, setExchangeRate] = useState('')
+  // A PPP-PD filing is in dinars, and so is the payroll posted from it, at an
+  // exchange_rate of 1. The one rate it needs is the EUR one, for the euro
+  // figure every row carries beside its dinars.
+  const currency = BOOK_CURRENCY
+  const [eurRate, setEurRate] = useState('')
   const [fetchingRate, setFetchingRate] = useState(false)
   const [rateWarning, setRateWarning] = useState('')
   const { companies, defaultCompany, showPicker } = useCompanies()
@@ -371,27 +374,35 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
       : e))
   }
 
+  // NBS RSD/EUR on the payment date. With no official rate the field stays
+  // empty and posting is blocked: a guessed rate would give wrong EUR figures
+  // that look exactly like right ones.
   const fetchRate = async () => {
-    if (currency === 'USD') { setExchangeRate('1'); return }
     setFetchingRate(true)
     try {
       const iso = header ? parseSerDate(header.payment_date) : new Date().toISOString().split('T')[0]
-      const r = await getRate(currency, iso)
-      if (r.isFallback) { setExchangeRate(''); setRateWarning('⚠ No official rate — enter it manually') }
-      else { setExchangeRate(r.rate.toString()); setRateWarning('') }
-    } catch (err) {
-      console.error('[PayrollImportDialog] getRate neuspesan:', err)
-      setExchangeRate('')
-      setRateWarning('⚠ No official rate — enter it manually')
+      const r = await getBookRates(iso)
+      setEurRate(String(r.eurRate)); setRateWarning('')
+    } catch (err: any) {
+      setEurRate('')
+      setRateWarning(`⚠ ${err?.message || 'No official rate'} — enter it manually`)
     }
     setFetchingRate(false)
   }
 
-  const toUsd = (amt: number) => convertToUSD(amt, currency, parseFloat(exchangeRate) || 1)
+  // The filing names its payment date; its rate is fetched as soon as it is read.
+  useEffect(() => {
+    if (header?.payment_date) fetchRate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [header?.payment_date])
+
   const accepted = employees.filter(e => e.accepted)
   const payDate = header ? parseSerDate(header.payment_date) : new Date().toISOString().split('T')[0]
   const invDate = header ? parseSerDate(header.invoice_date) : payDate
-  const usdRate = parseFloat(exchangeRate) || 1
+  const eurRateNum = parseFloat(eurRate)
+  const hasEurRate = eurRateNum > 0
+  /** The stored book columns for an RSD figure. Throws without a EUR rate. */
+  const book = (amt: number): BookAmounts => bookAmountsAtRate(amt, currency, 1, eurRateNum)
 
   const totalNet = accepted.reduce((s, e) => s + e.net_salary, 0)
   const totalEE = accepted.reduce((s, e) => s + e.contrib_employee, 0)
@@ -426,6 +437,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
 
   const handlePost = async () => {
     if (!companyId) { alert('Please select a company.'); return }
+    if (!hasEurRate) { alert('Enter the NBS EUR rate for the payment date first — every entry carries its EUR figure.'); return }
 
     const noDept = employeesMissingDepartment(employees.filter(e => e.accepted))
     if (noDept.length > 0) {
@@ -474,8 +486,8 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
       const { data: record, error: recErr } = await supabase.from('payroll_records').insert({
         company_id: companyId, period_month: invDate.slice(0, 7),
         payment_date: payDate, due_date: dueDate || null,
-        tax_filing_ref: taxFilingRef || null, currency, exchange_rate: usdRate,
-        amount_usd: toUsd(totalGross),
+        tax_filing_ref: taxFilingRef || null, currency,
+        ...book(totalGross),
         note: `${header?.period_label || ''} — ${taxMode === 'incentive' ? 'With Tax Incentives' : 'Standard'}`,
         status: 'posted',
       }).select().single()
@@ -518,7 +530,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             expense_description: emp.employee_name,
             ...revAllocFor(emp, emp.net_salary), opex_type: emp.opex_type,
             cf_type: emp.cf_type, cf_frequency: 'monthly', cf_next_month_est: emp.net_salary,
-            currency, amount: emp.net_salary, exchange_rate: usdRate, amount_usd: toUsd(emp.net_salary),
+            currency, amount: emp.net_salary, ...book(emp.net_salary),
             pl_impact: true, status: 'unpaid',
             note: `Payroll ${invDate.slice(0, 7)} — Net salary — ${emp.employee_name}`,
           })
@@ -538,7 +550,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             expense_description: emp.employee_name,
             ...revAllocFor(emp, ded.amount), opex_type: emp.opex_type,
             cf_type: emp.cf_type, cf_frequency: 'monthly', cf_next_month_est: ded.amount,
-            currency, amount: ded.amount, exchange_rate: usdRate, amount_usd: toUsd(ded.amount),
+            currency, amount: ded.amount, ...book(ded.amount),
             pl_impact: true, status: 'unpaid',
             note: `Payroll ${invDate.slice(0, 7)} — Deduction: ${ded.name} — ${emp.employee_name}`,
           })
@@ -549,7 +561,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           const { error: txErr } = await supabase.from('transactions').insert({
             company_id: companyId, partner_id: null,
             transaction_date: payDate, type: 'direct', tx_subtype: 'expense',
-            currency, amount: -ded.amount, exchange_rate: usdRate, amount_usd: -toUsd(ded.amount),
+            currency, amount: -ded.amount, ...book(-ded.amount),
             pl_impact: true,
             pl_category: isFit ? 'Employee and Labour' : 'General Business Expenses',
             pl_subcategory: isFit ? 'FitPass expenses' : 'Penalty, fines and other forced fees',
@@ -574,7 +586,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           expense_description: `Objedinjena naplata — ${taxFilingRef || invDate.slice(0, 7)} (${taxMode === 'incentive' ? 'Tax Incentives' : 'Standard'})`,
           rev_alloc_type: 'sg100', opex_type: 'opex',
           cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: totalTaxObl,
-          currency, amount: totalTaxObl, exchange_rate: usdRate, amount_usd: toUsd(totalTaxObl),
+          currency, amount: totalTaxObl, ...book(totalTaxObl),
           pl_impact: false, status: 'unpaid',
           note: `Payroll ${invDate.slice(0, 7)} — Poreska uprava objedinjena naplata${(parseFloat(taxRounding) || 0) !== 0 ? ' | rounding: ' + taxRounding : ''}`,
         }).select('id').single()
@@ -623,7 +635,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             rev_alloc_type: emp?.rev_alloc_type || 'sg100',
             opex_type: emp?.opex_type || 'opex',
             cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: r.amount,
-            currency, amount: r.amount, exchange_rate: usdRate, amount_usd: toUsd(r.amount),
+            currency, amount: r.amount, ...book(r.amount),
             pl_impact: true, status: 'unpaid', parent_invoice_id: parentId || null,
             note: `Payroll ${invDate.slice(0, 7)} — ${r.pl_subcategory} — ${r.employee_name}`
                 + `${r.carriesRounding ? ` | includes filing rounding ${taxRounding}` : ''}`
@@ -770,24 +782,15 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                     <input style={s.input} value={taxFilingRef} onChange={e => setTaxFilingRef(e.target.value)} placeholder="e.g. PPP-PD 2026-01" />
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Currency</label>
+                    <label style={s.lbl}>EUR rate (posted in {currency})</label>
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <select style={{ ...s.select, flex: 1 }} value={currency}
-                        onChange={e => {
-                          // A rate fetched for the previous currency must not
-                          // survive the switch. Leaving it is how a EUR rate of
-                          // 117 ended up converting an RSD payroll.
-                          setCurrency(e.target.value)
-                          setExchangeRate(e.target.value === 'USD' ? '1' : '')
-                          setRateWarning('')
-                        }}>
-                        {DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}
-                      </select>
+                      <input type="number" style={{ ...s.input, flex: 1 }} value={eurRate}
+                        onChange={e => setEurRate(e.target.value)} placeholder="RSD per 1 EUR" />
                       <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate}>{fetchingRate ? '...' : 'Fetch'}</button>
                     </div>
-                    {exchangeRate && (
+                    {hasEurRate && (
                       <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px' }}>
-                        Rate: {exchangeRate} RSD per 1 {currency === 'RSD' ? 'USD' : currency}
+                        1 EUR = {fmtNum(eurRateNum, 4)} RSD — every entry carries its EUR figure at this rate
                       </div>
                     )}
                     {rateWarning && <div style={{ fontSize: '11px', color: '#FF5B5A', fontWeight: 600, marginTop: '2px' }}>{rateWarning}</div>}
@@ -843,7 +846,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                         {row.tag && <span style={{ fontSize: '10px', color: row.color, background: `${row.color}18`, padding: '1px 6px', borderRadius: '20px' }}>{row.tag}</span>}
                       </div>
                       <span style={{ fontWeight: '600', color: row.color, fontSize: '13px' }}>
-                        {row.val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currency}
+                        {fmtNum(row.val)} {currency}
                       </span>
                     </div>
                   ))}
@@ -855,7 +858,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                         value={taxRounding} onChange={e => setTaxRounding(e.target.value)} placeholder="0" />
                     </div>
                     <span style={{ fontWeight: '700', color: '#F5A623', fontSize: '14px' }}>
-                      {totalTaxObl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currency}
+                      {fmtNum(totalTaxObl)} {currency}
                     </span>
                   </div>
                 </div>
@@ -885,7 +888,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#00D47E' }}>{emp.gross_salary.toLocaleString('en-US', { maximumFractionDigits: 0 })} {currency}</span>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: '#00D47E' }}>{fmtNum(emp.gross_salary, 0)} {currency}</span>
                           <button style={{ ...s.acceptBtn, background: emp.accepted ? 'rgba(255,91,90,0.12)' : 'rgba(0,212,126,0.15)', color: emp.accepted ? '#FF5B5A' : '#00D47E', borderColor: emp.accepted ? 'rgba(255,91,90,0.4)' : 'rgba(0,212,126,0.4)' }}
                             onClick={e2 => { e2.stopPropagation(); updateEmployee(emp.id, { accepted: !emp.accepted } as any) }}>
                             {emp.accepted ? '✕ Reject' : '✓ Accept'}
@@ -1032,14 +1035,14 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
 
         <div style={s.footer}>
           <div style={{ fontSize: '12px', color: '#7A9BB8' }}>
-            {step === 'review' && `${accepted.length} employees · Gross: ${totalGross.toLocaleString('en-US', { maximumFractionDigits: 0 })} ${currency} · Tax inv: ${totalTaxObl.toLocaleString('en-US', { maximumFractionDigits: 0 })} ${currency}`}
+            {step === 'review' && `${accepted.length} employees · Gross: ${fmtNum(totalGross, 0)} ${currency} · Tax inv: ${fmtNum(totalTaxObl, 0)} ${currency}${hasEurRate ? ` (${fmtEUR(book(totalGross).amount_eur, 0)} gross)` : ''}`}
             {step === 'upload' && `Mode: ${taxMode === 'incentive' ? '🎯 Tax Incentives' : '📋 Standard'}`}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button style={s.btnGhost} onClick={step === 'upload' ? onClose : () => setStep('upload')}>{step === 'upload' ? 'Cancel' : '← Back'}</button>
             {step === 'review' && (
               <button style={{ ...s.btnPrimary, opacity: (!companyId || accepted.length === 0) ? 0.5 : 1 }}
-                onClick={handlePost} disabled={!companyId || accepted.length === 0 || (currency !== 'USD' && !(parseFloat(exchangeRate) > 0))}>
+                onClick={handlePost} disabled={!companyId || accepted.length === 0 || !hasEurRate}>
                 📊 Post {accepted.length} employees
               </button>
             )}

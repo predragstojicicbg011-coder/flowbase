@@ -21,23 +21,20 @@
 // would produce a picker that disagrees with the posting it is predicting.
 //
 // **The caller picks the unit, and must keep it consistent for a given
-// invoice.** Bulk Import works in USD, because `remaining_usd` is what its
-// picker shows and what its running totals add up. The bank statement dialog
-// works in the invoice's own currency, because that is the amount a row
-// actually types. Nothing here converts anything, and nothing here assumes
-// dollars — quietly meaning one currency while being handed another is how
-// EUR 1,200 once became $10.22, and it is not going to start here.
+// invoice.** Bulk Import works in the book currency (RSD), because
+// `remaining_rsd` is what its picker shows and what its running totals add
+// up. The bank statement dialog works in the invoice's own currency, because
+// that is the amount a row actually types. Nothing here converts anything —
+// quietly meaning one currency while being handed another is how a figure
+// once came out wrong by a factor of a hundred, and it is not going to start
+// here.
 //
 // `EPSILON` is the slack that keeps a rounding remainder from reading as an
-// open invoice.
-//
-// ONE CENT, which is about a dinar — the same tolerance `v_invoice_status`
-// applies when it decides an invoice is settled, so the picker and the
-// database agree about what is still open. It was half a cent, which is about
-// half a dinar: the differences that actually happen are a bank rounding or a
-// rate landing a fraction out, and those are the size of a dinar rather than
-// half of one. An invoice left 0.60 RSD short was closed everywhere except in
-// the list that offers it.
+// open invoice: one para (0.01), the floor `v_invoice_status` applies when it
+// decides an invoice is settled, so the picker and the database agree about
+// what is still open.
+
+import { fmtRSD } from '../utils/formatters'
 
 /** Under this much left, an invoice is closed. The poster uses the same cut. */
 export const EPSILON = 0.01
@@ -167,7 +164,7 @@ export function exhaustedFor(
 export function claimNotice(
   free: FreeAmount,
   labelFor: (rowId: string) => string,
-  format: (amount: number) => string = n => `$${n.toFixed(2)}`,
+  format: (amount: number) => string = n => fmtRSD(n),
 ): string | null {
   if (free.claimedBy.length === 0) return null
   const who = free.claimedBy.map(labelFor).join(', ')

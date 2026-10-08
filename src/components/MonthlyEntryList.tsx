@@ -8,6 +8,7 @@ import {
   groupByMonth, filterRows, parseFilter, summarise,
   type MonthGroup,
 } from '../services/entryGroups'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 // ─── A drill-down list, by month ────────────────────────────────────────────
 //
@@ -43,7 +44,8 @@ export interface MonthlyEntryRow {
   id?: string
   source?: string | null
   pl_date: string
-  amount_usd: number | null
+  amount_rsd: number | null
+  amount_eur?: number | null
   expense_description?: string | null
 }
 
@@ -60,9 +62,12 @@ export function MonthlyEntryList({
   client: any
   onEdit: (target: EditTarget) => void
   busyId: string | null
+  /** Formats a total; the figures are in the viewer's display currency. */
   money: (n: number) => string
 }) {
-  const groups = useMemo(() => groupByMonth(rows), [rows])
+  // Month totals add each row's own figure in the display currency.
+  const { currency } = useDisplayCurrency()
+  const groups = useMemo(() => groupByMonth(rows, currency), [rows, currency])
 
   /**
    * The newest month, opened by default.
@@ -133,8 +138,8 @@ export function MonthlyEntryList({
    */
   const matched = useMemo(() => {
     if (filter.kind === 'none') return null
-    return groupByMonth(filterRows(rows, filter, r => (r.id ? detailById.get(r.id) : undefined)))
-  }, [rows, filter, detailById])
+    return groupByMonth(filterRows(rows, filter, currency, r => (r.id ? detailById.get(r.id) : undefined)), currency)
+  }, [rows, filter, detailById, currency])
 
   const matchedByKey = useMemo(() => {
     const m = new Map<string, MonthGroup<MonthlyEntryRow>>()

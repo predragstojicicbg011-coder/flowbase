@@ -6,6 +6,12 @@ export interface CreditOption {
   name: string
   bank: string
   rate_description: string
+  /**
+   * The credit's own currency, which every instalment figure is in. A loan
+   * may be indexed to EUR or taken in RSD; a payment booked against it goes
+   * through the ordinary book-amount rules from this currency.
+   */
+  currency: string
 }
 
 export interface CreditInstallment {
@@ -28,10 +34,12 @@ export function useCreditPayment() {
   useEffect(() => {
     supabase
       .from('credits')
-      .select('id, name, bank, rate_description')
+      .select('id, name, bank, rate_description, currency')
       .eq('status', 'active')
       .order('name')
-      .then(({ data }) => { if (data) setCredits(data) })
+      .then(({ data }) => {
+        if (data) setCredits(data.map((c: any) => ({ ...c, currency: c.currency || 'RSD' })))
+      })
   }, [])
 
   useEffect(() => {
@@ -65,6 +73,9 @@ export function useCreditPayment() {
     .filter(i => selectedInstallmentIds.includes(i.id))
     .reduce((s, i) => s + i.total_amount, 0)
 
+  /** The selected credit's currency — what `selectedTotal` and every instalment are in. */
+  const selectedCurrency = credits.find(c => c.id === selectedCreditId)?.currency || null
+
   const reset = () => {
     setSelectedCreditId('')
     setCreditInstallments([])
@@ -74,7 +85,7 @@ export function useCreditPayment() {
   return {
     credits, selectedCreditId, setSelectedCreditId,
     creditInstallments, selectedInstallmentIds,
-    toggleInstallment, toggleAll, selectedTotal, reset,
+    toggleInstallment, toggleAll, selectedTotal, selectedCurrency, reset,
   }
 }
 

@@ -4,9 +4,11 @@ import { PostFailure, reportPostFailure, type CompletedWrite } from '../services
 import { linkAmountsFromOwn } from '../services/invoiceLinks'
 import { outstandingOwn, settlementFor } from '../services/settleInvoice'
 import {
-  allocationCurrency, commonCurrency, formatMoney, toUsd,
+  allocationCurrency, commonCurrency, formatMoney, toOwn, toRsd,
 } from '../services/allocationDisplay'
 import { DIALOG } from './dialogTheme'
+import { round2 as bookRound2 } from '../services/bookAmounts'
+import { fmtMoney } from '../utils/formatters'
 
 interface Props {
   // Can be opened from either side
@@ -24,17 +26,20 @@ interface LinkRow {
   identifier: string   // invoice number or statement number
   currency: string
   amount: number
-  amount_usd: number
+  /** The row's own book figures and the stored rates they were booked at. */
+  amount_rsd: number
+  amount_eur: number
+  exchange_rate: number | null
+  eur_rate: number | null
   /** The invoice's own `paid_amount`, where this row IS the invoice. */
   paid_amount?: number
   /**
    * What the bill this row settles is still owed, IN ITS OWN CURRENCY.
    *
-   * This panel used to run entirely in dollars, and the dollar columns carry
-   * two different dates' rates — the invoice's and the payment's. So a dinar
-   * payment that settled a dinar bill to the para showed a "Remaining" of
-   * nought point something per cent of itself, for ever. Nothing was wrong
-   * with the books; the yardstick was.
+   * The book columns carry two different dates' rates — the invoice's and the
+   * payment's. So a euro payment that settled a euro bill to the cent would
+   * show a "Remaining" in dinars of the rate move between the two days, for
+   * ever. Nothing would be wrong with the books; the yardstick would be.
    */
   outstanding_own: number
   status: string
@@ -42,11 +47,14 @@ interface LinkRow {
   revenue_stream?: string
   /** What the person types, and what `allocated_amount` will hold. */
   allocated_own: number
-  /** Derived from it, for the reporting column. Never the other way round. */
-  allocated_usd: number
+  /**
+   * Derived from it at the invoice's stored rate, for the book totals.
+   * Never the other way round.
+   */
+  allocated_rsd: number
 }
 
-const round2 = (n: number): number => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100
+const round2 = (n: number): number => bookRound2(Number.isFinite(n) ? n : 0)
 
 export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconciled }: Props) {
   const [loading, setLoading] = useState(true)
@@ -150,8 +158,9 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
    * The bill a row settles and the payment that settles it.
    *
    * Which is which depends on the direction the panel was opened from, and
-   * getting it round the wrong way is how a dollar figure once ended up in a
-   * dinar column. Everything downstream asks this rather than guessing.
+   * getting it round the wrong way is how a figure in one currency once ended
+   * up in a column for another. Everything downstream asks this rather than
+   * guessing.
    */
   const invoiceFor = (row: any) => (sourceType === 'transaction' ? row : source)
   const paymentFor = (row: any) => (sourceType === 'transaction' ? source : row)
@@ -170,19 +179,28 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
     const takenFromBill = sourceType === 'invoice' ? totalAllocatedOwn : 0
     const takenFromPayment = sourceType === 'transaction'
       // Only the rows denominated in the payment's own currency spend it in
-      // that currency; the rest spend it in dollars and are counted there.
-      ? links.filter(l => (l.currency || 'USD') === (source?.currency || 'USD'))
+      // that currency; the rest spend it in dinars and are counted there.
+      ? links.filter(l => (l.currency || 'RSD') === (source?.currency || 'RSD'))
              .reduce((sum, l) => sum + (l.allocated_own || 0), 0)
       : 0
-    const takenUsd = sourceType === 'transaction' ? totalAllocatedUsd : 0
+    const takenRsd = sourceType === 'transaction' ? totalAllocatedRsd : 0
 
     const held = { ...invoice, paid_amount: (invoice?.paid_amount ?? 0) + takenFromBill }
-    const settlement = settlementFor({
-      invoice: held,
-      paymentCurrency: payment?.currency,
-      paymentOwn: Math.max(0, (payment?.amount ?? 0) - takenFromPayment),
-      paymentUsd: Math.max(0, (payment?.amount_usd ?? 0) - takenUsd),
-    })
+    let settlement: ReturnType<typeof settlementFor>
+    try {
+      settlement = settlementFor({
+        invoice: held,
+        paymentCurrency: payment?.currency,
+        paymentOwn: Math.max(0, (payment?.amount ?? 0) - takenFromPayment),
+        paymentRsd: Math.max(0, (payment?.amount_rsd ?? 0) - takenRsd),
+      })
+    } catch (err) {
+      // RateUnavailableError: the invoice carries no stored rate, so its
+      // allocation cannot be booked. Say so rather than guess.
+      setSaveError(err instanceof Error ? err.message : String(err))
+      return
+    }
+    setSaveError('')
 
     setLinks(prev => [...prev, {
       id: candidate.id,
@@ -192,13 +210,16 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
       identifier: candidate.invoice_number || candidate.statement_number || '—',
       currency: candidate.currency,
       amount: candidate.amount,
-      amount_usd: candidate.amount_usd,
+      amount_rsd: candidate.amount_rsd,
+      amount_eur: candidate.amount_eur,
+      exchange_rate: candidate.exchange_rate ?? null,
+      eur_rate: candidate.eur_rate ?? null,
       paid_amount: candidate.paid_amount ?? 0,
       outstanding_own: outstandingOwn(held),
       status: candidate.calculated_status || candidate.status || candidate.type,
       pl_category: candidate.pl_category || candidate.revenue_stream,
       allocated_own: settlement.own,
-      allocated_usd: settlement.usd,
+      allocated_rsd: settlement.rsd,
     }])
   }
 
@@ -207,23 +228,23 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
   }
 
   /**
-   * The person types in the currency of the bill; the dollars follow.
+   * The person types in the currency of the bill; the dinars follow.
    *
    * That way round, because the typed figure is the one that settles the
-   * invoice and the one that is stored. Holding dollars and displaying the
-   * conversion makes the field move under the user — type 12,000, store
-   * 117.23, redisplay 12,000.06.
+   * invoice and the one that is stored. Holding dinars and displaying the
+   * conversion makes the field move under the user — type 600 EUR, store
+   * 70,500 RSD, redisplay 600.00x.
    */
   const updateAllocation = (id: string, own: number) => {
     setLinks(prev => prev.map(l => l.id === id
-      ? { ...l, allocated_own: own, allocated_usd: toUsd(own, invoiceFor(l)) }
+      ? { ...l, allocated_own: own, allocated_rsd: toRsd(own, invoiceFor(l) || {}) }
       : l))
   }
 
   const totalAllocatedOwn = links.reduce((s, l) => s + (l.allocated_own || 0), 0)
-  const totalAllocatedUsd = links.reduce((s, l) => s + (l.allocated_usd || 0), 0)
+  const totalAllocatedRsd = links.reduce((s, l) => s + (l.allocated_rsd || 0), 0)
   const previouslyOwn = existingLinks.reduce((s, l) => s + (l.allocated_amount || 0), 0)
-  const previouslyUsd = existingLinks.reduce((s, l) => s + (l.allocated_amount_usd || 0), 0)
+  const previouslyRsd = existingLinks.reduce((s, l) => s + (l.allocated_amount_rsd || 0), 0)
 
   /**
    * The currency the running totals can honestly be shown in.
@@ -232,19 +253,19 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
    * dinars against one dinar invoice and one euro invoice has no single
    * currency its total means anything in, and inventing one by converting
    * would put a figure on screen that is nobody's actual money. Null means
-   * fall back to dollars and say so — the same rule the transaction dialog
-   * follows, in services/allocationDisplay.ts.
+   * fall back to dinars (the book) and say so — the same rule the transaction
+   * dialog follows, in services/allocationDisplay.ts.
    */
   const barCurrency = sourceType === 'transaction'
     ? commonCurrency(source?.currency, [
         ...links.map(l => ({ currency: l.currency })),
         ...existingLinks.map((l: any) => ({ currency: l.invoices?.currency })),
       ])
-    : (source?.currency || 'USD')
+    : (source?.currency || 'RSD')
 
-  const sourceTotalShown = barCurrency ? (source?.amount ?? 0) : (source?.amount_usd ?? 0)
-  const allocatedShown = barCurrency ? totalAllocatedOwn : totalAllocatedUsd
-  const previouslyShown = barCurrency ? previouslyOwn : previouslyUsd
+  const sourceTotalShown = barCurrency ? (source?.amount ?? 0) : (source?.amount_rsd ?? 0)
+  const allocatedShown = barCurrency ? totalAllocatedOwn : totalAllocatedRsd
+  const previouslyShown = barCurrency ? previouslyOwn : previouslyRsd
   const unallocated = round2(sourceTotalShown - allocatedShown - previouslyShown)
 
   const filteredCandidates = candidates.filter(c => {
@@ -259,6 +280,18 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
 
   const handleSave = async () => {
     if (links.length === 0) return
+
+    // Every link booked BEFORE anything is written: an invoice without stored
+    // rates cannot be allocated, and finding that out halfway through would
+    // leave half a reconciliation behind.
+    let booked: ReturnType<typeof linkAmountsFromOwn>[]
+    try {
+      booked = links.map(link => linkAmountsFromOwn(link.allocated_own, invoiceFor(link) || {}))
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+      return
+    }
+
     setSaving(true); setSaveError('')
 
     // Outside the try so the catch can read it: a refusal partway through a
@@ -266,7 +299,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
     const completed: CompletedWrite[] = []
 
     try {
-      for (const link of links) {
+      for (const [i, link] of links.entries()) {
         const invoiceId = sourceType === 'transaction' ? link.id : sourceId
         const transactionId = sourceType === 'transaction' ? sourceId : link.id
 
@@ -274,18 +307,18 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
         // direction: with a transaction as the source the candidates are
         // invoices, and with an invoice as the source the invoice is the
         // source itself. `invoiceFor` answers that rather than each call site
-        // guessing, because getting it round the wrong way is how a dollar
-        // figure once landed in a dinar column.
+        // guessing, because getting it round the wrong way is how a figure in
+        // one currency once landed in a column for another.
         //
         // THE FIGURE THAT WAS TYPED IS THE FIGURE THAT IS STORED, in the
         // currency of the bill. It goes into `allocated_amount`, the column
-        // the settled/partial rule reads, and the dollars are derived from
-        // it. See services/settleInvoice.ts.
-        const invoiceRow = invoiceFor(link) || {}
+        // the settled/partial rule reads, and the dinars and euros are
+        // derived from it at the invoice's stored rates. See
+        // services/settleInvoice.ts.
         const { error: linkErr } = await supabase.from('invoice_transaction_links').upsert({
           invoice_id: invoiceId,
           transaction_id: transactionId,
-          ...linkAmountsFromOwn(link.allocated_own, invoiceRow),
+          ...booked[i],
         }, { onConflict: 'invoice_id,transaction_id' })
         if (linkErr) throw new PostFailure('the allocation', linkErr.message)
         completed.push({ label: 'allocations', count: completed.length + 1 })
@@ -411,9 +444,9 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={s.sourceCardAmount}>
-                      {(source?.amount || 0).toLocaleString()} {source?.currency}
+                      {fmtMoney(source?.amount || 0, source?.currency || 'RSD')}
                     </div>
-                    <div style={s.sourceCardUsd}>${(source?.amount_usd || 0).toFixed(2)}</div>
+                    <div style={s.sourceCardBook}>{fmtMoney(source?.amount_rsd || 0, 'RSD')} · {fmtMoney(source?.amount_eur || 0, 'EUR')}</div>
                   </div>
                 </div>
 
@@ -431,7 +464,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                         </span>
                         <span style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.accent }}>
                           {formatMoney(el.allocated_amount || 0,
-                            (sourceType === 'transaction' ? el.invoices?.currency : source?.currency) || 'USD')} allocated
+                            (sourceType === 'transaction' ? el.invoices?.currency : source?.currency) || 'RSD')} allocated
                         </span>
                       </div>
                     ))}
@@ -442,25 +475,25 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
               {/* In the shared currency when the source and everything
                   linked to it agree, which is the ordinary case. When they do
                   not, no single currency these totals mean anything in
-                  exists, so they fall back to dollars and say so rather than
+                  exists, so they fall back to dinars and say so rather than
                   converting something into nobody's money. */}
               <div style={s.allocBar}>
                 <div style={s.allocBarItem}>
                   <span style={s.allocBarLabel}>Total</span>
-                  <span style={s.allocBarVal}>{formatMoney(sourceTotalShown, barCurrency || 'USD')}</span>
+                  <span style={s.allocBarVal}>{formatMoney(sourceTotalShown, barCurrency || 'RSD')}</span>
                 </div>
                 <div style={s.allocBarDivider} />
                 <div style={s.allocBarItem}>
                   <span style={s.allocBarLabel}>Previously linked</span>
                   <span style={{ ...s.allocBarVal, color: DIALOG.dim }}>
-                    {formatMoney(previouslyShown, barCurrency || 'USD')}
+                    {formatMoney(previouslyShown, barCurrency || 'RSD')}
                   </span>
                 </div>
                 <div style={s.allocBarDivider} />
                 <div style={s.allocBarItem}>
                   <span style={s.allocBarLabel}>New allocation</span>
                   <span style={{ ...s.allocBarVal, color: DIALOG.accent }}>
-                    {formatMoney(allocatedShown, barCurrency || 'USD')}
+                    {formatMoney(allocatedShown, barCurrency || 'RSD')}
                   </span>
                 </div>
                 <div style={s.allocBarDivider} />
@@ -471,7 +504,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                     color: Math.abs(unallocated) <= 0.01 ? DIALOG.accent : unallocated < 0 ? DIALOG.red : DIALOG.amber,
                     fontWeight: '600'
                   }}>
-                    {formatMoney(unallocated, barCurrency || 'USD')}
+                    {formatMoney(unallocated, barCurrency || 'RSD')}
                     {Math.abs(unallocated) <= 0.01 && ' ✓'}
                     {unallocated < 0 && ' ⚠️'}
                   </span>
@@ -479,7 +512,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
               </div>
               {!barCurrency && (
                 <div style={{ fontSize: '10.5px', color: DIALOG.dim, margin: '-6px 0 10px', lineHeight: 1.4 }}>
-                  Shown in USD: this {sourceType === 'transaction' ? 'payment' : 'invoice'} and what it is
+                  Shown in RSD (book): this {sourceType === 'transaction' ? 'payment' : 'invoice'} and what it is
                   linked to are not all in the same currency.
                 </div>
               )}
@@ -549,10 +582,10 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                             {(c.pl_category || c.revenue_stream) && ` · ${c.pl_category || c.revenue_stream}`}
                             {sourceType === 'transaction' && c.amount !== undefined && (() => {
                               // In the currency of the bill. Read off
-                              // `remaining_usd` this line carried the gap
-                              // between two dates' rates, and showed an
+                              // `remaining_rsd` this line would carry the gap
+                              // between two dates' rates, and show an
                               // amount outstanding on invoices that had been
-                              // settled to the para.
+                              // settled to the cent.
                               const left = outstandingOwn(c)
                               return (
                                 <span style={{ color: left > 0.01 ? DIALOG.red : DIALOG.accent }}>
@@ -563,8 +596,8 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                           </div>
                         </div>
                         <div style={{ textAlign: 'right', marginRight: '10px', flexShrink: 0 }}>
-                          <div style={s.candidateAmt}>{(c.amount || 0).toLocaleString()} {c.currency}</div>
-                          <div style={s.candidateUsd}>${(c.amount_usd || 0).toFixed(2)}</div>
+                          <div style={s.candidateAmt}>{fmtMoney(c.amount || 0, c.currency || 'RSD')}</div>
+                          <div style={s.candidateBook}>{fmtMoney(c.amount_rsd || 0, 'RSD')}</div>
                         </div>
                         {!alreadyDone ? (
                           !linked ? (
@@ -629,8 +662,11 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                               onClick={() => updateAllocation(link.id, Math.max(0, Math.min(
                                 link.outstanding_own || 0,
                                 // What is left of the source, plus what this
-                                // row is already holding back from it.
-                                round2(unallocated + (barCurrency ? link.allocated_own : link.allocated_usd)))))}
+                                // row is already holding back from it — in
+                                // the bill's currency either way.
+                                barCurrency
+                                  ? round2(unallocated + link.allocated_own)
+                                  : toOwn(round2(unallocated + link.allocated_rsd), invoiceFor(link) || {}))))}
                             >
                               Max
                             </button>
@@ -656,7 +692,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
           <div style={{ fontSize: '12px', color: DIALOG.dim }}>
             {links.length === 0
               ? 'Select one or more entries to link'
-              : `${links.length} link(s) ready · ${formatMoney(allocatedShown, barCurrency || 'USD')} allocated`}
+              : `${links.length} link(s) ready · ${formatMoney(allocatedShown, barCurrency || 'RSD')} allocated`}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button style={s.btnGhost} onClick={onClose}>Cancel</button>
@@ -690,7 +726,7 @@ const s: Record<string, React.CSSProperties> = {
   sourceCardPartner: { fontSize: '14px', fontWeight: '500', color: DIALOG.text, marginBottom: '3px' },
   sourceCardMeta: { fontSize: '12px', color: DIALOG.dim, marginBottom: '2px' },
   sourceCardAmount: { fontSize: '15px', fontWeight: '500', color: DIALOG.text },
-  sourceCardUsd: { fontSize: '12px', color: DIALOG.accent, fontWeight: '500' },
+  sourceCardBook: { fontSize: '12px', color: DIALOG.accent, fontWeight: '500' },
   existingLinks: { marginTop: '10px', paddingTop: '10px', borderTop: '0.5px solid ' + DIALOG.border },
   existingLinksLabel: { fontSize: '10px', fontWeight: '500', color: DIALOG.dim, textTransform: 'uppercase' as const, letterSpacing: '0.07em', marginBottom: '6px' },
   existingLinkRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0', borderBottom: '0.5px solid #ececec' },
@@ -709,7 +745,7 @@ const s: Record<string, React.CSSProperties> = {
   candidateIdentifier: { fontSize: '11px', color: DIALOG.dim, background: DIALOG.raised, padding: '1px 6px', borderRadius: '4px', fontFamily: 'monospace' },
   candidateMeta: { fontSize: '11px', color: DIALOG.dim },
   candidateAmt: { fontSize: '13px', fontWeight: '500', color: DIALOG.text, whiteSpace: 'nowrap' as const },
-  candidateUsd: { fontSize: '11px', color: DIALOG.dim },
+  candidateBook: { fontSize: '11px', color: DIALOG.dim },
   statusBadge: { fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px' },
   addBtn: { fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '5px 14px', border: '0.5px solid ' + DIALOG.accent, borderRadius: '6px', background: 'transparent', color: DIALOG.accent, cursor: 'pointer', whiteSpace: 'nowrap' as const, flexShrink: 0 },
   removeBtn: { fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '5px 14px', border: '0.5px solid ' + DIALOG.red, borderRadius: '6px', background: 'transparent', color: DIALOG.red, cursor: 'pointer', whiteSpace: 'nowrap' as const, flexShrink: 0 },

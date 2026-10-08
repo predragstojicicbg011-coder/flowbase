@@ -25,7 +25,7 @@ function Host({ amount = 120000 }: { amount?: number }) {
   const [lines, setLines] = useState<SplitLine[]>([])
   return (
     <SplitEditor
-      parent={{ amount, amount_usd: 1178.21, currency: 'RSD' }}
+      parent={{ amount, currency: 'RSD', exchange_rate: 1, eur_rate: 117.5, amount_rsd: amount }}
       lines={lines} onChange={setLines} scripts={SCRIPTS} />
   )
 }
@@ -93,13 +93,13 @@ describe('the sum control', () => {
     open()
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '50000' } })
     expect(amounts()).toEqual(['60000', '50000'])
-    expect(screen.getByText(/10,000.00 RSD left/)).toBeInTheDocument()
+    expect(screen.getByText(/10\.000,00 RSD left/)).toBeInTheDocument()
   })
 
   it('says when the lines have gone over', () => {
     open()
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '100000' } })
-    expect(screen.getByText(/40,000.00 RSD over/)).toBeInTheDocument()
+    expect(screen.getByText(/40\.000,00 RSD over/)).toBeInTheDocument()
   })
 
   it('puts the difference on the last line when asked', () => {
@@ -242,7 +242,7 @@ describe('making a template from inside the split', () => {
     const [lines, setLines] = useState<SplitLine[]>([])
     return (
       <SplitEditor
-        parent={{ amount: 120000, amount_usd: 1178.21, currency: 'RSD' }}
+        parent={{ amount: 120000, currency: 'RSD', exchange_rate: 1, eur_rate: 117.5, amount_rsd: 120000 }}
         lines={lines} onChange={setLines} scripts={SCRIPTS}
         classification={OPTIONS} client={{}} />
     )

@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import { fetchAllPages } from '../utils/fetchAllPages'
-import { fmtUSDCompact, type BudgetFigureFormat } from '../utils/formatters'
+import { fmtMoneyCompact, fmtMoney, type BudgetFigureFormat } from '../utils/formatters'
 import { makeClassKey } from '../services/budgetKeys'
-import { carriesInto, isCreditPayment, type Adjustment } from '../services/budgetForecast'
+import { carriesInto, isCreditPayment, figureIn, type Adjustment, type BudgetCurrency } from '../services/budgetForecast'
 import {
   EntriesModal, EntryRow, useEntryEditor, em,
   EntryItem, buildEntryItems,
@@ -49,8 +49,9 @@ export interface DrillState {
 
 export default function BudgetDrillModal({
   drill, companyIds, benchmark, benchmarkLabel,
-  ledgerEntries, ratesAreFallback,
-  format = fmtUSDCompact,
+  ledgerEntries,
+  currency = 'RSD',
+  format = (n: number, showSign?: boolean) => fmtMoneyCompact(n, currency, showSign),
   onClose, onEditDone, onChange,
 }: {
   drill: DrillState
@@ -60,18 +61,21 @@ export default function BudgetDrillModal({
   benchmarkLabel: string
   /** The change ledger for this node and month, exactly as the cell read it. */
   ledgerEntries: Adjustment[]
-  /** What is already owed in this month, company-wide. */
-  /** Instalments are priced in EUR, and the rate may not be a real one. */
-  ratesAreFallback: boolean
+  /**
+   * The currency the table the drill was opened from is shown in. Every entry
+   * and ledger figure here is read in it — the stored `_rsd` or `_eur`
+   * column, never a conversion.
+   */
+  currency?: BudgetCurrency
   /**
    * How the page is printing figures right now — full at the three-month
    * horizon, compact beyond it.
    *
    * Handed down rather than chosen here. This modal is opened FROM a cell and
    * restates that cell's total in its own header; picking its own formatter is
-   * how the drill comes to say `$1.6K` above a list opened from a cell reading
-   * `$1,590`, and a reader then has two figures and no way to tell whether
-   * they are the same one.
+   * how the drill comes to say `1,6 hilj. RSD` above a list opened from a cell
+   * reading `1.590 RSD`, and a reader then has two figures and no way to tell
+   * whether they are the same one.
    */
   format?: BudgetFigureFormat
   onClose: () => void
@@ -197,7 +201,7 @@ export default function BudgetDrillModal({
     load()
   }, [drill, companyIds, benchmark]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const total = entries.reduce((s, e) => s + (e.amountUsd || 0), 0)
+  const total = entries.reduce((s, e) => s + (figureIn(e, 'amount', currency) || 0), 0)
   // Nothing to scope by yet — render nothing rather than a modal reporting
   // zero transactions for a query that was never allowed to run. See the note
   // in the effect above for why an empty list is not "all companies".
@@ -272,20 +276,27 @@ export default function BudgetDrillModal({
           <div style={em.sectionTitle}>Changes</div>
           {ledgerEntries.length === 0
             ? <div style={dm.nothing}>Never changed — this is the seeded figure.</div>
-            : ledgerEntries.map(a => (
+            : ledgerEntries.map(a => {
+              // In the table's currency where the entry has it; otherwise its
+              // RSD figure, labelled RSD — never an RSD figure called EUR.
+              const own = figureIn(a, 'amount', currency)
+              const amount = own ?? Number(a.amount_rsd)
+              const unit = own === null ? 'RSD' : currency
+              return (
               <div key={a.id} style={{ padding: '9px 0', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
                   <span style={{ color: '#DCE9F6' }}>{a.reason}</span>
-                  <span style={{ color: a.amount_usd > 0 ? '#FF5B5A' : '#00D47E', whiteSpace: 'nowrap' }}>
-                    {a.kind === 'set' ? 'set to ' : a.amount_usd > 0 ? '+' : ''}
-                    ${Math.abs(a.amount_usd).toFixed(2)}
+                  <span style={{ color: amount > 0 ? '#FF5B5A' : '#00D47E', whiteSpace: 'nowrap' }}>
+                    {a.kind === 'set' ? 'set to ' : amount > 0 ? '+' : ''}
+                    {fmtMoney(amount, unit)}
                   </span>
                 </div>
                 <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px' }}>
                   {new Date(a.created_at).toLocaleDateString('en-GB')}
                 </div>
               </div>
-            ))}
+              )
+            })}
         </>
       )}
     </EntriesModal>

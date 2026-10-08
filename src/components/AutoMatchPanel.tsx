@@ -3,6 +3,8 @@ import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { proposePairs, summarize, PassthroughRow, MATCH_LIMITS } from '../services/autoMatch'
 import { DIALOG } from './dialogTheme'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { fmtRSD } from '../utils/formatters'
 
 // ── Pass-through auto-matching ──────────────────────────────────────────────
 // The engine only PROPOSES. Nothing is written until the user confirms, and
@@ -16,7 +18,8 @@ const CONF_STYLE: Record<string, { bg: string; color: string; label: string }> =
   low:    { bg: 'rgba(122,155,184,0.13)', color: '#7A9BB8', label: 'low' },
 }
 
-const fmt = (n: number) => '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// Rows print in the viewer's display currency. The gap between two legs is
+// what the engine scored, which is always the RSD book figure.
 
 export default function AutoMatchPanel({ onClose, onPaired }: Props) {
   const { companies, defaultCompany, showPicker } = useCompanies()
@@ -38,7 +41,7 @@ export default function AutoMatchPanel({ onClose, onPaired }: Props) {
     setLoading(true); setError(''); setResult(null)
     const { data, error: err } = await supabase
       .from('passthrough')
-      .select('id, company_id, partner_id, transaction_date, direction, amount, amount_usd, currency, note, reference_number, partners(name)')
+      .select('id, company_id, partner_id, transaction_date, direction, amount, amount_rsd, amount_eur, currency, note, reference_number, partners(name)')
       .eq('company_id', companyId)
       .eq('status', 'unpaired')
       .order('transaction_date', { ascending: false })
@@ -173,7 +176,7 @@ export default function AutoMatchPanel({ onClose, onPaired }: Props) {
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <span style={{ ...s.badge, background: cs.bg, color: cs.color }}>{cs.label}</span>
                     <div style={s.score}>{p.score} pts</div>
-                    {p.amountDiffUsd > 0 && <div style={s.diff}>diff {fmt(p.amountDiffUsd)}</div>}
+                    {p.amountDiffRsd > 0 && <div style={s.diff}>diff {fmtRSD(p.amountDiffRsd)}</div>}
                   </div>
                 </div>
               )
@@ -199,11 +202,13 @@ export default function AutoMatchPanel({ onClose, onPaired }: Props) {
 }
 
 function Side({ dir, row }: { dir: string; row: PassthroughRow }) {
+  const { pick, format } = useDisplayCurrency()
+  const book = pick(row)
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <span style={{ ...s.dirTag, background: dir === 'IN' ? 'rgba(0,212,126,0.15)' : 'rgba(255,91,90,0.15)', color: dir === 'IN' ? '#00D47E' : '#FF5B5A' }}>{dir}</span>
-        <span style={s.amount}>{fmt(row.amount_usd)}</span>
+        <span style={s.amount}>{book === null ? '—' : format(Math.abs(book))}</span>
       </div>
       <div style={s.meta}>
         {row.transaction_date} · {row.partner_name || '—'}

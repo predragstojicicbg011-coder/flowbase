@@ -100,7 +100,7 @@ const EMPTY: Record<LookupTable, Lookup[]> = {
  * A line records at the deepest level filled in, so stopping one short puts the
  * budget on the parent — where it shows as its own row rather than on any of
  * the lines under it. That is a supported thing to do and often the point
- * ("Marketing: $8,000, without itemising sixty lines"), but it surprised the
+ * ("Marketing: 8.000.000 RSD, without itemising sixty lines"), but it surprised the
  * owner once already from the change dialog, where two identical figures sat
  * one above the other and nothing said which one was about to move.
  *
@@ -178,7 +178,7 @@ export function resolveSeed(
 }
 
 export default function AddBudgetLineDialog({
-  levels, months, currentFor, seedFor, seedPath, onClose, onSaved,
+  levels, months, currentFor, seedFor, seedEurFor, seedPath, onClose, onSaved,
 }: {
   /** The open branch's levels, outermost first. */
   levels: Level[]
@@ -203,6 +203,11 @@ export default function AddBudgetLineDialog({
    * would drift exactly like any other. See `pinnedBase`.
    */
   seedFor: (pathLabels: string[], month: string) => number
+  /**
+   * The same seed in EUR, or null where the page has no EUR reading of the
+   * budget. Recorded beside the RSD seed; see `BudgetChangeDialog`.
+   */
+  seedEurFor?: (pathLabels: string[], month: string) => number | null
   /**
    * The tree row this was opened from, as labels — empty from the page's own
    * button, filled from the `+` beside a sub-category.
@@ -365,6 +370,7 @@ export default function AddBudgetLineDialog({
         rowLabel={pathLabels.join(' → ')}
         current={currentFor(pathLabels, monthMeta.key)}
         seed={seedFor(pathLabels, monthMeta.key)}
+        seedEur={seedEurFor ? seedEurFor(pathLabels, monthMeta.key) : null}
         onClose={onClose}
         onSaved={onSaved}
       />

@@ -7,6 +7,7 @@ import { useDataRefresh } from '../contexts/DataRefreshContext'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { EntriesModal, useEntryEditor, em } from '../components/EntriesModal'
 import { MonthlyEntryList } from '../components/MonthlyEntryList'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { KeyFigures, ChartDeck } from '../components/ExpenseVisuals'
 import {
   buildTree, withComparison, paretoCut, flatten, findNode,
@@ -47,8 +48,6 @@ import {
 // comparison, the hide-a-line arithmetic and the drill-down already exist and
 // are tested. One report, four tabs, one total.
 
-const money = (n: number, dp = 0) =>
-  (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })
 
 const pct = (n: number | null, dp = 1) => n === null ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(dp)}%`
 
@@ -92,9 +91,10 @@ function fetchEntries(dateFrom: string, dateTo: string, companyId: string): Prom
     // `amount` and the six allocation fields are what the stream and cost-type
     // branches are built from. `amount` is not decoration: the two typed
     // splits are stored in the currency of the bill, and the factor that
-    // turns them into dollars is amount_usd / amount off this very row.
+    // turns them into the display currency is amount_rsd / amount (or
+    // amount_eur / amount) off this very row.
     let q = supabase.from('v_pl_entries')
-      .select('id, tx_type, amount, amount_usd, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, rev_alloc_type, rev_alloc_sg, rev_alloc_aimfox, opex_type, opex_amount, performance_amount')
+      .select('id, tx_type, amount, amount_rsd, amount_eur, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, rev_alloc_type, rev_alloc_sg, rev_alloc_aimfox, opex_type, opex_amount, performance_amount')
       .gte('pl_date', dateFrom).lte('pl_date', dateTo)
     if (companyId !== 'all') q = q.eq('company_id', companyId)
     return q.order('pl_date').order('id').range(from, to)
@@ -103,6 +103,9 @@ function fetchEntries(dateFrom: string, dateTo: string, companyId: string): Prom
 
 export default function ExpenseAnalysis() {
   const { companies, defaultCompany, showPicker } = useCompanies()
+  // Every tree below sums each row's own figure in the display currency.
+  const { currency, format, pick } = useDisplayCurrency()
+  const money = (n: number, dp = 0) => format(n, dp)
   const [companyId, setCompanyId] = useState('all')
   // With one company, "all" is that company and is called by its name.
   const companyName = companyId === 'all'
@@ -163,8 +166,10 @@ export default function ExpenseAnalysis() {
   const priorExp = useMemo(() => prior.filter(isExpenseRow), [prior])
   const priExp = useMemo(() => prior.filter(isExpenseRow), [prior])
 
-  const tree = useMemo(() => buildTree(curExp, branch), [curExp, branch])
-  const priorTree = useMemo(() => buildTree(priExp, branch), [priExp, branch])
+  const tree = useMemo(() => buildTree(curExp, branch, currency), [curExp, branch, currency])
+  const priorTree = useMemo(() => buildTree(priExp, branch, currency), [priExp, branch, currency])
+  // Rows with no figure in the display currency count as zero — said, not hidden.
+  const missingFigure = useMemo(() => curExp.filter(e => pick(e) === null).length, [curExp, pick])
   const compared = useMemo(() => withComparison(tree, priorTree), [tree, priorTree])
 
   const total = useMemo(() => totalOf(tree), [tree])
@@ -185,16 +190,16 @@ export default function ExpenseAnalysis() {
   // an owner. Built once here rather than inline in the markup, because at
   // ~5,500 rows two tree builds per keystroke is felt.
   const recon = useMemo(() => {
-    const plTotal = totalOf(buildTree(curExp, 'pl'))
-    const deptTree = buildTree(curExp, 'department')
+    const plTotal = totalOf(buildTree(curExp, 'pl', currency))
+    const deptTree = buildTree(curExp, 'department', currency)
     return {
       plTotal,
       deptTotal: totalOf(deptTree),
-      streamTotal: totalOf(buildTree(curExp, 'stream')),
-      typeTotal: totalOf(buildTree(curExp, 'type')),
+      streamTotal: totalOf(buildTree(curExp, 'stream', currency)),
+      typeTotal: totalOf(buildTree(curExp, 'type', currency)),
       unassigned: deptTree.find(n => n.label === UNASSIGNED)?.amount || 0,
     }
-  }, [curExp])
+  }, [curExp, currency])
   const unassigned = recon.unassigned
 
   /**
@@ -229,20 +234,20 @@ export default function ExpenseAnalysis() {
   // for part of their value.
   const drillRows = useMemo(() => {
     if (!selectedNode) return []
-    return curExp.filter(e => contributesTo(e, branch, selectedNode.path))
-  }, [selectedNode, curExp, branch])
+    return curExp.filter(e => contributesTo(e, branch, selectedNode.path, currency))
+  }, [selectedNode, curExp, branch, currency])
 
   /**
    * What those rows are worth in full, as against the figure above them.
    *
-   * On an allocated branch a $1,000 invoice split 60/40 is listed under both
+   * On an allocated branch a 100,000 RSD invoice split 60/40 is listed under both
    * halves, and a reader who adds the list up gets a number larger than the
    * one they clicked. Saying so is not a footnote — it is the difference
    * between a report and a trap.
    */
   const drillWhole = useMemo(
-    () => drillRows.reduce((sum, e) => sum + Math.abs(e.amount_usd || 0), 0),
-    [drillRows])
+    () => drillRows.reduce((sum, e) => sum + Math.abs(pick(e) ?? 0), 0),
+    [drillRows, pick])
 
   /**
    * The whole report, in a file someone else can work with.
@@ -261,7 +266,7 @@ export default function ExpenseAnalysis() {
     setExporting(true)
     try {
       const treeFor = (b: Branch) =>
-        withComparison(buildTree(curExp, b), buildTree(priorExp, b))
+        withComparison(buildTree(curExp, b, currency), buildTree(priorExp, b, currency))
       const isExcluded = (key: string) => hidden.has(key)
 
       // Details come from the two base tables the view is built from, by id.
@@ -314,6 +319,7 @@ export default function ExpenseAnalysis() {
         paretoLines: pareto.cutoff,
         entryCount: entries.length,
         generatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        currency,
       })), 'Read me')
       // Every branch, not whichever one happened to be open. A reader who
       // opens the file a week later has no idea which tab it was exported from.
@@ -414,7 +420,8 @@ export default function ExpenseAnalysis() {
             <div style={s.pageTitle}>P&amp;L Analysis</div>
             <div style={s.pageSub}>
               {loading ? 'Loading…'
-                : `${companyName} · ${range.label} vs ${range.priorLabel} · ${curExp.length.toLocaleString()} entries · USD`}
+                : `${companyName} · ${range.label} vs ${range.priorLabel} · ${curExp.length.toLocaleString()} entries · ${currency}`
+                  + (missingFigure > 0 ? ` · ${missingFigure.toLocaleString()} with no ${currency} figure, counted as zero` : '')}
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -563,7 +570,7 @@ export default function ExpenseAnalysis() {
             }
             footerLeft={
               `${drillRows.length.toLocaleString()} transaction${drillRows.length !== 1 ? 's' : ''} · `
-              + `grouped by month, newest first · amounts in USD · click Edit to modify`
+              + `grouped by month, newest first · amounts in ${currency} · click Edit to modify`
               + (isAllocated(branch) && drillWhole - selectedNode.amount >= 0.01
                 ? ` · these transactions are worth ${money(drillWhole)} in full; `
                   + `${money(selectedNode.amount)} of that is allocated here and the rest to the other side`

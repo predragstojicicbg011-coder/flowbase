@@ -47,7 +47,7 @@ const input = (over: Partial<RunInput> = {}): RunInput => ({
 })
 
 const context = (over: Partial<SaveContext> = {}): SaveContext => ({
-  companyId: 'c1', month: MONTH, exchangeRate: RATE, usdRate: 100,
+  companyId: 'c1', month: MONTH, exchangeRate: RATE, eurRate: RATE,
   monthHours: FUND,
   people: { e1: person() },
   ...over,
@@ -114,6 +114,12 @@ describe('the header', () => {
     // A recalculation months later must not silently use today's rate, and
     // the only way to notice is to have kept the one that was used.
     expect(headerOf(runOf('regular'), context()).exchange_rate).toBe(RATE)
+  })
+
+  it('records the EUR rate the posted rows will carry, and no dollar rate', () => {
+    const header: any = headerOf(runOf('regular'), context({ eurRate: 117.2 }))
+    expect(header.eur_rate).toBe(117.2)
+    expect('usd_rate' in header).toBe(false)
   })
 })
 
@@ -200,7 +206,7 @@ describe('saveRun', () => {
 describe('byMonth', () => {
   const run = (over: Partial<SavedRun>): SavedRun => ({
     id: 'x', company_id: 'c1', period_month: '2026-09-01', run_key: 'regular',
-    label: 'Salaries', status: 'draft', exchange_rate: RATE, usd_rate: 100,
+    label: 'Salaries', status: 'draft', exchange_rate: RATE, eur_rate: RATE,
     month_hours: FUND, gross: 0, net: 0, income_tax: 0,
     contributions_employee: 0, contributions_employer: 0,
     total_cost: 0, deductions_third_party: 0, deductions_employer: 0,

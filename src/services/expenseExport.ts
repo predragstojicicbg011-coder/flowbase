@@ -27,6 +27,7 @@
 // directly. Fetching lives in the page; `xlsx` is never imported here.
 
 import type { Branch, ComparedNode, PlEntry } from './expenseTree'
+import type { DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 /** The classification levels, in the order they are written out. */
 export const CLASS_COLUMNS = [
@@ -158,7 +159,10 @@ export interface EntryRowOut {
   'Expense description': string
   Currency: string
   Amount: number | ''
-  'Amount USD': number
+  /** The book figure in dinars. */
+  'Amount RSD': number
+  /** The book figure in euros; blank where the row has none yet. */
+  'Amount EUR': number | ''
   'Cash flow': string
   Note: string
 }
@@ -192,7 +196,8 @@ export function entryRows(
         'Expense description': e.expense_description || '',
         Currency: d?.currency || '',
         Amount: d?.amount == null ? '' : money2(d.amount),
-        'Amount USD': money2(e.amount_usd || 0),
+        'Amount RSD': money2(e.amount_rsd || 0),
+        'Amount EUR': e.amount_eur == null ? '' : money2(e.amount_eur),
         'Cash flow': d?.cfType || '',
         Note: d?.note || '',
       }
@@ -211,6 +216,8 @@ export interface PreambleFacts {
   paretoLines: number
   entryCount: number
   generatedAt: string
+  /** The currency the totals were summed in — the viewer's display currency. */
+  currency: DisplayCurrency
 }
 
 /**
@@ -220,6 +227,7 @@ export interface PreambleFacts {
  * something that is not a person, and placed first so it is what opens.
  */
 export function preambleRows(f: PreambleFacts): { Field: string; Value: string | number }[] {
+  const c = f.currency
   return [
     { Field: 'Report', Value: 'Expense Analysis' },
     { Field: 'Period', Value: f.period },
@@ -227,12 +235,12 @@ export function preambleRows(f: PreambleFacts): { Field: string; Value: string |
     { Field: 'Company', Value: f.company },
     { Field: 'Generated', Value: f.generatedAt },
     { Field: '', Value: '' },
-    { Field: 'Total expenses (USD)', Value: money2(f.total) },
-    { Field: 'Prior period total (USD)', Value: money2(f.prior) },
-    { Field: 'Change (USD)', Value: money2(f.total - f.prior) },
-    { Field: 'Excluded by hiding (USD)', Value: money2(f.excluded) },
-    { Field: 'Adjusted total (USD)', Value: money2(f.adjusted) },
-    { Field: 'Unassigned, department branch (USD)', Value: money2(f.unassigned) },
+    { Field: `Total expenses (${c})`, Value: money2(f.total) },
+    { Field: `Prior period total (${c})`, Value: money2(f.prior) },
+    { Field: `Change (${c})`, Value: money2(f.total - f.prior) },
+    { Field: `Excluded by hiding (${c})`, Value: money2(f.excluded) },
+    { Field: `Adjusted total (${c})`, Value: money2(f.adjusted) },
+    { Field: `Unassigned, department branch (${c})`, Value: money2(f.unassigned) },
     { Field: 'Lines making 80% of spend', Value: f.paretoLines },
     { Field: 'Entries listed', Value: f.entryCount },
     { Field: '', Value: '' },
@@ -240,7 +248,7 @@ export function preambleRows(f: PreambleFacts): { Field: string; Value: string |
     { Field: 'Sheet: By P&L', Value: 'The same money grouped by P&L category. Both branches total the same figure.' },
     { Field: 'Sheet: Entries', Value: 'One row per transaction or invoice, with its full classification repeated on it. This is the sheet to pivot, filter or hand to an analysis tool.' },
     { Field: '', Value: '' },
-    { Field: 'Amounts', Value: 'USD unless a row states its own currency. Amount USD is what every total on the other sheets is built from.' },
+    { Field: 'Amounts', Value: `Totals are in ${c}, summed from each entry's Amount ${c}. Amount RSD and Amount EUR are the book figures every entry carries; Currency and Amount are the document's own.` },
     { Field: 'Excluded rows', Value: 'Lines hidden on screen are still listed, marked in the Excluded column, so nothing is silently missing.' },
   ]
 }

@@ -9,7 +9,7 @@ import {
   behaviourOf, branchRoots,
 } from './expenseCharts'
 
-const e = (o: Partial<PlEntry> & { amount_usd: number }): PlEntry => ({
+const e = (o: Partial<PlEntry> & { amount_rsd: number }): PlEntry => ({
   tx_type: 'expense',
   pl_category: 'A', pl_subcategory: 'A1',
   department: 'D', dept_subcategory: 'D1', expense_description: 'x',
@@ -18,12 +18,22 @@ const e = (o: Partial<PlEntry> & { amount_usd: number }): PlEntry => ({
 })
 
 describe('monthlySeries', () => {
+  it('stacks the EUR figures when the tree was built in EUR', () => {
+    const eurTree = buildTree([
+      e({ amount_rsd: 11720, amount_eur: 100, pl_category: 'A', pl_date: '2026-07-05' }),
+      e({ amount_rsd: 23500, amount_eur: 200, pl_category: 'B', pl_date: '2026-07-09' }),
+    ], 'pl', 'EUR')
+    const s = monthlySeries(eurTree, ['2026-07'])
+    expect(s.points[0].values).toEqual({ B: 200, A: 100 })
+    expect(s.max).toBe(300)
+  })
+
   const tree = buildTree([
-    e({ amount_usd: 100, pl_category: 'A', pl_date: '2026-07-05' }),
-    e({ amount_usd: 300, pl_category: 'A', pl_date: '2026-08-05' }),
-    e({ amount_usd: 50, pl_category: 'B', pl_date: '2026-07-09' }),
-    e({ amount_usd: 20, pl_category: 'C', pl_date: '2026-08-09' }),
-  ], 'pl')
+    e({ amount_rsd: 100, pl_category: 'A', pl_date: '2026-07-05' }),
+    e({ amount_rsd: 300, pl_category: 'A', pl_date: '2026-08-05' }),
+    e({ amount_rsd: 50, pl_category: 'B', pl_date: '2026-07-09' }),
+    e({ amount_rsd: 20, pl_category: 'C', pl_date: '2026-08-09' }),
+  ], 'pl', 'RSD')
   const months = ['2026-07', '2026-08']
 
   it('gives one point per month, in the order asked for', () => {
@@ -71,13 +81,13 @@ describe('monthlySeries', () => {
 
 describe('bridgeSteps', () => {
   const cur = buildTree([
-    e({ amount_usd: 150, pl_category: 'A' }),
-    e({ amount_usd: 50, pl_category: 'C' }),
-  ], 'pl')
+    e({ amount_rsd: 150, pl_category: 'A' }),
+    e({ amount_rsd: 50, pl_category: 'C' }),
+  ], 'pl', 'RSD')
   const prior = buildTree([
-    e({ amount_usd: 100, pl_category: 'A' }),
-    e({ amount_usd: 80, pl_category: 'B' }),
-  ], 'pl')
+    e({ amount_rsd: 100, pl_category: 'A' }),
+    e({ amount_rsd: 80, pl_category: 'B' }),
+  ], 'pl', 'RSD')
   const steps = bridgeSteps(withComparison(cur, prior))
 
   it('opens on the prior total and closes on the current one', () => {
@@ -110,8 +120,8 @@ describe('bridgeSteps', () => {
 
   it('folds the tail into one Other step and still closes', () => {
     const many = buildTree(
-      Array.from({ length: 10 }, (_, i) => e({ amount_usd: 10 * (i + 1), pl_category: `C${i}` })), 'pl')
-    const none = buildTree([], 'pl')
+      Array.from({ length: 10 }, (_, i) => e({ amount_rsd: 10 * (i + 1), pl_category: `C${i}` })), 'pl', 'RSD')
+    const none = buildTree([], 'pl', 'RSD')
     const s = bridgeSteps(withComparison(many, none), 3)
     expect(s.filter(x => x.kind === 'up' || x.kind === 'down')).toHaveLength(3)
     expect(s.find(x => x.label === OTHER)).toBeDefined()
@@ -131,10 +141,10 @@ describe('bridgeSteps', () => {
 
 describe('paretoSeries', () => {
   const tree = buildTree([
-    e({ amount_usd: 700, pl_subcategory: 'big' }),
-    e({ amount_usd: 200, pl_subcategory: 'mid' }),
-    e({ amount_usd: 100, pl_subcategory: 'small' }),
-  ], 'pl')
+    e({ amount_rsd: 700, pl_subcategory: 'big' }),
+    e({ amount_rsd: 200, pl_subcategory: 'mid' }),
+    e({ amount_rsd: 100, pl_subcategory: 'small' }),
+  ], 'pl', 'RSD')
 
   it('ranks leaves largest first', () => {
     expect(paretoSeries(tree).map(p => p.label)).toEqual(['big', 'mid', 'small'])
@@ -154,7 +164,7 @@ describe('paretoSeries', () => {
 
   it('returns nothing when there is no spend', () => {
     expect(paretoSeries([])).toEqual([])
-    expect(paretoSeries(buildTree([e({ amount_usd: 0 })], 'pl'))).toEqual([])
+    expect(paretoSeries(buildTree([e({ amount_rsd: 0 })], 'pl', 'RSD'))).toEqual([])
   })
 })
 
@@ -179,12 +189,19 @@ describe('axis helpers', () => {
   })
 
   it('writes money compactly', () => {
-    expect(shortMoney(0)).toBe('$0')
-    expect(shortMoney(850)).toBe('$850')
-    expect(shortMoney(1200)).toBe('$1.2k')
-    expect(shortMoney(67429)).toBe('$67k')
-    expect(shortMoney(2114286)).toBe('$2.1M')
-    expect(shortMoney(-35858)).toBe('-$36k')
+    expect(shortMoney(0)).toBe('0')
+    expect(shortMoney(850)).toBe('850')
+    expect(shortMoney(1200)).toBe('1,2 hilj.')
+    expect(shortMoney(67429)).toBe('67 hilj.')
+    expect(shortMoney(2114286)).toBe('2,1 mil.')
+    expect(shortMoney(-35858)).toBe('-36 hilj.')
+    expect(shortMoney(48_500_000)).toBe('49 mil.')
+    expect(shortMoney(1_500_000_000)).toBe('1,5 mlrd.')
+  })
+
+  it('names the currency when asked to', () => {
+    expect(shortMoney(2114286, 'RSD')).toBe('2,1 mil. RSD')
+    expect(shortMoney(-850, 'EUR')).toBe('-850 EUR')
   })
 
   it('names months, with the year only when asked', () => {
@@ -403,12 +420,12 @@ describe('quantile bins', () => {
 describe('heatGrid', () => {
   const months = ['2026-01', '2026-02', '2026-03']
   const rows = [
-    e({ amount_usd: 100, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-01-10' }),
-    e({ amount_usd: 300, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-03-10' }),
-    e({ amount_usd: 50, pl_category: 'Marketing', pl_subcategory: 'Events', pl_date: '2026-02-10' }),
-    e({ amount_usd: 900, pl_category: 'Office', pl_subcategory: 'Rent', pl_date: '2026-01-10' }),
+    e({ amount_rsd: 100, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-01-10' }),
+    e({ amount_rsd: 300, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-03-10' }),
+    e({ amount_rsd: 50, pl_category: 'Marketing', pl_subcategory: 'Events', pl_date: '2026-02-10' }),
+    e({ amount_rsd: 900, pl_category: 'Office', pl_subcategory: 'Rent', pl_date: '2026-01-10' }),
   ]
-  const tree = buildTree(rows, 'pl')
+  const tree = buildTree(rows, 'pl', 'RSD')
 
   it('lays a line out across the months, gaps included', () => {
     const g = heatGrid(tree, months, 1)
@@ -449,9 +466,9 @@ describe('heatGrid', () => {
 
   it('distinguishes two lines of the same name under different parents', () => {
     const same = buildTree([
-      e({ amount_usd: 10, pl_category: 'A', pl_subcategory: 'Fees', pl_date: '2026-01-10' }),
-      e({ amount_usd: 20, pl_category: 'B', pl_subcategory: 'Fees', pl_date: '2026-01-10' }),
-    ], 'pl')
+      e({ amount_rsd: 10, pl_category: 'A', pl_subcategory: 'Fees', pl_date: '2026-01-10' }),
+      e({ amount_rsd: 20, pl_category: 'B', pl_subcategory: 'Fees', pl_date: '2026-01-10' }),
+    ], 'pl', 'RSD')
     const g = heatGrid(same, months, 1)
     expect(g.rows.map(r => r.parent[0]).sort()).toEqual(['A', 'B'])
     expect(new Set(g.rows.map(r => r.key)).size).toBe(2)
@@ -462,11 +479,11 @@ describe('heatGrid', () => {
 
 describe('facingRows', () => {
   const rows = [
-    e({ amount_usd: 1000, amount: 1000, pl_category: 'Marketing', pl_subcategory: 'Ads', rev_alloc_type: 'byval', rev_alloc_sg: 700, rev_alloc_aimfox: 300 }),
-    e({ amount_usd: 400, pl_category: 'Office', pl_subcategory: 'Rent', rev_alloc_type: 'sg100' }),
-    e({ amount_usd: 250, pl_category: 'Legal', pl_subcategory: 'Advice', rev_alloc_type: 'af100' }),
+    e({ amount_rsd: 1000, amount: 1000, pl_category: 'Marketing', pl_subcategory: 'Ads', rev_alloc_type: 'byval', rev_alloc_sg: 700, rev_alloc_aimfox: 300 }),
+    e({ amount_rsd: 400, pl_category: 'Office', pl_subcategory: 'Rent', rev_alloc_type: 'sg100' }),
+    e({ amount_rsd: 250, pl_category: 'Legal', pl_subcategory: 'Advice', rev_alloc_type: 'af100' }),
   ]
-  const tree = buildTree(rows, 'stream')
+  const tree = buildTree(rows, 'stream', 'RSD')
   const chart = () => facingRows(tree, SOCIAL_GROWTH, AIMFOX)
 
   it('puts each category on both sides of the centre line', () => {
@@ -506,7 +523,7 @@ describe('facingRows', () => {
    * complete comparison.
    */
   it('keeps a side that spent nothing at all', () => {
-    const oneSided = buildTree([e({ amount_usd: 500, rev_alloc_type: 'sg100' })], 'stream')
+    const oneSided = buildTree([e({ amount_rsd: 500, rev_alloc_type: 'sg100' })], 'stream', 'RSD')
     const c = facingRows(oneSided, SOCIAL_GROWTH, AIMFOX)
     expect(c.rightLabel).toBe(AIMFOX)
     expect(c.rightTotal).toBe(0)
@@ -568,11 +585,11 @@ describe('behaviourOf', () => {
 describe('branchRoots', () => {
   const months = ['2026-07', '2026-08', '2026-09']
   const tree = buildTree([
-    e({ amount_usd: 100, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-07-04' }),
-    e({ amount_usd: 100, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-08-04' }),
-    e({ amount_usd: 100, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-09-04' }),
-    e({ amount_usd: 900, pl_category: 'Office', pl_subcategory: 'Rent', pl_date: '2026-07-04' }),
-  ], 'pl')
+    e({ amount_rsd: 100, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-07-04' }),
+    e({ amount_rsd: 100, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-08-04' }),
+    e({ amount_rsd: 100, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-09-04' }),
+    e({ amount_rsd: 900, pl_category: 'Office', pl_subcategory: 'Rent', pl_date: '2026-07-04' }),
+  ], 'pl', 'RSD')
 
   it('keeps the tree shape the table already shows', () => {
     const roots = branchRoots(tree, months)
@@ -597,7 +614,7 @@ describe('branchRoots', () => {
   })
 
   it('does not draw a branch carrying nothing', () => {
-    const withZero = buildTree([e({ amount_usd: 0, pl_category: 'Ghost' })], 'pl')
+    const withZero = buildTree([e({ amount_rsd: 0, pl_category: 'Ghost' })], 'pl', 'RSD')
     expect(branchRoots(withZero, months)).toEqual([])
   })
 })

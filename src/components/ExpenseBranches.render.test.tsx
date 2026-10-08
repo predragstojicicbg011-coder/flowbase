@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import fs from 'fs'
 import path from 'path'
 import ExpenseBranches, { type ExpenseBranchNode } from './ExpenseBranches'
+import { DisplayCurrencyProvider } from '../contexts/DisplayCurrencyContext'
 
 // ─── Rendering the branches, and then looking at them ───────────────────────
 //
@@ -71,6 +72,14 @@ const branches = (onOpenLedger?: (k: string, l: string) => void) => (
 )
 
 describe('the branches draw', () => {
+  it('prices each branch in the display currency, in the app notation', () => {
+    const { unmount } = render(branches())
+    expect(screen.getByLabelText(/^Employee and Labour, 113\.188 RSD,/)).toBeInTheDocument()
+    unmount()
+    render(<DisplayCurrencyProvider initial="EUR">{branches()}</DisplayCurrencyProvider>)
+    expect(screen.getByLabelText(/^Employee and Labour, 113\.188 EUR,/)).toBeInTheDocument()
+  })
+
   it('opens one level, so the month is categories and what is under them', () => {
     const { container } = render(branches())
     capture('branches-1-one-level', container.innerHTML)

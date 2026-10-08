@@ -4,7 +4,9 @@ import { useCompanies } from '../contexts/CompaniesContext'
 import { supabase } from '../supabase'
 import { useNav } from '../navigation'
 import type { Page } from '../navigation'
-import { fmtUSD, fmtUSDSigned } from '../utils/formatters'
+import { fmtMoney } from '../utils/formatters'
+import { shortMoney } from '../services/expenseCharts'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import MetricCard from '../components/MetricCard'
 import { SkeletonRows, Rise, useDrawLength } from '../components/motion'
 import { fetchAllPages, countRows } from '../utils/fetchAllPages'
@@ -46,7 +48,8 @@ function AreaChart({ months, revenues, expenses }: { months: string[]; revenues:
   // Y-axis ticks
   const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => ({ v: max * f, y: padT + (1 - f) * chartH }))
 
-  const fmt = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v.toFixed(0)}`
+  // Axis ticks carry the scale only; the card above names the currency.
+  const fmt = (v: number) => shortMoney(v)
 
   return (
     <div style={{ position: 'relative' }}>
@@ -164,12 +167,13 @@ function DonutChart({ segments }: { segments: { label: string; value: number; co
 
 // ── Horizontal Bar ────────────────────────────────────────
 function HBar({ label, value, max, color, sub }: { label: string; value: number; max: number; color: string; sub?: string }) {
+  const { format } = useDisplayCurrency()
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0
   return (
     <div style={{ marginBottom: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
         <span style={{ fontSize: '12px', color: '#DCE9F6', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, maxWidth: '60%' }}>{label}</span>
-        <span style={{ fontSize: '12px', color: '#7A9BB8', whiteSpace: 'nowrap' as const }}>{fmtUSD(value)}{sub ? ` · ${sub}` : ''}</span>
+        <span style={{ fontSize: '12px', color: '#7A9BB8', whiteSpace: 'nowrap' as const }}>{format(value, 0)}{sub ? ` · ${sub}` : ''}</span>
       </div>
       <div style={{ height: '5px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: '3px', transition: 'width 0.6s ease' }} />
@@ -181,6 +185,11 @@ function HBar({ label, value, max, color, sub }: { label: string; value: number;
 export default function Dashboard() {
   const { user } = useAuth()
   const { setPage } = useNav()
+  // Every figure sums each row's own amount in the display currency; a row
+  // with none counts as zero. Switching currency refetches.
+  const { currency, pick, format } = useDisplayCurrency()
+  const money = (n: number) => format(n, 0)
+  const amt = (row: any): number => pick(row) ?? 0
   const [entity, setEntity] = useState<Entity>('all')
   const [dateFrom, setDateFrom] = useState(() => `${new Date().getFullYear()}-01-01`)
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0])
@@ -233,14 +242,14 @@ export default function Dashboard() {
       // ── P&L entries for period ──
       const plEntries = await fetchAllPages<any>((from, to) => {
         let q = supabase.from('v_pl_entries')
-          .select('tx_type,amount_usd,pl_date,pl_category,partner_id')
+          .select('tx_type,amount_rsd,amount_eur,pl_date,pl_category,partner_id')
           .gte('pl_date', dateFrom).lte('pl_date', dateTo)
         if (companyId) q = q.eq('company_id', companyId)
         return q.order('pl_date').order('id').range(from, to)
       })
 
-      const revenue = (plEntries || []).filter(e => e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue').reduce((s, e) => s + (e.amount_usd || 0), 0)
-      const expenses = (plEntries || []).filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').reduce((s, e) => s + (e.amount_usd || 0), 0)
+      const revenue = (plEntries || []).filter(e => e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue').reduce((s, e) => s + amt(e), 0)
+      const expenses = (plEntries || []).filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').reduce((s, e) => s + amt(e), 0)
 
       // ── Monthly breakdown ──
       const monthMap: Record<string, { revenue: number; expenses: number }> = {}
@@ -253,8 +262,8 @@ export default function Dashboard() {
       ;(plEntries || []).forEach(e => {
         const key = (e.pl_date || '').slice(0, 7)
         if (!monthMap[key]) monthMap[key] = { revenue: 0, expenses: 0 }
-        if (e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue') monthMap[key].revenue += e.amount_usd || 0
-        if (e.tx_type === 'expense' || e.tx_type === 'invoice_expense') monthMap[key].expenses += e.amount_usd || 0
+        if (e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue') monthMap[key].revenue += amt(e)
+        if (e.tx_type === 'expense' || e.tx_type === 'invoice_expense') monthMap[key].expenses += amt(e)
       })
       const monthly = Object.entries(monthMap).sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => ({
         month: new Date(key + '-01').toLocaleString('en', { month: 'short' }),
@@ -266,7 +275,7 @@ export default function Dashboard() {
       const catMap: Record<string, number> = {}
       ;(plEntries || []).filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').forEach(e => {
         const cat = e.pl_category || 'Other'
-        catMap[cat] = (catMap[cat] || 0) + (e.amount_usd || 0)
+        catMap[cat] = (catMap[cat] || 0) + amt(e)
       })
       const cats = Object.entries(catMap).sort(([, a], [, b]) => b - a).slice(0, 6).map(([label, value], i) => ({
         label, value, color: CATEGORY_COLORS[i % CATEGORY_COLORS.length]
@@ -276,12 +285,12 @@ export default function Dashboard() {
       // ── Open invoices ──
       const openInv = await fetchAllPages<any>((from, to) => {
         let q = supabase.from('v_invoice_status')
-          .select('calculated_status,remaining_usd,due_date,partner_name,amount_usd')
+          .select('calculated_status,remaining_rsd,remaining_eur,due_date,partner_name,amount_rsd,amount_eur')
           .in('calculated_status', ['unpaid', 'partial'])
         if (companyId) q = q.eq('company_id', companyId)
         return q.order('due_date', { nullsFirst: false }).order('id').range(from, to)
       })
-      const unpaidTotal = openInv.reduce((s, i) => s + (i.remaining_usd || 0), 0)
+      const unpaidTotal = openInv.reduce((s, i) => s + (pick(i, 'remaining') ?? 0), 0)
       const overdueCount = openInv.filter(i => i.due_date && i.due_date < today).length
 
       // ── Pass-through unmatched ──
@@ -297,7 +306,7 @@ export default function Dashboard() {
       // ── Top partners by transaction volume ──
       const txData = await fetchAllPages<any>((from, to) => {
         let q = supabase.from('transactions')
-          .select('amount_usd, partners!transactions_partner_id_fkey(name,type)')
+          .select('amount_rsd, amount_eur, partners!transactions_partner_id_fkey(name,type)')
           .gte('transaction_date', dateFrom).lte('transaction_date', dateTo)
           .not('partner_id', 'is', null)
         if (companyId) q = q.eq('company_id', companyId)
@@ -308,14 +317,14 @@ export default function Dashboard() {
         const name = t.partners?.name || 'Unknown'
         const type = t.partners?.type || 'vendor'
         if (!partnerMap[name]) partnerMap[name] = { amount: 0, type }
-        partnerMap[name].amount += t.amount_usd || 0
+        partnerMap[name].amount += amt(t)
       })
       const topP = Object.entries(partnerMap).sort(([, a], [, b]) => b.amount - a.amount).slice(0, 5).map(([name, v]) => ({ name, ...v }))
       setTopPartners(topP)
 
       // ── Recent activity ──
       let actQ = supabase.from('transactions')
-        .select('transaction_date,type,amount,currency,amount_usd,partners!transactions_partner_id_fkey(name),companies!transactions_company_id_fkey(name)')
+        .select('transaction_date,type,amount,currency,amount_rsd,amount_eur,partners!transactions_partner_id_fkey(name),companies!transactions_company_id_fkey(name)')
         .order('transaction_date', { ascending: false }).limit(5)
       if (companyId) actQ = actQ.eq('company_id', companyId)
       const { data: actData } = await actQ
@@ -324,7 +333,7 @@ export default function Dashboard() {
       // ── Alerts ──
       const newAlerts: { type: 'warn' | 'ok' | 'info'; text: string }[] = []
       if (overdueCount > 0) newAlerts.push({ type: 'warn', text: `${overdueCount} overdue invoice${overdueCount > 1 ? 's' : ''}` })
-      if ((openInv || []).length > 0) newAlerts.push({ type: 'info', text: `${(openInv || []).length} open invoices · ${fmtUSD(unpaidTotal)} remaining` })
+      if ((openInv || []).length > 0) newAlerts.push({ type: 'info', text: `${(openInv || []).length} open invoices · ${money(unpaidTotal)} remaining` })
       if (unmatchedPt > 0) newAlerts.push({ type: 'warn', text: `${unmatchedPt} unpaired pass-through entries` })
       if (newAlerts.length === 0) newAlerts.push({ type: 'ok', text: 'All clear — no pending alerts' })
 
@@ -337,7 +346,7 @@ export default function Dashboard() {
       setAlerts(newAlerts)
     } catch (err) { console.error('Dashboard error:', err) }
     setLoading(false)
-  }, [dateFrom, dateTo, getCompanyId]) // eslint-disable-line
+  }, [dateFrom, dateTo, getCompanyId, currency]) // eslint-disable-line
 
   useEffect(() => {
     if (!companiesLoading) fetchAll()
@@ -405,9 +414,9 @@ export default function Dashboard() {
           <Rise delay={0}>
           <MetricCard
             label="Total Revenue"
-            value={loading ? '—' : fmtUSD(metrics.totalRevenue)}
+            value={loading ? '—' : money(metrics.totalRevenue)}
             amount={loading ? undefined : metrics.totalRevenue}
-            format={fmtUSD}
+            format={money}
             sub={`YTD ${activeEntity.name}`}
             color="#00D47E"
             darkColor="#00D47E"
@@ -417,9 +426,9 @@ export default function Dashboard() {
           <Rise delay={55}>
           <MetricCard
             label="Total Expenses"
-            value={loading ? '—' : fmtUSD(metrics.totalExpenses)}
+            value={loading ? '—' : money(metrics.totalExpenses)}
             amount={loading ? undefined : metrics.totalExpenses}
-            format={fmtUSD}
+            format={money}
             sub={metrics.totalRevenue > 0 ? `${((metrics.totalExpenses / metrics.totalRevenue) * 100).toFixed(0)}% of revenue` : 'No revenue'}
             color="#FF5B5A"
             darkColor="#FF5B5A"
@@ -429,9 +438,9 @@ export default function Dashboard() {
           <Rise delay={110}>
           <MetricCard
             label="Net Profit / Loss"
-            value={loading ? '—' : fmtUSDSigned(metrics.netProfit)}
+            value={loading ? '—' : money(metrics.netProfit)}
             amount={loading ? undefined : metrics.netProfit}
-            format={fmtUSDSigned}
+            format={money}
             sub={`${margin.toFixed(1)}% margin`}
             color={metrics.netProfit >= 0 ? '#00D47E' : '#FF5B5A'}
             darkColor={metrics.netProfit >= 0 ? '#00D47E' : '#FF5B5A'}
@@ -441,7 +450,7 @@ export default function Dashboard() {
           <Rise delay={165}>
           <MetricCard
             label="Open Invoices"
-            value={loading ? '—' : metrics.openInvoicesCount > 0 ? fmtUSD(metrics.unpaidInvoices) : '$0'}
+            value={loading ? '—' : metrics.openInvoicesCount > 0 ? money(metrics.unpaidInvoices) : fmtMoney(0, currency, 0)}
             sub={`${metrics.openInvoicesCount} open${metrics.overdueCount > 0 ? ` · ${metrics.overdueCount} overdue` : ''}`}
             color={metrics.overdueCount > 0 ? '#F5A623' : '#00D47E'}
             darkColor={metrics.overdueCount > 0 ? '#F5A623' : '#00D47E'}
@@ -507,7 +516,7 @@ export default function Dashboard() {
                         <div key={cat.label} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '7px' }}>
                           <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: cat.color, flexShrink: 0 }} />
                           <span style={{ fontSize: '11px', color: '#7A9BB8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{cat.label}</span>
-                          <span style={{ fontSize: '11px', fontWeight: '500', color: '#DCE9F6', whiteSpace: 'nowrap' as const }}>{fmtUSD(cat.value)}</span>
+                          <span style={{ fontSize: '11px', fontWeight: '500', color: '#DCE9F6', whiteSpace: 'nowrap' as const }}>{money(cat.value)}</span>
                         </div>
                       ))}
                     </div>
@@ -552,7 +561,7 @@ export default function Dashboard() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: '12px' }}>
                   <thead>
                     <tr>
-                      {['Date', 'Partner', 'Type', 'Amount', 'USD'].map(h => (
+                      {['Date', 'Partner', 'Type', 'Amount', currency].map(h => (
                         <th key={h} style={{ textAlign: 'left' as const, padding: '0 0 8px', fontSize: '9.5px', color: 'rgba(255,255,255,0.30)', fontWeight: '600', textTransform: 'uppercase' as const, letterSpacing: '0.09em' }}>{h}</th>
                       ))}
                     </tr>
@@ -567,8 +576,8 @@ export default function Dashboard() {
                             {t.type === 'invoice_payment' ? 'Inv. pay' : t.type}
                           </span>
                         </td>
-                        <td style={{ padding: '8px 8px 8px 0', fontWeight: '500', color: '#DCE9F6', whiteSpace: 'nowrap' as const }}>{(t.amount || 0).toLocaleString()} {t.currency}</td>
-                        <td style={{ padding: '8px 0', fontWeight: '500', color: '#00D47E', whiteSpace: 'nowrap' as const }}>{fmtUSD(t.amount_usd || 0)}</td>
+                        <td style={{ padding: '8px 8px 8px 0', fontWeight: '500', color: '#DCE9F6', whiteSpace: 'nowrap' as const }}>{fmtMoney(t.amount || 0, t.currency || 'RSD')}</td>
+                        <td style={{ padding: '8px 0', fontWeight: '500', color: '#00D47E', whiteSpace: 'nowrap' as const }}>{format(pick(t))}</td>
                       </tr>
                     ))}
                   </tbody>

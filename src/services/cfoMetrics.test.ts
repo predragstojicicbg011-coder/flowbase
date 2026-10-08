@@ -14,10 +14,10 @@ describe('twelve months of in and out', () => {
 
   it('separates what came in from what went out', () => {
     const t = monthlyTrend([
-      { pl_date: '2026-01-05', amount_usd: 1000, tx_type: 'revenue' },
-      { pl_date: '2026-01-09', amount_usd: 500, tx_type: 'invoice_revenue' },
-      { pl_date: '2026-01-14', amount_usd: 900, tx_type: 'expense' },
-    ], ['2026-01'])
+      { pl_date: '2026-01-05', amount_rsd: 1000, tx_type: 'revenue' },
+      { pl_date: '2026-01-09', amount_rsd: 500, tx_type: 'invoice_revenue' },
+      { pl_date: '2026-01-14', amount_rsd: 900, tx_type: 'expense' },
+    ], 'RSD', ['2026-01'])
     expect(t[0]).toMatchObject({ revenue: 1500, expenses: 900, result: 600 })
   })
 
@@ -26,15 +26,15 @@ describe('twelve months of in and out', () => {
     // others, and adding a negative to an expense total makes the month look
     // cheaper than it was.
     const t = monthlyTrend([
-      { pl_date: '2026-01-14', amount_usd: -900, tx_type: 'expense' },
-    ], ['2026-01'])
+      { pl_date: '2026-01-14', amount_rsd: -900, tx_type: 'expense' },
+    ], 'RSD', ['2026-01'])
     expect(t[0].expenses).toBe(900)
   })
 
   it('MARKS THE MONTH THAT IS STILL RUNNING rather than dropping or hiding it', () => {
     // Dropped, the chart omits the month everyone is actually in. Included
     // silently, three weeks of a month reads as a collapse.
-    const t = monthlyTrend([], ['2026-01', '2026-02'], '2026-02')
+    const t = monthlyTrend([], 'RSD', ['2026-01', '2026-02'], '2026-02')
     expect(t.map(p => p.complete)).toEqual([true, false])
   })
 
@@ -42,15 +42,27 @@ describe('twelve months of in and out', () => {
     // Not zero. A month with costs and no revenue has an undefined margin,
     // and 0% reads as breaking even.
     const t = monthlyTrend([
-      { pl_date: '2026-01-14', amount_usd: 900, tx_type: 'expense' },
-    ], ['2026-01'])
+      { pl_date: '2026-01-14', amount_rsd: 900, tx_type: 'expense' },
+    ], 'RSD', ['2026-01'])
     expect(t[0].margin).toBeNull()
+  })
+
+  it('sums each row’s EUR figure in the EUR view', () => {
+    const rows = [
+      { pl_date: '2026-01-05', amount_rsd: 117200, amount_eur: 1000, tx_type: 'revenue' },
+      { pl_date: '2026-01-14', amount_rsd: 58650, amount_eur: 500, tx_type: 'expense' },
+      { pl_date: '2026-01-20', amount_rsd: 1000, amount_eur: null, tx_type: 'expense' },
+    ]
+    expect(monthlyTrend(rows, 'EUR', ['2026-01'])[0])
+      .toMatchObject({ revenue: 1000, expenses: 500, result: 500 })
+    expect(monthlyTrend(rows, 'RSD', ['2026-01'])[0])
+      .toMatchObject({ revenue: 117200, expenses: 59650, result: 57550 })
   })
 
   it('gives every month asked for, including the empty ones', () => {
     // A month with nothing in it is a gap in the line, and a line drawn
     // straight through a missing month is a claim about it.
-    expect(monthlyTrend([], monthsEndingAt('2026-12', 12))).toHaveLength(12)
+    expect(monthlyTrend([], 'RSD', monthsEndingAt('2026-12', 12))).toHaveLength(12)
   })
 })
 
@@ -255,7 +267,7 @@ describe('what moves the result most', () => {
 
 describe('money earned and not yet collected', () => {
   const inv = (due: string | null, amount: number) =>
-    ({ due_date: due, remaining_usd: amount })
+    ({ due_date: due, remaining_rsd: amount })
 
   it('ages what is owed against today', () => {
     const r = receivables([
@@ -263,7 +275,7 @@ describe('money earned and not yet collected', () => {
       inv('2026-09-20', 2000),   // 6 days
       inv('2026-08-01', 3000),   // 56 days
       inv('2026-05-01', 4000),   // 148 days
-    ], '2026-09-26', 900000)
+    ], 'RSD', '2026-09-26', 900000)
 
     const by = Object.fromEntries(r.buckets.map(b => [b.label, b.amount]))
     expect(by['Not yet due']).toBe(1000)
@@ -277,28 +289,37 @@ describe('money earned and not yet collected', () => {
   it('KEEPS AN INVOICE WITH NO DUE DATE, rather than dropping it from the total', () => {
     // It is money owed either way, and a total that quietly omits the rows
     // with a missing field is wrong in the one direction nobody checks.
-    const r = receivables([inv(null, 5000)], '2026-09-26', 900000)
+    const r = receivables([inv(null, 5000)], 'RSD', '2026-09-26', 900000)
     expect(r.total).toBe(5000)
     expect(r.buckets.find(b => b.label === 'Not yet due')!.amount).toBe(5000)
   })
 
   it('works DSO off revenue per day over the window', () => {
     // 90,000 owed against 900,000 over 90 days is 9,000 a day — ten days.
-    expect(receivables([inv('2026-09-01', 90000)], '2026-09-26', 810000).dso).toBe(10)
+    expect(receivables([inv('2026-09-01', 90000)], 'RSD', '2026-09-26', 810000).dso).toBe(10)
   })
 
   it('LEAVES DSO NULL WHERE THERE IS NO REVENUE to divide by', () => {
     // Infinity is not a large DSO, it is an undefined one, and a huge number
     // where the denominator was zero is how a panel loses its reader.
-    expect(receivables([inv('2026-09-01', 90000)], '2026-09-26', 0).dso).toBeNull()
+    expect(receivables([inv('2026-09-01', 90000)], 'RSD', '2026-09-26', 0).dso).toBeNull()
+  })
+
+  it('ages the EUR remainder in the EUR view', () => {
+    const r = receivables([
+      { due_date: '2026-09-20', remaining_rsd: 117200, remaining_eur: 1000 },
+      { due_date: '2026-10-15', remaining_rsd: 23500, remaining_eur: 200 },
+    ], 'EUR', '2026-09-26', 9000)
+    expect(r.total).toBe(1200)
+    expect(r.overdue).toBe(1000)
   })
 
   it('leaves out a line that is already settled', () => {
-    expect(receivables([inv('2026-09-01', 0)], '2026-09-26', 900000).total).toBe(0)
+    expect(receivables([inv('2026-09-01', 0)], 'RSD', '2026-09-26', 900000).total).toBe(0)
   })
 
   it('counts the invoices in each band as well as their value', () => {
-    const r = receivables([inv('2026-08-01', 10), inv('2026-08-02', 20)], '2026-09-26', 1)
+    const r = receivables([inv('2026-08-01', 10), inv('2026-08-02', 20)], 'RSD', '2026-09-26', 1)
     expect(r.buckets.find(b => b.label === '31–60 days')!.count).toBe(2)
   })
 })

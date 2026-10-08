@@ -374,7 +374,8 @@ export async function reallocateInvoiceLink(
     invoiceId: string
     transactionId: string
     allocatedAmount: number
-    allocatedAmountUsd: number
+    allocatedAmountRsd: number
+    allocatedAmountEur: number
     note?: string | null
   },
 ): Promise<LinkOutcome> {
@@ -382,7 +383,8 @@ export async function reallocateInvoiceLink(
     invoice_id: link.invoiceId,
     transaction_id: link.transactionId,
     allocated_amount: link.allocatedAmount,
-    allocated_amount_usd: link.allocatedAmountUsd,
+    allocated_amount_rsd: link.allocatedAmountRsd,
+    allocated_amount_eur: link.allocatedAmountEur,
     note: link.note ?? null,
   }, { onConflict: 'invoice_id,transaction_id' })
   if (upErr) return { ok: false, message: reportLinkFailure('insertReplacement', upErr.message), done: [] }

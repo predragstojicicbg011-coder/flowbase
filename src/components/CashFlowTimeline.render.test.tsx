@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import fs from 'fs'
 import path from 'path'
 import CashFlowTimeline from './CashFlowTimeline'
+import { DisplayCurrencyProvider } from '../contexts/DisplayCurrencyContext'
 import { cashTimeline, datedByMonth, monthsAround } from '../services/cashTimeline'
 
 beforeAll(() => {
@@ -32,13 +33,14 @@ const timeline = (position: { amount: number; asOf: string } | null = { amount: 
   cashTimeline({
     months: MONTHS, currentMonth: '2026-09', actual, projected, position,
     postedAfterReading: { inflow: 0, outflow: 18400 },
+    currency: 'RSD',
   })
 
 const DATED = datedByMonth([
-  { date: '2026-10-05', label: 'Intesa 100k #18', amountUsd: 6654.25, kind: 'instalment' },
-  { date: '2026-10-07', label: 'A1 Srbija', amountUsd: 1481.68, kind: 'invoice' },
-  { date: '2026-10-24', label: 'Cognant AI', amountUsd: 4840, kind: 'invoice' },
-  { date: '2026-11-05', label: 'Intesa 100k #19', amountUsd: 6654.25, kind: 'instalment' },
+  { date: '2026-10-05', label: 'Intesa 100k #18', amount: 6654.25, kind: 'instalment' },
+  { date: '2026-10-07', label: 'A1 Srbija', amount: 1481.68, kind: 'invoice' },
+  { date: '2026-10-24', label: 'Cognant AI', amount: 4840, kind: 'invoice' },
+  { date: '2026-11-05', label: 'Intesa 100k #19', amount: 6654.25, kind: 'instalment' },
 ], MONTHS)
 
 function capture(name: string, html: string) {
@@ -59,6 +61,17 @@ describe('the cash line draws', () => {
     capture('cash-1-timeline', container.innerHTML)
     expect(screen.getByText(/read 2026-09-25/)).toBeInTheDocument()
     expect(screen.getByText(/lowest/)).toBeInTheDocument()
+  })
+
+  it('names the display currency on the anchor, in the app notation', () => {
+    const { unmount } = render(<CashFlowTimeline timeline={timeline()} dated={DATED} />)
+    expect(screen.getByText(/anchored on 612\.400 RSD read 2026-09-25/)).toBeInTheDocument()
+    unmount()
+    render(
+      <DisplayCurrencyProvider initial="EUR">
+        <CashFlowTimeline timeline={timeline()} dated={DATED} />
+      </DisplayCurrencyProvider>)
+    expect(screen.getByText(/anchored on 612\.400 EUR/)).toBeInTheDocument()
   })
 
   it('DRAWS NO BALANCE without a cash position, and says why', () => {

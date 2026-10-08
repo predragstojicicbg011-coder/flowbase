@@ -4,8 +4,34 @@
 // here, with no Supabase import, so it can be tested without a database.
 //
 // The page supplies rows; this decides what they mean.
+//
+// ── Currency ────────────────────────────────────────────────────────────────
+//
+// Budgets are planned in RSD, the currency the books are kept in. Every input
+// this arithmetic reads carries its figure in EUR beside the RSD one — actuals
+// as `amount_rsd` / `amount_eur`, ledger entries as `amount_rsd` /
+// `amount_eur` and `seed_rsd` / `seed_eur` — so the same arithmetic runs in
+// either, by reading the other column. Nothing here converts one into the
+// other except a credit instalment, which is a schedule in the credit's own
+// currency and is priced through `bookAmountsAtRate` like any other document.
+//
+// The functions take the currency to read as their last argument, defaulting
+// to RSD. A figure missing in the currency asked for is never read as zero
+// where that would move a typed budget: see `ledgerFigure`.
 
 import { CREDIT_PRINCIPAL, CREDIT_INTEREST } from './creditClassification'
+import { bookAmountsAtRate, round2 } from './bookAmounts'
+
+/** The two currencies a budget can be read in. */
+export type BudgetCurrency = 'RSD' | 'EUR'
+
+/** `row[base_rsd]` or `row[base_eur]` as a number; null when absent or unreadable. */
+export function figureIn(row: object, base: string, currency: BudgetCurrency): number | null {
+  const v = (row as Record<string, unknown>)[`${base}_${currency.toLowerCase()}`]
+  if (v === null || v === undefined || v === '') return null
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : null
+}
 
 /** A month as 'YYYY-MM'. */
 export type MonthKey = string
@@ -28,7 +54,10 @@ export interface SourceEntry {
   department: string | null
   dept_subcategory: string | null
   expense_description: string | null
-  amount_usd: number | null
+  /** Book amount in RSD. */
+  amount_rsd: number | null
+  /** The same in EUR. */
+  amount_eur?: number | null
   cf_type: string | null
   cf_frequency: string | null
   pl_date: string
@@ -155,6 +184,7 @@ export function seedFromEntries(
   entries: SourceEntry[],
   months: MonthKey[],
   benchmark: MonthKey,
+  currency: BudgetCurrency = 'RSD',
 ): SeedResult {
   const byKey: Record<string, Record<MonthKey, number>> = {}
   const byCompany: SeedResult['byCompany'] = {}
@@ -162,12 +192,12 @@ export function seedFromEntries(
 
   for (const e of entries) {
     if (e.pl_date.slice(0, 7) !== benchmark) continue
-    const amount = e.amount_usd || 0
+    const amount = figureIn(e, 'amount', currency) || 0
 
     // ── The one spend whose future is KNOWN, not estimated ─────────────────
     //
-    // This is not "a special case for credits" and deleting it puts roughly
-    // $26K per month back on the page twice.
+    // This is not "a special case for credits" and deleting it puts every
+    // monthly instalment back on the page twice.
     //
     // A credit payment is posted with `cf_type: 'recurring', monthly` — every
     // dialog that books one does it, and correctly, because that is what the
@@ -236,11 +266,13 @@ export function seedFromEntries(
  * `outstanding`, so this is every row of the schedule and nothing else.
  */
 export function creditScheduleByMonth(
-  installments: Installment[], months: MonthKey[],
-): { byKey: Record<string, Record<MonthKey, number>>; total: number } {
+  installments: Installment[], months: MonthKey[], currency: BudgetCurrency = 'RSD',
+): { byKey: Record<string, Record<MonthKey, number>>; total: number; unpriced: string[] } {
   const horizon = new Set(months)
   const byKey: Record<string, Record<MonthKey, number>> = {}
   let total = 0
+  /** Instalments that could not be priced in `currency` — no rate for them. */
+  const unpriced: string[] = []
 
   const principalKey = classificationKey(CREDIT_PRINCIPAL)
   const interestKey = classificationKey(CREDIT_INTEREST)
@@ -256,14 +288,37 @@ export function creditScheduleByMonth(
   for (const i of installments) {
     const month = (i.due_date || '').slice(0, 7)
     if (!month || !horizon.has(month)) continue
-    add(principalKey, month, (i.principal_amount || 0) * i.eurUsd)
-    add(interestKey, month, (i.interest_amount || 0) * i.eurUsd)
+    const principal = priceInstallment(i.principal_amount || 0, i, currency)
+    const interest = priceInstallment(i.interest_amount || 0, i, currency)
+    // Left out, and named, rather than priced at a guess. A forecast figure
+    // from a made-up rate looks exactly like one from a real rate.
+    if (principal === null || interest === null) { unpriced.push(i.id); continue }
+    add(principalKey, month, principal)
+    add(interestKey, month, interest)
   }
 
-  return { byKey, total: Math.round(total * 100) / 100 }
+  return { byKey, total: Math.round(total * 100) / 100, unpriced }
 }
 
-/** A credit instalment from the schedule, with the EUR/USD rate to price it. */
+/**
+ * One leg of an instalment in `currency`.
+ *
+ * In its own currency it is the scheduled figure as it stands, and needs no
+ * rate. Otherwise it is booked at the instalment's planning rates the way any
+ * document is (`bookAmountsAtRate`); without them it is null — unpriced.
+ */
+export function priceInstallment(amount: number, i: Installment, currency: BudgetCurrency): number | null {
+  const own = (i.currency || 'RSD').toUpperCase()
+  if (own === currency) return round2(amount)
+  try {
+    const b = bookAmountsAtRate(amount, own, i.exchangeRate, i.eurRate)
+    return currency === 'RSD' ? b.amount_rsd : b.amount_eur
+  } catch {
+    return null
+  }
+}
+
+/** A credit instalment from the schedule, with the rates to price it. */
 export interface Installment {
   id: string
   credit_name: string
@@ -272,8 +327,16 @@ export interface Installment {
   principal_amount: number
   interest_amount: number
   status: string
-  /** USD per EUR on the due date. Instalments are denominated in EUR. */
-  eurUsd: number
+  /** The credit's currency — what the schedule's figures are in. RSD when absent. */
+  currency?: string | null
+  /**
+   * RSD per 1 unit of `currency`, the rate the horizon is planned at. Nobody
+   * knows the rate on a date that has not arrived, so it is one rate for the
+   * whole horizon. Null when it could not be read.
+   */
+  exchangeRate: number | null
+  /** RSD per 1 EUR, the same day. Null when it could not be read. */
+  eurRate: number | null
 }
 
 export interface OpenInvoice {
@@ -287,7 +350,10 @@ export interface OpenInvoice {
    */
   invoice_date: string | null
   due_date: string | null
-  remaining_usd: number
+  /** What is still owed, in RSD. */
+  remaining_rsd: number
+  /** The same in EUR. */
+  remaining_eur?: number | null
   /**
    * The invoice's cash-flow classification, which decides whether the seed
    * actually carried it — not merely whether it could have.
@@ -329,7 +395,8 @@ export interface OpenInvoice {
 export interface CommitmentItem {
   id: string
   label: string
-  amountUsd: number
+  /** In the currency `commitmentsByMonth` was asked for. */
+  amount: number
   kind: 'installment' | 'invoice'
   /** Its due date has already passed. Owed now, not later. */
   overdue?: boolean
@@ -360,10 +427,10 @@ export interface Commitments {
  * not. Adding it here as well, at its `due_date`, puts one bill in one month
  * twice.
  *
- * Telekom is the shape of it: invoice dated 2026-08-20, due 2026-09-20, $420,
- * unpaid, recurring monthly, benchmark 2026-08. September's seed carries $420
- * and September's Committed row carried the same $420, so September read $840
- * for one $420 bill.
+ * Telekom is the shape of it: invoice dated 2026-08-20, due 2026-09-20, 49.000 RSD,
+ * unpaid, recurring monthly, benchmark 2026-08. September's seed carries 49.000 RSD
+ * and September's Committed row carried the same 49.000 RSD, so September read 98.000 RSD
+ * for one 49.000 RSD bill.
  *
  * So an invoice whose own date falls in the benchmark month is skipped HERE,
  * where the double entry is, rather than in the seed, where dropping it would
@@ -401,6 +468,7 @@ export function commitmentsByMonth(
   invoices: OpenInvoice[],
   months: MonthKey[],
   benchmark: MonthKey,
+  currency: BudgetCurrency = 'RSD',
 ): Commitments {
   const horizon = new Set(months)
   const byMonth: Commitments['byMonth'] = {}
@@ -408,14 +476,14 @@ export function commitmentsByMonth(
   const add = (month: MonthKey, item: CommitmentItem) => {
     if (!horizon.has(month)) return
     if (!byMonth[month]) byMonth[month] = { total: 0, items: [] }
-    byMonth[month].total += item.amountUsd
+    byMonth[month].total += item.amount
     byMonth[month].items.push(item)
   }
 
   // ── Credit instalments are NOT here any more ────────────────────────────
   //
-  // They used to be, and this row carried $6,654 of Intesa and $3,159 of
-  // Halkbank beside an $11 payment-card invoice. Two objections to that and
+  // They used to be, and this row carried two banks' instalments beside a
+  // small payment-card invoice. Two objections to that and
   // the second is the one that matters.
   //
   // It reads wrong: "Committed" sits under the table as one line with no
@@ -478,7 +546,7 @@ export function commitmentsByMonth(
     add(before ? firstMonth : dueMonth, {
       id: v.id,
       label: v.partner_name,
-      amountUsd: v.remaining_usd,
+      amount: figureIn(v, 'remaining', currency) || 0,
       kind: 'invoice',
       ...(before ? { overdue: true, dueMonth } : {}),
     })
@@ -490,12 +558,18 @@ export function commitmentsByMonth(
 export interface Adjustment {
   id: string
   kind: 'set' | 'adjust'
-  amount_usd: number
+  /** In RSD — what was typed, or the difference it made. */
+  amount_rsd: number
+  /**
+   * The same in EUR, at the NBS rate of the day it was recorded. Null on an
+   * entry recorded in dinars only; such a ledger cannot be read in EUR.
+   */
+  amount_eur?: number | null
   reason: string
   created_at: string
   /**
    * The seed this entry's node carried, in this month, at the moment the
-   * figure was typed. `budget_adjustments.seed_usd`.
+   * figure was typed, in RSD. `budget_adjustments.seed_rsd`.
    *
    * Null or absent on every entry written before the column existed, and that
    * is not a defect to be filled in: what the seed was on a given afternoon is
@@ -504,7 +578,30 @@ export interface Adjustment {
    *
    * See `pinnedBase` for what it is for.
    */
-  seed_usd?: number | null
+  seed_rsd?: number | null
+  /** The same seed in EUR — read off the EUR actuals it was seeded from. */
+  seed_eur?: number | null
+}
+
+/**
+ * Whether every entry carries its figure in `currency`.
+ *
+ * A ledger with an entry in dinars only cannot be replayed in euros: reading
+ * the missing figure as zero would drop a decision somebody typed, and the
+ * cell would show a budget nobody set. The page reads such a budget in RSD
+ * instead, and says so.
+ */
+export function ledgerReadableIn(adjustments: Adjustment[], currency: BudgetCurrency): boolean {
+  return adjustments.every(a => figureIn(a, 'amount', currency) !== null)
+}
+
+/** An entry's amount in `currency`. Throws where it has none — see `ledgerReadableIn`. */
+export function ledgerFigure(a: Adjustment, currency: BudgetCurrency): number {
+  const n = figureIn(a, 'amount', currency)
+  if (n === null) {
+    throw new Error(`Budget entry ${a.id} has no ${currency} figure; this ledger cannot be read in ${currency}.`)
+  }
+  return n
 }
 
 /**
@@ -519,9 +616,9 @@ export interface Adjustment {
  * A typed figure was stored as the difference between it and the seed. That is
  * fine for as long as the seed holds still, and the seed holds still for as
  * long as the month does. Budgeting November during October, the seed was
- * September's spend carried forward; the owner typed $12,400 and the cell read
- * $12,400. In November the benchmark became October, the seed became October's
- * spend, and the cell read $12,400 plus the difference between two months of
+ * September's spend carried forward; the owner typed 1.450.000 RSD and the cell read
+ * 1.450.000 RSD. In November the benchmark became October, the seed became October's
+ * spend, and the cell read 1.450.000 RSD plus the difference between two months of
  * actuals — a figure nobody typed, different on every line, and wrong in a
  * direction that depends on which way last month went.
  *
@@ -542,9 +639,11 @@ export interface Adjustment {
  * It also means one re-typed figure anchors a drifted line again, which is the
  * whole of the repair for everything recorded before this existed.
  */
-export function pinnedBase(inLedgerOrder: Adjustment[], liveSeed: number): number {
+export function pinnedBase(
+  inLedgerOrder: Adjustment[], liveSeed: number, currency: BudgetCurrency = 'RSD',
+): number {
   for (let i = inLedgerOrder.length - 1; i >= 0; i--) {
-    const pinned = inLedgerOrder[i].seed_usd
+    const pinned = (inLedgerOrder[i] as any)[`seed_${currency.toLowerCase()}`]
     if (pinned === null || pinned === undefined) continue
     // Coerced, and not for tidiness. Postgres `numeric` reaches some clients as
     // a string, and a string base would make the first `value += delta` a
@@ -590,16 +689,19 @@ export function pinnedBase(inLedgerOrder: Adjustment[], liveSeed: number): numbe
  * own number: it makes it read that number plus whatever the children carry
  * that the entry's own classification did not already account for.
  */
-export function applyLedger(seededBase: number, adjustments: Adjustment[]): number {
+export function applyLedger(
+  seededBase: number, adjustments: Adjustment[], currency: BudgetCurrency = 'RSD',
+): number {
   const ordered = [...adjustments].sort(inLedgerOrder)
 
   // Not `seededBase` where anything has been typed: see `pinnedBase`, which is
   // where the reason lives. The live seed moves when the month turns over, and
   // a figure somebody decided on must not move with it.
-  let value = pinnedBase(ordered, seededBase)
+  let value = pinnedBase(ordered, seededBase, currency)
   for (const a of ordered) {
-    if (a.kind === 'set') value = a.amount_usd
-    else value += a.amount_usd
+    const amount = ledgerFigure(a, currency)
+    if (a.kind === 'set') value = amount
+    else value += amount
   }
   return value
 }

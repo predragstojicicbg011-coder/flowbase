@@ -6,8 +6,9 @@ import { useCompanies } from '../contexts/CompaniesContext'
 import { SkeletonRows } from '../components/motion'
 import { fetchAllPages, fetchByIds, countRows } from '../utils/fetchAllPages'
 import { outstandingOwn } from '../services/settleInvoice'
-import { toUsd } from '../services/allocationDisplay'
-import { fmtUSD as fmt, fmtUSDSigned as fmtN, fmtLocal, fmtNum } from '../utils/formatters'
+import { toRsd, toEur } from '../services/allocationDisplay'
+import { fmtMoney, fmtNum } from '../utils/formatters'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { findAccountByNumber, defaultAccount } from '../services/partnerAccountChoice'
 
 // ── Halcom TKDIS format generator ────────────────────────
@@ -117,6 +118,9 @@ function exportHalcom(invoices: any[], companyBankAccount: any, companyProfile: 
 
 // ── Unpaid Invoices Panel ────────────────────────────────
 function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
+  // What is owed prints in the viewer's display currency, beside the bill's own.
+  const { currency, pick, format } = useDisplayCurrency()
+  const fmt = (n: number | null) => format(n, 0)
   const [invoices, setInvoices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [sortBy, setSortBy] = useState<'due_date' | 'amount' | 'partner'>('due_date')
@@ -161,7 +165,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
       // view — it decides which invoices, not what is printed on them.
       const openRows = await fetchAllPages<any>((from, to) =>
         supabase.from('v_invoice_status')
-          .select('id, calculated_status, amount, paid_amount, remaining_usd')
+          .select('id, calculated_status, amount, paid_amount, remaining_rsd, remaining_eur')
           .eq('company_id', compData.id)
           .in('calculated_status', ['unpaid', 'partial'])
           .order('due_date', { ascending: true }).order('id')
@@ -183,12 +187,13 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
             ...i,
             calculated_status: open?.calculated_status ?? i.status,
             // Nothing is owed on an unpaid invoice yet — the whole amount is.
-            // `remaining_usd` only means something once something is paid.
-            remaining_usd: partial ? (open?.remaining_usd ?? i.amount_usd) : 0,
+            // `remaining_*` only means something once something is paid.
+            remaining_rsd: partial ? (open?.remaining_rsd ?? i.amount_rsd) : 0,
+            remaining_eur: partial ? (open?.remaining_eur ?? i.amount_eur) : 0,
             // WHAT IS ACTUALLY OWED, in the currency the bill was written in.
             //
             // `amount - paid_amount`, from the column the settled/partial rule
-            // is decided on. This page showed `remaining_usd * exchange_rate`
+            // is decided on. Mintflow showed `remaining_usd * exchange_rate`
             // instead, which is the dollar remainder — itself the difference
             // between the invoice's rate and the payment's — multiplied by a
             // THIRD rate. Three rates in one figure, on a screen that
@@ -254,25 +259,26 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
       return matchSearch && matchStatus && matchAsOf
     })
     .sort((a, b) => {
-      if (sortBy === 'amount') return (b.amount_usd || 0) - (a.amount_usd || 0)
+      if (sortBy === 'amount') return (pick(b) ?? 0) - (pick(a) ?? 0)
       if (sortBy === 'partner') return (a.partners?.name || '').localeCompare(b.partners?.name || '')
       return (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1
     })
 
-  // The dollar figures are derived from what is owed in the bill's own
-  // currency, at the invoice's own rate, so the two columns cannot disagree
-  // about the same invoice.
-  const owedUsd = (i: any) => (i.calculated_status === 'partial'
-    ? toUsd(i.outstanding_own || 0, i)
-    : (i.amount_usd || 0))
-  const totalUnpaid = filtered.reduce((s, i) => s + owedUsd(i), 0)
+  // The display-currency figures are derived from what is owed in the bill's
+  // own currency, at the invoice's own rates, so the two columns cannot
+  // disagree about the same invoice. Null where the invoice carries no EUR
+  // figure (no eur_rate) — printed as a dash, counted as zero in the totals.
+  const owed = (i: any): number | null => (i.calculated_status === 'partial'
+    ? (currency === 'RSD' ? toRsd(i.outstanding_own || 0, i) : toEur(i.outstanding_own || 0, i))
+    : pick(i))
+  const totalUnpaid = filtered.reduce((s, i) => s + (owed(i) ?? 0), 0)
   const overdueCount = filtered.filter(i => i.due_date && i.due_date < effectiveDate).length
   const selectedInvoices = filtered.filter(i => selected.has(i.id))
   const selectedBank = bankAccounts.find(b => b.id === selectedBankId)
 
   // Međuzbir selektovanih
   const selectedTotalRsd = selectedInvoices.reduce((s, i) => s + (i.outstanding_own || 0), 0)
-  const selectedTotalUsd = selectedInvoices.reduce((s, i) => s + owedUsd(i), 0)
+  const selectedTotalBook = selectedInvoices.reduce((s, i) => s + (owed(i) ?? 0), 0)
 
   const toggleSelect = (id: string) => { setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n }) }
   const toggleAll = () => { if (selected.size === filtered.length) setSelected(new Set()); else setSelected(new Set(filtered.map(i => i.id))) }
@@ -365,12 +371,14 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   {fmtNum(selectedTotalRsd)} RSD
                 </div>
               </div>
-              <div>
-                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginBottom: '2px' }}>Total USD</div>
-                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: '15px', fontWeight: '600', color: '#00D47E' }}>
-                  {fmt(selectedTotalUsd)}
+              {currency !== 'RSD' && (
+                <div>
+                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginBottom: '2px' }}>Total {currency}</div>
+                  <div style={{ fontFamily: "'DM Mono',monospace", fontSize: '15px', fontWeight: '600', color: '#00D47E' }}>
+                    {fmt(selectedTotalBook)}
+                  </div>
                 </div>
-              </div>
+              )}
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <button
                   style={{ fontFamily: "'Inter',sans-serif", fontSize: '11px', padding: '5px 12px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', background: 'transparent', color: '#7A9BB8', cursor: 'pointer' }}
@@ -436,7 +444,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   <th style={ps.th}>Invoice no.</th>
                   <th style={ps.th}>Type</th>
                   <th style={{ ...ps.th, textAlign: 'right' as const }}>Amount</th>
-                  <th style={{ ...ps.th, textAlign: 'right' as const }}>USD</th>
+                  <th style={{ ...ps.th, textAlign: 'right' as const }}>{currency}</th>
                   <th style={ps.th}>Payee account</th>
                   <th style={ps.th}>Remaining</th>
                 </tr>
@@ -490,11 +498,11 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                       <td style={{ ...ps.td, textAlign: 'right' as const }}>
                         <div>
                           <span style={{ fontSize: '13px', fontWeight: '500', fontFamily: "'DM Mono', monospace", color: '#E8F1FB', whiteSpace: 'nowrap' as const }}>
-                            {fmtLocal(inv.amount || 0, inv.currency)}
+                            {fmtMoney(inv.amount || 0, inv.currency)}
                           </span>
                           {inv.calculated_status === 'partial' && (
                             <div style={{ fontSize: '10px', color: '#F5A623', marginTop: '2px', whiteSpace: 'nowrap' as const }}>
-                              Remaining: {fmtLocal(inv.outstanding_own || 0, inv.currency)}
+                              Remaining: {fmtMoney(inv.outstanding_own || 0, inv.currency)}
                             </div>
                           )}
                         </div>
@@ -502,11 +510,11 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                       <td style={{ ...ps.td, textAlign: 'right' as const }}>
                         <div>
                           <span style={{ fontSize: '13px', fontWeight: '600', fontFamily: "'DM Mono', monospace", color: inv.calculated_status === 'partial' ? '#F5A623' : '#00D47E' }}>
-                            {fmt(owedUsd(inv))}
+                            {fmt(owed(inv))}
                           </span>
                           {inv.calculated_status === 'partial' && (
                             <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.30)', marginTop: '2px' }}>
-                              of {fmt(inv.amount_usd || 0)}
+                              of {fmt(pick(inv))}
                             </div>
                           )}
                         </div>
@@ -579,6 +587,9 @@ export default function Reports() {
   const [activeReport, setActiveReport] = useState('')
   const [showUnpaidPanel, setShowUnpaidPanel] = useState(false)
   const { companies, showPicker } = useCompanies()
+  // The KPIs sum each row's own figure in the display currency.
+  const { pick, format } = useDisplayCurrency()
+  const fmt = (n: number) => format(n, 0)
   const [companyId, setCompanyId] = useState('all')
   const [loading, setLoading] = useState(true)
 
@@ -600,14 +611,14 @@ export default function Reports() {
       // read 1000 while the real figure was near 4000.
       const [plData, invData, unmatchedPassthrough] = await Promise.all([
         fetchAllPages<any>((from, to) => {
-          let q = supabase.from('v_pl_entries').select('tx_type,amount_usd')
+          let q = supabase.from('v_pl_entries').select('tx_type,amount_rsd,amount_eur')
             .gte('pl_date', ytdStart).lte('pl_date', today)
           if (companyId !== 'all') q = q.eq('company_id', companyId)
           return q.order('pl_date').order('id').range(from, to)
         }),
         fetchAllPages<any>((from, to) => {
           let q = supabase.from('v_invoice_status')
-            .select('calculated_status,remaining_usd,due_date')
+            .select('calculated_status,remaining_rsd,remaining_eur,due_date')
             .in('calculated_status', ['unpaid', 'partial'])
           if (companyId !== 'all') q = q.eq('company_id', companyId)
           return q.order('due_date', { nullsFirst: false }).order('id').range(from, to)
@@ -621,19 +632,19 @@ export default function Reports() {
           return q
         })()),
       ])
-      const revenue = plData.filter(e => e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue').reduce((s, e) => s + (e.amount_usd || 0), 0)
-      const expenses = plData.filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').reduce((s, e) => s + (e.amount_usd || 0), 0)
-      const openAmt = invData.reduce((s, i) => s + (i.remaining_usd || 0), 0)
+      const revenue = plData.filter(e => e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue').reduce((s, e) => s + (pick(e) ?? 0), 0)
+      const expenses = plData.filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').reduce((s, e) => s + (pick(e) ?? 0), 0)
+      const openAmt = invData.reduce((s, i) => s + (pick(i, 'remaining') ?? 0), 0)
       const overdue = invData.filter(i => i.due_date && i.due_date < today).length
       setKpis({ netProfit: revenue - expenses, totalRevenue: revenue, totalExpenses: expenses, expenseRatio: revenue > 0 ? (expenses / revenue * 100) : 0, openInvoicesCount: invData.length, openInvoicesAmount: openAmt, unmatchedPassthrough, overdueCount: overdue })
     } catch (err) { console.error('Reports KPI fetch error:', err) }
     setLoading(false)
-  }, [companyId, ytdStart, today])
+  }, [companyId, ytdStart, today, pick])
 
   useEffect(() => { fetchKpis() }, [fetchKpis])
 
   const kpiCards = [
-    { label: 'Net Profit (YTD)',    value: loading ? '...' : fmtN(kpis.netProfit),                                     sub: `${currentYear} year to date`,  up: kpis.netProfit >= 0,      trend: loading ? '' : kpis.netProfit >= 0 ? 'Profitable' : 'Loss',    accent: kpis.netProfit >= 0 ? '#00D47E' : '#FF5B5A' },
+    { label: 'Net Profit (YTD)',    value: loading ? '...' : fmt(kpis.netProfit),                                     sub: `${currentYear} year to date`,  up: kpis.netProfit >= 0,      trend: loading ? '' : kpis.netProfit >= 0 ? 'Profitable' : 'Loss',    accent: kpis.netProfit >= 0 ? '#00D47E' : '#FF5B5A' },
     { label: 'Total Revenue (YTD)', value: loading ? '...' : fmt(kpis.totalRevenue),                                    sub: `${currentYear} year to date`,  up: true,                     trend: loading ? '' : `${fmt(kpis.totalExpenses)} expenses`,           accent: '#00D47E' },
     { label: 'Expense Ratio',       value: loading ? '...' : `${kpis.expenseRatio.toFixed(1)}%`,                        sub: 'Expenses / Revenue YTD',       up: kpis.expenseRatio < 90,   trend: loading ? '' : kpis.expenseRatio < 80 ? 'Healthy' : kpis.expenseRatio < 90 ? 'Watch' : 'High', accent: kpis.expenseRatio < 80 ? '#00D47E' : kpis.expenseRatio < 90 ? '#F5A623' : '#FF5B5A' },
     { label: 'Open Invoices',       value: loading ? '...' : kpis.openInvoicesCount > 0 ? `${kpis.openInvoicesCount} · ${fmt(kpis.openInvoicesAmount)}` : 'None', sub: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} overdue` : 'All on time', up: kpis.overdueCount === 0, trend: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} overdue` : 'On time', accent: kpis.overdueCount > 0 ? '#FF5B5A' : '#4EA8FF' },

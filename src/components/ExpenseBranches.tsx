@@ -4,6 +4,8 @@ import {
   branchPath, keysToDepth, layoutBranches, type BranchNode,
 } from '../services/branchTree'
 import type { CostBehaviour } from '../services/cfoMetrics'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { fmtMoney } from '../utils/formatters'
 
 // ── The expense branches ────────────────────────────────────────────────────
 //
@@ -54,10 +56,9 @@ export interface ExpenseBranchNode extends BranchNode {
   children?: ExpenseBranchNode[]
 }
 
-const money = (n: number) =>
-  '$' + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
-const money2 = (n: number) =>
-  '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// A branch carries a magnitude, in the viewer's display currency — the roots
+// handed in were summed in it; this only names it.
+const moneyIn = (currency: string, dp: number) => (n: number) => fmtMoney(Math.abs(n), currency, dp)
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`
 
 const ROW = 34
@@ -126,6 +127,9 @@ export default function ExpenseBranches({
   amountLabel?: string
   emptyText?: string
 }) {
+  const { currency } = useDisplayCurrency()
+  const money = moneyIn(currency, 0)
+  const money2 = moneyIn(currency, 2)
   const [ref, width] = useWidth(900)
   const [open, setOpen] = useState<Set<string>>(
     () => start === 'folded' ? new Set() : keysToDepth(roots, TWO_LEVELS))
@@ -279,7 +283,7 @@ export default function ExpenseBranches({
       {!bare && (
         <div style={note}>
           A branch is drawn as thick as the money it carries, scaled against the largest
-          line anywhere rather than against each parent — so thickness means dollars and
+          line anywhere rather than against each parent — so thickness means money and
           not "share of whichever category this happens to sit under". Colour says the one
           thing the thickness cannot: whether the cost moves. Click a node to open or fold
           it — a branch opens as deep as it goes that way. The button above stops at two

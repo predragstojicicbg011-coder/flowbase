@@ -3,7 +3,8 @@ import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { SkeletonRows } from '../components/motion'
 import { CASH_ONLY_FILTER } from '../services/cashBasis'
-import { fmtUSD, fmtUSDSigned, fmtAmount } from '../utils/formatters'
+import { fmtMoney } from '../utils/formatters'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import CashFlowTimeline from '../components/CashFlowTimeline'
 import CashPositionDialog from '../components/CashPositionDialog'
 import { loadCashTimeline, type LoadedCashTimeline } from '../services/loadCashTimeline'
@@ -12,6 +13,10 @@ import { previousMonth } from '../services/cashTimeline'
 export default function CashFlow() {
 
   const { companies, showPicker } = useCompanies()
+  // Every total below sums each transaction's own figure in the display
+  // currency (amount_rsd or amount_eur); a row with none counts as zero.
+  const { currency, pick, format } = useDisplayCurrency()
+  const amt = (t: any): number => pick(t) ?? 0
   const [banks, setBanks] = useState<any[]>([])
   const [companyId, setCompanyId] = useState('all')
   const [periodType, setPeriodType] = useState<'month' | 'quarter' | 'year'>('month')
@@ -104,11 +109,12 @@ export default function CashFlow() {
         // line projects is the figure that page shows.
         benchmark: previousMonth(today.slice(0, 7)),
         companyIds: ids,
+        currency,
       }))
     } catch (e: any) {
       setLineError(e?.message || String(e))
     }
-  }, [companyId, companies, today])
+  }, [companyId, companies, today, currency])
 
   useEffect(() => { loadLine() }, [loadLine])
 
@@ -116,7 +122,7 @@ export default function CashFlow() {
   // Inflows: direct revenue transactions
   const operatingIn = transactions
     .filter(t => t.type === 'direct' && t.tx_subtype === 'revenue')
-    .reduce((s, t) => s + (t.amount_usd || 0), 0)
+    .reduce((s, t) => s + amt(t), 0)
 
   // Outflows: direct expense + invoice payments (mi plaćamo)
   // Excluding banking and taxes (separate line items)
@@ -126,15 +132,15 @@ export default function CashFlow() {
       t.type === 'invoice_payment'
     )
     .filter(t => !['Banking and Finance', 'Taxes'].includes(t.pl_category || ''))
-    .reduce((s, t) => s + (t.amount_usd || 0), 0)
+    .reduce((s, t) => s + amt(t), 0)
 
   const bankingOut = transactions
     .filter(t => t.pl_category === 'Banking and Finance')
-    .reduce((s, t) => s + (t.amount_usd || 0), 0)
+    .reduce((s, t) => s + amt(t), 0)
 
   const taxOut = transactions
     .filter(t => t.pl_category === 'Taxes')
-    .reduce((s, t) => s + (t.amount_usd || 0), 0)
+    .reduce((s, t) => s + amt(t), 0)
 
   // ── A TRANSFER BETWEEN OUR OWN ACCOUNTS IS NOT CASH FLOW ────────────────
   //
@@ -157,10 +163,10 @@ export default function CashFlow() {
     const bankTx = transactions.filter(t => t.bank_id === bankId)
     const income = bankTx
       .filter(t => t.type === 'direct' && t.tx_subtype === 'revenue')
-      .reduce((s, t) => s + (t.amount_usd || 0), 0)
+      .reduce((s, t) => s + amt(t), 0)
     const expense = bankTx
       .filter(t => (t.type === 'direct' && t.tx_subtype === 'expense') || t.type === 'invoice_payment')
-      .reduce((s, t) => s + (t.amount_usd || 0), 0)
+      .reduce((s, t) => s + amt(t), 0)
     return { income, expense, net: income - expense, txCount: bankTx.length }
   }
 
@@ -194,7 +200,7 @@ export default function CashFlow() {
 
   const fmtAmt = (n: number) => {
     if (n === 0) return '—'
-    return fmtUSDSigned(n)
+    return format(n, 0)
   }
 
   return (
@@ -204,7 +210,7 @@ export default function CashFlow() {
           <div>
             <div style={s.pageTitle}>Cash Flow</div>
             <div style={s.pageSub}>
-              {loading ? 'Loading...' : `${transactions.length} transactions · USD equiv.`}
+              {loading ? 'Loading...' : `${transactions.length} transactions · ${currency}`}
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' as const }}>
@@ -262,18 +268,18 @@ export default function CashFlow() {
         <div style={s.summaryGrid} className="mf-stagger">
           <div style={s.summaryCard}>
             <div style={s.summaryLabel}>Total inflows</div>
-            <div style={{ ...s.summaryValue, color: '#00D47E' }}>{loading ? '...' : fmtUSD(totalInflows)}</div>
+            <div style={{ ...s.summaryValue, color: '#00D47E' }}>{loading ? '...' : format(totalInflows, 0)}</div>
             <div style={s.summarySub}>Revenue received. Transfers between our own accounts are not counted.</div>
           </div>
           <div style={s.summaryCard}>
             <div style={s.summaryLabel}>Total outflows</div>
-            <div style={{ ...s.summaryValue, color: '#FF5B5A' }}>{loading ? '...' : fmtUSD(totalOutflows)}</div>
+            <div style={{ ...s.summaryValue, color: '#FF5B5A' }}>{loading ? '...' : format(totalOutflows, 0)}</div>
             <div style={s.summarySub}>Expenses, invoices, banking and tax. Not transfers.</div>
           </div>
           <div style={s.summaryCard}>
             <div style={s.summaryLabel}>Net cash flow</div>
             <div style={{ ...s.summaryValue, color: netCashFlow >= 0 ? '#0F6E56' : '#A32D2D' }}>
-              {loading ? '...' : fmtUSDSigned(netCashFlow)}
+              {loading ? '...' : format(netCashFlow, 0)}
             </div>
             <div style={s.summarySub}>For selected period</div>
           </div>
@@ -302,7 +308,7 @@ export default function CashFlow() {
                     <thead>
                       <tr style={s.theadRow}>
                         <th style={{ ...s.th, width: '60%' }}>Item</th>
-                        <th style={{ ...s.th, textAlign: 'right' as const }}>Amount (USD)</th>
+                        <th style={{ ...s.th, textAlign: 'right' as const }}>Amount ({currency})</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -352,7 +358,7 @@ export default function CashFlow() {
                           <th style={s.th}>Bank</th>
                           <th style={s.th}>Type</th>
                           <th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
-                          <th style={{ ...s.th, textAlign: 'right' as const }}>USD</th>
+                          <th style={{ ...s.th, textAlign: 'right' as const }}>{currency}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -369,10 +375,10 @@ export default function CashFlow() {
                                 </span>
                               </td>
                               <td style={{ ...s.td, textAlign: 'right' as const, color: isIn ? '#0F6E56' : '#A32D2D', fontWeight: '500' }}>
-                                {isIn ? '+' : '-'}{fmtAmount(tx.amount || 0, tx.currency || 'USD')}
+                                {isIn ? '+' : '-'}{fmtMoney(Math.abs(tx.amount || 0), tx.currency || 'RSD')}
                               </td>
                               <td style={{ ...s.td, textAlign: 'right' as const, color: '#7A9BB8' }}>
-                                {fmtUSD(tx.amount_usd || 0)}
+                                {pick(tx) === null ? '—' : format(Math.abs(pick(tx) as number))}
                               </td>
                             </tr>
                           )
@@ -401,7 +407,7 @@ export default function CashFlow() {
                   </div>
                 ) : filteredBanks.map(bank => {
                   const flow = getBankFlow(bank.id)
-                  const cc = currencyColor((bank.currencies || [])[0] || 'USD')
+                  const cc = currencyColor((bank.currencies || [])[0] || 'RSD')
                   const compName = companies.find(c => c.id === bank.company_id)?.name || '—'
                   return (
                     <div key={bank.id} style={s.accountCard}>
@@ -415,15 +421,15 @@ export default function CashFlow() {
                       <div style={s.accountBalances}>
                         <div>
                           <div style={s.balLabel}>Inflows</div>
-                          <div style={{ ...s.balValue, color: '#00D47E' }}>{fmtUSD(flow.income)}</div>
+                          <div style={{ ...s.balValue, color: '#00D47E' }}>{format(flow.income, 0)}</div>
                         </div>
                         <div style={{ fontSize: '14px', color: 'rgba(255,255,255,0.30)', alignSelf: 'flex-end', paddingBottom: '2px' }}>→</div>
                         <div>
                           <div style={s.balLabel}>Outflows</div>
-                          <div style={{ ...s.balValue, color: '#FF5B5A' }}>{fmtUSD(flow.expense)}</div>
+                          <div style={{ ...s.balValue, color: '#FF5B5A' }}>{format(flow.expense, 0)}</div>
                         </div>
                         <div style={{ ...s.diffBadge, background: flow.net >= 0 ? 'rgba(0,212,126,0.12)' : 'rgba(255,91,90,0.13)', color: flow.net >= 0 ? '#085041' : '#A32D2D' }}>
-                          {fmtUSDSigned(flow.net)}
+                          {format(flow.net, 0)}
                         </div>
                       </div>
                       <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.30)', marginTop: '6px' }}>

@@ -3,7 +3,11 @@ import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import InlineCategoryAdd from './InlineCategoryAdd'
 import * as XLSX from 'xlsx'
-import { getRate, convertToUSD, getRatesForDate } from '../services/currencyService'
+import {
+  bookAmounts, getBookRates, partBookAmounts, partFromRsd, round2,
+  type BookAmounts, type BookRates,
+} from '../services/bookAmounts'
+import { fmtMoney, fmtNum, fmtRSD } from '../utils/formatters'
 import { importRowHash } from '../utils/importHash'
 import PartnerDialog from './PartnerDialog'
 import CreditInstallmentSelector from './CreditInstallmentSelector'
@@ -17,7 +21,7 @@ import {
 import {
   fetchScripts, saveScript, removeScript, orderedForDifference, findCurrencyDifference,
 } from '../services/quickFillStore'
-import { formatMoney, toOwn, toUsd } from '../services/allocationDisplay'
+import { formatMoney, toOwn, toRsd } from '../services/allocationDisplay'
 import { sameName } from '../services/lookupNames'
 import SplitEditor from './SplitEditor'
 import {
@@ -30,6 +34,7 @@ import {
   claimNotice, freeForRow, isHiddenForRow, type ClaimRow, type OpenInvoice,
 } from '../services/invoiceClaims'
 import { CREDIT_PRINCIPAL, CREDIT_INTEREST, creditNote, allocatePayment } from '../services/creditClassification'
+import { creditLegBooker, checkCreditCurrency, UnsupportedCreditCurrencyError } from '../services/creditPayment'
 import { fetchAllPartners } from '../services/allPartners'
 
 // credit payment P&L logic is inline
@@ -385,6 +390,37 @@ function formatDate(d: string): string {
   return d
 }
 
+/**
+ * A row's four stored columns, as the analysis step attached them, or null.
+ * Read from `parsed` because that is where `analyzeWithAI` puts them.
+ */
+function attachedBook(p: any): BookAmounts | null {
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const ex = n(p?.exchange_rate), eur = n(p?.eur_rate), rsd = n(p?.amount_rsd), e = n(p?.amount_eur)
+  return ex !== null && eur !== null && rsd !== null && e !== null
+    ? { exchange_rate: ex, eur_rate: eur, amount_rsd: rsd, amount_eur: e }
+    : null
+}
+
+/**
+ * Books amounts at the NBS rates for a date, fetching each date once.
+ * Throws RateUnavailableError — never a guessed rate.
+ */
+function makeBooker() {
+  const cache: Record<string, Promise<BookRates>> = {}
+  return async (amount: number, currency: string, isoDate: string): Promise<BookAmounts> => {
+    if (!cache[isoDate]) cache[isoDate] = getBookRates(isoDate)
+    let rates: BookRates
+    try {
+      rates = await cache[isoDate]
+    } catch (err) {
+      delete cache[isoDate]
+      throw err
+    }
+    return bookAmounts(amount, currency, rates)
+  }
+}
+
 function makeImportRow(parsed: ParsedRow): ImportRow {
   const isExpense = (parsed.debit || 0) > 0
   const isPassthrough = parsed.statement_number === 'passthrough'
@@ -555,9 +591,11 @@ export default function BulkImport({ onClose, onImported }: Props) {
       if (expDesc) setExpenseDescriptions(expDesc)
       if (pacc) setPartnerAccounts(pacc)
       const { data: creds } = await supabase
-        .from('credits').select('id,name,bank,rate_description')
+        .from('credits').select('id,name,bank,rate_description,currency')
         .eq('status', 'active').order('name')
-      if (creds) setCredits(creds)
+      // A credit's figures are in its own currency; a missing one reads as
+      // RSD, as in useCreditPayment.
+      if (creds) setCredits(creds.map((c: any) => ({ ...c, currency: c.currency || 'RSD' })))
     }
     load()
   }, [])
@@ -615,22 +653,29 @@ export default function BulkImport({ onClose, onImported }: Props) {
     const p = row.parsed
     const own = (p.debit || 0) > 0 ? (p.debit || 0) : (p.credit || 0)
     if (own <= 0) return null
-    const rowUsd = p.currency === 'USD' ? own : ((p as any).amount_usd || 0)
-    if (rowUsd <= 0) return null
+    // In RSD, the book currency both sides share: the row at its own rate
+    // (attached by the analysis step; a dinar row needs none), the invoice's
+    // remainder at the invoice's.
+    const booked = attachedBook(p)
+    const rowRsd = booked ? booked.amount_rsd : p.currency === 'RSD' ? own : 0
+    if (rowRsd <= 0) return null
 
-    const remainingUsd = inv.remaining_usd || 0
-    const allocUsd = Math.min(rowUsd, remainingUsd)
+    const remainingRsd = toRsd(outstandingOwn(inv), inv)
+    const allocRsd = Math.min(rowRsd, remainingRsd)
     const difference = differenceFor({
-      invoiceShortfall: remainingUsd - allocUsd,
-      paymentUnallocated: rowUsd - allocUsd,
-      currency: 'USD',
+      invoiceShortfall: remainingRsd - allocRsd,
+      paymentUnallocated: rowRsd - allocRsd,
+      currency: 'RSD',
     })
     return {
       inv,
       difference,
       amountOwn: difference.kind === 'gain'
         ? toOwn(difference.amount, inv)
-        : Math.round(difference.amount * (rowUsd > 0 ? own / rowUsd : 1) * 100) / 100,
+        // A loss is part of this bank line, in the line's currency at its rate.
+        : booked
+          ? partFromRsd(difference.amount, { currency: p.currency, exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate }).amount
+          : difference.amount,
       currency: difference.kind === 'gain' ? (inv.currency || p.currency) : p.currency,
     }
   }, [openInvoices])
@@ -843,28 +888,20 @@ export default function BulkImport({ onClose, onImported }: Props) {
     setAnalyzing(true); setAnalyzeError(''); setProgress(0)
     const supabaseUrl = process.env.REACT_APP_SUPABASE_URL
     const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY
-    const rateCache: Record<string, number> = {}
+    // Every row's book columns at the NBS rates for its date — an RSD row too,
+    // which still needs the EUR rate for amount_eur.
+    const bookRow = makeBooker()
     let rowsWithRates: typeof rows
     try {
     rowsWithRates = await Promise.all(rows.map(async (row) => {
       const { currency, date, debit, credit } = row.parsed
-      if (currency === 'USD') return row
       const amount = (debit || 0) > 0 ? (debit || 0) : (credit || 0)
       if (!amount) return row
-      const parts = date.split('.')
-      const isoDate = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : date
-      const cacheKey = `${currency}_${isoDate}`
-      if (!rateCache[cacheKey]) {
-        const rateData = await getRate(currency, isoDate)
-        if (rateData.isFallback) throw new Error(`No official rate for ${currency} on ${isoDate}.`)
-        rateCache[cacheKey] = rateData.rate
-      }
-      const rate = rateCache[cacheKey]
-      const amountUsd = convertToUSD(amount, currency, rate)
-      return { ...row, parsed: { ...row.parsed, amount_usd: amountUsd, exchange_rate: rate } }
+      const booked = await bookRow(amount, currency, formatDate(date))
+      return { ...row, parsed: { ...row.parsed, ...booked } }
     }))
     } catch (err: any) {
-      setAnalyzeError(`Exchange rate unavailable: ${err.message} The analysis was stopped.`)
+      setAnalyzeError(`Exchange rate unavailable: ${err.message}. The analysis was stopped.`)
       setAnalyzing(false)
       return
     }
@@ -944,40 +981,32 @@ export default function BulkImport({ onClose, onImported }: Props) {
     // goes, checked once at the end.
     const settlementExpectations: Expectation[] = []
     const localPartners = [...partners]
-    const rateCache: Record<string, number> = {}
-    const getAmountUsd = async (p: any, amount: number): Promise<{ amount_usd: number; exchange_rate: number | null }> => {
-      if (p.currency === 'USD') return { amount_usd: amount, exchange_rate: 1 }
-      if ((p as any).amount_usd) return { amount_usd: (p as any).amount_usd, exchange_rate: (p as any).exchange_rate }
-      const parts = (p.date || '').split('.')
-      const isoDate = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : p.date
-      const cacheKey = `${p.currency}_${isoDate}`
-      if (!rateCache[cacheKey]) {
-        const rateData = await getRate(p.currency, isoDate)
-        if (rateData.isFallback) throw new Error(`No official rate for ${p.currency} on ${isoDate}.`)
-        rateCache[cacheKey] = rateData.rate
-      }
-      const rate = rateCache[cacheKey]
-      return { amount_usd: convertToUSD(amount, p.currency, rate), exchange_rate: rate }
+    // The four stored columns of a row: as the analysis step attached them
+    // when the amount is the one it booked, otherwise at the NBS rates for
+    // the row's date.
+    const bookRow = makeBooker()
+    const bookFor = async (p: any, amount: number): Promise<BookAmounts> => {
+      const attached = attachedBook(p)
+      const analysedAmount = (p.debit || 0) > 0 ? (p.debit || 0) : (p.credit || 0)
+      if (attached && analysedAmount === amount) return attached
+      return bookRow(amount, p.currency, formatDate(p.date))
     }
 
     // Pre-flight: svi kursevi se provjere PRIJE prvog upisa, da import ne
-    // ostane napola odradjen. Kursevi rata kredita idu u eurUsdByDate.
-    const eurUsdByDate: Record<string, number> = {}
+    // ostane napola odradjen. Valuta kredita se takodje provjeri ovdje.
     try {
       for (const row of accepted) {
         const p = row.parsed
-        await getAmountUsd(p, Math.abs(p.debit || p.credit || 0))
+        await bookFor(p, Math.abs(p.debit || p.credit || 0))
         if (row.override_tx_type === 'credit_payment' && row.override_installment_ids.length > 0) {
-          const d = formatDate(p.date)
-          if (!eurUsdByDate[d]) {
-            const rates = await getRatesForDate(d)
-            if (rates.isFallback) throw new Error(`No official EUR/USD rate for ${d}.`)
-            eurUsdByDate[d] = rates.eurRsdRate / rates.usdRsdRate
-          }
+          const credit = credits.find((c: any) => c.id === row.override_credit_id)
+          checkCreditCurrency(credit?.currency, credit?.name)
         }
       }
     } catch (err: any) {
-      setAnalyzeError(`Exchange rate unavailable: ${err.message} Nothing was posted.`)
+      setAnalyzeError(err instanceof UnsupportedCreditCurrencyError
+        ? `${err.message}. Nothing was posted.`
+        : `Exchange rate unavailable: ${err.message}. Nothing was posted.`)
       setStep('review')
       return
     }
@@ -1008,8 +1037,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
         }
       }
       if (row.override_tx_type === 'passthrough') {
-        const { amount_usd, exchange_rate } = await getAmountUsd(p, amount)
-        const { error: ptErr } = await supabase.from('passthrough').insert({ import_hash: importHash, import_batch_id: importBatchId, company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), direction: row.override_pt_direction, period_month: row.override_pt_period || null, currency: p.currency, amount, exchange_rate, amount_usd, note: row.override_note || p.description || null, account_number: p.account_number || null, model: p.model || null, reference_number: p.reference_number || null, status: 'unpaired' })
+        const rowBook = await bookFor(p, amount)
+        const { error: ptErr } = await supabase.from('passthrough').insert({ import_hash: importHash, import_batch_id: importBatchId, company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), direction: row.override_pt_direction, period_month: row.override_pt_period || null, currency: p.currency, amount, ...rowBook, note: row.override_note || p.description || null, account_number: p.account_number || null, model: p.model || null, reference_number: p.reference_number || null, status: 'unpaired' })
         if (ptErr) {
           if (ptErr.code === '23505') { skippedDuplicates++; done++; setProgress(Math.round((done / accepted.length) * 100)); continue }
           throw ptErr
@@ -1017,13 +1046,15 @@ export default function BulkImport({ onClose, onImported }: Props) {
         done++; setProgress(Math.round((done / accepted.length) * 100)); continue
       }
       const isDirectWithPL = row.override_tx_type === 'direct'
-      const { amount_usd, exchange_rate } = await getAmountUsd(p, amount)
+      const rowBook = await bookFor(p, amount)
+      /** This bank line as a parent, for its own parts. */
+      const rowParent = { currency: p.currency, exchange_rate: rowBook.exchange_rate, eur_rate: rowBook.eur_rate }
       // The split is stored in the currency of the bill, which is the currency
       // the inputs above are labelled in and the currency every other writer
       // uses — TransactionDialog, InvoiceDialog and BankStatementDialog all
-      // store what was typed. This import used to convert to USD here, which
-      // left its rows the odd ones out: reopened in a dialog they showed
-      // dollars under an `(RSD)` label, and the P&L now converts on read
+      // store what was typed. Converting here would leave this import's rows
+      // the odd ones out: reopened in a dialog they would show another
+      // currency under the row's label, and the P&L converts on read
       // (src/services/allocation.ts) and would convert them a second time.
       const typed = (val: string) => {
         const raw = parseFloat(val) || 0
@@ -1039,7 +1070,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
       // which nobody finds, because every other line is correct.
       if (isDirectWithPL) {
         const whyThisSplit = whySplitNotSavable(
-          { amount, amount_usd }, row.override_pl_splits)
+          { amount, currency: p.currency, ...rowBook }, row.override_pl_splits)
         if (whyThisSplit) {
           throw new Error(`${formatDate(p.date)} ${p.description || ''}: ${whyThisSplit}`)
         }
@@ -1047,7 +1078,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
       const { data: newTx, error: txErr } = await supabase.from('transactions').insert({
         import_hash: importHash, import_batch_id: importBatchId,
-        company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), statement_number: p.statement_number || null, type: row.override_tx_type, tx_subtype: row.override_tx_subtype, payment_method: row.override_payment_method || null, currency: p.currency, amount, exchange_rate, amount_usd, pl_impact: isDirectWithPL,
+        company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), statement_number: p.statement_number || null, type: row.override_tx_type, tx_subtype: row.override_tx_subtype, payment_method: row.override_payment_method || null, currency: p.currency, amount, ...rowBook, pl_impact: isDirectWithPL,
         pl_category: isDirectWithPL ? (row.override_pl_category_name || null) : null, pl_subcategory: isDirectWithPL ? (row.override_pl_subcategory_name || null) : null, department: isDirectWithPL ? (row.override_department_name || null) : null, dept_subcategory: isDirectWithPL ? (row.override_dept_subcategory_name || null) : null, expense_description: isDirectWithPL ? (row.override_expense_description || null) : null, revenue_stream: isDirectWithPL ? (row.override_revenue_stream || null) : null,
         rev_alloc_type: row.override_rev_alloc || 'sg100', rev_alloc_aimfox: aimfoxAmount, rev_alloc_sg: sgAmount, opex_type: isDirectWithPL && row.override_tx_subtype === 'expense' ? (row.override_opex_type || 'opex') : null, opex_amount: opexAmount, performance_amount: perfAmount,
         cf_type: isDirectWithPL && row.override_tx_subtype === 'expense' ? (row.override_cf_type || null) : null, cf_frequency: row.override_cf_type === 'recurring' ? row.override_cf_frequency : null, cf_next_month_est: row.override_cf_type === 'recurring' ? (row.override_cf_next_month_est ? parseFloat(row.override_cf_next_month_est) : amount) : null,
@@ -1068,20 +1099,23 @@ export default function BulkImport({ onClose, onImported }: Props) {
       if (isDirectWithPL && row.override_pl_splits.length > 0 && newTx?.id) {
         const outcome = await saveSplits(
           supabase, 'transaction', newTx.id,
-          { amount, amount_usd }, row.override_pl_splits)
+          { amount, currency: p.currency, ...rowBook }, row.override_pl_splits)
         if (!outcome.ok) throw new Error(`${formatDate(p.date)}: ${outcome.message}`)
       }
       if (row.override_tx_type === 'credit_payment' && row.override_installment_ids.length > 0) {
-        // EUR/USD = eurRsdRate / usdRsdRate (NBS zvanični kurs)
-        const eurUsdRateBI = eurUsdByDate[formatDate(p.date)]
+        // Rate kredita su u valuti kredita (RSD ili EUR). Svaki deo se knjizi
+        // u toj valuti po kursevima ovog reda izvoda, a poslednji deo nosi
+        // zaokruzivanje - services/creditPayment.ts.
+        const credit = credits.find((c: any) => c.id === row.override_credit_id)
+        const creditName = credit?.name || 'Credit'
+        const legs = creditLegBooker(credit?.currency, rowBook, creditName)
 
-        const creditName = credits.find((c: any) => c.id === row.override_credit_id)?.name || 'Credit'
-
-        // Ukupan plaćeni iznos u EUR (iz USD amount)
-        let remainingEUR = amount_usd / eurUsdRateBI
+        // Ukupan plaćeni iznos u EUR — amount_eur reda (tačno `amount` za EUR red)
+        // (amount_rsd za RSD kredit, amount_eur za EUR kredit)
+        let remaining = legs.payable
 
         for (const instId of row.override_installment_ids) {
-          if (remainingEUR <= 0.005) break
+          if (remaining <= 0.005) break
 
           const { data: inst } = await supabase
             .from('credit_installments')
@@ -1097,62 +1131,56 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
           if (remainingTotal <= 0.005) continue // već potpuno plaćeno
 
-          let instPaidEUR = 0
+          let instPaid = 0
 
           // Same rule as the other two paths: the amount decides which leg a
           // line paid, instead of principal always going first.
-          const legSplit = allocatePayment(remainingEUR, remainingPrincipal, remainingInterest)
+          const legSplit = allocatePayment(remaining, remainingPrincipal, remainingInterest)
 
           // 1. Glavnica → Loans/Credits/Dividend
           if (legSplit.principal > 0.005) {
-            const paidPrincipalEUR = legSplit.principal
-            const paidPrincipalUSD = Math.round(paidPrincipalEUR * eurUsdRateBI * 100) / 100
-            remainingEUR = Math.max(0, remainingEUR - paidPrincipalEUR)
-            instPaidEUR += paidPrincipalEUR
+            const paidPrincipal = legSplit.principal
+            remaining = Math.max(0, remaining - paidPrincipal)
+            instPaid += paidPrincipal
 
             await supabase.from('transactions').insert({
               company_id: company, bank_id: bank,
               partner_id: partnerId, transaction_date: formatDate(p.date),
               statement_number: p.statement_number || null,
-              type: 'credit_payment', tx_subtype: 'expense', currency: 'EUR',
-              amount: Math.round(paidPrincipalEUR * 100) / 100,
-              exchange_rate: eurUsdRateBI,
-              amount_usd: paidPrincipalUSD,
+              type: 'credit_payment', tx_subtype: 'expense',
+              ...legs.book(paidPrincipal),
               pl_impact: true, ...CREDIT_PRINCIPAL,
               cf_type: 'recurring', cf_frequency: 'monthly',
-              note: creditNote('principal', creditName, inst.installment_no, paidPrincipalEUR, row.override_note || p.description),
+              note: creditNote('principal', creditName, inst.installment_no, paidPrincipal, row.override_note || p.description, legs.currency),
               status: 'posted',
             })
           }
 
           // 2. Kamata → Loans/Credits/Dividend / Paid Interest on credit
           if (legSplit.interest > 0.005) {
-            const paidInterestEUR = legSplit.interest
-            const paidInterestUSD = Math.round(paidInterestEUR * eurUsdRateBI * 100) / 100
-            remainingEUR = Math.max(0, remainingEUR - paidInterestEUR)
-            instPaidEUR += paidInterestEUR
+            const paidInterest = legSplit.interest
+            remaining = Math.max(0, remaining - paidInterest)
+            instPaid += paidInterest
 
             await supabase.from('transactions').insert({
               company_id: company, bank_id: bank,
               partner_id: partnerId, transaction_date: formatDate(p.date),
               statement_number: p.statement_number || null,
-              type: 'credit_payment', tx_subtype: 'expense', currency: 'EUR',
-              amount: Math.round(paidInterestEUR * 100) / 100,
-              exchange_rate: eurUsdRateBI,
-              amount_usd: paidInterestUSD,
+              type: 'credit_payment', tx_subtype: 'expense',
+              ...legs.book(paidInterest),
               pl_impact: true, ...CREDIT_INTEREST,
               cf_type: 'recurring', cf_frequency: 'monthly',
-              note: creditNote('interest', creditName, inst.installment_no, paidInterestEUR, row.override_note || p.description),
+              note: creditNote('interest', creditName, inst.installment_no, paidInterest, row.override_note || p.description, legs.currency),
               status: 'posted',
             })
           }
 
           // 3. Ažuriraj ratu: partial ili paid
-          const totalPaidEUR = alreadyPaid + instPaidEUR
-          const instFullyPaid = totalPaidEUR >= inst.total_amount - 0.005
+          const totalPaid = alreadyPaid + instPaid
+          const instFullyPaid = totalPaid >= inst.total_amount - 0.005
 
           await supabase.from('credit_installments').update({
-            paid_amount: Math.round(totalPaidEUR * 100) / 100,
+            paid_amount: Math.round(totalPaid * 100) / 100,
             status: instFullyPaid ? 'paid' : 'outstanding', // ostaje outstanding ako nije u potpunosti plaćeno
             paid_date: instFullyPaid ? formatDate(p.date) : null,
             updated_at: new Date().toISOString(),
@@ -1179,10 +1207,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
           : row.override_linked_invoice_id ? [row.override_linked_invoice_id] : []
 
         if (invoiceIds.length > 0) {
-          const { amount_usd: totalAmtUsd } = await getAmountUsd(p, amount)
-          // remainingUsd tracks how much of the PAYMENT is left to allocate (payment currency)
-          // But for non-indexed invoices, we close based on ORIGINAL AMOUNT in invoice currency
-          // so we track remaining in original currency (amount paid)
+          // remainingOrig tracks how much of the PAYMENT is left to allocate,
+          // in the payment's own currency; its RSD figure is that part of the
+          // line at the line's rate (`rowParent`).
           let remainingOrig = amount   // original currency amount (e.g. RSD)
 
           for (const invoiceId of invoiceIds) {
@@ -1190,7 +1217,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
             // Fetch invoice details including is_indexed flag
             const { data: inv } = await supabase.from('invoices')
-              .select('id, invoice_number, amount, amount_usd, currency, exchange_rate, is_indexed')
+              .select('id, invoice_number, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, is_indexed')
               .eq('id', invoiceId).single()
             if (!inv) continue
 
@@ -1201,10 +1228,10 @@ export default function BulkImport({ onClose, onImported }: Props) {
             // the invoice's. Taking `Math.min` of the two compared euros with
             // dinars, and for a EUR payment against a dinar invoice it always
             // picked the euros — so the link recorded about 6,074 against a
-            // bill of 712,957 while the dollar column came out right. That is
-            // the fault behind every "remaining $0 and still partial" invoice.
+            // bill of 712,957 while the book column came out right. That is
+            // the fault behind every "remaining 0 and still partial" invoice.
             //
-            // So the comparison happens in dollars, which both sides have, and
+            // So the comparison happens in RSD, which both sides have, and
             // the invoice's own currency figure is converted from that with
             // the invoice's own rate. The `is_indexed` rate switch is gone with
             // it: its comment said it existed to stop FX differences leaving
@@ -1219,20 +1246,17 @@ export default function BulkImport({ onClose, onImported }: Props) {
             if (remainingInvOrig <= 0.005) continue // already paid
 
             // WHERE THE PAYMENT AND THE BILL SHARE A CURRENCY, NOTHING IS
-            // CONVERTED. What was here took `Math.min` of the payment in
-            // dollars at the PAYMENT date's rate and the invoice in dollars at
-            // the INVOICE date's, and converted the smaller back — so a rate
-            // that had moved between the two dates left a bill that had been
-            // paid in full short by whatever had moved, and even an unmoved
-            // rate lost the value of half a US cent, about a dinar, to the
-            // rounding. See services/settleInvoice.ts.
-            const paymentRateUsd = amount > 0 ? totalAmtUsd / amount : 1
-            const remainingPayUsd = Math.round(remainingOrig * paymentRateUsd * 100) / 100
+            // CONVERTED. Taking `Math.min` of the payment in the reporting
+            // currency at the PAYMENT date's rate and the invoice at the
+            // INVOICE date's, and converting the smaller back, left a bill
+            // that had been paid in full short by whatever had moved between
+            // the two dates. See services/settleInvoice.ts.
+            const remainingPayRsd = partBookAmounts(remainingOrig, rowParent).amount_rsd
             const settlement = settlementFor({
               invoice: { ...inv, paid_amount: alreadyAllocOrig },
               paymentCurrency: p.currency,
               paymentOwn: remainingOrig,
-              paymentUsd: remainingPayUsd,
+              paymentRsd: remainingPayRsd,
             })
             const allocOwn = settlement.own
 
@@ -1253,20 +1277,21 @@ export default function BulkImport({ onClose, onImported }: Props) {
               invoiceNumber: inv.invoice_number || null,
               amount: inv.amount || 0,
               allocated: alreadyAllocOrig + allocOwn,
+              amountRsd: inv.amount_rsd ?? null,
             })
 
             // Update invoice status based on original currency (prevents FX rounding partial)
             const { data: allAlloc } = await supabase.from('invoice_transaction_links')
               .select('allocated_amount').eq('invoice_id', invoiceId)
             const totalAllocatedOrig = (allAlloc || []).reduce((s: number, r: any) => s + (r.allocated_amount || 0), 0)
-            const invStatus = settledStatus(inv.amount || 0, totalAllocatedOrig, inv.amount_usd)
+            const invStatus = settledStatus(inv.amount || 0, totalAllocatedOrig, inv.amount_rsd)
             await supabase.from('invoices')
               .update({ status: invStatus, updated_at: new Date().toISOString() })
               .eq('id', invoiceId)
 
             // Auto-close children if parent is fully paid
             const { data: children } = await supabase.from('invoices')
-              .select('id, amount, amount_usd').eq('parent_invoice_id', invoiceId)
+              .select('id, amount, amount_rsd').eq('parent_invoice_id', invoiceId)
             if (children && children.length > 0) {
               if (invStatus === 'paid') {
                 for (const child of children) {
@@ -1279,12 +1304,13 @@ export default function BulkImport({ onClose, onImported }: Props) {
                   // own currency — the same unit its own `amount` is in.
                   const childShare = (inv.amount || 0) > 0 ? allocOwn / (inv.amount || 1) : 0
                   const childAllocOrig = Math.round((child.amount || 0) * childShare * 100) / 100
-                  const childAllocUsd = Math.round(toUsd(childAllocOrig, { ...child, currency: inv.currency }) * 100) / 100
+                  // A child is a part of the parent invoice, so its link is
+                  // booked at the PARENT's stored rates.
                   await supabase.from('invoice_transaction_links').insert({
                     invoice_id: child.id, transaction_id: newTx.id,
-                    allocated_amount: childAllocOrig, allocated_amount_usd: childAllocUsd,
+                    ...linkAmountsFromOwn(childAllocOrig, inv),
                   })
-                  const childStatus = settledStatus(child.amount || 0, childAllocOrig, child.amount_usd)
+                  const childStatus = settledStatus(child.amount || 0, childAllocOrig, child.amount_rsd)
                   await supabase.from('invoices').update({ status: childStatus, updated_at: new Date().toISOString() }).eq('id', child.id)
                 }
               }
@@ -1306,24 +1332,25 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
           if (row.override_fx_book && invoiceIds.length === 1 && fxScript) {
             const { data: inv } = await supabase.from('invoices')
-              .select('id, invoice_number, amount, amount_usd, currency, exchange_rate')
+              .select('id, invoice_number, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate')
               .eq('id', invoiceIds[0]).single()
             const { data: st } = await supabase.from('v_invoice_status')
-              .select('amount, paid_amount, remaining_usd').eq('id', invoiceIds[0]).maybeSingle()
+              .select('amount, paid_amount').eq('id', invoiceIds[0]).maybeSingle()
 
             if (inv) {
               // In the invoice's own currency, from the column the
-              // settled/partial rule reads. `remaining_usd` is the dollar
-              // column, quantised to the cent, so it reported a gap of about
-              // a dinar on bills that had in fact been settled exactly.
+              // settled/partial rule reads, and converted once to RSD at the
+              // invoice's rate. The book remainder carries every earlier
+              // payment's rate and would report a gap on bills that had in
+              // fact been settled exactly.
               const shortfallOwn = outstandingOwn({ ...inv, paid_amount: st?.paid_amount ?? 0 })
-              const shortfallUsd = toUsd(shortfallOwn, inv)
+              const shortfallRsd = toRsd(shortfallOwn, inv)
               const spareOrig = Math.max(0, remainingOrig)
-              const rateUsd = amount > 0 ? totalAmtUsd / amount : 1
               const difference = differenceFor({
-                invoiceShortfall: shortfallUsd,
-                paymentUnallocated: Math.round(spareOrig * rateUsd * 100) / 100,
-                currency: 'USD',
+                invoiceShortfall: shortfallRsd,
+                // What is left of the line, at the line's rate.
+                paymentUnallocated: partBookAmounts(round2(spareOrig), rowParent).amount_rsd,
+                currency: 'RSD',
               })
 
               if (isBookable(difference)) {
@@ -1333,6 +1360,12 @@ export default function BulkImport({ onClose, onImported }: Props) {
                   ? shortfallOwn
                   : Math.round(spareOrig * 100) / 100
                 const fxCurrency = isGain ? (inv.currency || p.currency) : p.currency
+                // A gain is a part of the invoice, booked at its stored rates;
+                // a loss a part of the bank line, at the line's.
+                const fxBook = partBookAmounts(fxOwn, isGain ? { ...inv, currency: fxCurrency } : rowParent)
+                const fxRates = isGain
+                  ? { exchange_rate: inv.exchange_rate, eur_rate: inv.eur_rate }
+                  : { exchange_rate: rowBook.exchange_rate, eur_rate: rowBook.eur_rate }
 
                 const { data: fxTx, error: fxErr } = await supabase.from('transactions').insert({
                   company_id: company, bank_id: bank,
@@ -1343,8 +1376,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
                   tx_subtype: isGain ? 'revenue' : 'expense',
                   currency: fxCurrency,
                   amount: fxOwn,
-                  exchange_rate: difference.amount > 0 ? fxOwn / difference.amount : null,
-                  amount_usd: difference.amount,
+                  ...fxRates,
+                  amount_rsd: fxBook.amount_rsd,
+                  amount_eur: fxBook.amount_eur,
                   pl_impact: true,
                   pl_category: fxScript.pl_category || null,
                   pl_subcategory: fxScript.pl_subcategory || null,
@@ -1433,15 +1467,14 @@ export default function BulkImport({ onClose, onImported }: Props) {
       && r.status !== 'rejected' && !r.already_imported)
     .map(r => {
       const own = (r.parsed.debit || 0) > 0 ? (r.parsed.debit || 0) : (r.parsed.credit || 0)
-      const attached = r.parsed.currency === 'USD' ? own : ((r.parsed as any).amount_usd || 0)
+      const attached = r.parsed.currency === 'RSD' ? own : (attachedBook(r.parsed)?.amount_rsd || 0)
 
-      // ── Working the dollar figure out rather than giving up on it ──────
+      // ── Working the dinar figure out rather than giving up on it ───────
       //
-      // `amount_usd` is attached by the analysis step and is missing on a row
+      // `amount_rsd` is attached by the analysis step and is missing on a row
       // that skipped it. The row still knows what it paid, in its own
       // currency, and the FIRST invoice it ticked carries the rate it was
-      // booked at — `remaining_usd * exchange_rate` is what the picker prints
-      // beside it. Where the two currencies agree, that rate converts the
+      // booked at. Where the two currencies agree, that rate converts the
       // payment.
       //
       // For the picker only. Nothing here is posted; the posting fetches the
@@ -1451,17 +1484,17 @@ export default function BulkImport({ onClose, onImported }: Props) {
       const first = (r.override_linked_invoice_ids || [])[0]
       const inv = first ? openInvoices.find(i => i.id === first) : null
       const viaInvoice = inv && inv.currency === r.parsed.currency && (inv.exchange_rate || 0) > 0
-        ? own / inv.exchange_rate
+        ? toRsd(own, inv)
         : 0
-      const usd = attached > 0 ? attached : viaInvoice
+      const rsd = attached > 0 ? attached : viaInvoice
 
       return {
         id: r.parsed.id,
         // ── An unknown amount is the WHOLE invoice, not none of it ───────
         //
-        // The claims are compared in dollars, and `amount_usd` is attached by
+        // The claims are compared in RSD, and `amount_rsd` is attached by
         // `analyzeWithAI`. A row that never went through it — or one whose
-        // rate lookup gave nothing — had no dollar figure, and this read that
+        // rate lookup gave nothing — had no dinar figure, and this read that
         // as a claim of zero: the row plainly closed a 505,023 RSD invoice,
         // claimed nothing, and the invoice went on being offered to every
         // other line of the statement. Which is the exact trap the claims
@@ -1474,7 +1507,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
         // offering an invoice that is already spoken for leaves another one
         // open and still reconciles to the penny, while hiding one that had
         // room is visible, says so, and has a button beside it.
-        amount: usd > 0 ? usd : Number.POSITIVE_INFINITY,
+        amount: rsd > 0 ? rsd : Number.POSITIVE_INFINITY,
         invoiceIds: r.override_linked_invoice_ids || [],
       }
     }), [rows, openInvoices])
@@ -1613,8 +1646,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
                           <div style={{ fontSize: '11px', color: '#7A9BB8' }}>{r.parsed.date} · {r.parsed.description?.slice(0, 60)}</div>
                         </div>
                         <div style={{ textAlign: 'right' as const }}>
-                          {(r.parsed.debit || 0) > 0 && <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.red }}>-{r.parsed.debit?.toLocaleString()} {r.parsed.currency}</div>}
-                          {(r.parsed.credit || 0) > 0 && <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.accent }}>+{r.parsed.credit?.toLocaleString()} {r.parsed.currency}</div>}
+                          {(r.parsed.debit || 0) > 0 && <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.red }}>-{fmtMoney(r.parsed.debit || 0, r.parsed.currency)}</div>}
+                          {(r.parsed.credit || 0) > 0 && <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.accent }}>+{fmtMoney(r.parsed.credit || 0, r.parsed.currency)}</div>}
                         </div>
                       </div>
                     ))}
@@ -1742,7 +1775,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                           )}
                         </div>
                         <div style={{ textAlign: 'right' as const, flexShrink: 0, marginRight: '10px' }}>
-                          <div style={{ fontSize: '13px', fontWeight: '500', color: isExpense ? DIALOG.red : DIALOG.accent }}>{isExpense ? '-' : '+'}{amount?.toLocaleString()} {p.currency}</div>
+                          <div style={{ fontSize: '13px', fontWeight: '500', color: isExpense ? DIALOG.red : DIALOG.accent }}>{isExpense ? '-' : '+'}{fmtMoney(amount || 0, p.currency)}</div>
                           <div style={{ fontSize: '10px', color: DIALOG.faint }}>{p.statement_number ? `Izvod #${p.statement_number}` : p.date}</div>
                         </div>
                         <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
@@ -1946,7 +1979,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                           <div key={invId} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 8px', borderRadius: '6px', border: '1px solid rgba(0,212,126,0.4)', background: 'rgba(0,212,126,0.06)', marginBottom: '3px' }}>
                                             <span style={{ fontSize: '10px', color: '#7A9BB8', width: '14px' }}>{idx + 1}.</span>
                                             <span style={{ fontSize: '12px', fontWeight: '500', color: '#00D47E', flex: 1 }}>{sel.partner_name || '—'}</span>
-                                            <span style={{ fontSize: '10px', color: '#7A9BB8' }}>${(sel.remaining_usd || 0).toFixed(0)} rem</span>
+                                            <span style={{ fontSize: '10px', color: '#7A9BB8' }}>{fmtMoney(outstandingOwn(sel), sel.currency || 'RSD')} rem</span>
                                             <button style={{ background: 'none', border: 'none', color: '#FF5B5A', fontSize: '13px', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}
                                               onClick={e => { e.stopPropagation(); updateRow(p.id, { override_linked_invoice_ids: row.override_linked_invoice_ids.filter(x => x !== invId), status: row.override_linked_invoice_ids.length <= 1 ? 'pending' as RowStatus : 'accepted' as RowStatus }) }}>×</button>
                                           </div>
@@ -1976,7 +2009,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                     const hidden = openInvoices.filter(inv =>
                                       !(row.override_linked_invoice_ids || []).includes(inv.id)
                                       && freeForRow(
-                                        { id: inv.id, remaining: inv.remaining_usd || 0 } as OpenInvoice,
+                                        { id: inv.id, remaining: inv.remaining_rsd || 0 } as OpenInvoice,
                                         claimRows, p.id).exhausted).length
                                     if (hidden === 0) return null
                                     return (
@@ -2007,22 +2040,20 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                       })
                                       .filter(inv => !isHiddenForRow(
                                         freeForRow(
-                                          { id: inv.id, remaining: inv.remaining_usd || 0 } as OpenInvoice,
+                                          { id: inv.id, remaining: inv.remaining_rsd || 0 } as OpenInvoice,
                                           claimRows, p.id),
                                         (row.override_linked_invoice_ids || []).includes(inv.id),
                                         !!showTaken[p.id]))
                                       .map(inv => {
                                         const selectedIds = row.override_linked_invoice_ids || []
                                         const isChecked = selectedIds.includes(inv.id)
-                                        const remOrig = inv.currency !== 'USD' && (inv.exchange_rate || 0) > 0
-                                          ? ((inv.remaining_usd || 0) * inv.exchange_rate).toFixed(0)
-                                          : null
+                                        const remOwn = outstandingOwn(inv)
                                         const orderNum = isChecked ? selectedIds.indexOf(inv.id) + 1 : null
                                         // What other rows of this batch have left of it. The asking
                                         // row is excluded, so ticking an invoice never makes it look
                                         // unavailable to the row that just ticked it.
                                         const free = freeForRow(
-                                          { id: inv.id, remaining: inv.remaining_usd || 0 } as OpenInvoice,
+                                          { id: inv.id, remaining: inv.remaining_rsd || 0 } as OpenInvoice,
                                           claimRows, p.id)
                                         const taken = free.exhausted && !isChecked
                                         const notice = claimNotice(free, claimRowLabel)
@@ -2058,9 +2089,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                               </div>
                                             </div>
                                             <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
-                                              <div style={{ fontSize: '11px', fontWeight: '600', color: '#DCE9F6' }}>{(inv.amount || 0).toLocaleString()} {inv.currency}</div>
-                                              <div style={{ fontSize: '10px', color: (inv.remaining_usd || 0) > 0.01 ? '#FF5B5A' : '#00D47E', marginTop: '1px' }}>
-                                                Rem: {remOrig ? `${remOrig} ${inv.currency}` : `$${(inv.remaining_usd || 0).toFixed(2)}`}
+                                              <div style={{ fontSize: '11px', fontWeight: '600', color: '#DCE9F6' }}>{fmtMoney(inv.amount || 0, inv.currency || 'RSD')}</div>
+                                              <div style={{ fontSize: '10px', color: remOwn > 0.01 ? '#FF5B5A' : '#00D47E', marginTop: '1px' }}>
+                                                Rem: {fmtMoney(remOwn, inv.currency || 'RSD')}
                                               </div>
                                             </div>
                                           </div>
@@ -2080,7 +2111,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                               {(row.override_linked_invoice_ids?.length > 0) && (
                                 <div style={{ ...s.aiNotes, background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, marginTop: '8px' }}>
                                   💳 Will close {row.override_linked_invoice_ids.length} invoice{row.override_linked_invoice_ids.length > 1 ? 's' : ''} sequentially ·
-                                  Total rem: <strong>${row.override_linked_invoice_ids.reduce((s, id) => { const inv = openInvoices.find(i => i.id === id); return s + (inv?.remaining_usd || 0) }, 0).toFixed(2)}</strong>
+                                  Total rem: <strong>{fmtRSD(row.override_linked_invoice_ids.reduce((s, id) => { const inv = openInvoices.find(i => i.id === id); return s + (inv?.remaining_rsd || 0) }, 0))}</strong>
                                 </div>
 
                               )}
@@ -2139,11 +2170,10 @@ export default function BulkImport({ onClose, onImported }: Props) {
                               <SplitEditor
                                 parent={{
                                   amount: (p.debit || 0) > 0 ? (p.debit || 0) : (p.credit || 0),
-                                  // Worked out at post time from the official
-                                  // rate for the day, so not known here. The
-                                  // lines balance in the currency the bank
+                                  // The book figures are worked out at post
+                                  // time from the official rate for the day.
+                                  // The lines balance in the currency the bank
                                   // moved, which is the figure on screen.
-                                  amount_usd: null,
                                   currency: p.currency || undefined,
                                 }}
                                 lines={row.override_pl_splits}
@@ -2410,7 +2440,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                         style={{ ...s.editInput, flex: 1 }}
                                         value={row.override_cf_next_month_est}
                                         onChange={e => updateRow(p.id, { override_cf_next_month_est: e.target.value })}
-                                        placeholder={`Auto: ${(p.debit || p.credit || 0).toLocaleString()}`}
+                                        placeholder={`Auto: ${fmtNum(p.debit || p.credit || 0)}`}
                                       />
                                       {!row.override_cf_next_month_est && (
                                         <button
@@ -2426,7 +2456,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                           ? ((p.debit || p.credit || 0) / 3).toFixed(2)
                                           : row.override_cf_frequency === 'yearly'
                                           ? ((p.debit || p.credit || 0) / 12).toFixed(2)
-                                          : (p.debit || p.credit || 0).toLocaleString()} {p.currency}/mo
+                                          : fmtNum(p.debit || p.credit || 0)} {p.currency}/mo
                                       </div>
                                     )}
                                   </div>

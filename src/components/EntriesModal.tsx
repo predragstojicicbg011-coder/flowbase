@@ -3,6 +3,8 @@ import { supabase } from '../supabase'
 import TransactionDialog from './TransactionDialog'
 import InvoiceDialog from './InvoiceDialog'
 import { byDateDesc } from '../services/expenseTree'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { fmtMoney } from '../utils/formatters'
 
 // ── Entries modal ───────────────────────────────────────────────────────────
 //
@@ -47,7 +49,9 @@ export interface EntryItem {
   note?: string | null
   amount: number
   currency: string
-  amountUsd?: number | null
+  /** The book figures. The row prints the one for the display currency. */
+  amount_rsd?: number | null
+  amount_eur?: number | null
   badges?: EntryBadge[]
   edit: EditTarget
 }
@@ -107,11 +111,11 @@ export async function buildEntryItems(
   const [tx, inv] = await Promise.all([
     txIds.length === 0 ? Promise.resolve({ data: [], error: null }) : supabase
       .from('transactions')
-      .select('id, transaction_date, amount, amount_usd, currency, pl_category, department, expense_description, cf_type, note, partners(name)')
+      .select('id, transaction_date, amount, amount_rsd, amount_eur, currency, pl_category, department, expense_description, cf_type, note, partners(name)')
       .in('id', txIds),
     invIds.length === 0 ? Promise.resolve({ data: [], error: null }) : supabase
       .from('invoices')
-      .select('id, invoice_date, invoice_number, amount, amount_usd, currency, pl_category, department, expense_description, note, partners(name)')
+      .select('id, invoice_date, invoice_number, amount, amount_rsd, amount_eur, currency, pl_category, department, expense_description, note, partners(name)')
       .in('id', invIds),
   ])
   if (tx.error) throw tx.error
@@ -129,7 +133,8 @@ export async function buildEntryItems(
       note: r.note,
       amount: r.amount,
       currency: r.currency,
-      amountUsd: r.amount_usd,
+      amount_rsd: r.amount_rsd,
+      amount_eur: r.amount_eur,
       badges: r.cf_type && CF_BADGES[r.cf_type] ? [CF_BADGES[r.cf_type]] : [],
       edit: { table: 'transactions' as const, id: r.id },
     })),
@@ -141,7 +146,8 @@ export async function buildEntryItems(
       note: r.note,
       amount: r.amount,
       currency: r.currency,
-      amountUsd: r.amount_usd,
+      amount_rsd: r.amount_rsd,
+      amount_eur: r.amount_eur,
       badges: [INVOICE_BADGE(r.invoice_number || 'Invoice')],
       edit: { table: 'invoices' as const, id: r.id },
     })),
@@ -238,6 +244,8 @@ export function EntryRow({ item, onEdit, busy }: {
   onEdit: (target: EditTarget) => void
   busy?: boolean
 }) {
+  const { currency, pick, format } = useDisplayCurrency()
+  const book = pick(item)
   return (
     <div style={em.txRow}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -259,19 +267,18 @@ export function EntryRow({ item, onEdit, busy }: {
           </div>
         )}
       </div>
-      {/* USD leads, because the total in the header is USD and this column has
-          to be the thing that adds up to it. With the original currency bold
-          instead, the eye sums 345,492 + 12,436 RSD and reads the header as
-          wrong. The original amount stays, one line down. */}
+      {/* The display-currency figure leads, because the total in the header
+          is in it and this column has to be the thing that adds up to it.
+          With the original currency bold instead, the eye sums 1.886 EUR +
+          12.436 RSD and reads the header as wrong. The original amount stays,
+          one line down, when it is in another currency. */}
       <div style={{ textAlign: 'right', flexShrink: 0, marginRight: '12px' }}>
         <div style={{ fontSize: '13px', fontWeight: '600', color: '#FF5B5A', fontFamily: "'DM Mono', monospace" }}>
-          {item.amountUsd != null
-            ? `$${item.amountUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-            : `${item.amount.toLocaleString()} ${item.currency}`}
+          {book != null ? format(book) : fmtMoney(item.amount, item.currency)}
         </div>
-        {item.currency !== 'USD' && item.amountUsd != null && (
+        {item.currency !== currency && book != null && (
           <div style={{ fontSize: '11px', color: '#7A9BB8', fontFamily: "'DM Mono', monospace" }}>
-            {item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.currency}
+            {fmtMoney(item.amount, item.currency)}
           </div>
         )}
       </div>

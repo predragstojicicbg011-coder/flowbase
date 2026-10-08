@@ -19,8 +19,8 @@
 // ── An unknown rate is not zero ─────────────────────────────────────────────
 //
 // With no benchmark recorded, the monthly interest is UNKNOWN, and everything
-// here returns null or an empty schedule rather than a figure. A €50,000
-// obligation showing €0.00 of interest reads as a cheap line of credit; one
+// here returns null or an empty schedule rather than a figure. A 50.000 EUR
+// obligation showing 0,00 EUR of interest reads as a cheap line of credit; one
 // showing "—" reads as a question, which is what it is.
 
 export interface RateReset {

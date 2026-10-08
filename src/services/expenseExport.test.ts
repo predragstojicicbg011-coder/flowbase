@@ -99,10 +99,10 @@ describe('summaryRows', () => {
 
 describe('entryRows', () => {
   const entries: PlEntry[] = [
-    { id: 'a', pl_date: '2026-03-01', amount_usd: 100, source: 'transaction',
+    { id: 'a', pl_date: '2026-03-01', amount_rsd: 10100, amount_eur: 86.18, source: 'transaction',
       pl_category: 'Ops', pl_subcategory: 'Telecom', department: 'Admin',
       dept_subcategory: 'Office', expense_description: 'Telekom' },
-    { id: 'b', pl_date: '2026-05-20', amount_usd: 250, source: 'invoice',
+    { id: 'b', pl_date: '2026-05-20', amount_rsd: 29300, source: 'invoice',
       pl_category: 'Ops', pl_subcategory: 'Telecom', department: 'Admin',
       dept_subcategory: 'Office', expense_description: 'Telekom' },
   ]
@@ -133,10 +133,10 @@ describe('entryRows', () => {
     const rows = entryRows(entries, detail)
     const missing = rows.find(r => r.Date === '2026-05-20')!
     expect(missing.Partner).toBe('')
-    expect(missing['Amount USD']).toBe(250)
+    expect(missing['Amount RSD']).toBe(29300)
   })
 
-  it('leaves the original amount blank rather than writing the USD figure twice', () => {
+  it('leaves the original amount blank rather than writing the book figure twice', () => {
     expect(entryRows(entries, detail).find(r => r.Partner === '')!.Amount).toBe('')
   })
 
@@ -144,12 +144,18 @@ describe('entryRows', () => {
     const r = entryRows(entries, detail).find(r => r.Partner === 'Telekom Srbija')!
     expect(r.Currency).toBe('RSD')
     expect(r.Amount).toBe(10100)
-    expect(r['Amount USD']).toBe(100)
+    expect(r['Amount RSD']).toBe(10100)
+    expect(r['Amount EUR']).toBe(86.18)
   })
 
-  it('treats a missing amount_usd as zero rather than writing nothing', () => {
-    const rows = entryRows([{ ...entries[0], amount_usd: null }], new Map())
-    expect(rows[0]['Amount USD']).toBe(0)
+  it('treats a missing amount_rsd as zero rather than writing nothing', () => {
+    const rows = entryRows([{ ...entries[0], amount_rsd: null }], new Map())
+    expect(rows[0]['Amount RSD']).toBe(0)
+  })
+
+  it('leaves Amount EUR blank, not zero, where the row has no EUR figure yet', () => {
+    const r = entryRows(entries, detail).find(r => r.Date === '2026-05-20')!
+    expect(r['Amount EUR']).toBe('')
   })
 })
 
@@ -159,6 +165,7 @@ describe('preambleRows', () => {
     total: 1000, prior: 800, excluded: 50, adjusted: 950,
     unassigned: 20, paretoLines: 7, entryCount: 1137,
     generatedAt: '2026-09-21 10:00',
+    currency: 'RSD' as const,
   }
 
   it('leads with what the file is', () => {
@@ -172,7 +179,14 @@ describe('preambleRows', () => {
   })
 
   it('computes the change rather than asking the caller for it', () => {
-    expect(preambleRows(facts).find(r => r.Field === 'Change (USD)')?.Value).toBe(200)
+    expect(preambleRows(facts).find(r => r.Field === 'Change (RSD)')?.Value).toBe(200)
+  })
+
+  it('labels the totals with the currency they were summed in', () => {
+    const fields = preambleRows({ ...facts, currency: 'EUR' }).map(r => r.Field)
+    expect(fields).toContain('Total expenses (EUR)')
+    expect(fields).toContain('Change (EUR)')
+    expect(fields.some(f => f.includes('RSD'))).toBe(false)
   })
 
   it('describes every sheet the workbook holds', () => {

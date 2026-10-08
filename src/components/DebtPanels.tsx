@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, createContext, useContext } from 'react'
+import { fmtMoney } from '../utils/formatters'
 import { C, deck, useWidth, Empty, TipHead, TipRow, type Tip } from './chartChrome'
 import { niceMax, axisTicks, shortMoney, monthLabel } from '../services/expenseCharts'
 import {
@@ -17,7 +18,7 @@ import {
 //
 // The balance panel is the one that earns the page. An amortising book slopes
 // gently to zero; a revolving book sits flat and then falls off in a single
-// month, and that month is when €50,000 has to be in the bank. No table of
+// month, and that month is when the whole principal has to be in the bank. No table of
 // instalments shows that.
 //
 // ── Two colour pairs, each meaning one thing everywhere ─────────────────────
@@ -40,10 +41,23 @@ const INTEREST = '#C08020'
 const ANNUITY = '#2B9C74'
 const REVOLVING = '#B25DC0'
 
-const money = (n: number) =>
-  '€' + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
-const money2 = (n: number) =>
-  '€' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+/**
+ * The currency every figure here is in — the one the page converted the
+ * credits into before handing them over. The panels add instalments of
+ * several credits together, so they can only be handed figures that are
+ * already in one currency; they print its code, never assume one.
+ */
+const DebtCurrency = createContext<string>('RSD')
+
+/** The formatters, in the panels' currency. Magnitudes: the sign is the panel's. */
+function useMoney() {
+  const currency = useContext(DebtCurrency)
+  return {
+    money: (n: number) => fmtMoney(Math.abs(n), currency, 0),
+    money2: (n: number) => fmtMoney(Math.abs(n), currency, 2),
+    short: (n: number) => shortMoney(n, currency),
+  }
+}
 
 type Tab = 'due' | 'balance' | 'credits'
 type Horizon = 12 | 24 | 0
@@ -69,6 +83,8 @@ export interface DebtPanelsProps {
   }[]
   /** How many revolving lines carry no rate, so the charts can say so. */
   unpriced: number
+  /** The currency every figure above is in. RSD when not said. */
+  currency?: string
   /** Which panel opens. Defaults to what falls due, which is the near question. */
   initialTab?: Tab
 }
@@ -104,6 +120,7 @@ export default function DebtPanels(p: DebtPanelsProps) {
   const active = TABS.find(t => t.id === tab)!
 
   return (
+    <DebtCurrency.Provider value={p.currency || 'RSD'}>
     <div style={{ marginTop: '26px' }}>
       <Figures f={figures} balance={balance} unpriced={p.unpriced} span={span} />
 
@@ -169,6 +186,7 @@ export default function DebtPanels(p: DebtPanelsProps) {
         </div>
       </div>
     </div>
+    </DebtCurrency.Provider>
   )
 }
 
@@ -180,6 +198,7 @@ function Figures({ f, balance, unpriced, span }: {
   unpriced: number
   span: number
 }) {
+  const { money } = useMoney()
   const now = balance.length > 0 ? f.openingBalance : 0
   const cards = [
     {
@@ -234,6 +253,7 @@ function Figures({ f, balance, unpriced, span }: {
 function DueChart({ rows, w, onTip }: {
   rows: DueRow[]; w: number; onTip: (t: Tip) => void
 }) {
+  const { money2, short } = useMoney()
   const H = 290
   const PAD = { l: 58, r: 18, t: 16, b: 38 }
   const iw = Math.max(w - PAD.l - PAD.r, 10)
@@ -257,7 +277,7 @@ function DueChart({ rows, w, onTip }: {
         <g key={t}>
           <line x1={PAD.l} x2={w - PAD.r} y1={y(t)} y2={y(t)} stroke={C.grid} strokeWidth="1" />
           <text x={PAD.l - 9} y={y(t) + 3.5} textAnchor="end" fontSize="10" fill={C.faint}>
-            {shortMoney(t).replace('$', '€')}
+            {short(t)}
           </text>
         </g>
       ))}
@@ -311,6 +331,7 @@ function DueChart({ rows, w, onTip }: {
 function BalanceChart({ points, w, onTip }: {
   points: BalancePoint[]; w: number; onTip: (t: Tip) => void
 }) {
+  const { money2, short } = useMoney()
   const H = 290
   const PAD = { l: 58, r: 18, t: 16, b: 38 }
   const iw = Math.max(w - PAD.l - PAD.r, 10)
@@ -343,7 +364,7 @@ function BalanceChart({ points, w, onTip }: {
         <g key={t}>
           <line x1={PAD.l} x2={w - PAD.r} y1={y(t)} y2={y(t)} stroke={C.grid} strokeWidth="1" />
           <text x={PAD.l - 9} y={y(t) + 3.5} textAnchor="end" fontSize="10" fill={C.faint}>
-            {shortMoney(t).replace('$', '€')}
+            {short(t)}
           </text>
         </g>
       ))}
@@ -389,6 +410,7 @@ function BalanceChart({ points, w, onTip }: {
 function CreditsChart({ rows, w, onTip }: {
   rows: ReturnType<typeof byCredit>; w: number; onTip: (t: Tip) => void
 }) {
+  const { money, money2 } = useMoney()
   if (rows.length === 0) return <Empty h={240} text="No credits to compare." />
 
   const ROW = 34

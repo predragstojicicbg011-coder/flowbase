@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { supabase } from '../supabase'
 import { DIALOG, chrome } from './dialogTheme'
+import { toBookAmounts } from '../services/bookAmounts'
+import { fmtRSD } from '../utils/formatters'
 
 // ─── What is in the accounts, and when it was read ──────────────────────────
 //
@@ -18,10 +20,14 @@ import { DIALOG, chrome } from './dialogTheme'
 //
 // The panel shows the date beside the figure, because a reading three weeks
 // old is still the best answer available and its age is part of what it means.
+//
+// The reading is typed in dinars, the currency the books are kept in, and the
+// EUR figure beside it is worked out at the NBS rate of the day it was read.
 
 export default function CashPositionDialog({ onClose, onSaved, current }: {
   onClose: () => void
   onSaved: () => void
+  /** The latest reading, in RSD. */
   current: { amount: number; asOf: string } | null
 }) {
   const today = new Date().toISOString().slice(0, 10)
@@ -44,10 +50,19 @@ export default function CashPositionDialog({ onClose, onSaved, current }: {
     if (!asOf) { setError('Say which day this was read.'); return }
     setSaving(true); setError('')
 
+    let amountEur: number
+    try {
+      amountEur = (await toBookAmounts(parsed as number, 'RSD', asOf)).amount_eur
+    } catch (e: any) {
+      setError(`Not saved: ${e?.message || String(e)}`)
+      setSaving(false)
+      return
+    }
+
     // One reading per day: a second is a correction of the first, not a
     // second fact about it. The unique index says so and this lands on it.
     const { error: upErr } = await supabase.from('cash_positions')
-      .upsert({ as_of: asOf, amount_usd: parsed, note: note.trim() || null },
+      .upsert({ as_of: asOf, amount_rsd: parsed, amount_eur: amountEur, note: note.trim() || null },
         { onConflict: 'as_of' })
     if (upErr) { setError(`Could not save: ${upErr.message}`); setSaving(false); return }
     onSaved()
@@ -80,16 +95,16 @@ export default function CashPositionDialog({ onClose, onSaved, current }: {
                 aria-label="Read on" onChange={e => setAsOf(e.target.value)} />
             </div>
             <div>
-              <div style={s.lbl}>Total, all accounts, USD</div>
+              <div style={s.lbl}>Total, all accounts, RSD</div>
               <input style={s.input} type="number" value={amount} autoFocus
-                aria-label="Total, all accounts, USD"
-                onChange={e => setAmount(e.target.value)} placeholder="612400.00" />
+                aria-label="Total, all accounts, RSD"
+                onChange={e => setAmount(e.target.value)} placeholder="71850000.00" />
             </div>
           </div>
 
           {current && (
             <div style={{ fontSize: '11.5px', color: DIALOG.dim }}>
-              The last reading was ${current.amount.toFixed(2)} on {current.asOf}.
+              The last reading was {fmtRSD(current.amount)} on {current.asOf}.
               {current.asOf === asOf && ' Saving replaces it — one reading per day.'}
             </div>
           )}

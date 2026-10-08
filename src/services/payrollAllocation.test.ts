@@ -88,7 +88,7 @@ describe('the filing rounding adjustment', () => {
 
 describe('what the expense report then shows', () => {
   const asEntry = (r: ReturnType<typeof obligationRows>[number]): PlEntry => ({
-    tx_type: 'invoice_expense', pl_date: '2026-08-31', amount_usd: r.amount,
+    tx_type: 'invoice_expense', pl_date: '2026-08-31', amount_rsd: r.amount,
     pl_category: 'Employee and Labour', pl_subcategory: r.pl_subcategory,
     department: r.department, dept_subcategory: r.dept_subcategory,
     expense_description: r.expense_description,
@@ -96,13 +96,13 @@ describe('what the expense report then shows', () => {
 
   it('leaves nothing under Unassigned', () => {
     const entries = obligationRows(two, 1.11).map(asEntry)
-    const dept = buildTree(entries, 'department')
+    const dept = buildTree(entries, 'department', 'RSD')
     expect(dept.map(n => n.label)).not.toContain(UNASSIGNED)
   })
 
   it('groups an employee onto one line in the department branch', () => {
     const entries = obligationRows(two).map(asEntry)
-    const leaves = buildTree(entries, 'department')
+    const leaves = buildTree(entries, 'department', 'RSD')
       .flatMap(n => n.children).flatMap(n => n.children)
     expect(leaves.map(l => l.label).sort()).toEqual(['Ana Ilić', 'Marko Petrović'])
     expect(leaves.find(l => l.label === 'Ana Ilić')!.amount).toBeCloseTo(870.60, 2)
@@ -110,14 +110,14 @@ describe('what the expense report then shows', () => {
 
   it('still separates the components in the P&L branch', () => {
     const entries = obligationRows(two).map(asEntry)
-    const subs = buildTree(entries, 'pl')[0].children.map(c => c.label).sort()
+    const subs = buildTree(entries, 'pl', 'RSD')[0].children.map(c => c.label).sort()
     expect(subs).toEqual([SUBCATEGORY.employer, SUBCATEGORY.employee, SUBCATEGORY.tax].sort())
   })
 
   it('both branches tie', () => {
     const entries = obligationRows(two, 2.5).map(asEntry)
     const total = (b: 'pl' | 'department') =>
-      buildTree(entries, b).reduce((s, n) => s + n.amount, 0)
+      buildTree(entries, b, 'RSD').reduce((s, n) => s + n.amount, 0)
     expect(total('pl')).toBeCloseTo(total('department'), 6)
   })
 })

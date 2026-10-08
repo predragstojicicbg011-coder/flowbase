@@ -2,6 +2,7 @@ import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ChartDeck } from './ExpenseVisuals'
 import { buildTree, withComparison, monthsIn, type PlEntry, type Branch } from '../services/expenseTree'
+import { DisplayCurrencyProvider } from '../contexts/DisplayCurrencyContext'
 
 // ── Rendering the deck, on every branch ─────────────────────────────────────
 //
@@ -21,7 +22,7 @@ beforeAll(() => {
   }
 })
 
-const e = (o: Partial<PlEntry> & { amount_usd: number }): PlEntry => ({
+const e = (o: Partial<PlEntry> & { amount_rsd: number }): PlEntry => ({
   tx_type: 'expense',
   pl_category: 'Marketing', pl_subcategory: 'Ads',
   department: 'Growth', dept_subcategory: 'Paid', expense_description: 'Meta',
@@ -30,25 +31,25 @@ const e = (o: Partial<PlEntry> & { amount_usd: number }): PlEntry => ({
 })
 
 const ROWS: PlEntry[] = [
-  e({ amount_usd: 12000, amount: 12000, pl_date: '2026-07-10', rev_alloc_type: 'byval', rev_alloc_sg: 9000, rev_alloc_aimfox: 3000, opex_type: 'performance' }),
-  e({ amount_usd: 18000, amount: 18000, pl_date: '2026-08-10', rev_alloc_type: 'byval', rev_alloc_sg: 6000, rev_alloc_aimfox: 12000, opex_type: 'performance' }),
-  e({ amount_usd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', dept_subcategory: 'People', expense_description: 'Payroll', pl_date: '2026-07-28', rev_alloc_type: 'sg100', opex_type: 'opex' }),
-  e({ amount_usd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', dept_subcategory: 'People', expense_description: 'Payroll', pl_date: '2026-08-28', rev_alloc_type: 'sg100', opex_type: 'opex' }),
-  e({ amount_usd: 980, pl_category: 'General Business', pl_subcategory: 'Software', department: 'Admin', dept_subcategory: 'Tools', expense_description: 'Figma', pl_date: '2026-08-03', rev_alloc_type: 'af100', opex_type: 'opex' }),
+  e({ amount_rsd: 12000, amount: 12000, pl_date: '2026-07-10', rev_alloc_type: 'byval', rev_alloc_sg: 9000, rev_alloc_aimfox: 3000, opex_type: 'performance' }),
+  e({ amount_rsd: 18000, amount: 18000, pl_date: '2026-08-10', rev_alloc_type: 'byval', rev_alloc_sg: 6000, rev_alloc_aimfox: 12000, opex_type: 'performance' }),
+  e({ amount_rsd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', dept_subcategory: 'People', expense_description: 'Payroll', pl_date: '2026-07-28', rev_alloc_type: 'sg100', opex_type: 'opex' }),
+  e({ amount_rsd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', dept_subcategory: 'People', expense_description: 'Payroll', pl_date: '2026-08-28', rev_alloc_type: 'sg100', opex_type: 'opex' }),
+  e({ amount_rsd: 980, pl_category: 'General Business', pl_subcategory: 'Software', department: 'Admin', dept_subcategory: 'Tools', expense_description: 'Figma', pl_date: '2026-08-03', rev_alloc_type: 'af100', opex_type: 'opex' }),
 ]
 
 const PRIOR: PlEntry[] = [
-  e({ amount_usd: 4000, amount: 4000, pl_date: '2026-06-10', rev_alloc_type: 'byval', rev_alloc_sg: 2000, rev_alloc_aimfox: 2000, opex_type: 'performance' }),
-  e({ amount_usd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', dept_subcategory: 'People', expense_description: 'Payroll', pl_date: '2026-06-28', rev_alloc_type: 'sg100', opex_type: 'opex' }),
+  e({ amount_rsd: 4000, amount: 4000, pl_date: '2026-06-10', rev_alloc_type: 'byval', rev_alloc_sg: 2000, rev_alloc_aimfox: 2000, opex_type: 'performance' }),
+  e({ amount_rsd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', dept_subcategory: 'People', expense_description: 'Payroll', pl_date: '2026-06-28', rev_alloc_type: 'sg100', opex_type: 'opex' }),
 ]
 
 function deckFor(branch: Branch, rows = ROWS, prior = PRIOR) {
-  const tree = buildTree(rows, branch)
+  const tree = buildTree(rows, branch, 'RSD')
   return (
     <ChartDeck
       branch={branch}
       tree={tree}
-      compared={withComparison(tree, buildTree(prior, branch))}
+      compared={withComparison(tree, buildTree(prior, branch, 'RSD'))}
       months={monthsIn(rows)}
       hidden={new Set()}
       selected={null}
@@ -89,6 +90,27 @@ describe('which panels a branch offers', () => {
     render(deckFor('type'))
     fireEvent.click(screen.getByText('The split'))
     expect(screen.getByText(/lean OPEX/)).toBeInTheDocument()
+  })
+
+  it('prices the split in the display currency the tree was summed in', () => {
+    const { unmount } = render(deckFor('stream'))
+    fireEvent.click(screen.getByText('The split'))
+    expect(screen.getByText(/Social Growth · 29\.800 RSD/)).toBeInTheDocument()
+    unmount()
+
+    // The same rows read in EUR: each row's own amount_eur, a hundredth here.
+    const eur = ROWS.map(r => ({ ...r, amount_eur: (r.amount_rsd as number) / 100 }))
+    const tree = buildTree(eur, 'stream', 'EUR')
+    render(
+      <DisplayCurrencyProvider initial="EUR">
+        <ChartDeck
+          branch="stream" tree={tree}
+          compared={withComparison(tree, buildTree(PRIOR, 'stream', 'EUR'))}
+          months={monthsIn(eur)} hidden={new Set()} selected={null}
+          onSelect={() => {}} periodLabel="2026 YTD" priorLabel="2025 YTD" />
+      </DisplayCurrencyProvider>)
+    fireEvent.click(screen.getByText('The split'))
+    expect(screen.getByText(/Social Growth · 298 EUR/)).toBeInTheDocument()
   })
 
   it('names the streams on the stream branch', () => {
@@ -204,11 +226,11 @@ describe('composition is the branch tree, folded', () => {
 describe('the legend is a control', () => {
   it('opens a line from the legend rather than only naming it', () => {
     const picked: (string | null)[] = []
-    const tree = buildTree(ROWS, 'pl')
+    const tree = buildTree(ROWS, 'pl', 'RSD')
     render(
       <ChartDeck
         branch="pl" tree={tree}
-        compared={withComparison(tree, buildTree(PRIOR, 'pl'))}
+        compared={withComparison(tree, buildTree(PRIOR, 'pl', 'RSD'))}
         months={monthsIn(ROWS)} hidden={new Set()} selected={null}
         onSelect={k => picked.push(k)}
         periodLabel="2026 YTD" priorLabel="2025 YTD" />)

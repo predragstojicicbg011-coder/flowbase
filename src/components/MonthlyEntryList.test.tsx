@@ -1,6 +1,8 @@
 import React from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MonthlyEntryList, type MonthlyEntryRow } from './MonthlyEntryList'
+import { fmtMoney } from '../utils/formatters'
+import { DisplayCurrencyProvider } from '../contexts/DisplayCurrencyContext'
 
 // `EntriesModal` imports the real client for `useEntryEditor`, and the two
 // dialogs it opens drag in half the app. None of it is needed here: this
@@ -9,7 +11,7 @@ jest.mock('../supabase', () => ({ supabase: {} }))
 jest.mock('./TransactionDialog', () => ({ __esModule: true, default: () => null }))
 jest.mock('./InvoiceDialog', () => ({ __esModule: true, default: () => null }))
 
-const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
+const money = (n: number) => fmtMoney(n, 'RSD', 0)
 
 interface Call { table: string; ids: string[] }
 
@@ -40,12 +42,12 @@ function fixture() {
     ['a2', '2026-08-04', 100, 'Software', 'Notion Labs'],
     ['j1', '2026-07-11', 75, 'Video calls', 'Zoom Video'],
   ]
-  const rows: MonthlyEntryRow[] = spec.map(([id, pl_date, amount_usd, expense_description]) =>
-    ({ id, pl_date, amount_usd, expense_description, source: 'transaction' }))
+  const rows: MonthlyEntryRow[] = spec.map(([id, pl_date, amount_rsd, expense_description]) =>
+    ({ id, pl_date, amount_rsd, expense_description, source: 'transaction' }))
   const byId: Record<string, any> = {}
   for (const [id, d, amt, desc, partner] of spec) {
     byId[id] = {
-      id, transaction_date: d, amount: amt, amount_usd: amt, currency: 'USD',
+      id, transaction_date: d, amount: amt, amount_rsd: amt, currency: 'RSD',
       pl_category: 'Opex', department: 'Eng', expense_description: desc,
       cf_type: null, note: null, partners: { name: partner },
     }
@@ -87,13 +89,30 @@ describe('a drill-down grouped by month', () => {
     renderList(rows, byId)
 
     expect(monthHeader('September 2026')).toHaveTextContent('3 entries')
-    expect(monthHeader('September 2026')).toHaveTextContent('$1,500')
+    expect(monthHeader('September 2026')).toHaveTextContent('1.500 RSD')
     expect(monthHeader('August 2026')).toHaveTextContent('2 entries')
-    expect(monthHeader('August 2026')).toHaveTextContent('$1,300')
+    expect(monthHeader('August 2026')).toHaveTextContent('1.300 RSD')
     expect(monthHeader('July 2026')).toHaveTextContent('1 entry')
-    expect(monthHeader('July 2026')).toHaveTextContent('$75')
+    expect(monthHeader('July 2026')).toHaveTextContent('75 RSD')
 
     await waitFor(() => expect(screen.getAllByText('Slack Technologies')).toHaveLength(2))
+  })
+
+  it('totals each month from amount_eur when the viewer reads EUR', async () => {
+    const { rows, byId } = fixture()
+    // Each row's own EUR figure, a hundredth of its dinars here; the one row
+    // with no EUR figure counts as zero.
+    const eurRows = rows.map(r => ({ ...r, amount_eur: r.id === 'j1' ? null : (r.amount_rsd as number) / 100 }))
+    render(
+      <DisplayCurrencyProvider initial="EUR">
+        <MonthlyEntryList
+          rows={eurRows} client={stubClient(byId, [])}
+          onEdit={() => {}} busyId={null} money={n => fmtMoney(n, 'EUR', 0)} />
+      </DisplayCurrencyProvider>)
+    expect(monthHeader('September 2026')).toHaveTextContent('15 EUR')
+    expect(monthHeader('August 2026')).toHaveTextContent('13 EUR')
+    expect(monthHeader('July 2026')).toHaveTextContent('0 EUR')
+    await settle()
   })
 
   it('heads every month before anything at all has been fetched', async () => {
@@ -105,7 +124,7 @@ describe('a drill-down grouped by month', () => {
     const { calls } = renderList(rows, byId)
     expect(calls.flatMap(c => c.ids)).not.toContain('a1')
     expect(monthHeader('August 2026')).toHaveTextContent('2 entries')
-    expect(monthHeader('August 2026')).toHaveTextContent('$1,300')
+    expect(monthHeader('August 2026')).toHaveTextContent('1.300 RSD')
     await settle()
   })
 
@@ -171,9 +190,9 @@ describe('filtering a drill-down', () => {
     type('1200')
 
     await waitFor(() => expect(monthHeader('September 2026')).toHaveTextContent('1 entry'))
-    expect(monthHeader('September 2026')).toHaveTextContent('$1,200')
+    expect(monthHeader('September 2026')).toHaveTextContent('1.200 RSD')
     expect(monthHeader('August 2026')).toHaveTextContent('1 entry')
-    expect(monthHeader('August 2026')).toHaveTextContent('$1,200')
+    expect(monthHeader('August 2026')).toHaveTextContent('1.200 RSD')
     expect(monthHeader('July 2026')).toHaveTextContent('0 entries')
     // An amount lives on the rows the page already holds, so the answer needs
     // no round trip: August's figures moved without August ever being read.
@@ -248,9 +267,9 @@ describe('a drill-down with a month bigger than the fetch cap', () => {
     for (let i = 0; i < 400; i++) {
       const id = `b${String(i).padStart(3, '0')}`
       const d = `2026-09-${String((i % 28) + 1).padStart(2, '0')}`
-      rows.push({ id, pl_date: d, amount_usd: 10, expense_description: 'Ads', source: 'transaction' })
+      rows.push({ id, pl_date: d, amount_rsd: 10, expense_description: 'Ads', source: 'transaction' })
       byId[id] = {
-        id, transaction_date: d, amount: 10, amount_usd: 10, currency: 'USD',
+        id, transaction_date: d, amount: 10, amount_rsd: 10, currency: 'RSD',
         pl_category: 'Opex', department: 'Growth', expense_description: 'Ads',
         cf_type: null, note: null, partners: { name: `Vendor ${i}` },
       }
@@ -264,7 +283,7 @@ describe('a drill-down with a month bigger than the fetch cap', () => {
 
     // The header is the whole month whatever the fetch managed to bring back.
     expect(monthHeader('September 2026')).toHaveTextContent('400 entries')
-    expect(monthHeader('September 2026')).toHaveTextContent('$4,000')
+    expect(monthHeader('September 2026')).toHaveTextContent('4.000 RSD')
 
     await waitFor(() =>
       expect(screen.getByText(/only the 300 most recent could be/)).toBeInTheDocument())

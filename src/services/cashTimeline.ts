@@ -28,6 +28,15 @@
 // balance starting from zero — those read as measurements. The flows are
 // still worth showing, and they are shown.
 
+// ── Which currency ──────────────────────────────────────────────────────────
+//
+// Every figure here is in the viewer's display currency (RSD or EUR). The
+// loader reads each row's own amount_rsd / amount_eur; nothing is converted
+// after it has been summed.
+
+import { fmtMoney } from '../utils/formatters'
+import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
+
 export type MonthKey = string
 
 export interface CashMonth {
@@ -86,6 +95,8 @@ export interface CashInput {
    * the balance was read.
    */
   postedAfterReading?: { inflow: number; outflow: number }
+  /** The currency every figure above is in — for the words, not the sums. */
+  currency: DisplayCurrency
 }
 
 const cents = (n: number): number => Math.round(n * 100) / 100
@@ -198,7 +209,7 @@ export function cashTimeline(input: CashInput): CashTimeline {
   if (trough && (trough.closing as number) < 0) {
     problems.push(
       `On this line the balance goes negative in ${trough.month}, reaching `
-      + `${(trough.closing as number).toFixed(2)}.`)
+      + `${fmtMoney(trough.closing as number, input.currency)}.`)
   }
 
   return {
@@ -216,7 +227,8 @@ export interface DatedOutflow {
   /** `YYYY-MM-DD`. */
   date: string
   label: string
-  amountUsd: number
+  /** In the display currency. */
+  amount: number
   kind: 'instalment' | 'invoice'
 }
 
@@ -239,11 +251,11 @@ export function datedByMonth(
     const month = (i.date || '').slice(0, 7)
     if (!month || !horizon.has(month)) continue
     if (!out[month]) out[month] = { total: 0, items: [] }
-    out[month].total = cents(out[month].total + i.amountUsd)
+    out[month].total = cents(out[month].total + i.amount)
     out[month].items.push(i)
   }
   for (const m of Object.keys(out)) {
-    out[m].items.sort((a, b) => a.date.localeCompare(b.date) || b.amountUsd - a.amountUsd)
+    out[m].items.sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount)
   }
   return out
 }
@@ -254,7 +266,8 @@ export function datedByMonth(
 export interface CashTx {
   type?: string | null
   tx_subtype?: string | null
-  amount_usd?: number | null
+  amount_rsd?: number | null
+  amount_eur?: number | null
 }
 
 /**
@@ -276,9 +289,11 @@ export interface CashTx {
  * The amount is taken at its size whichever sign it arrives with: the ledger
  * books expenses positive in some places and negative in others, and adding a
  * negative to an outflow makes the month look cheaper than it was.
+ *
+ * `currency` picks which book figure is read; a row with none is no movement.
  */
-export function cashMovement(tx: CashTx): { inflow: number; outflow: number } {
-  const amount = Math.abs(Number(tx.amount_usd) || 0)
+export function cashMovement(tx: CashTx, currency: DisplayCurrency): { inflow: number; outflow: number } {
+  const amount = Math.abs(pickAmount(tx, currency) ?? 0)
   if (!amount) return { inflow: 0, outflow: 0 }
   if (tx.type === 'direct' && tx.tx_subtype === 'revenue') return { inflow: amount, outflow: 0 }
   if (tx.type === 'direct' && tx.tx_subtype === 'expense') return { inflow: 0, outflow: amount }

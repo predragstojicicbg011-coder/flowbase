@@ -592,7 +592,9 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
                 onChange={e => setEdit({ ...edit, currency: e.target.value })}>
                 <option value="EUR">EUR</option>
                 <option value="RSD">RSD</option>
-                <option value="USD">USD</option>
+                {/* A payroll converts contract terms at the EUR rate only; USD stays for a term written before. */}
+
+                {edit.currency === 'USD' && <option value="USD">USD</option>}
               </select>
             </Field>
             <Field label="Contracted net" hint="The total on the payslip, seniority included">
@@ -640,7 +642,9 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
             onChange={e => setDraft({ ...draft, currency: e.target.value })}>
             <option value="EUR">EUR</option>
             <option value="RSD">RSD</option>
-            <option value="USD">USD</option>
+            {/* A payroll converts contract terms at the EUR rate only; USD stays for a term written before. */}
+
+            {draft.currency === 'USD' && <option value="USD">USD</option>}
           </select>
         </Field>
         <Field label="Contracted net" hint="The total on the payslip, seniority included">
@@ -935,7 +939,9 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
                 onChange={e => setDraft({ ...draft, currency: e.target.value })}>
                 <option value="RSD">RSD</option>
                 <option value="EUR">EUR</option>
-                <option value="USD">USD</option>
+                {/* A payroll converts contract terms at the EUR rate only; USD stays for a term written before. */}
+
+                {draft.currency === 'USD' && <option value="USD">USD</option>}
               </select>
             )}
           </div>

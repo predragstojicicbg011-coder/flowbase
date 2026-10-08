@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
-import { getRate, convertToUSD } from '../services/currencyService'
 import { DIALOG } from './dialogTheme'
 import { fetchAllPartners } from '../services/allPartners'
-import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
+import { DOCUMENT_CURRENCIES, bookAmountsAtRate, getBookRates, rateFor, type BookAmounts } from '../services/bookAmounts'
+import { fmtMoney, fmtNum } from '../utils/formatters'
 
 interface Props {
   onClose: () => void
@@ -55,16 +55,30 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
 
   // Step 3
   const [amount, setAmount] = useState('')
+  // RSD per 1 unit of `currency`, and RSD per 1 EUR — fetched from NBS or
+  // typed by hand. On a EUR entry the two are the same number.
   const [exRate, setExRate] = useState('')
+  const [eurRate, setEurRate] = useState('')
   const [rateSource, setRateSource] = useState('')
-  const [rateIsFallback, setRateIsFallback] = useState(false)
+  const [rateMissing, setRateMissing] = useState(false)
   const [fetchingRate, setFetchingRate] = useState(false)
 
-  const usdAmount = (() => {
-    const a = parseFloat(amount) || 0
-    const r = parseFloat(exRate) || 0
-    return convertToUSD(a, currency, r)
+  const effectiveExRate = currency === 'RSD' ? '1' : exRate
+  const effectiveEurRate = currency === 'EUR' ? exRate : eurRate
+
+  // The four stored columns, from the rates in hand. A missing rate is an
+  // error to show, never a figure to guess.
+  const book: { amounts: BookAmounts | null; error: string } = (() => {
+    const a = parseFloat(amount)
+    if (!currency || !(a > 0)) return { amounts: null, error: '' }
+    try {
+      return { amounts: bookAmountsAtRate(a, currency, parseFloat(effectiveExRate), parseFloat(effectiveEurRate)), error: '' }
+    } catch (err) {
+      return { amounts: null, error: err instanceof Error ? err.message : String(err) }
+    }
   })()
+  const amountRsd = book.amounts?.amount_rsd ?? 0
+  const amountEur = book.amounts?.amount_eur ?? 0
 
   // ── Validation ─────────────────────────────────────────
   const runValidation = () => {
@@ -75,11 +89,11 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
     if (!txDate) e.txDate = 'Transaction date is required'
     if (!periodMonth) e.periodMonth = 'Period month is required'
     if (!amount || parseFloat(amount) <= 0) e.amount = 'Amount must be greater than 0'
-    if (currency && currency !== 'USD' && (!exRate || parseFloat(exRate) <= 0)) e.exRate = 'Exchange rate is required'
+    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Exchange rate is required'
     return e
   }
 
-  useEffect(() => { setErrors(runValidation()) }, [companyId, bankId, currency, txDate, periodMonth, amount, exRate]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setErrors(runValidation()) }, [companyId, bankId, currency, txDate, periodMonth, amount, exRate, eurRate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const load = async () => {
@@ -130,6 +144,7 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
       setNote(passthrough.note || '')
       setAmount(passthrough.amount?.toString() || '')
       setExRate(passthrough.exchange_rate?.toString() || '')
+      setEurRate(passthrough.eur_rate?.toString() || '')
     }
   }, [passthrough])
 
@@ -155,20 +170,22 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
     return (stepFields[n] || []).some(f => !!errors[f])
   }
 
+  // Both rates for the transaction date. An RSD entry still needs the EUR
+  // rate, for amount_eur.
   const fetchRate = async () => {
-    if (!currency || currency === 'USD') { setExRate('1'); setRateSource('N/A'); setRateIsFallback(false); return }
+    if (!currency) return
     setFetchingRate(true)
     try {
-      const rateData = await getRate(currency, txDate, false)
-      setExRate(rateData.rate.toString())
-      setRateSource(rateData.source)
-      setRateIsFallback(rateData.isFallback)
+      const rates = await getBookRates(txDate)
+      setExRate(String(rateFor(currency, rates)))
+      setEurRate(String(rates.eurRate))
+      setRateSource(rates.source)
+      setRateMissing(false)
     } catch (err) {
-      // Vidi komentar u InvoiceDialog — hardkodovani kursevi su uklonjeni.
-      console.error('[PassthroughDialog] getRate neuspesan:', err)
-      setExRate('')
-      setRateSource('⚠ No official rate — enter it manually')
-      setRateIsFallback(true)
+      // RateUnavailableError: say so in its own words and let the person type
+      // the rate. Nothing is guessed.
+      setRateSource(err instanceof Error ? `${err.message} — enter it manually` : 'No official rate — enter it manually')
+      setRateMissing(true)
     }
     setFetchingRate(false)
   }
@@ -176,13 +193,16 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
   const stepTitles = ['Basic information', 'Direction & pairing', 'Amount & review']
 
   const selectedPair = unpaired.find(p => p.id === pairId)
-  const balanceDiff = selectedPair ? Math.abs((selectedPair.amount_usd || 0) - usdAmount) : null
+  // Balanced is decided in the book currency: both sides in RSD.
+  const balanceDiff = selectedPair ? Math.abs((selectedPair.amount_rsd || 0) - amountRsd) : null
   const isBalanced = balanceDiff !== null && balanceDiff < 0.01
 
   const handlePost = async () => {
     setTouched({ companyId: true, bankId: true, currency: true, txDate: true, periodMonth: true, amount: true, exRate: true })
     const e = runValidation()
     if (Object.keys(e).length > 0) { setShowValidationSummary(true); return }
+    const booked = book.amounts
+    if (!booked) { setSaveError(book.error || 'Exchange rate is required'); return }
 
     setSaving(true); setSaveError('')
 
@@ -202,7 +222,8 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
         company_id: companyId || null, bank_id: bankId || null, partner_id: finalPartnerId || null,
         direction, pair_id: pairId || null, period_month: periodMonth,
         currency, amount: parseFloat(amount),
-        exchange_rate: parseFloat(exRate) || null, amount_usd: usdAmount,
+        exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
+        amount_rsd: booked.amount_rsd, amount_eur: booked.amount_eur,
         transaction_date: txDate, statement_number: statement || null,
         note: note || null, pl_impact: false,
         status: pairId ? 'paired' : 'unpaired',
@@ -231,9 +252,9 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
         const { error: pairErr } = await supabase.from('passthrough')
           .update({ pair_id: ptId, status: 'paired' }).eq('id', pairId)
         if (pairErr) throw new PostFailure('the pairing', pairErr.message)
-        const { data: pairData, error: readErr } = await supabase.from('passthrough').select('amount_usd').eq('id', pairId).single()
+        const { data: pairData, error: readErr } = await supabase.from('passthrough').select('amount_rsd').eq('id', pairId).single()
         if (readErr) throw new PostFailure('the pairing', readErr.message)
-        if (pairData && Math.abs(pairData.amount_usd - usdAmount) < 0.01) {
+        if (pairData && Math.abs((pairData.amount_rsd || 0) - booked.amount_rsd) < 0.01) {
           const { error: balA } = await supabase.from('passthrough').update({ status: 'balanced' }).eq('id', pairId)
           if (balA) throw new PostFailure('the balanced status', balA.message)
           const { error: balB } = await supabase.from('passthrough').update({ status: 'balanced' }).eq('id', ptId)
@@ -455,19 +476,19 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                           <div style={{ fontSize: '11px', color: DIALOG.dim, marginTop: '2px' }}>{p.transaction_date} · Period: {p.period_month} · {p.banks?.name}</div>
                         </div>
                         <div style={{ textAlign: 'right' as const }}>
-                          <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.text }}>{(p.amount || 0).toLocaleString()} {p.currency}</div>
-                          <div style={{ fontSize: '11px', color: DIALOG.dim }}>${(p.amount_usd || 0).toFixed(2)}</div>
+                          <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.text }}>{fmtMoney(p.amount || 0, p.currency)}</div>
+                          <div style={{ fontSize: '11px', color: DIALOG.dim }}>{fmtMoney(p.amount_rsd || 0, 'RSD')}</div>
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
 
-                {pairId && usdAmount > 0 && (
+                {pairId && amountRsd > 0 && (
                   <div style={{ ...s.balanceBox, marginTop: '12px', ...(isBalanced ? s.balanceBoxOk : s.balanceBoxWarn) }}>
                     {isBalanced
                       ? <>✅ Amounts match — pair will be marked as <strong>balanced</strong>.</>
-                      : <>⚠️ Difference of <strong>${balanceDiff?.toFixed(2)}</strong>. Pair will be <strong>paired but not balanced</strong>.</>
+                      : <>⚠️ Difference of <strong>{fmtMoney(balanceDiff ?? 0, 'RSD')}</strong>. Pair will be <strong>paired but not balanced</strong>.</>
                     }
                   </div>
                 )}
@@ -486,7 +507,9 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
               <div style={s.section}>
                 <div style={s.sectionTitle}>Amount & currency conversion</div>
                 <div style={{ ...s.infoBox, marginBottom: '12px' }}>
-                  {currency === 'USD' ? 'No conversion needed — amount is already in USD.' : `Rate fetched on transaction date (${txDate}).`}
+                  {currency === 'RSD'
+                    ? `Booked in RSD; the EUR rate on the transaction date (${txDate}) gives the EUR figure.`
+                    : `NBS middle rate on the transaction date (${txDate}), in RSD per 1 ${currency || 'unit'}.`}
                 </div>
                 <div style={s.row2}>
                   <div style={s.field}>
@@ -496,29 +519,41 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                     {fieldErr('amount') && <span style={s.errorMsg}>{fieldErr('amount')}</span>}
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Exchange rate {currency !== 'USD' && <span style={s.req}>*</span>}</label>
+                    <label style={s.lbl}>{currency && currency !== 'RSD' ? `RSD per 1 ${currency}` : 'RSD per 1 EUR'} <span style={s.req}>*</span></label>
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={exRate}
-                        onChange={e => { setExRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                        placeholder={currency === 'USD' ? 'N/A' : 'Click Fetch'} />
-                      {currency !== 'USD' && <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate}>{fetchingRate ? '...' : 'Fetch'}</button>}
+                      {currency && currency !== 'RSD' ? (
+                        <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={exRate}
+                          onChange={e => { setExRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
+                          placeholder="Click Fetch" />
+                      ) : (
+                        <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={eurRate}
+                          onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
+                          placeholder="Click Fetch" />
+                      )}
+                      <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate || !currency}>{fetchingRate ? '...' : 'Fetch'}</button>
                     </div>
-                    {rateSource && <div style={{ fontSize: '11px', color: rateIsFallback ? '#FF5B5A' : DIALOG.blue, fontWeight: rateIsFallback ? 600 : 400, marginTop: '4px' }}>Source: {rateSource}</div>}
+                    {currency === 'USD' && (
+                      <input type="number" style={{ ...s.input, marginTop: '6px' }} value={eurRate}
+                        onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
+                        placeholder="RSD per 1 EUR" aria-label="RSD per 1 EUR" />
+                    )}
+                    {rateSource && <div style={{ fontSize: '11px', color: rateMissing ? '#FF5B5A' : DIALOG.blue, fontWeight: rateMissing ? 600 : 400, marginTop: '4px' }}>Source: {rateSource}</div>}
                     {fieldErr('exRate') && <span style={s.errorMsg}>{fieldErr('exRate')}</span>}
                   </div>
                 </div>
                 <div style={s.convRow}>
-                  <div><div style={s.convLabel}>Original amount</div><div style={s.convVal}>{amount ? `${parseFloat(amount).toLocaleString()} ${currency}` : '—'}</div></div>
+                  <div><div style={s.convLabel}>Original amount</div><div style={s.convVal}>{amount ? fmtMoney(parseFloat(amount), currency) : '—'}</div></div>
                   <div style={{ fontSize: '20px', color: DIALOG.faint, alignSelf: 'flex-end', paddingBottom: '4px' }}>→</div>
-                  <div><div style={s.convLabel}>USD equivalent</div><div style={{ ...s.convVal, color: DIALOG.blue }}>${usdAmount > 0 ? usdAmount.toFixed(2) : '0.00'}</div></div>
+                  <div><div style={s.convLabel}>RSD (book)</div><div style={{ ...s.convVal, color: DIALOG.blue }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
+                  <div><div style={s.convLabel}>EUR</div><div style={{ ...s.convVal, color: DIALOG.blue }}>{book.amounts ? fmtMoney(amountEur, 'EUR') : '—'}</div></div>
                 </div>
 
                 {/* Balance re-check after amount entered */}
-                {pairId && usdAmount > 0 && selectedPair && (
+                {pairId && amountRsd > 0 && selectedPair && (
                   <div style={{ ...s.balanceBox, marginTop: '12px', ...(isBalanced ? s.balanceBoxOk : s.balanceBoxWarn) }}>
                     {isBalanced
                       ? <>✅ Amounts match — pair will be marked as <strong>balanced</strong>.</>
-                      : <>⚠️ Difference of <strong>${balanceDiff?.toFixed(2)}</strong> with paired entry (${(selectedPair.amount_usd || 0).toFixed(2)}). Will be <strong>paired but not balanced</strong>.</>
+                      : <>⚠️ Difference of <strong>{fmtMoney(balanceDiff ?? 0, 'RSD')}</strong> with paired entry ({fmtMoney(selectedPair.amount_rsd || 0, 'RSD')}). Will be <strong>paired but not balanced</strong>.</>
                     }
                   </div>
                 )}
@@ -560,9 +595,10 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                     ['P&L impact', 'None — cash flow only'],
                   ]},
                   { title: 'Amounts', rows: [
-                    ['Original amount', amount ? `${parseFloat(amount).toLocaleString()} ${currency}` : '—'],
-                    ['Exchange rate', exRate ? `${parseFloat(exRate).toFixed(4)} (${rateSource || 'Manual'})` : 'N/A'],
-                    ['USD equivalent', `$${usdAmount.toFixed(2)}`],
+                    ['Original amount', amount ? fmtMoney(parseFloat(amount), currency) : '—'],
+                    ['Exchange rate', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'Manual'})` : 'N/A'],
+                    ['RSD (book)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
+                    ['EUR', book.amounts ? fmtMoney(amountEur, 'EUR') : '—'],
                   ]},
                 ].map(sec => (
                   <div key={sec.title} style={s.reviewSection}>

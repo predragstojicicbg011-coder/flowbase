@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { SkeletonRows } from '../components/motion'
-import { getRatesForDate } from '../services/currencyService'
+import { getBookRates } from '../services/bookAmounts'
 import { fetchSettings, monthStart, numberFor, ratesFor, type SettingRow } from '../services/payroll/settings'
 import {
   fetchEmployees, fetchContracts, fetchDeductions,
@@ -82,7 +82,7 @@ export default function Payroll() {
   const [payslip, setPayslip] = useState<
     { line: SalaryRunLine; runLabel: string } | null>(null)
 
-  const [rate, setRate] = useState<{ eur: number; usd: number; date: string } | null>(null)
+  const [rate, setRate] = useState<{ eur: number; date: string } | null>(null)
   const [rateError, setRateError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -145,8 +145,8 @@ export default function Payroll() {
   useEffect(() => {
     let cancelled = false
     setRate(null); setRateError(null)
-    getRatesForDate(rateDateFor(month))
-      .then(r => { if (!cancelled) setRate({ eur: r.eurRsdRate, usd: r.usdRsdRate, date: r.date }) })
+    getBookRates(rateDateFor(month))
+      .then(r => { if (!cancelled) setRate({ eur: r.eurRate, date: r.date }) })
       .catch(e => { if (!cancelled) setRateError(e.message || String(e)) })
     return () => { cancelled = true }
   }, [month])
@@ -224,7 +224,7 @@ export default function Payroll() {
     setRecalculating(run.key); setError(null)
     try {
       const context: SaveContext = {
-        companyId, month, exchangeRate: rate?.eur ?? null, usdRate: rate?.usd ?? null,
+        companyId, month, exchangeRate: rate?.eur ?? null, eurRate: rate?.eur ?? null,
         monthHours: fund.monthHours, people: peopleById,
       }
       await saveRun(supabase, run, context)
@@ -553,7 +553,6 @@ export default function Payroll() {
                 people={peopleById}
                 month={month}
                 companyId={companyId}
-                usdRate={rate?.usd ?? null}
                 exchangeRate={rate?.eur ?? null}
                 savedRuns={saved}
                 onPosted={load}

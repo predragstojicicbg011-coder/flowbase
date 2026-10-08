@@ -201,15 +201,15 @@ export function statementLabel(statementNumber: string): string {
  * An invoice's status from what has been allocated against it.
  *
  * The tenth of a percent that used to be written here was a fudge for
- * settlement arithmetic that went through the dollar column and came back
- * rounded. It does not any more — see services/settleInvoice.ts — so the
+ * settlement arithmetic that went through the reporting currency and came
+ * back rounded. It does not any more — see services/settleInvoice.ts — so the
  * tolerance is a para, and the rule is that module's rather than a fourth
  * copy of it.
  */
 export function invoiceStatus(
-  allocated: number, invoiceAmount: number, invoiceAmountUsd?: number | null,
+  allocated: number, invoiceAmount: number, invoiceAmountRsd?: number | null,
 ): 'unpaid' | 'partial' | 'paid' {
-  return settledStatus(invoiceAmount, allocated, invoiceAmountUsd)
+  return settledStatus(invoiceAmount, allocated, invoiceAmountRsd)
 }
 
 /** What a grid row is worth: debit is money out, credit is money in. */

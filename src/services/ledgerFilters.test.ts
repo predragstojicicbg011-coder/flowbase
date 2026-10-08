@@ -12,7 +12,7 @@ const TODAY = '2026-09-19'
 const f = (patch: Partial<FilterState> = {}): FilterState => ({ ...emptyFilters(), ...patch })
 
 const build = (tab: Tab, patch: Partial<FilterState>, partnerIds: string[] = []) =>
-  buildPredicates(tab, f(patch), { today: TODAY, partnerIds })
+  buildPredicates(tab, f(patch), { today: TODAY, partnerIds, currency: 'RSD' })
 
 /** The predicate on a column, or undefined. Order is not part of the contract. */
 const on = (preds: Predicate[], column: string, op?: string) =>
@@ -23,7 +23,7 @@ const ors = (preds: Predicate[]) => preds.filter(p => p.op === 'or').map(p => (p
 describe('an empty filter state', () => {
   it('asks the database for nothing', () => {
     TABS.forEach(tab => {
-      expect(buildPredicates(tab, emptyFilters(), { today: TODAY })).toEqual([])
+      expect(buildPredicates(tab, emptyFilters(), { today: TODAY, currency: 'RSD' })).toEqual([])
     })
   })
 
@@ -101,10 +101,10 @@ describe('a value belonging to another tab', () => {
       ptStatus: 'unpaired', ptDirection: 'in', periodFrom: '2026-01', bankId: 'bank-1',
       department: 'Engineering', plCategory: 'Operating Expenses',
     })
-    expect(buildPredicates('passthrough', leaked, { today: TODAY }).map(p => (p as any).column).sort())
+    expect(buildPredicates('passthrough', leaked, { today: TODAY, currency: 'RSD' }).map(p => (p as any).column).sort())
       .toEqual(['bank_id', 'direction', 'period_month', 'status'])
 
-    const txCols = buildPredicates('transactions', leaked, { today: TODAY }).map(p => (p as any).column)
+    const txCols = buildPredicates('transactions', leaked, { today: TODAY, currency: 'RSD' }).map(p => (p as any).column)
     expect(txCols).toContain('type')
     expect(txCols).toContain('department')
     expect(txCols).not.toContain('calculated_status')
@@ -184,11 +184,20 @@ describe('the date presets', () => {
 })
 
 describe('the amount range', () => {
-  it('filters amount_usd on every tab', () => {
+  it('filters amount_rsd on every tab', () => {
     TABS.forEach(tab => {
       const preds = build(tab, { amountFrom: '100', amountTo: '500' })
-      expect(on(preds, 'amount_usd', 'gte')).toEqual({ op: 'gte', column: 'amount_usd', value: 100 })
-      expect(on(preds, 'amount_usd', 'lte')).toEqual({ op: 'lte', column: 'amount_usd', value: 500 })
+      expect(on(preds, 'amount_rsd', 'gte')).toEqual({ op: 'gte', column: 'amount_rsd', value: 100 })
+      expect(on(preds, 'amount_rsd', 'lte')).toEqual({ op: 'lte', column: 'amount_rsd', value: 500 })
+    })
+  })
+
+  it('filters amount_eur when the viewer reads the books in EUR', () => {
+    TABS.forEach(tab => {
+      const preds = buildPredicates(tab, f({ amountFrom: '100', amountTo: '500' }), { today: TODAY, currency: 'EUR' })
+      expect(on(preds, 'amount_eur', 'gte')).toEqual({ op: 'gte', column: 'amount_eur', value: 100 })
+      expect(on(preds, 'amount_eur', 'lte')).toEqual({ op: 'lte', column: 'amount_eur', value: 500 })
+      expect(on(preds, 'amount_rsd')).toBeUndefined()
     })
   })
 
@@ -201,9 +210,12 @@ describe('the amount range', () => {
 
   it('reads a thousands separator and a zero bound', () => {
     expect(parseAmount('1,250.50')).toBe(1250.5)
+    expect(parseAmount('1.250,50')).toBe(1250.5)
+    expect(parseAmount('1.250')).toBe(1250)
+    expect(parseAmount('1250.5')).toBe(1250.5)
     // Zero is a bound, not an empty box — `>= 0` must survive.
-    expect(on(build('transactions', { amountFrom: '0' }), 'amount_usd', 'gte'))
-      .toEqual({ op: 'gte', column: 'amount_usd', value: 0 })
+    expect(on(build('transactions', { amountFrom: '0' }), 'amount_rsd', 'gte'))
+      .toEqual({ op: 'gte', column: 'amount_rsd', value: 0 })
   })
 })
 
@@ -412,9 +424,9 @@ describe('the chips', () => {
 
   it('reads an amount range in both one-sided forms', () => {
     expect(activeChips('transactions', f({ amountFrom: '100', amountTo: '500' }))[0].label)
-      .toBe('Amount: $100 – $500')
-    expect(activeChips('transactions', f({ amountFrom: '100' }))[0].label).toBe('Amount: ≥ $100')
-    expect(activeChips('transactions', f({ amountTo: '500' }))[0].label).toBe('Amount: ≤ $500')
+      .toBe('Amount: 100 RSD – 500 RSD')
+    expect(activeChips('transactions', f({ amountFrom: '1250' }))[0].label).toBe('Amount: ≥ 1.250 RSD')
+    expect(activeChips('transactions', f({ amountTo: '500' }), {}, 'EUR')[0].label).toBe('Amount: ≤ 500 EUR')
   })
 
   it('spells the enum values out instead of showing the database token', () => {
@@ -436,7 +448,7 @@ describe('the chips', () => {
     const cleared = clearFields(state, dept.clears)
     expect(cleared.department).toBe('')
     expect(cleared.deptSubcategory).toBe('')
-    expect(buildPredicates('transactions', cleared, { today: TODAY })).toEqual([])
+    expect(buildPredicates('transactions', cleared, { today: TODAY, currency: 'RSD' })).toEqual([])
   })
 
   it('removes exactly one filter and leaves the rest standing', () => {
@@ -469,7 +481,7 @@ describe('the chips', () => {
         if (v === '' || v === false) return
         expect(chipFields.has(field)).toBe(true)
       })
-      expect(buildPredicates(tab, everything, { today: TODAY }).length).toBeGreaterThan(0)
+      expect(buildPredicates(tab, everything, { today: TODAY, currency: 'RSD' }).length).toBeGreaterThan(0)
     })
   })
 
@@ -482,7 +494,7 @@ describe('the chips', () => {
     let state = everything
     activeChips('transactions', state).forEach(chip => { state = clearFields(state, chip.clears) })
     expect(activeChips('transactions', state)).toEqual([])
-    expect(buildPredicates('transactions', state, { today: TODAY })).toEqual([])
+    expect(buildPredicates('transactions', state, { today: TODAY, currency: 'RSD' })).toEqual([])
   })
 })
 
@@ -491,7 +503,7 @@ describe('clear all', () => {
     const state = f({ companyId: 'c-1', search: 'figma', txType: 'direct', unclassified: true })
     const cleared = clearTab('transactions', state)
     expect(activeChips('transactions', cleared)).toEqual([])
-    expect(buildPredicates('transactions', cleared, { today: TODAY })).toEqual([])
+    expect(buildPredicates('transactions', cleared, { today: TODAY, currency: 'RSD' })).toEqual([])
   })
 
   it('does not disturb a field the tab does not own', () => {

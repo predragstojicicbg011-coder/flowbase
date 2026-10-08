@@ -152,8 +152,8 @@ const seed = (db: MockDb) => {
     { id: 'tx-2', company_id: 'co-1', transaction_date: '2026-05-15', deleted_at: null },
   ]
   db.rows.invoice_transaction_links = [
-    { id: 'l-1', invoice_id: 'inv-1', transaction_id: 'tx-1', allocated_amount: 100, allocated_amount_usd: 100 },
-    { id: 'l-2', invoice_id: 'inv-2', transaction_id: 'tx-2', allocated_amount: 200, allocated_amount_usd: 200 },
+    { id: 'l-1', invoice_id: 'inv-1', transaction_id: 'tx-1', allocated_amount: 100, allocated_amount_rsd: 100, allocated_amount_eur: 100 },
+    { id: 'l-2', invoice_id: 'inv-2', transaction_id: 'tx-2', allocated_amount: 200, allocated_amount_rsd: 200, allocated_amount_eur: 200 },
   ]
   db.rows.credit_installments = [
     { id: 'i-1', transaction_id: 'tx-1', paid_amount: 100, status: 'paid', paid_date: '2026-01-15' },
@@ -456,15 +456,15 @@ describe('reallocateInvoiceLink', () => {
   beforeEach(() => {
     db = freshDb()
     db.rows.invoice_transaction_links = [
-      { id: 'l-old', invoice_id: 'inv-1', transaction_id: 'tx-old', allocated_amount: 50, allocated_amount_usd: 50 },
-      { id: 'l-other', invoice_id: 'inv-2', transaction_id: 'tx-other', allocated_amount: 70, allocated_amount_usd: 70 },
+      { id: 'l-old', invoice_id: 'inv-1', transaction_id: 'tx-old', allocated_amount: 50, allocated_amount_rsd: 50, allocated_amount_eur: 50 },
+      { id: 'l-other', invoice_id: 'inv-2', transaction_id: 'tx-other', allocated_amount: 70, allocated_amount_rsd: 70, allocated_amount_eur: 70 },
     ]
   })
 
   it('a failed link insert leaves the previous allocation in place', async () => {
     db.errors['invoice_transaction_links:upsert'] = { message: 'Period 2026-01 je zakljucan za ovu firmu' }
     const out = await reallocateInvoiceLink(makeClient(db), {
-      invoiceId: 'inv-1', transactionId: 'tx-new', allocatedAmount: 100, allocatedAmountUsd: 100,
+      invoiceId: 'inv-1', transactionId: 'tx-new', allocatedAmount: 100, allocatedAmountRsd: 11750, allocatedAmountEur: 100,
     })
 
     expect(out.ok).toBe(false)
@@ -478,29 +478,29 @@ describe('reallocateInvoiceLink', () => {
 
   it('replaces the allocation and leaves other invoices alone', async () => {
     const out = await reallocateInvoiceLink(makeClient(db), {
-      invoiceId: 'inv-1', transactionId: 'tx-new', allocatedAmount: 100, allocatedAmountUsd: 100, note: 'Reconciled',
+      invoiceId: 'inv-1', transactionId: 'tx-new', allocatedAmount: 100, allocatedAmountRsd: 11750, allocatedAmountEur: 100, note: 'Reconciled',
     })
 
     expect(out.ok).toBe(true)
     const links = db.rows.invoice_transaction_links
     expect(links.filter(l => l.invoice_id === 'inv-1')).toHaveLength(1)
-    expect(links.find(l => l.invoice_id === 'inv-1')).toMatchObject({ transaction_id: 'tx-new', allocated_amount: 100, note: 'Reconciled' })
+    expect(links.find(l => l.invoice_id === 'inv-1')).toMatchObject({ transaction_id: 'tx-new', allocated_amount: 100, allocated_amount_rsd: 11750, allocated_amount_eur: 100, note: 'Reconciled' })
     expect(links.find(l => l.id === 'l-other')).toBeTruthy()
   })
 
   it('writes the replacement before removing anything', async () => {
     await reallocateInvoiceLink(makeClient(db), {
-      invoiceId: 'inv-1', transactionId: 'tx-new', allocatedAmount: 100, allocatedAmountUsd: 100,
+      invoiceId: 'inv-1', transactionId: 'tx-new', allocatedAmount: 100, allocatedAmountRsd: 11750, allocatedAmountEur: 100,
     })
     expect(db.calls.map(c => c.op)).toEqual(['upsert', 'delete'])
   })
 
   it('re-saving an unchanged link is an update, not a delete and a re-insert', async () => {
     db.rows.invoice_transaction_links = [
-      { id: 'l-1', invoice_id: 'inv-1', transaction_id: 'tx-1', allocated_amount: 50, allocated_amount_usd: 50 },
+      { id: 'l-1', invoice_id: 'inv-1', transaction_id: 'tx-1', allocated_amount: 50, allocated_amount_rsd: 50, allocated_amount_eur: 50 },
     ]
     const out = await reallocateInvoiceLink(makeClient(db), {
-      invoiceId: 'inv-1', transactionId: 'tx-1', allocatedAmount: 120, allocatedAmountUsd: 120,
+      invoiceId: 'inv-1', transactionId: 'tx-1', allocatedAmount: 120, allocatedAmountRsd: 14100, allocatedAmountEur: 120,
     })
     expect(out.ok).toBe(true)
     expect(db.rows.invoice_transaction_links).toHaveLength(1)
@@ -510,7 +510,7 @@ describe('reallocateInvoiceLink', () => {
   it('warns that the invoice now counts both when the cleanup fails', async () => {
     db.errors['invoice_transaction_links:delete'] = { message: 'connection reset' }
     const out = await reallocateInvoiceLink(makeClient(db), {
-      invoiceId: 'inv-1', transactionId: 'tx-new', allocatedAmount: 100, allocatedAmountUsd: 100,
+      invoiceId: 'inv-1', transactionId: 'tx-new', allocatedAmount: 100, allocatedAmountRsd: 11750, allocatedAmountEur: 100,
     })
 
     expect(out.ok).toBe(false)

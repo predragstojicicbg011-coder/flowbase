@@ -1,5 +1,5 @@
 import {
-  summarise, benchmarkFrom, whyNotPriceable, type RevolvingCredit,
+  summarise, summariseByCurrency, benchmarkFrom, whyNotPriceable, type RevolvingCredit,
 } from './RevolvingCredits'
 import type { RateReset } from '../services/revolvingCredit'
 
@@ -9,7 +9,7 @@ jest.mock('../supabase', () => ({ supabase: {} }))
 //
 // The totals at the top of the Credits page add the annuity instalments to
 // these tranches. The one thing that must not happen is an unpriced line being
-// added in as if its interest were zero: €50,000 of revolving credit showing a
+// added in as if its interest were zero: 50.000 EUR of revolving credit showing a
 // cost of nothing reads as a cheap facility, and it is simply not known yet.
 
 const far = () => `${new Date().getFullYear() + 3}-10-26`
@@ -68,6 +68,31 @@ describe('summarise', () => {
     const out = summarise([tranche({ id: 'a', principal_amount: 10000, maturity_date: null })], { a: priced })
     expect(out.principal).toBe(10000)
     expect(out.interest).toBeNull()
+  })
+})
+
+describe('summariseByCurrency', () => {
+  /**
+   * A EUR line and an RSD line are not added together here: there is no rate
+   * in this section, and a total of 10,000 EUR + 1,200,000 RSD = 1,210,000
+   * of nothing is the fault it exists to avoid.
+   */
+  it('totals each currency on its own', () => {
+    const out = summariseByCurrency([
+      tranche({ id: 'a', principal_amount: 10000 }),
+      tranche({ id: 'b', principal_amount: 1200000, currency: 'RSD' }),
+      tranche({ id: 'c', principal_amount: 5000 }),
+    ], { a: priced, b: priced, c: priced })
+    expect(out.map(t => [t.currency, t.principal])).toEqual([['EUR', 15000], ['RSD', 1200000]])
+  })
+
+  it('keeps an unpriced line unknown within its own currency only', () => {
+    const out = summariseByCurrency([
+      tranche({ id: 'a', principal_amount: 10000 }),
+      tranche({ id: 'b', principal_amount: 1200000, currency: 'RSD' }),
+    ], { a: priced })
+    expect(out.find(t => t.currency === 'EUR')!.interest).not.toBeNull()
+    expect(out.find(t => t.currency === 'RSD')!.interest).toBeNull()
   })
 })
 

@@ -16,7 +16,9 @@ export interface PassthroughRow {
   transaction_date: string
   direction: 'in' | 'out'
   amount: number
-  amount_usd: number
+  /** Book figure in dinars — what the engine compares. */
+  amount_rsd: number
+  amount_eur?: number | null
   currency: string
   note?: string | null
   reference_number?: string | null
@@ -28,7 +30,8 @@ export interface PairProposal {
   score: number
   confidence: Confidence
   reasons: string[]
-  amountDiffUsd: number
+  /** The gap between the two legs, in RSD (the book currency). */
+  amountDiffRsd: number
   dayGap: number
 }
 
@@ -91,8 +94,10 @@ export function scorePair(inRow: PassthroughRow, outRow: PassthroughRow): PairPr
   let score = 0
 
   // ── Iznos ──
-  const a = Math.abs(inRow.amount_usd || 0)
-  const b = Math.abs(outRow.amount_usd || 0)
+  // Uvijek u RSD (knjigovodstvena valuta), nezavisno od valute prikaza — par
+  // ne smije da se promijeni kad korisnik prebaci prikaz na EUR.
+  const a = Math.abs(inRow.amount_rsd || 0)
+  const b = Math.abs(outRow.amount_rsd || 0)
   const diff = Math.abs(a - b)
   const base = Math.max(a, b)
   if (base === 0) return null
@@ -134,7 +139,7 @@ export function scorePair(inRow: PassthroughRow, outRow: PassthroughRow): PairPr
     inRow, outRow, score,
     confidence: confidenceOf(score),
     reasons,
-    amountDiffUsd: Math.round(diff * 100) / 100,
+    amountDiffRsd: Math.round(diff * 100) / 100,
     dayGap: gap,
   }
 }

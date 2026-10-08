@@ -9,7 +9,7 @@
 // Drawn together, that second shape is the thing worth seeing. An amortising
 // book slopes gently to zero; a revolving book sits flat and then falls off a
 // cliff on one day, and the month that cliff lands in is the month the company
-// has to have €50,000 in the bank. No table of instalments shows that, and it
+// has to have the whole principal in the bank. No table of instalments shows that, and it
 // is the first question anybody asks about a revolving line.
 //
 // Pure arithmetic, no React and no Supabase, because every figure here is a

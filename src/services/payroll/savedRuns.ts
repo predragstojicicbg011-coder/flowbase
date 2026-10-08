@@ -32,7 +32,7 @@ export interface SavedRun {
   label: string
   status: RunStatus
   exchange_rate: number | null
-  usd_rate: number | null
+  eur_rate: number | null
   month_hours: number | null
   gross: number
   net: number
@@ -85,7 +85,8 @@ export interface SaveContext {
   companyId: string
   month: string
   exchangeRate: number | null
-  usdRate: number | null
+  /** RSD per 1 EUR, for the eur_rate the posted rows carry. */
+  eurRate: number | null
   monthHours: number
   /** The roster, for the department each line posts to. */
   people: Record<string, EmployeeForMonth>
@@ -187,7 +188,7 @@ export function headerOf(run: PayrollRun, context: SaveContext) {
     run_key: run.key,
     label: run.label,
     exchange_rate: context.exchangeRate,
-    usd_rate: context.usdRate,
+    eur_rate: context.eurRate,
     month_hours: context.monthHours,
     gross: run.totals.gross,
     net: run.totals.net,

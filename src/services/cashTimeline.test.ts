@@ -19,6 +19,7 @@ const base = (over: Partial<CashInput> = {}): CashInput => ({
     '2026-11': { inflow: 345000, outflow: 285000 },
   },
   position: { amount: 600000, asOf: '2026-09-26' },
+  currency: 'RSD',
   ...over,
 })
 
@@ -135,6 +136,8 @@ describe('the balance, walked out from the reading', () => {
     }))
     expect(t.trough!.amount).toBeLessThan(0)
     expect(t.problems.join(' ')).toMatch(/goes negative in 2026-10/)
+    // Written in the app's money notation, with the currency it is in.
+    expect(t.problems.join(' ')).toMatch(/reaching -340\.000,00 RSD\./)
   })
 })
 
@@ -163,10 +166,10 @@ describe('what it refuses to draw', () => {
 
 describe('the outflows that carry a date of their own', () => {
   const items = [
-    { date: '2026-10-24', label: 'Cognant AI', amountUsd: 4840, kind: 'invoice' as const },
-    { date: '2026-10-05', label: 'Intesa 100k #18', amountUsd: 6654.25, kind: 'instalment' as const },
-    { date: '2026-11-05', label: 'Intesa 100k #19', amountUsd: 6654.25, kind: 'instalment' as const },
-    { date: '2027-06-05', label: 'far away', amountUsd: 99, kind: 'instalment' as const },
+    { date: '2026-10-24', label: 'Cognant AI', amount: 4840, kind: 'invoice' as const },
+    { date: '2026-10-05', label: 'Intesa 100k #18', amount: 6654.25, kind: 'instalment' as const },
+    { date: '2026-11-05', label: 'Intesa 100k #19', amount: 6654.25, kind: 'instalment' as const },
+    { date: '2027-06-05', label: 'far away', amount: 99, kind: 'instalment' as const },
   ]
 
   it('sums them by month AND keeps the list', () => {
@@ -188,7 +191,7 @@ describe('the outflows that carry a date of their own', () => {
   })
 
   it('leaves out an item with no date rather than guessing one', () => {
-    const by = datedByMonth([{ date: '', label: 'x', amountUsd: 10, kind: 'invoice' }], ['2026-10'])
+    const by = datedByMonth([{ date: '', label: 'x', amount: 10, kind: 'invoice' }], ['2026-10'])
     expect(Object.keys(by)).toEqual([])
   })
 })
@@ -196,14 +199,14 @@ describe('the outflows that carry a date of their own', () => {
 
 describe('what counts as money moving', () => {
   it('counts a direct receipt in, and a direct payment out', () => {
-    expect(cashMovement({ type: 'direct', tx_subtype: 'revenue', amount_usd: 500 }))
+    expect(cashMovement({ type: 'direct', tx_subtype: 'revenue', amount_rsd: 500 }, 'RSD'))
       .toEqual({ inflow: 500, outflow: 0 })
-    expect(cashMovement({ type: 'direct', tx_subtype: 'expense', amount_usd: 500 }))
+    expect(cashMovement({ type: 'direct', tx_subtype: 'expense', amount_rsd: 500 }, 'RSD'))
       .toEqual({ inflow: 0, outflow: 500 })
   })
 
   it('counts a payment against an invoice as money out', () => {
-    expect(cashMovement({ type: 'invoice_payment', amount_usd: 420 }).outflow).toBe(420)
+    expect(cashMovement({ type: 'invoice_payment', amount_rsd: 420 }, 'RSD').outflow).toBe(420)
   })
 
   it('COUNTS NO TRANSFER BETWEEN OUR OWN ACCOUNTS', () => {
@@ -211,30 +214,38 @@ describe('what counts as money moving', () => {
     // both legs inflates the inflow and the outflow by the same amount — the
     // net is untouched, so nothing looks wrong, and both totals are too big.
     for (const tx of [
-      { type: 'passthrough', tx_subtype: 'in', amount_usd: 50000 },
-      { type: 'passthrough', tx_subtype: 'out', amount_usd: 50000 },
-      { type: 'transfer', amount_usd: 50000 },
+      { type: 'passthrough', tx_subtype: 'in', amount_rsd: 50000 },
+      { type: 'passthrough', tx_subtype: 'out', amount_rsd: 50000 },
+      { type: 'transfer', amount_rsd: 50000 },
     ]) {
-      expect(cashMovement(tx)).toEqual({ inflow: 0, outflow: 0 })
+      expect(cashMovement(tx, 'RSD')).toEqual({ inflow: 0, outflow: 0 })
     }
   })
 
   it('IS AN ALLOWLIST, so a shape added to the ledger tomorrow counts nothing', () => {
     // Written the other way round it would count whatever arrives next,
     // which is how a total starts drifting with no change to this file.
-    expect(cashMovement({ type: 'something_new', amount_usd: 9999 }))
+    expect(cashMovement({ type: 'something_new', amount_rsd: 9999 }, 'RSD'))
       .toEqual({ inflow: 0, outflow: 0 })
-    expect(cashMovement({ type: 'direct', tx_subtype: 'neither', amount_usd: 9999 }))
+    expect(cashMovement({ type: 'direct', tx_subtype: 'neither', amount_rsd: 9999 }, 'RSD'))
       .toEqual({ inflow: 0, outflow: 0 })
   })
 
   it('takes an amount at its size whichever sign it arrives with', () => {
-    expect(cashMovement({ type: 'direct', tx_subtype: 'expense', amount_usd: -500 }).outflow)
+    expect(cashMovement({ type: 'direct', tx_subtype: 'expense', amount_rsd: -500 }, 'RSD').outflow)
       .toBe(500)
   })
 
+  it('reads the EUR figure in the EUR view, and nothing where a row has none', () => {
+    const tx = { type: 'direct', tx_subtype: 'revenue', amount_rsd: 117200, amount_eur: 1000 }
+    expect(cashMovement(tx, 'EUR')).toEqual({ inflow: 1000, outflow: 0 })
+    expect(cashMovement(tx, 'RSD')).toEqual({ inflow: 117200, outflow: 0 })
+    expect(cashMovement({ type: 'invoice_payment', amount_rsd: 500 }, 'EUR'))
+      .toEqual({ inflow: 0, outflow: 0 })
+  })
+
   it('has nothing to say about a transaction of nothing', () => {
-    expect(cashMovement({ type: 'direct', tx_subtype: 'revenue', amount_usd: 0 }))
+    expect(cashMovement({ type: 'direct', tx_subtype: 'revenue', amount_rsd: 0 }, 'RSD'))
       .toEqual({ inflow: 0, outflow: 0 })
   })
 })

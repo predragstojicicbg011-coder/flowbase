@@ -13,15 +13,15 @@
 //
 // So the arithmetic lives here, away from any dialog, and is tested directly.
 //
-// ── The dollar figure is derived, never typed ───────────────────────────────
+// ── The book figures are derived, never typed ───────────────────────────────
 //
-// Every line carries its own currency amount and its dollar equivalent,
-// because `v_pl_entries` exposes both and the reports read whichever suits
-// them. The dollars come from THE PARENT'S OWN RATE — `amount_usd / amount`
-// off the row being split — so the lines sum to the parent in both columns by
+// Every line carries its own currency amount and its dinar and euro figures,
+// because `v_pl_entries` exposes all three and the reports read whichever the
+// viewer has chosen. They come from THE PARENT'S STORED RATES —
+// `exchange_rate` and `eur_rate` off the row being split, through
+// `partBookAmounts` — so the lines sum to the parent in every column by
 // construction. A rate fetched separately can be right about the day and
-// still disagree with the row it is applied to, and then the two columns tell
-// different stories about the same payment.
+// still disagree with the row it is applied to.
 //
 // ── The remainder goes somewhere on purpose ─────────────────────────────────
 //
@@ -29,6 +29,8 @@
 // Rather than let the difference fall where the floating point puts it, the
 // LAST line takes whatever is left over. One line absorbs one rounding, every
 // time, and it is the line the person was last looking at.
+
+import { partBookAmounts, round2 } from './bookAmounts'
 
 export interface SplitLine {
   /** Stable within the editor, so a line can be removed without reordering. */
@@ -49,11 +51,18 @@ export interface SplitLine {
 export interface SplitParent {
   /** The whole payment, in its own currency. */
   amount: number
-  /** The same payment in dollars, as the row already carries it. */
-  amount_usd?: number | null
+  /** The payment's currency; RSD when missing. */
+  currency?: string | null
+  /** RSD per 1 unit of `currency`, as stored on the parent. */
+  exchange_rate?: number | string | null
+  /** RSD per 1 EUR, as stored on the parent. */
+  eur_rate?: number | string | null
+  /** The parent's own book figures, which the lines must sum to. */
+  amount_rsd?: number | null
+  amount_eur?: number | null
 }
 
-const cents = (n: number): number => Math.round(n * 100) / 100
+const cents = round2
 
 /** A blank line, ready to be filled from a script or by hand. */
 export function emptyLine(key: string): SplitLine {
@@ -164,7 +173,8 @@ export function splitInHalf(parent: SplitParent, keyOf: (n: number) => string): 
 
 export interface SplitRow {
   amount: number
-  amount_usd: number | null
+  amount_rsd: number
+  amount_eur: number
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
@@ -178,33 +188,46 @@ export interface SplitRow {
 }
 
 /**
- * The lines as rows to store, with the dollars derived and made to sum.
+ * The lines as rows to store, with the dinars and euros derived and made to
+ * sum.
  *
- * THE LAST LINE TAKES THE ROUNDING. Converting each line separately and
- * storing the result leaves the dollar column short or long by a cent or two,
- * which is the kind of difference that survives for years because every
- * individual row looks right. Here every line but the last is converted and
- * rounded, and the last is whatever is left of the parent's own dollar
- * figure — so the column sums exactly, by construction rather than by luck.
+ * THE LAST LINE TAKES THE ROUNDING. Converting each line separately leaves
+ * the book columns short or long by a para or two, which is the kind of
+ * difference that survives for years because every individual row looks
+ * right. Here every line but the last is booked at the parent's rates and
+ * rounded, and the last is whatever is left of the parent's own `amount_rsd`
+ * and `amount_eur` — so each column sums exactly, by construction.
+ *
+ * Throws RateUnavailableError when the parent carries no stored rates.
  */
 export function rowsFor(parent: SplitParent, lines: SplitLine[]): SplitRow[] {
-  const total = parent.amount || 0
-  const totalUsd = typeof parent.amount_usd === 'number' && Number.isFinite(parent.amount_usd)
-    ? parent.amount_usd : null
+  const rated = { ...parent, currency: parent.currency || 'RSD' }
+  const whole = partBookAmounts(cents(parent.amount || 0), rated)
+  const stored = (n: unknown): number | null =>
+    typeof n === 'number' && Number.isFinite(n) ? n : null
+  const totalRsd = stored(parent.amount_rsd) ?? whole.amount_rsd
+  const totalEur = stored(parent.amount_eur) ?? whole.amount_eur
 
-  let usdSoFar = 0
+  let rsdSoFar = 0
+  let eurSoFar = 0
   return lines.map((l, i) => {
     const amount = cents(l.amount || 0)
-    let amount_usd: number | null = null
-    if (totalUsd !== null && total !== 0) {
-      amount_usd = i === lines.length - 1
-        ? cents(totalUsd - usdSoFar)
-        : cents((amount / total) * totalUsd)
-      usdSoFar = cents(usdSoFar + amount_usd)
+    let amount_rsd: number
+    let amount_eur: number
+    if (i === lines.length - 1) {
+      amount_rsd = cents(totalRsd - rsdSoFar)
+      amount_eur = cents(totalEur - eurSoFar)
+    } else {
+      const b = partBookAmounts(amount, rated)
+      amount_rsd = b.amount_rsd
+      amount_eur = b.amount_eur
     }
+    rsdSoFar = cents(rsdSoFar + amount_rsd)
+    eurSoFar = cents(eurSoFar + amount_eur)
     return {
       amount,
-      amount_usd,
+      amount_rsd,
+      amount_eur,
       pl_category: l.pl_category.trim() || null,
       pl_subcategory: l.pl_subcategory.trim() || null,
       department: l.department.trim() || null,

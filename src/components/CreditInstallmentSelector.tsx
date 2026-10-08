@@ -1,6 +1,7 @@
 import React from 'react'
 import type { CreditOption, CreditInstallment } from './useCreditPayment'
 import { DIALOG } from './dialogTheme'
+import { fmtMoney, fmtNum } from '../utils/formatters'
 
 // ── Credit installment selector ─────────────────────────────────────────────
 //
@@ -36,6 +37,10 @@ export default function CreditInstallmentSelector({
   installments, selectedInstallmentIds, onToggle, onToggleAll,
   selectedTotal, error,
 }: Props) {
+  // Every figure in the selected credit's own currency — EUR for an indexed
+  // loan, RSD for a dinar one. Never assumed.
+  const currency = credits.find(c => c.id === selectedCreditId)?.currency || 'RSD'
+
   const select: React.CSSProperties = {
     fontFamily: "'Inter',sans-serif", fontSize: '13px', padding: '8px 10px', width: '100%',
     border: `0.5px solid ${DIALOG.border}`, borderRadius: '8px',
@@ -55,7 +60,7 @@ export default function CreditInstallmentSelector({
         <select style={select} value={selectedCreditId} onChange={e => onCreditChange(e.target.value)}>
           <option value="">Select credit...</option>
           {credits.map(c => (
-            <option key={c.id} value={c.id}>{c.name} — {c.bank} ({c.rate_description})</option>
+            <option key={c.id} value={c.id}>{c.name} — {c.bank} ({c.rate_description}) · {c.currency}</option>
           ))}
         </select>
       </div>
@@ -109,10 +114,10 @@ export default function CreditInstallmentSelector({
                     <div style={{ fontSize: '11px', color: DIALOG.dim }}>
                       Due: <strong>{inst.due_date}</strong>
                       <span style={{ marginLeft: '10px', color: DIALOG.blue }}>
-                        Principal: {inst.principal_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        Principal: {fmtNum(inst.principal_amount)}
                       </span>
                       <span style={{ marginLeft: '10px', color: DIALOG.amber }}>
-                        Interest: {inst.interest_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        Interest: {fmtNum(inst.interest_amount)}
                       </span>
                     </div>
                   </div>
@@ -120,7 +125,7 @@ export default function CreditInstallmentSelector({
                     fontFamily: "'DM Mono',monospace", fontSize: '13px', fontWeight: '600',
                     color: DIALOG.text, flexShrink: 0, textAlign: 'right',
                   }}>
-                    {inst.total_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })} EUR
+                    {fmtMoney(inst.total_amount, currency)}
                   </div>
                 </div>
               )
@@ -135,7 +140,7 @@ export default function CreditInstallmentSelector({
             }}>
               <span>{selectedInstallmentIds.length} installment{selectedInstallmentIds.length > 1 ? 's' : ''} selected</span>
               <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: '700' }}>
-                {selectedTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })} EUR
+                {fmtMoney(selectedTotal, currency)}
               </span>
             </div>
           )}

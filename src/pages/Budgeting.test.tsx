@@ -137,9 +137,10 @@ jest.mock('../supabase', () => {
   return { supabase: { from: (table: string) => makeBuilder(table) } }
 })
 
-// The committed column prices EUR instalments. The real thing calls the NBS
-// over the network and answers an outage with a hardcoded 1.17.
+// The credit schedule prices EUR instalments in dinars at today's NBS rate.
+// The real thing calls the NBS over the network; here it is 117 RSD per EUR.
 jest.mock('../services/currencyService', () => ({
+  ...jest.requireActual('../services/currencyService'),
   getRatesForDate: () => Promise.resolve({
     usdRsdRate: 100, eurRsdRate: 117, date: '2026-09-01', source: 'test', isFallback: false,
   }),
@@ -167,7 +168,7 @@ const horizonMonth = (n: number): string => {
 const expenseRow = (over: Record<string, any> = {}) => ({
   id: 'tx-1',
   company_id: COMPANY_A,
-  amount_usd: 1000,
+  amount_rsd: 1000,
   pl_category: 'Operating Expenses',
   pl_subcategory: 'Telecom',
   department: 'Administration',
@@ -188,7 +189,7 @@ const openInvoice = (i: number, over: Record<string, any> = {}) => ({
   // commitment in its own right.
   invoice_date: `${horizonMonth(-3)}-05`,
   due_date: `${horizonMonth(1)}-10`,
-  remaining_usd: 10,
+  remaining_rsd: 10,
   calculated_status: 'unpaid',
   type: 'expense',
   company_id: COMPANY_A,
@@ -258,7 +259,7 @@ const monthHeaders = (): string[] => {
 
 /** The label the table gives the month we are in. */
 const thisMonthLabel = (): string =>
-  new Date().toLocaleString('en-US', { month: 'short', year: 'numeric' })
+  new Date().toLocaleString('en-GB', { month: 'short', year: 'numeric' })
 
 /**
  * Render and pick one company from the selector.
@@ -332,16 +333,16 @@ describe('the Budgeting page and the thousand-row cap', () => {
         due_date: `${horizonMonth(2)}-05`,
         principal_amount: 10, interest_amount: 0,
         status: 'outstanding',
-        credits: { name: 'Intesa 100k', company_id: COMPANY_A },
+        credits: { name: 'Intesa 100k', company_id: COMPANY_A, currency: 'EUR' },
       })),
     })
     render(<Budgeting />)
 
-    // 1,050 × €10 at 1.17 USD/EUR, on the row the principal leg is
-    // classified to.
+    // 1,050 × 10 EUR at 117 RSD/EUR = 1,228,500 RSD, on the row the
+    // principal leg is classified to.
     await waitFor(() => expect(screen.getByText(CREDIT_DEPARTMENT)).toBeInTheDocument())
     await waitFor(() =>
-      expect(budgetFigure(CREDIT_DEPARTMENT, 2).textContent).toBe('$12,285'))
+      expect(budgetFigure(CREDIT_DEPARTMENT, 2).textContent).toBe('1.228.500 RSD'))
   })
 
 })
@@ -362,18 +363,18 @@ describe('the credit schedule on its own rows', () => {
       due_date: `${horizonMonth(1)}-05`,
       principal_amount: 1000, interest_amount: 0,
       status: 'outstanding',
-      credits: { name: 'Intesa 100k', company_id: COMPANY_A },
+      credits: { name: 'Intesa 100k', company_id: COMPANY_A, currency: 'EUR' },
     }],
-    v_invoice_status: [openInvoice(1, { partner_name: 'Telekom Srbija', remaining_usd: 420 })],
+    v_invoice_status: [openInvoice(1, { partner_name: 'Telekom Srbija', remaining_rsd: 420 })],
   })
 
   it('PUTS THE INSTALMENT ON ITS OWN ROW', async () => {
     oneInstalment()
     render(<Budgeting />)
-    // €1,000 at 1.17.
+    // 1,000 EUR at 117 RSD/EUR.
     await waitFor(() => expect(screen.getByText(CREDIT_DEPARTMENT)).toBeInTheDocument())
     await waitFor(() =>
-      expect(budgetFigure(CREDIT_DEPARTMENT, 1).textContent).toBe('$1,170'))
+      expect(budgetFigure(CREDIT_DEPARTMENT, 1).textContent).toBe('117.000 RSD'))
   })
 
   it('DRAWS NO COMMITTED ROW AT ALL any more', async () => {
@@ -496,16 +497,16 @@ describe('the horizon', () => {
     // The whole point of the narrower horizon. `$6.7K` is the same string for
     // every figure between 6,650 and 6,749; two months an accountant is trying
     // to compare must not read identically when there is room for the digits.
-    seedDb({ v_pl_entries: [expenseRow({ amount_usd: 26432 })] })
+    seedDb({ v_pl_entries: [expenseRow({ amount_rsd: 26432 })] })
     render(<Budgeting />)
     await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
 
-    expect(screen.getAllByText('$26,432').length).toBeGreaterThan(0)
-    expect(screen.queryByText('$26.4K')).not.toBeInTheDocument()
+    expect(screen.getAllByText('26.432 RSD').length).toBeGreaterThan(0)
+    expect(screen.queryByText('26,4 hilj. RSD')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '12m' }))
-    await waitFor(() => expect(screen.getAllByText('$26.4K').length).toBeGreaterThan(0))
-    expect(screen.queryByText('$26,432')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByText('26,4 hilj. RSD').length).toBeGreaterThan(0))
+    expect(screen.queryByText('26.432 RSD')).not.toBeInTheDocument()
   })
 
   it('totals twelve months in the Year column while showing three', async () => {
@@ -513,15 +514,16 @@ describe('the horizon', () => {
     // worse than no Year column. One commitment falls inside the window and
     // one falls seven months out; the Year figure is both.
     // One instalment inside the three months on screen and one outside them.
-    // €100 and €200 at 1.17 USD/EUR.
+    // 1 EUR and 2 EUR at 117 RSD/EUR: 117 + 234 = 351 RSD, small enough to
+    // print the same at every horizon.
     seedDb({
       credit_installments: [
         { id: 'i1', installment_no: 1, due_date: `${horizonMonth(1)}-10`,
-          principal_amount: 100, interest_amount: 0, status: 'outstanding',
-          credits: { name: 'Intesa 100k', company_id: COMPANY_A } },
+          principal_amount: 1, interest_amount: 0, status: 'outstanding',
+          credits: { name: 'Intesa 100k', company_id: COMPANY_A, currency: 'EUR' } },
         { id: 'i2', installment_no: 7, due_date: `${horizonMonth(7)}-10`,
-          principal_amount: 200, interest_amount: 0, status: 'outstanding',
-          credits: { name: 'Intesa 100k', company_id: COMPANY_A } },
+          principal_amount: 2, interest_amount: 0, status: 'outstanding',
+          credits: { name: 'Intesa 100k', company_id: COMPANY_A, currency: 'EUR' } },
       ],
     })
     render(<Budgeting />)
@@ -529,7 +531,7 @@ describe('the horizon', () => {
 
     expect(monthHeaders()).toHaveLength(3)
     // Three months on screen, and month seven is not one of them.
-    await waitFor(() => expect(yearTotalOf(CREDIT_DEPARTMENT)).toBe('$351'))
+    await waitFor(() => expect(yearTotalOf(CREDIT_DEPARTMENT)).toBe('351 RSD'))
 
     // The header says which twelve months it is, so nobody has to guess.
     expect(screen.getByText('all 12 months')).toBeInTheDocument()
@@ -538,7 +540,7 @@ describe('the horizon', () => {
     // always all twelve months.
     fireEvent.click(screen.getByRole('button', { name: '12m' }))
     await waitFor(() => expect(monthHeaders()).toHaveLength(12))
-    expect(yearTotalOf(CREDIT_DEPARTMENT)).toBe('$351')
+    expect(yearTotalOf(CREDIT_DEPARTMENT)).toBe('351 RSD')
   })
 
   it('does not re-query the database when the horizon changes', async () => {
@@ -624,7 +626,7 @@ describe('adding a budget line nothing has been spent on', () => {
       pl_category: null,
       pl_subcategory: null,
       kind: 'adjust',
-      amount_usd: 4000,
+      amount_rsd: 4000,
       reason: 'Autumn campaign',
     })
   })
@@ -670,7 +672,7 @@ describe('adding a budget line nothing has been spent on', () => {
 
     fireEvent.click(screen.getByText('Continue'))
     // The seeded figure the line already carries this month, not a zero.
-    expect(await screen.findByText('$1000.00')).toBeInTheDocument()
+    expect(await screen.findByText('1.000,00 RSD')).toBeInTheDocument()
   })
 
   it('writes a new name into the lookup table, not only into the ledger', async () => {
@@ -738,7 +740,7 @@ describe('adding a budget line nothing has been spent on', () => {
 
     await waitFor(() => expect(screen.getByText('Marketing')).toBeInTheDocument())
     expect(screen.getByText('Events')).toBeInTheDocument()
-    expect(screen.getAllByText('$4,000').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('4.000 RSD').length).toBeGreaterThan(0)
   })
 
   it('does not offer a new description under a P&L sub-category it cannot parent', async () => {
@@ -801,7 +803,7 @@ describe('a budget line belongs to the group', () => {
       level: 'department',
       department: 'Administration',
       kind: 'adjust',
-      amount_usd: 500,
+      amount_rsd: 500,
       reason: 'Group plan for the quarter',
     })
   })
@@ -819,7 +821,7 @@ describe('a budget line belongs to the group', () => {
           budget_month: `${horizonMonth(1)}-01`, level: 'department',
           pl_category: null, pl_subcategory: null,
           department: 'Administration', dept_subcategory: null, expense_description: null,
-          kind: 'adjust', amount_usd: 500,
+          kind: 'adjust', amount_rsd: 500,
           reason: 'Carried over from the previous budget screen',
           created_at: '2026-01-01T00:00:00Z',
         },
@@ -828,7 +830,7 @@ describe('a budget line belongs to the group', () => {
           budget_month: `${horizonMonth(1)}-01`, level: 'department',
           pl_category: null, pl_subcategory: null,
           department: 'Administration', dept_subcategory: null, expense_description: null,
-          kind: 'adjust', amount_usd: 300,
+          kind: 'adjust', amount_rsd: 300,
           reason: 'Group plan for the quarter',
           created_at: '2026-02-01T00:00:00Z',
         },
@@ -837,8 +839,8 @@ describe('a budget line belongs to the group', () => {
     await renderConsolidated()
     await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
 
-    // $1,000 seeded from the benchmark month, plus both entries.
-    await waitFor(() => expect(budgetFigure('Administration', 1).textContent).toContain('$1,800'))
+    // 1.000 RSD seeded from the benchmark month, plus both entries.
+    await waitFor(() => expect(budgetFigure('Administration', 1).textContent).toContain('1.800 RSD'))
   })
 })
 
@@ -941,7 +943,7 @@ describe('which row a budget change is about to land on', () => {
   it('counts the lines instead of naming them once there are too many to name', async () => {
     seedDb({
       v_pl_entries: ['Telekom', 'Yettel', 'A1', 'Orion', 'SBB'].map((name, i) => expenseRow({
-        id: `tx-${i}`, expense_description: name, amount_usd: 100,
+        id: `tx-${i}`, expense_description: name, amount_rsd: 100,
       })),
     })
     await renderConsolidated()
@@ -969,7 +971,7 @@ describe('which row a budget change is about to land on', () => {
       department: 'Administration',
       dept_subcategory: 'Office',
       expense_description: 'Telekom',
-      amount_usd: 20,
+      amount_rsd: 20,
     })
   })
 
@@ -990,7 +992,7 @@ describe('which row a budget change is about to land on', () => {
       department: 'Administration',
       dept_subcategory: 'Office',
       expense_description: null,
-      amount_usd: 20,
+      amount_rsd: 20,
     })
   })
 
@@ -1018,7 +1020,7 @@ describe("the row for a parent's own budget", () => {
       budget_month: `${horizonMonth(0)}-01`, level: 'dept_subcategory',
       pl_category: null, pl_subcategory: null,
       department: 'Administration', dept_subcategory: 'Office', expense_description: null,
-      kind: 'adjust', amount_usd: 20,
+      kind: 'adjust', amount_rsd: 20,
       reason: 'Seat added',
       created_at: '2026-01-01T00:00:00Z',
     }],
@@ -1083,7 +1085,7 @@ describe('the Budgeting page on a single company', () => {
     expect(screen.getAllByText('ACTUAL').length).toBe(3)
     expect(screen.getByText('BENCHMARK')).toBeInTheDocument()
     expect(within(headerRow()).getByText(/THIS MONTH/)).toBeInTheDocument()
-    expect(screen.getAllByText('$1,000').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('1.000 RSD').length).toBeGreaterThan(0)
     expect(screen.getByText('Administration')).toBeInTheDocument()
 
     // And one line saying why, rather than a silently shorter table.
@@ -1211,7 +1213,54 @@ describe('adding a line from the row it belongs under', () => {
       // read its real figure. Had the dialog assumed a pre-filled line starts
       // at zero it would have written +750 here, and the line would have gone
       // to $1,750 while the dialog said $750.
-      amount_usd: -250,
+      amount_rsd: -250,
     })
+  })
+})
+
+// ── Read in EUR ─────────────────────────────────────────────────────────────
+//
+// Budgets are planned in RSD and every figure carries EUR beside it. With EUR
+// selected the table reads the EUR columns; where the ledger holds an entry
+// recorded in dinars only it cannot, and it says so and stays in RSD with RSD
+// on every figure — never RSD figures labelled EUR.
+
+describe('the budget read in EUR', () => {
+  const { DisplayCurrencyProvider } = jest.requireActual('../contexts/DisplayCurrencyContext')
+  const renderIn = async (currency: 'RSD' | 'EUR') => {
+    render(<DisplayCurrencyProvider initial={currency}><Budgeting /></DisplayCurrencyProvider>)
+    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+  }
+  const adjustment = (over: Record<string, any>) => ({
+    id: 'adj-1', company_id: null,
+    budget_month: `${horizonMonth(1)}-01`, level: 'department',
+    pl_category: null, pl_subcategory: null,
+    department: 'Administration', dept_subcategory: null, expense_description: null,
+    kind: 'adjust', reason: 'Plan', created_at: '2026-02-01T00:00:00Z',
+    ...over,
+  })
+
+  it('seeds from the EUR actuals and replays the EUR ledger figures', async () => {
+    seedDb({
+      v_pl_entries: [expenseRow({ amount_rsd: 117000, amount_eur: 1000 })],
+      budget_adjustments: [adjustment({ amount_rsd: 58500, amount_eur: 500, seed_rsd: 0, seed_eur: 0 })],
+    })
+    await renderIn('EUR')
+    await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
+    // 1,000 EUR seeded on the Telekom line under it + 500 EUR recorded on
+    // Administration itself (whose own seed, recorded with the entry, is 0).
+    await waitFor(() => expect(budgetFigure('Administration', 1).textContent).toContain('1.500 EUR'))
+    expect(screen.queryByText(/cannot be read in EUR/)).not.toBeInTheDocument()
+  })
+
+  it('stays in RSD, and says why, when an entry was recorded in dinars only', async () => {
+    seedDb({
+      v_pl_entries: [expenseRow({ amount_rsd: 117000, amount_eur: 1000 })],
+      budget_adjustments: [adjustment({ amount_rsd: 58500, amount_eur: null })],
+    })
+    await renderIn('EUR')
+    await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
+    await waitFor(() => expect(budgetFigure('Administration', 1).textContent).toContain('175.500 RSD'))
+    expect(screen.getByText(/recorded in RSD only/)).toBeInTheDocument()
   })
 })

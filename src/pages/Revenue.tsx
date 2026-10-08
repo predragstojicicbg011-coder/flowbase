@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import { SkeletonRows } from '../components/motion'
 import { runWrite } from '../services/writeOrder'
-import { fmtUSD } from '../utils/formatters'
+import { fmtMoney, fmtNum } from '../utils/formatters'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 const BRANDS = ['Kicksta', 'Flock', 'Nitreo', 'Kenji', 'Upleap', 'EngagementBoost', 'Upgram', 'SocialFollow', 'Aimfox']
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
@@ -33,6 +34,12 @@ export default function Revenue() {
   const [entries, setEntries] = useState<any[]>([])
   const [collections, setCollections] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  // Every entry and collection carries its book figure in RSD and in EUR
+  // (`amount_rsd` / `amount_eur`, `collected_rsd` / `collected_eur` …), so the
+  // page reads the display currency's column — never a conversion.
+  const { currency, pick } = useDisplayCurrency()
+  const money = (n: number | null | undefined) => fmtMoney(n ?? 0, currency, 0)
+  const amt = (row: any, base = 'amount') => pick(row, base) || 0
 
   const fetchEntries = async () => {
     setLoading(true)
@@ -79,15 +86,15 @@ export default function Revenue() {
       (c.notes||'').toLowerCase().includes(search.toLowerCase()))
   )
 
-  const totalOpen = entries.filter(e => e.calculated_status === 'open').reduce((s,e) => s+(e.amount_usd||0), 0)
-  const totalPartialRemaining = entries.filter(e => e.calculated_status === 'partial').reduce((s,e) => s+(e.remaining_usd||0), 0)
-  const totalCollected = entries.filter(e => e.calculated_status === 'collected').reduce((s,e) => s+(e.amount_usd||0), 0)
+  const totalOpen = entries.filter(e => e.calculated_status === 'open').reduce((s,e) => s+amt(e), 0)
+  const totalPartialRemaining = entries.filter(e => e.calculated_status === 'partial').reduce((s,e) => s+amt(e, 'remaining'), 0)
+  const totalCollected = entries.filter(e => e.calculated_status === 'collected').reduce((s,e) => s+amt(e), 0)
   const unmatchedCount = collections.filter(c => c.status === 'unmatched').length
 
   const brandTotals = BRANDS.map(brand => ({
     brand, stream: brand === 'Aimfox' ? 'aimfox' : 'social_growth',
-    total: entries.filter(e => e.brand === brand).reduce((s,e) => s+(e.amount_usd||0), 0),
-    collected: entries.filter(e => e.brand === brand).reduce((s,e) => s+(e.collected_usd||0), 0),
+    total: entries.filter(e => e.brand === brand).reduce((s,e) => s+amt(e), 0),
+    collected: entries.filter(e => e.brand === brand).reduce((s,e) => s+amt(e, 'collected'), 0),
     count: entries.filter(e => e.brand === brand).length,
   })).filter(b => b.count > 0).sort((a,b) => b.total-a.total)
   const maxBrand = brandTotals[0]?.total || 1
@@ -109,17 +116,17 @@ export default function Revenue() {
         <div style={s.summaryRow} className="mf-stagger">
           <div style={{ ...s.summaryCard, borderTop: '2px solid #F5A623' }}>
             <div style={s.summaryLabel}>Open (uncollected)</div>
-            <div style={{ ...s.summaryVal, color: '#F5A623' }}>{fmtUSD(totalOpen)}</div>
+            <div style={{ ...s.summaryVal, color: '#F5A623' }}>{money(totalOpen)}</div>
             <div style={s.summarySub}>{entries.filter(e => e.calculated_status === 'open').length} entries pending</div>
           </div>
           <div style={{ ...s.summaryCard, borderTop: '2px solid #4EA8FF' }}>
             <div style={s.summaryLabel}>Partially collected</div>
-            <div style={{ ...s.summaryVal, color: '#4EA8FF' }}>{fmtUSD(totalPartialRemaining)}</div>
+            <div style={{ ...s.summaryVal, color: '#4EA8FF' }}>{money(totalPartialRemaining)}</div>
             <div style={s.summarySub}>{entries.filter(e => e.calculated_status === 'partial').length} entries · remaining</div>
           </div>
           <div style={{ ...s.summaryCard, borderTop: '2px solid #00D47E' }}>
             <div style={s.summaryLabel}>Collected</div>
-            <div style={{ ...s.summaryVal, color: '#00D47E' }}>{fmtUSD(totalCollected)}</div>
+            <div style={{ ...s.summaryVal, color: '#00D47E' }}>{money(totalCollected)}</div>
             <div style={s.summarySub}>{entries.filter(e => e.calculated_status === 'collected').length} entries closed</div>
           </div>
           <div style={{ ...s.summaryCard, ...(unmatchedCount > 0 ? s.summaryCardWarn : {}), borderTop: `2px solid ${unmatchedCount > 0 ? '#F5A623' : 'rgba(255,255,255,0.1)'}` }}>
@@ -139,11 +146,11 @@ export default function Revenue() {
                     <span style={{ fontSize: '12px', fontWeight: '600', color: '#DCE9F6' }}>{b.brand}</span>
                     <span style={{ ...s.badge, ...STREAM_COLORS[b.stream] }}>{b.stream === 'aimfox' ? 'AF' : 'SG'}</span>
                   </div>
-                  <div style={{ fontSize: '15px', fontWeight: '600', color: '#00D47E', marginBottom: '4px' }}>{fmtUSD(b.total)}</div>
+                  <div style={{ fontSize: '15px', fontWeight: '600', color: '#00D47E', marginBottom: '4px' }}>{money(b.total)}</div>
                   <div style={{ height: '3px', background: 'rgba(255,255,255,0.07)', borderRadius: '2px', overflow: 'hidden', marginBottom: '5px' }}>
                     <div style={{ height: '100%', width: `${(b.total/maxBrand)*100}%`, background: b.stream === 'aimfox' ? '#9D97FF' : '#00D47E', borderRadius: '2px' }} />
                   </div>
-                  <div style={{ fontSize: '10px', color: '#7A9BB8' }}>{b.count} entr{b.count>1?'ies':'y'} · {fmtUSD(b.collected)} collected</div>
+                  <div style={{ fontSize: '10px', color: '#7A9BB8' }}>{b.count} entr{b.count>1?'ies':'y'} · {money(b.collected)} collected</div>
                 </div>
               ))}
             </div>
@@ -176,8 +183,8 @@ export default function Revenue() {
           </select>
           <div style={s.totalBadge}>
             {subTab === 'entries'
-              ? <>{filteredEntries.length} entries · <strong>{fmtUSD(filteredEntries.reduce((s,e) => s+(e.amount_usd||0),0))} USD</strong></>
-              : <>{filteredCollections.length} collections · <strong>{fmtUSD(filteredCollections.reduce((s,c) => s+(c.amount_usd||0),0))} USD</strong></>}
+              ? <>{filteredEntries.length} entries · <strong>{money(filteredEntries.reduce((s,e) => s+amt(e),0))}</strong></>
+              : <>{filteredCollections.length} collections · <strong>{money(filteredCollections.reduce((s,c) => s+amt(c),0))}</strong></>}
           </div>
         </div>
 
@@ -200,7 +207,7 @@ export default function Revenue() {
               <table style={s.table}>
                 <thead><tr style={s.thead}>
                   <th style={s.th}>Period</th><th style={s.th}>Brand</th><th style={s.th}>Stream</th><th style={s.th}>Source</th><th style={s.th}>Ref</th>
-                  <th style={{ ...s.th, textAlign:'right' as const }}>Amount USD</th><th style={{ ...s.th, textAlign:'right' as const }}>Collected</th>
+                  <th style={{ ...s.th, textAlign:'right' as const }}>Amount {currency}</th><th style={{ ...s.th, textAlign:'right' as const }}>Collected</th>
                   <th style={{ ...s.th, textAlign:'right' as const }}>Remaining</th><th style={s.th}>Status</th><th style={s.th}></th>
                 </tr></thead>
                 <tbody>
@@ -211,9 +218,9 @@ export default function Revenue() {
                       <td style={s.td}><span style={{ ...s.badge, ...(STREAM_COLORS[e.revenue_stream]||STREAM_COLORS.other) }}>{e.revenue_stream==='aimfox'?'Aimfox':e.revenue_stream==='social_growth'?'Social Growth':'Other'}</span></td>
                       <td style={s.td}><span style={{ ...s.badge, background:'rgba(255,255,255,0.06)',color:'#7A9BB8' }}>{e.source}</span></td>
                       <td style={s.td}><span style={s.monoCell}>{e.invoice_ref||'—'}</span></td>
-                      <td style={{ ...s.td, textAlign:'right' as const }}><span style={s.amtCell}>{fmtUSD(e.amount_usd||0)}</span></td>
-                      <td style={{ ...s.td, textAlign:'right' as const }}><span style={{ ...s.amtCell,color:'#00D47E' }}>{fmtUSD(e.collected_usd||0)}</span></td>
-                      <td style={{ ...s.td, textAlign:'right' as const }}><span style={{ ...s.amtCell,color:(e.remaining_usd||0)>0.01?'#F5A623':'#7A9BB8' }}>{fmtUSD(e.remaining_usd||0)}</span></td>
+                      <td style={{ ...s.td, textAlign:'right' as const }}><span style={s.amtCell}>{money(amt(e))}</span></td>
+                      <td style={{ ...s.td, textAlign:'right' as const }}><span style={{ ...s.amtCell,color:'#00D47E' }}>{money(amt(e, 'collected'))}</span></td>
+                      <td style={{ ...s.td, textAlign:'right' as const }}><span style={{ ...s.amtCell,color:amt(e, 'remaining')>0.01?'#F5A623':'#7A9BB8' }}>{money(amt(e, 'remaining'))}</span></td>
                       <td style={s.td}><span style={{ ...s.badge, ...(STATUS_COLORS[e.calculated_status]||{}) }}>{e.calculated_status}</span></td>
                       <td style={s.td} onClick={ev => ev.stopPropagation()}>
                         <div style={{ position:'relative' }}>
@@ -252,7 +259,7 @@ export default function Revenue() {
               <table style={s.table}>
                 <thead><tr style={s.thead}>
                   <th style={s.th}>Date</th><th style={s.th}>Source</th><th style={s.th}>Brand</th><th style={s.th}>Reference</th>
-                  <th style={{ ...s.th, textAlign:'right' as const }}>Amount</th><th style={{ ...s.th, textAlign:'right' as const }}>USD</th>
+                  <th style={{ ...s.th, textAlign:'right' as const }}>Amount</th><th style={{ ...s.th, textAlign:'right' as const }}>{currency}</th>
                   <th style={s.th}>Status</th><th style={s.th}></th>
                 </tr></thead>
                 <tbody>
@@ -270,9 +277,9 @@ export default function Revenue() {
                             : <span style={{ color:'rgba(255,255,255,0.20)',fontSize:'12px' }}>—</span>}
                         </td>
                         <td style={s.td}><span style={s.monoCell}>{(c.reference||'—').slice(0,24)}</span></td>
-                        <td style={{ ...s.td, textAlign:'right' as const }}><span style={s.amtCell}>{(c.amount||0).toLocaleString()} {c.currency}</span></td>
+                        <td style={{ ...s.td, textAlign:'right' as const }}><span style={s.amtCell}>{fmtNum(c.amount||0)} {c.currency}</span></td>
                         <td style={{ ...s.td, textAlign:'right' as const }}>
-                          <span style={{ ...s.amtCell, color:(c.amount_usd||0)<0?'#FF5B5A':'#00D47E' }}>{fmtUSD(c.amount_usd||0)}</span>
+                          <span style={{ ...s.amtCell, color:amt(c)<0?'#FF5B5A':'#00D47E' }}>{money(amt(c))}</span>
                         </td>
                         <td style={s.td}><span style={{ ...s.badge, ...(COLL_STATUS_COLORS[c.status]||{}) }}>{c.status}</span></td>
                         <td style={s.td} onClick={ev => ev.stopPropagation()}>

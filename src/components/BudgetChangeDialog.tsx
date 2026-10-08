@@ -2,6 +2,8 @@ import React, { useState } from 'react'
 import { supabase } from '../supabase'
 import { DIALOG, chrome } from './dialogTheme'
 import { deltaForTarget } from '../services/budgetForecast'
+import { getBookRates, rsdToEur } from '../services/bookAmounts'
+import { fmtRSD } from '../utils/formatters'
 
 // ─── The budget change dialog ────────────────────────────────────────────────
 //
@@ -21,6 +23,16 @@ import { deltaForTarget } from '../services/budgetForecast'
 // here for a company picker to answer, and the refusal that used to stand in
 // its place — "pick one in the selector before changing a budget" — was
 // refusing on behalf of a per-company budget that no longer exists.
+//
+// ── In dinars, with euros beside them ───────────────────────────────────────
+//
+// A budget is planned in RSD, so the figure is typed in RSD and the change is
+// stored as `amount_rsd` against `seed_rsd`. The EUR reading of the same
+// entry is stored beside it: `amount_eur` is the RSD change at the NBS rate
+// of the day it is recorded, and `seed_eur` is the row's own EUR seed, read
+// off the EUR actuals. When either cannot be had — NBS unreachable, or the
+// page itself not readable in EUR — both are left null rather than guessed,
+// and the budget then reads in RSD only, which the page says.
 
 /** The five classification columns a ledger row files a change under. */
 export interface BudgetClassification {
@@ -101,7 +113,7 @@ export function whyNotRecordable(
  *     `AddBudgetLineDialog` builds a path rather than picking a row off a tree.
  *
  * This is deliberately not a refusal and not a confirmation step. Budgeting on
- * a parent is a supported, deliberate act — "Marketing: $8,000 without
+ * a parent is a supported, deliberate act — "Marketing: 8.000.000 RSD without
  * itemising sixty lines". The fault was that it happened silently.
  */
 export interface ChangeScope {
@@ -135,7 +147,7 @@ export function scopeOfChange(rowLabel: string, childLabels?: string[] | null): 
 }
 
 export default function BudgetChangeDialog({
-  month, monthLabel, level, classification, rowLabel, current, seed, childLabels,
+  month, monthLabel, level, classification, rowLabel, current, seed, seedEur = null, childLabels,
   onClose, onSaved, onExplain,
 }: {
   month: string
@@ -159,6 +171,11 @@ export default function BudgetChangeDialog({
    * not vanish into a figure pinned above it.
    */
   seed: number
+  /**
+   * The same seed in EUR, from the EUR actuals; null where the page has no
+   * EUR reading of this budget. Recorded as `seed_eur`.
+   */
+  seedEur?: number | null
   /**
    * The labels of the row's direct children, or omitted where the caller has
    * no tree to read them from. An empty array is a leaf and says so; omitting
@@ -191,6 +208,18 @@ export default function BudgetChangeDialog({
     if (delta === null) return
     setSaving(true); setError('')
 
+    // The EUR reading, both halves or neither. See the note at the top.
+    let eur: { amount_eur: number; seed_eur: number } | { amount_eur: null; seed_eur: null } =
+      { amount_eur: null, seed_eur: null }
+    if (seedEur !== null && seedEur !== undefined && Number.isFinite(seedEur)) {
+      try {
+        const rates = await getBookRates(new Date().toISOString().slice(0, 10))
+        eur = { amount_eur: rsdToEur(delta, rates.eurRate), seed_eur: seedEur }
+      } catch {
+        // Not a reason to refuse a budget planned in dinars.
+      }
+    }
+
     const { error: insErr } = await supabase.from('budget_adjustments').insert({
       // The group's. Null is the budget's own scope, not a missing value: the
       // owner budgets consolidated, and the classification tables this line is
@@ -200,10 +229,11 @@ export default function BudgetChangeDialog({
       level,
       ...classification,
       kind: 'adjust',
-      amount_usd: delta,
+      amount_rsd: delta,
       // See the prop. Without this the figure typed above drifts the moment
       // the month turns over.
-      seed_usd: seed,
+      seed_rsd: seed,
+      ...eur,
       reason: reason.trim(),
     })
     if (insErr) { setError(`Could not save: ${insErr.message}`); setSaving(false); return }
@@ -238,10 +268,10 @@ export default function BudgetChangeDialog({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
               <div style={s.lbl}>Currently</div>
-              <div style={{ fontSize: '18px', color: DIALOG.dim }}>${current.toFixed(2)}</div>
+              <div style={{ fontSize: '18px', color: DIALOG.dim }}>{fmtRSD(current)}</div>
             </div>
             <div>
-              <div style={s.lbl}>Change to</div>
+              <div style={s.lbl}>Change to (RSD)</div>
               <input style={s.input} type="number" value={target} autoFocus
                 aria-label="Change to"
                 onChange={e => setTarget(e.target.value)} />
@@ -255,7 +285,7 @@ export default function BudgetChangeDialog({
               ? 'No figure typed. An empty box is not zero — type 0 if zero is what you mean.'
               : delta === 0
                 ? 'No change yet.'
-                : delta > 0 ? `+$${delta.toFixed(2)} more` : `-$${Math.abs(delta).toFixed(2)} less`}
+                : delta > 0 ? `+${fmtRSD(delta)} more` : `-${fmtRSD(Math.abs(delta))} less`}
           </div>
 
           <div>

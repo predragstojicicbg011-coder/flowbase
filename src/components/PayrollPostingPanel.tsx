@@ -17,6 +17,7 @@ import type { EmployeeForMonth } from '../services/payroll/employees'
 import type { LedgerNames } from '../services/payroll/booking'
 import type { SavedRun } from '../services/payroll/savedRuns'
 import { fmtNum } from '../utils/formatters'
+import { getBookRates } from '../services/bookAmounts'
 import { fetchAllPartners } from '../services/allPartners'
 /** Two names for one person, compared the way the matcher compares them. */
 const personKeyEq = (a: string | null | undefined, b: string | null | undefined) =>
@@ -36,13 +37,13 @@ const personKeyEq = (a: string | null | undefined, b: string | null | undefined)
  * to fix a blocker is how a blocker becomes a habit of ignoring it.
  */
 export default function PayrollPostingPanel({
-  runs, people, month, companyId, usdRate, exchangeRate, savedRuns, onPosted,
+  runs, people, month, companyId, exchangeRate, savedRuns, onPosted,
 }: {
   runs: PayrollRun[]
   people: Record<string, EmployeeForMonth>
   month: string
   companyId: string
-  usdRate: number | null
+  /** RSD per EUR for the month, for euro-denominated deductions in the plan. */
   exchangeRate: number | null
   /** The kept calculations. Only a run that IS one can be posted. */
   savedRuns: SavedRun[]
@@ -313,16 +314,22 @@ export default function PayrollPostingPanel({
   const post = async (run: PayrollRun) => {
     const entry = plans[run.key]
     if (!entry || entry.why) return
-    if (!usdRate) {
-      // Every report in this application totals in dollars. Entries written
-      // with no rate would be correct in dinars and invisible everywhere
-      // else, which reads as a month that simply cost less.
-      setError('The dollar rate for this month could not be read, so nothing was posted. '
-        + 'Every entry would go in without a dollar amount and would be missing from the '
-        + 'P&L, which would look like a cheaper month rather than like an error.')
+    setBusy(run.key); setError(null); setDone(null)
+    // Payroll is booked in dinars; every row carries its euro figure beside
+    // them at the NBS rate of the payment date. Entries written with no EUR
+    // rate would be correct in dinars and missing from every report read in
+    // euros, which reads as a month that simply cost less — so without the
+    // rate nothing is posted.
+    let eurRate: number
+    try {
+      eurRate = (await getBookRates(paymentDate)).eurRate
+    } catch (e: any) {
+      setError(`The NBS euro rate for ${paymentDate} could not be read, so nothing was posted. `
+        + `(${e?.message || String(e)}) Every entry would go in without its EUR figure and `
+        + 'would be missing from the reports read in euros.')
+      setBusy(null)
       return
     }
-    setBusy(run.key); setError(null); setDone(null)
     const context: PostContext = {
       companyId, paymentDate,
       // The month being posted, not the month it is being posted in. A run
@@ -331,7 +338,7 @@ export default function PayrollPostingPanel({
       dueDate: lastWorkingDayOf(month, holidays),
       invoiceNumber: month,
       currency: 'RSD',
-      usdRate, exchangeRate,
+      eurRate,
       // Posting freezes this run, so a recalculation cannot move underneath
       // the invoices it just wrote.
       runId: entry.runId,

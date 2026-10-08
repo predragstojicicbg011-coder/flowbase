@@ -2,62 +2,78 @@
 //
 // Allocating a payment in the currency the bill was written in.
 //
-// The transaction dialog asked for allocations in dollars against invoices
-// denominated in dinars. Checking a figure then meant dividing by a rate in
-// your head — 12,000 RSD is $117.23 at 102.36 — which is not a check anybody
-// performs reliably, and an allocation that is wrong by a factor is exactly
-// the kind of error this codebase has spent a week repairing.
+// A person types an allocation in the bill's own currency — that is what the
+// bill, the bank statement and the payment order show. The book figures
+// (`allocated_amount_rsd`, `allocated_amount_eur`) are derived from it at the
+// moment of writing, by `invoiceLinks`.
 //
-// The stored contract does not change. `invoice_transaction_links` keeps both
-// columns and `linkAmounts` still decides what goes in them. This is about
-// which number a person types and reads.
+// WHICH WAY ROUND MATTERS. Holding dinars and displaying the conversion makes
+// the field move under the user: type 600 EUR, store 70,500 RSD, redisplay
+// 600.00x. So the typed figure is the one that is held. A number a person
+// entered is never shown back to them altered.
 //
-// WHICH WAY ROUND MATTERS. Holding dollars and displaying the conversion
-// makes the field move under the user: type 12,000, store 117.23, redisplay
-// 12,000.06. So the typed figure is the one that is held, and the dollars are
-// derived from it at the moment of writing. A number a person entered is
-// never shown back to them altered.
-//
-// The rate comes from the invoice's own `amount / amount_usd`, the same source
-// `invoiceLinks` uses, so the conversion agrees with how that row was booked
-// rather than with a rate fetched separately and rounded differently.
+// Conversions here use the invoice's STORED rates, the same source
+// `invoiceLinks` uses, so the display agrees with how that row was booked.
+// They never throw: a row without rates is shown in its own figures and the
+// save path, which does throw, says why it cannot be written.
 
-import { impliedRate, type InvoiceMoney } from './invoiceLinks'
+import { invoiceRates, type InvoiceMoney } from './invoiceLinks'
+import { BOOK_CURRENCY, round2 } from './bookAmounts'
+import { fmtMoney } from '../utils/formatters'
 
-const cents = (n: number): number => Math.round(n * 100) / 100
-
-/** Is this invoice denominated in something other than dollars? */
+/** Is this invoice denominated in something other than the book currency (RSD)? */
 export function hasOwnCurrency(invoice: InvoiceMoney): boolean {
-  return !!invoice.currency && invoice.currency !== 'USD' && impliedRate(invoice) !== null
+  return !!invoice.currency && invoice.currency !== BOOK_CURRENCY && invoiceRates(invoice) !== null
 }
 
-/** The currency an allocation against this invoice should be typed in. */
+/**
+ * The currency an allocation against this invoice is typed in: the bill's
+ * own, always — `allocated_amount` is in it whether or not the invoice
+ * carries the rates to convert it. Dinars when the invoice names none.
+ */
 export function allocationCurrency(invoice: InvoiceMoney): string {
-  return hasOwnCurrency(invoice) ? (invoice.currency as string) : 'USD'
+  return invoice.currency || BOOK_CURRENCY
 }
 
-/** A dollar allocation, in the currency the bill was written in. */
-export function toOwn(usd: number, invoice: InvoiceMoney): number {
-  if (!Number.isFinite(usd)) return 0
-  const rate = hasOwnCurrency(invoice) ? impliedRate(invoice) : null
-  return cents(rate === null ? usd : usd * rate)
+/** A dinar figure, in the currency the bill was written in (invoice rate). */
+export function toOwn(amountRsd: number, invoice: InvoiceMoney): number {
+  if (!Number.isFinite(amountRsd)) return 0
+  const r = hasOwnCurrency(invoice) ? invoiceRates(invoice) : null
+  return round2(r === null ? amountRsd : amountRsd / r.exchangeRate)
 }
 
-/** The same figure back in dollars, which is what the link's USD column holds. */
-export function toUsd(own: number, invoice: InvoiceMoney): number {
+/** An own-currency figure in dinars, at the invoice's rate. */
+export function toRsd(own: number, invoice: InvoiceMoney): number {
   if (!Number.isFinite(own)) return 0
-  const rate = hasOwnCurrency(invoice) ? impliedRate(invoice) : null
-  return cents(rate === null || rate === 0 ? own : own / rate)
+  const r = hasOwnCurrency(invoice) ? invoiceRates(invoice) : null
+  return round2(r === null ? own : own * r.exchangeRate)
 }
+
+/**
+ * An own-currency figure in euros, at the invoice's rates — exactly `own` on
+ * a EUR bill. Null when the invoice carries no eur_rate.
+ */
+export function toEur(own: number, invoice: InvoiceMoney): number | null {
+  if (!Number.isFinite(own)) return 0
+  if (invoice.currency === 'EUR') return round2(own)
+  const r = invoiceRates(invoice)
+  if (r === null) return null
+  return round2(round2(own * r.exchangeRate) / r.eurRate)
+}
+
+/**
+ * @deprecated The book currency is RSD now; this returns DINARS. Kept as an
+ * alias of `toRsd` so src/pages/Reports.tsx keeps compiling — use `toRsd`.
+ */
+export const toUsd = toRsd
 
 /**
  * The currency the running totals can honestly be shown in.
  *
  * Only when the payment and every invoice it closes agree. A payment in
  * dinars against one dinar invoice and one euro invoice has no single
- * currency its total means anything in, and inventing one by converting would
- * put a figure on screen that is nobody's actual money. `null` means fall
- * back to dollars and say so.
+ * currency its total means anything in other than the book's. `null` means
+ * fall back to RSD (the book) and say so.
  */
 export function commonCurrency(
   transactionCurrency: string | null | undefined,
@@ -70,32 +86,28 @@ export function commonCurrency(
 }
 
 /**
- * A figure with its currency, the way this dialog writes money.
- *
- * Dollars lead with the sign because that is the convention everywhere else
- * on this screen; everything else trails its code, because "12.000,00 RSD" is
- * how a Serbian statement reads and this is meant to be checked against one.
+ * A figure with its currency, the way this dialog writes money — Serbian
+ * notation with the code trailing, because the bill and the bank statement it
+ * is checked against are written that way. Nonsense prints as zero.
  */
 export function formatMoney(amount: number, currency: string): string {
-  const n = Number.isFinite(amount) ? amount : 0
-  if (currency === 'USD') {
-    return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US',
-      { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  }
-  // Serbian notation, because the bill, the bank statement and the payment
-  // order this is checked against are all written that way. It used to print
-  // `300,000.00 RSD`, which is the dollar convention wearing a dinar's code.
-  return n.toLocaleString('sr-RS', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    + ' ' + currency
+  return fmtMoney(Number.isFinite(amount) ? amount : 0, currency)
 }
 
 /**
  * What a row should start with when the dialog opens.
  *
- * An existing link stores dollars, so the field it is typed into has to be
- * seeded with the conversion — this is the one place the round trip happens,
- * and it happens once, before anyone has typed anything to be altered.
+ * A stored link carries `allocated_amount` in the invoice's own currency, so
+ * that is the seed when it is there; a dinar figure is converted once, before
+ * anyone has typed anything to be altered.
  */
-export function seedOwn(allocatedUsd: number, invoice: InvoiceMoney): number {
-  return toOwn(allocatedUsd, invoice)
+export function seedOwn(
+  link: { allocated_amount?: number | null; allocated_amount_rsd?: number | null } | number,
+  invoice: InvoiceMoney,
+): number {
+  if (typeof link === 'number') return toOwn(link, invoice)
+  if (typeof link.allocated_amount === 'number' && Number.isFinite(link.allocated_amount)) {
+    return round2(link.allocated_amount)
+  }
+  return toOwn(Number(link.allocated_amount_rsd) || 0, invoice)
 }

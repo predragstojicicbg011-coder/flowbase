@@ -8,7 +8,7 @@ import {
 } from '../services/expenseSplit'
 import { saveSplits, loadSplits } from '../services/saveSplits'
 import InlineCategoryAdd from './InlineCategoryAdd'
-import { getRate, convertToUSD, getRatesForDate } from '../services/currencyService'
+
 import CreditInstallmentSelector from './CreditInstallmentSelector'
 import { useCreditPayment } from './useCreditPayment'
 import { chooseAccount, carriedAccountOf } from '../services/partnerAccountChoice'
@@ -18,7 +18,7 @@ import { linkAmountsFromOwn } from '../services/invoiceLinks'
 import { outstandingOwn, settlementFor } from '../services/settleInvoice'
 import { planLinkChanges, describeChanges } from '../services/linkPlan'
 import {
-  allocationCurrency, commonCurrency, formatMoney, toUsd,
+  allocationCurrency, commonCurrency, formatMoney, toRsd,
 } from '../services/allocationDisplay'
 import { differenceFor, entryNote, isBookable } from '../services/currencyDifference'
 import {
@@ -26,10 +26,15 @@ import {
 } from '../services/settlementCheck'
 import { orderedForDifference, findCurrencyDifference } from '../services/quickFillStore'
 import { CREDIT_PRINCIPAL, CREDIT_INTEREST, creditNote, allocatePayment } from '../services/creditClassification'
+import { creditLegBooker } from '../services/creditPayment'
 import { planSave, isCrossTableMove, type TxTable, type TxType } from '../services/transactionMove'
 import { softDeleteRow } from '../services/writeOrder'
 import { fetchAllPartners } from '../services/allPartners'
-import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
+import {
+  DOCUMENT_CURRENCIES, bookAmountsAtRate, getBookRates, partBookAmounts, partFromRsd, rateFor,
+  type BookAmounts,
+} from '../services/bookAmounts'
+import { fmtMoney, fmtNum } from '../utils/formatters'
 
 interface Props {
   onClose: () => void
@@ -55,25 +60,27 @@ interface LinkedInvoice {
   due_date: string
   currency: string
   amount: number
-  amount_usd: number
-  remaining_usd: number
+  /** The invoice's book figure and the stored rates it was booked at. */
+  amount_rsd: number
+  exchange_rate: number | null
+  eur_rate: number | null
   /**
    * What the bill is owed IN ITS OWN CURRENCY, excluding this payment's link.
    *
    * The figure the settled/partial rule is decided on, so it is the figure
-   * the field has to be judged against. The dollar remainder beside it is
-   * kept only for the currency-difference arithmetic, which genuinely is a
-   * question about two rates.
+   * the field has to be judged against.
    */
   outstanding_own: number
-  /** For reporting. Derived from what was settled; never the other way. */
-  allocated_usd: number
+  /**
+   * The allocation in RSD at the invoice's stored rate, for the book totals.
+   * Derived from what was settled; never the other way.
+   */
+  allocated_rsd: number
   /**
    * What the field shows, in the invoice's own currency, exactly as typed.
    *
-   * Held rather than converted on each render: the dollar column stores cents,
-   * so round-tripping 12,000 RSD through it returns 11,999.69, and a field
-   * that rewrites a figure after you leave it is how one gets corrected twice.
+   * Held rather than converted on each render: a field that rewrites a figure
+   * after you leave it is how one gets corrected twice.
    */
   allocated_own: number
 }
@@ -171,7 +178,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     credits, selectedCreditId, setSelectedCreditId,
     creditInstallments, selectedInstallmentIds,
     toggleInstallment, toggleAll: toggleAllInstallments,
-    selectedTotal: creditSelectedTotal, reset: resetCredit,
+    selectedTotal: creditSelectedTotal, selectedCurrency: creditCurrency, reset: resetCredit,
   } = useCreditPayment()
 
   const [plCatId, setPlCatId] = useState('')
@@ -277,17 +284,40 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
   // Step 2
   const [amount, setAmount] = useState('')
+  // RSD per 1 unit of `currency`, and RSD per 1 EUR — fetched from NBS or
+  // typed by hand. On a EUR payment the two are the same number.
   const [exRate, setExRate] = useState('')
+  const [eurRate, setEurRate] = useState('')
   const [isIndexed, setIsIndexed] = useState(false)
   const [rateSource, setRateSource] = useState('')
-  const [rateIsFallback, setRateIsFallback] = useState(false)
+  const [rateMissing, setRateMissing] = useState(false)
   const [fetchingRate, setFetchingRate] = useState(false)
 
-  const usdAmount = (() => {
-    const a = parseFloat(amount) || 0
-    const r = parseFloat(exRate) || 0
-    return convertToUSD(a, currency, r)
+  // The four stored columns, from the rates in hand (bookAmountsAtRate, so a
+  // hand-typed rate is booked exactly like a fetched one). A missing rate is
+  // an error to show, never a figure to guess.
+  const book: { amounts: BookAmounts | null; error: string } = (() => {
+    const a = parseFloat(amount)
+    if (!currency || !(a > 0)) return { amounts: null, error: '' }
+    const own = currency === 'RSD' ? 1 : parseFloat(exRate)
+    const eur = currency === 'EUR' ? parseFloat(exRate) : parseFloat(eurRate)
+    try {
+      return { amounts: bookAmountsAtRate(a, currency, own, eur), error: '' }
+    } catch (err) {
+      return { amounts: null, error: err instanceof Error ? err.message : String(err) }
+    }
   })()
+  const amountRsd = book.amounts?.amount_rsd ?? 0
+  const amountEur = book.amounts?.amount_eur ?? 0
+  /** This payment as a parent row: for its split lines and its own parts. */
+  const paymentRow = {
+    amount: parseFloat(amount) || 0,
+    currency: currency || undefined,
+    exchange_rate: book.amounts?.exchange_rate ?? null,
+    eur_rate: book.amounts?.eur_rate ?? null,
+    amount_rsd: book.amounts?.amount_rsd ?? null,
+    amount_eur: book.amounts?.amount_eur ?? null,
+  }
 
   /**
    * The costs this one payment is made of, where it is more than one.
@@ -317,8 +347,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
    * nothing on screen to explain it.
    */
   const whySplit = txType === 'direct'
-    ? whySplitNotSavable(
-      { amount: parseFloat(amount) || 0, amount_usd: usdAmount }, splitLines)
+    ? whySplitNotSavable(paymentRow, splitLines)
     : null
 
   const splitActive = txType === 'direct' && splitLines.length > 0
@@ -343,12 +372,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     setDeptSubId(deptSubcategories.find(c => c.name === from.dept_subcategory)?.id || '')
   }, [splitLines, txType, plCategories, plSubcategories, departments, deptSubcategories])
 
-  const totalAllocated = linkedInvoices.reduce((s, i) => s + (i.allocated_usd || 0), 0)
+  /** What is allocated, in RSD at each invoice's stored rate. */
+  const totalAllocatedRsd = linkedInvoices.reduce((s, i) => s + (i.allocated_rsd || 0), 0)
   /** The same totals in the shared currency, when there is one to share. */
   const allocCurrency = commonCurrency(currency, linkedInvoices)
   const totalAllocatedOwn = linkedInvoices.reduce((s, i) => s + (i.allocated_own || 0), 0)
   const unallocatedOwn = (parseFloat(amount) || 0) - totalAllocatedOwn
-  const unallocated = usdAmount - totalAllocated
+  /** In RSD: the payment at its own rate, less the allocations at the invoices'. */
+  const unallocatedRsd = amountRsd - totalAllocatedRsd
 
   // Revenue stream split handlers
   const handleAimfoxChange = (val: string) => {
@@ -418,7 +449,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     if (!currency) e.currency = 'Currency is required'
     if (!txDate) e.txDate = 'Transaction date is required'
     if (!amount || parseFloat(amount) <= 0) e.amount = 'Amount must be greater than 0'
-    if (currency && currency !== 'USD' && (!exRate || parseFloat(exRate) <= 0)) e.exRate = 'Exchange rate is required'
+    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Exchange rate is required'
     if (txType === 'invoice_payment' && linkedInvoices.length === 0) e.linkedInvoices = 'Select at least one invoice to close'
     if (txType === 'credit_payment' && selectedInstallmentIds.length === 0) e.creditInstallments = 'Select at least one installment'
     if (txType === 'direct') {
@@ -438,7 +469,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, bankId, currency, txDate, amount, exRate, txType, linkedInvoices, selectedInstallmentIds, directSubtype, plCatId, deptId, revStream, revAlloc, aimfoxVal, sgVal, opexType, opexVal, performanceVal]) // eslint-disable-line
+  }, [companyId, bankId, currency, txDate, amount, exRate, eurRate, txType, linkedInvoices, selectedInstallmentIds, directSubtype, plCatId, deptId, revStream, revAlloc, aimfoxVal, sgVal, opexType, opexVal, performanceVal]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -548,6 +579,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     setNote(transaction.note || '')
     setAmount(transaction.amount?.toString() || '')
     setExRate(transaction.exchange_rate?.toString() || '')
+    setEurRate(transaction.eur_rate?.toString() || '')
     setIsIndexed(transaction.is_indexed || false)
     setPlCatName(transaction.pl_category || '')
     setPlSubName(transaction.pl_subcategory || '')
@@ -639,20 +671,19 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       setLinksLoading(true)
       const { data, error } = await supabase
         .from('invoice_transaction_links')
-        .select('invoice_id, allocated_amount, allocated_amount_usd, invoices(id, invoice_number, invoice_date, due_date, currency, amount, amount_usd, partners(name))')
+        .select('invoice_id, allocated_amount, allocated_amount_rsd, invoices(id, invoice_number, invoice_date, due_date, currency, amount, amount_rsd, exchange_rate, eur_rate, partners(name))')
         .eq('transaction_id', rowId)
       // What is actually left on each of them. The invoice's own amount is not
       // that: a partly paid invoice would show its full value as outstanding,
       // at the exact moment someone is deciding how much to allocate.
       const ids = (data || []).map((l: any) => l.invoice_id)
       const { data: statuses } = ids.length > 0
-        ? await supabase.from('v_invoice_status').select('id, amount, paid_amount, remaining_usd').in('id', ids)
+        ? await supabase.from('v_invoice_status').select('id, amount, paid_amount').in('id', ids)
         : { data: [] as any[] }
-      const remainingById = new Map<string, number>((statuses || []).map((r: any) => [r.id, r.remaining_usd || 0]))
       // `paid_amount` is the view's sum of `allocated_amount` — the invoice's
       // own currency, and the column the settled/partial rule reads. The
-      // dollar remainder beside it cannot answer the same question: it is
-      // quantised to the cent, and a cent is about a dinar.
+      // book remainder beside it cannot answer the same question: it carries
+      // the rates of every payment that went against the bill.
       const paidById = new Map<string, number>((statuses || []).map((r: any) => [r.id, r.paid_amount || 0]))
       if (cancelled) { return }
       if (error) {
@@ -671,22 +702,20 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         due_date: l.invoices?.due_date,
         currency: l.invoices?.currency,
         amount: l.invoices?.amount,
-        amount_usd: l.invoices?.amount_usd,
-        // The remainder BEFORE this payment is taken off, which is what the
-        // allocation beside it has to be judged against.
-        remaining_usd: (remainingById.get(l.invoice_id) ?? 0) + (l.allocated_amount_usd || 0),
+        amount_rsd: l.invoices?.amount_rsd,
+        exchange_rate: l.invoices?.exchange_rate ?? null,
+        eur_rate: l.invoices?.eur_rate ?? null,
         // What the bill is owed with this payment's own link taken back out,
         // which is what the figure beside it has to be judged against.
         outstanding_own: outstandingOwn({
           currency: l.invoices?.currency,
           amount: l.invoices?.amount,
-          amount_usd: l.invoices?.amount_usd,
           paid_amount: (paidById.get(l.invoice_id) ?? 0) - (l.allocated_amount || 0),
         }),
-        allocated_usd: l.allocated_amount_usd || 0,
+        allocated_rsd: l.allocated_amount_rsd || 0,
         // What the field shows and the user edits, in the invoice's own
         // currency — READ STRAIGHT OUT OF THE COLUMN that holds it. Seeding it
-        // from the dollars instead put the round trip back in on every reopen.
+        // from the book column instead would put a round trip in on every reopen.
         allocated_own: l.allocated_amount || 0,
       }))
       setLinkedInvoices(rows as any)
@@ -700,8 +729,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
   // ── The currency difference ─────────────────────────────────────────────
   //
-  // A dinar invoice indexed to the euro is booked at one rate and settled at
-  // another, so it never lands exactly. What is left is worked out in
+  // An invoice in (or indexed to) a foreign currency is booked at one rate
+  // and settled at another, so in RSD it never lands exactly. What is left —
+  // in RSD, the book currency both sides share — is worked out in
   // services/currencyDifference.ts, which also decides which way it goes and
   // whether it has to be linked to close the invoice.
   //
@@ -712,30 +742,35 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   // currency-difference one is the obvious choice.
   const fxScripts = useMemo(() => orderedForDifference(quickFillScripts), [quickFillScripts])
   const fxInvoice = linkedInvoices.length === 1 ? linkedInvoices[0] : null
-  // The shortfall is asked in the invoice's own currency and converted, not
-  // read off the dollar columns. Read off the dollars, a dinar payment that
-  // settled a dinar bill to the para still showed a gap — the rate had moved
-  // between the two dates — and the dialog offered to book it as a gain.
+  // The shortfall is asked in the invoice's own currency and converted to RSD
+  // at the invoice's rate, not read off the book remainder. Read off the
+  // book, a euro payment that settled a euro bill to the cent would still
+  // show a gap — the rate had moved between the two dates — and the dialog
+  // would offer to book it as a gain.
   const fxShortfallOwn = fxInvoice
     ? Math.round(((fxInvoice.outstanding_own || 0) - (fxInvoice.allocated_own || 0)) * 100) / 100
     : 0
-  const fxShortfallUsd = fxInvoice ? toUsd(Math.max(0, fxShortfallOwn), fxInvoice) : 0
+  const fxShortfallRsd = fxInvoice ? toRsd(Math.max(0, fxShortfallOwn), fxInvoice) : 0
   const fxDifference = differenceFor({
-    invoiceShortfall: fxShortfallUsd,
-    paymentUnallocated: fxInvoice ? usdAmount - totalAllocated : 0,
-    // Presented in the currency the entry will be written in: a gain closes a
-    // dinar invoice and belongs in dinars; a surplus is part of this bank line
-    // and belongs in the currency the bank moved.
-    currency: 'USD',
+    invoiceShortfall: fxShortfallRsd,
+    // A surplus is the payment at its own rate less the allocations at the
+    // invoice's. Only meaningful in a currency other than the bill's: a
+    // same-currency surplus is an unallocated part, not a rate difference.
+    paymentUnallocated: fxInvoice ? unallocatedRsd : 0,
+    currency: 'RSD',
   })
   /** The same figure in the currency the created entry will carry. */
-  const fxAmountOwn = !fxInvoice ? 0
-    : fxDifference.kind === 'gain'
-      // The gain IS the rest of the bill, to the para. Converting the dollar
-      // figure back would leave the invoice short by whatever the round trip
-      // cost, which is the one thing a gain exists to prevent.
-      ? Math.max(0, fxShortfallOwn)
-      : Math.round(fxDifference.amount * (usdAmount > 0 ? (parseFloat(amount) || 0) / usdAmount : 1) * 100) / 100
+  const fxAmountOwn = (() => {
+    if (!fxInvoice) return 0
+    // The gain IS the rest of the bill, to the cent, in the bill's currency.
+    if (fxDifference.kind === 'gain') return Math.max(0, fxShortfallOwn)
+    // A loss is part of this bank line, in the payment's currency at its rate.
+    try {
+      return partFromRsd(fxDifference.amount, paymentRow).amount
+    } catch {
+      return 0
+    }
+  })()
   const fxCurrency = !fxInvoice ? currency
     : fxDifference.kind === 'gain' ? allocationCurrency(fxInvoice) : currency
   const fxScript = fxScripts.find(sc => sc.id === differenceScriptId)
@@ -750,7 +785,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
    *
    * IN THE CURRENCY OF THE BILL. A dinar payment against a dinar bill needs
    * no rate at all: it pays what it pays, up to what is owed. Routing it
-   * through dollars compared the payment date's rate against the invoice
+   * through the book currency compared the payment date's rate against the invoice
    * date's and left the bill short by whatever had moved between them — a
    * remainder that then offered itself as a currency difference, though
    * dinars had settled a dinar bill in full.
@@ -758,35 +793,44 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const addInvoiceLink = (inv: any) => {
     if (isInvoiceLinked(inv.id)) return
     const outstanding = outstandingOwn(inv)
-    const settlement = settlementFor({
-      invoice: inv,
-      paymentCurrency: currency,
-      paymentOwn: Math.max(0, (parseFloat(amount) || 0) - totalAllocatedOwn),
-      paymentUsd: Math.max(0, usdAmount - totalAllocated),
-    })
+    let settlement: ReturnType<typeof settlementFor>
+    try {
+      settlement = settlementFor({
+        invoice: inv,
+        paymentCurrency: currency,
+        paymentOwn: Math.max(0, (parseFloat(amount) || 0) - totalAllocatedOwn),
+        paymentRsd: Math.max(0, amountRsd - totalAllocatedRsd),
+      })
+    } catch (err) {
+      // RateUnavailableError: the invoice carries no stored rate, so its
+      // allocation cannot be booked. Say so rather than guess.
+      setPostError(err instanceof Error ? err.message : String(err))
+      return
+    }
     setLinkedInvoices(prev => [...prev, {
       invoice_id: inv.id, invoice_number: inv.invoice_number || '—',
       partner_name: inv.partner_name || '—', invoice_date: inv.invoice_date,
       due_date: inv.due_date, currency: inv.currency, amount: inv.amount,
-      amount_usd: inv.amount_usd,
-      remaining_usd: inv.remaining_usd ?? inv.amount_usd ?? 0,
+      amount_rsd: inv.amount_rsd,
+      exchange_rate: inv.exchange_rate ?? null,
+      eur_rate: inv.eur_rate ?? null,
       outstanding_own: outstanding,
-      allocated_usd: settlement.usd,
+      allocated_rsd: settlement.rsd,
       allocated_own: settlement.own,
     }])
     touch('linkedInvoices')
   }
   const removeInvoiceLink = (invId: string) => setLinkedInvoices(prev => prev.filter(l => l.invoice_id !== invId))
   /**
-   * The user types in the invoice's currency; the dollars follow.
+   * The user types in the invoice's currency; the dinars follow.
    *
    * `allocated_own` is what the field shows, so it is stored exactly as
-   * entered. `allocated_usd` is derived here and is what the link is written
-   * from. Deriving the other way would redisplay 12,000 as 11,999.69.
+   * entered. `allocated_rsd` is derived here, at the invoice's rate, for the
+   * running totals. Deriving the other way would redisplay a figure altered.
    */
   const updateAllocated = (invId: string, own: number) => setLinkedInvoices(prev =>
     prev.map(l => l.invoice_id === invId
-      ? { ...l, allocated_own: own, allocated_usd: toUsd(own, l) }
+      ? { ...l, allocated_own: own, allocated_rsd: toRsd(own, l) }
       : l))
   const handleAccountSelect = (accountId: string) => {
     setSelectedAccountId(accountId)
@@ -794,19 +838,22 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     if (acc) { setAccNum(acc.account_number || ''); setModel(acc.model || '') }
   }
 
+  // Both NBS rates for the transaction date. An RSD payment still needs the
+  // EUR rate, for amount_eur.
   const fetchRate = async () => {
-    if (!currency || currency === 'USD') { setExRate('1'); setRateSource('N/A'); setRateIsFallback(false); return }
+    if (!currency) return
     setFetchingRate(true)
     try {
-      const rateData = await getRate(currency, txDate, isIndexed)
-      setExRate(rateData.rate.toString()); setRateSource(rateData.source)
-      setRateIsFallback(rateData.isFallback)
+      const rates = await getBookRates(txDate)
+      setExRate(String(rateFor(currency, rates)))
+      setEurRate(String(rates.eurRate))
+      setRateSource(rates.source)
+      setRateMissing(false)
     } catch (err) {
-      // Vidi komentar u InvoiceDialog — hardkodovani kursevi su uklonjeni.
-      console.error('[TransactionDialog] getRate neuspesan:', err)
-      setExRate('')
-      setRateSource('⚠ No official rate — enter it manually')
-      setRateIsFallback(true)
+      // RateUnavailableError, in its own words. Nothing is guessed; the
+      // person can retry or type the rate.
+      setRateSource(err instanceof Error ? `${err.message} — enter it manually` : 'No official rate — enter it manually')
+      setRateMissing(true)
     }
     setFetchingRate(false)
   }
@@ -894,16 +941,24 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     })
     if (plan.kind === 'refuse') { setPostError(plan.reason); return }
 
-    // Rate kredita su u EUR, a placanje u USD — bez zvanicnog EUR/USD kursa
-    // iznos bi bio pogadjan. Provjeri PRIJE upisa.
-    let eurUsdRate = 1
+    // The book columns of the payment, checked BEFORE anything is written. A
+    // credit's instalments are in the credit's own currency (RSD or EUR), and
+    // the payment's stored figure in that currency is what they are paid
+    // down by — see services/creditPayment.ts.
+    const booked = book.amounts
+    if (!booked) {
+      setPostError(`${book.error || 'Exchange rate is required'}. Nothing was posted.`)
+      return
+    }
+    let creditLegs: ReturnType<typeof creditLegBooker> | null = null
     if (txType === 'credit_payment') {
-      const rates = await getRatesForDate(txDate)
-      if (rates.isFallback) {
-        setPostError(`No official EUR/USD rate for ${txDate}. Nothing was posted.`)
+      const credit = credits.find(c => c.id === selectedCreditId)
+      try {
+        creditLegs = creditLegBooker(credit?.currency, booked, credit?.name)
+      } catch (err: any) {
+        setPostError(`${err.message}. Nothing was posted.`)
         return
       }
-      eurUsdRate = rates.eurRsdRate / rates.usdRsdRate
     }
 
     setSaving(true)
@@ -926,7 +981,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         statement_number: statement || null, type: txType,
         tx_subtype: txType === 'direct' ? directSubtype : null,
         currency, amount: parseFloat(amount),
-        exchange_rate: parseFloat(exRate) || null, amount_usd: usdAmount,
+        exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
+        amount_rsd: booked.amount_rsd, amount_eur: booked.amount_eur,
         is_indexed: isIndexed, pl_impact: isDirectWithPL,
         pl_category: isDirectWithPL ? (plCatName || null) : null,
         pl_subcategory: isDirectWithPL ? (plSubName || null) : null,
@@ -957,7 +1013,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           partner_id: finalPartnerId || null, transaction_date: txDate,
           direction: ptDirection, period_month: ptPeriodMonth || null,
           currency, amount: parseFloat(amount),
-          exchange_rate: parseFloat(exRate) || null, amount_usd: usdAmount,
+          exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
+          amount_rsd: booked.amount_rsd, amount_eur: booked.amount_eur,
           note: note || null, status: 'unpaired',
           account_number: accNum || null, model: model || null, reference_number: refNum || null,
         }
@@ -1000,18 +1057,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
       } else if (txType === 'credit_payment') {
         // ── Credit payment ────────────────────────────────────────────────────
-        // Existing system: currency=RSD, exRate=RSD/USD, amount_usd=RSD/exRate
-        // Credit installments are in EUR
-        // EUR paid = amount_usd / eur_usd_rate
-        // We fetch EUR/USD rate to calculate how many EUR the payment covers
-
-        const usdPaid = usdAmount  // already computed: RSD / (RSD/USD rate)
+        // Instalments are in the credit's own currency. The payment covers its
+        // stored figure in that currency, and each leg is a row in that
+        // currency at the payment's rates, the last leg taking the rounding —
+        // services/creditPayment.ts.
+        if (!creditLegs) throw new Error('The credit payment was not prepared — nothing was posted.')
+        const legs = creditLegs
         const creditName = credits.find(c => c.id === selectedCreditId)?.name || 'Credit'
-
-        // Fetch EUR/USD rate to convert USD paid → EUR paid
-        // getRatesForDate vraća oba kursa: usdRsdRate i eurRsdRate
-        // EUR/USD = eurRsdRate / usdRsdRate (npr. 117.38 / 100.03 = 1.1735)
-        let remainingEUR = usdPaid / eurUsdRate  // EUR equivalent of payment
+        let remaining = legs.payable
 
         // Sort selected installments by due_date (oldest first)
         const sortedInstIds = [...selectedInstallmentIds].sort((a, b) => {
@@ -1037,7 +1090,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         const allInstIds = [...sortedInstIds, ...overflowIds]
 
         for (const instId of allInstIds) {
-          if (remainingEUR <= 0.01) break
+          if (remaining <= 0.01) break
 
           // Get installment data
           const inst = creditInstallments.find(i => i.id === instId)
@@ -1045,28 +1098,28 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           if (!inst) continue
 
           // Account for already paid amount (partial from previous payment)
-          const alreadyPaidEUR = inst.paid_amount || 0
-          const remainingPrincipal = Math.max(0, inst.principal_amount - alreadyPaidEUR)
-          const remainingInterest = Math.max(0, inst.interest_amount - Math.max(0, alreadyPaidEUR - inst.principal_amount))
+          const alreadyPaid = inst.paid_amount || 0
+          const remainingPrincipal = Math.max(0, inst.principal_amount - alreadyPaid)
+          const remainingInterest = Math.max(0, inst.interest_amount - Math.max(0, alreadyPaid - inst.principal_amount))
           const remainingTotal = remainingPrincipal + remainingInterest
 
           if (remainingTotal <= 0.01) continue  // already fully paid
 
-          let instPaidEUR = 0
+          let instPaid = 0
           const firstTxId: string[] = []
 
           // Which leg this payment is. Satisfying principal first put an
           // interest-only line on principal and pushed the tail of the
           // principal line onto interest — the two crossed over and, because
           // they were equal, the totals hid it.
-          const legSplit = allocatePayment(remainingEUR, remainingPrincipal, remainingInterest)
+          const legSplit = allocatePayment(remaining, remainingPrincipal, remainingInterest)
 
           // 1. Principal → Loans/Credits/Dividend
           if (legSplit.principal > 0) {
-            const paidPrincipalEUR = legSplit.principal
-            const paidPrincipalUSD = paidPrincipalEUR * eurUsdRate
-            remainingEUR -= paidPrincipalEUR
-            instPaidEUR  += paidPrincipalEUR
+            const paidPrincipal = legSplit.principal
+            const principalMoney = legs.book(paidPrincipal)
+            remaining -= paidPrincipal
+            instPaid  += paidPrincipal
 
             const { data: txP, error: txPErr } = await supabase.from('transactions').insert({
               company_id: companyId || null,
@@ -1076,15 +1129,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               statement_number: statement || null,
               type: 'credit_payment',
               tx_subtype: 'expense',
-              currency: 'EUR',
-              amount: Math.round(paidPrincipalEUR * 100) / 100,
-              exchange_rate: eurUsdRate,
-              amount_usd: Math.round(paidPrincipalUSD * 100) / 100,
+              ...principalMoney,
               pl_impact: true,
               ...CREDIT_PRINCIPAL,
               cf_type: 'recurring',
               cf_frequency: 'monthly',
-              note: creditNote('principal', creditName, inst.installment_no, paidPrincipalEUR, note),
+              note: creditNote('principal', creditName, inst.installment_no, paidPrincipal, note, legs.currency),
               status: 'posted',
             }).select('id').single()
             if (txPErr) throw txPErr
@@ -1093,10 +1143,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
           // 2. Interest → Loans/Credits/Dividend / Paid Interest on credit
           if (legSplit.interest > 0) {
-            const paidInterestEUR = legSplit.interest
-            const paidInterestUSD = paidInterestEUR * eurUsdRate
-            remainingEUR -= paidInterestEUR
-            instPaidEUR  += paidInterestEUR
+            const paidInterest = legSplit.interest
+            const interestMoney = legs.book(paidInterest)
+            remaining -= paidInterest
+            instPaid  += paidInterest
 
             const { error: txIErr } = await supabase.from('transactions').insert({
               company_id: companyId || null,
@@ -1106,29 +1156,26 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               statement_number: statement || null,
               type: 'credit_payment',
               tx_subtype: 'expense',
-              currency: 'EUR',
-              amount: Math.round(paidInterestEUR * 100) / 100,
-              exchange_rate: eurUsdRate,
-              amount_usd: Math.round(paidInterestUSD * 100) / 100,
+              ...interestMoney,
               pl_impact: true,
               ...CREDIT_INTEREST,
               cf_type: 'recurring',
               cf_frequency: 'monthly',
-              note: creditNote('interest', creditName, inst.installment_no, paidInterestEUR, note),
+              note: creditNote('interest', creditName, inst.installment_no, paidInterest, note, legs.currency),
               status: 'posted',
             })
             if (txIErr) throw txIErr
           }
 
           // Update installment
-          const totalPaidEUR = alreadyPaidEUR + instPaidEUR
-          const instStatus = totalPaidEUR >= inst.total_amount - 0.01 ? 'paid' : 'outstanding'
+          const totalPaid = alreadyPaid + instPaid
+          const instStatus = totalPaid >= inst.total_amount - 0.01 ? 'paid' : 'outstanding'
 
           const { data: instRows, error: instErr } = await supabase.from('credit_installments').update({
             status: instStatus,
             paid_date: instStatus === 'paid' ? txDate : null,
             transaction_id: firstTxId[0] || null,
-            paid_amount: Math.round(totalPaidEUR * 100) / 100,
+            paid_amount: Math.round(totalPaid * 100) / 100,
             updated_at: new Date().toISOString(),
           }).eq('id', instId).select('id')
           if (instErr) throw instErr
@@ -1193,7 +1240,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         {
           const outcome = await saveSplits(
             supabase, 'transaction', txId,
-            { amount: parseFloat(amount) || 0, amount_usd: usdAmount },
+            { amount: parseFloat(amount) || 0, currency, ...booked },
             txType === 'direct' ? splitLines : [])
           if (!outcome.ok) {
             setSaving(false)
@@ -1211,7 +1258,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
             originalLinkIds,
             // By what it settles, in the bill's own currency: an allocation
             // worth less than a cent is still an allocation, and dropping it
-            // for reading as zero dollars would release the invoice.
+            // for reading as zero in the book would release the invoice.
             linkedInvoices.map(l => ({ invoiceId: l.invoice_id, allocated: l.allocated_own })))
 
           if (plan.toRemove.length > 0) {
@@ -1234,9 +1281,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           for (const link of linkedInvoices.filter(l => l.allocated_own > 0)) {
             // THE FIGURE THAT WAS TYPED IS THE FIGURE THAT IS STORED. It goes
             // into `allocated_amount`, which is the column the settled/partial
-            // rule reads, and the dollars are derived from it. Deriving it the
-            // other way quantised the dinars to the whole US cent — about a
-            // dinar — so a bill paid in full sat there owing the remainder.
+            // rule reads, and the dinars and euros are derived from it at the
+            // invoice's stored rates.
             const { error: linkErr } = await supabase.from('invoice_transaction_links').upsert({
               invoice_id: link.invoice_id, transaction_id: txId,
               ...linkAmountsFromOwn(link.allocated_own, link),
@@ -1265,7 +1311,15 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           // by the payment, and the surplus is part of the same bank line.
           if (bookDifference && fxInvoice && isBookable(fxDifference) && fxScript && fxAmountOwn > 0) {
             const isGain = fxDifference.kind === 'gain'
-            const fxRate = fxAmountOwn > 0 ? fxAmountOwn / fxDifference.amount : null
+            // A gain is the rest of the invoice, so it is booked as a part of
+            // the invoice at the invoice's stored rates; a loss is a part of
+            // this bank line, at the payment's. Either way its RSD figure is
+            // the difference itself (to the rounding of the part).
+            const fxParent = isGain ? fxInvoice : { ...paymentRow, ...booked }
+            const fxBook = partBookAmounts(fxAmountOwn, { ...fxParent, currency: fxCurrency })
+            const fxRates = isGain
+              ? { exchange_rate: fxInvoice.exchange_rate, eur_rate: fxInvoice.eur_rate }
+              : { exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate }
             const { data: fxTx, error: fxErr } = await supabase.from('transactions').insert({
               company_id: companyId || null,
               bank_id: bankId || null,
@@ -1276,8 +1330,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               tx_subtype: isGain ? 'revenue' : 'expense',
               currency: fxCurrency,
               amount: fxAmountOwn,
-              exchange_rate: fxRate,
-              amount_usd: fxDifference.amount,
+              ...fxRates,
+              amount_rsd: fxBook.amount_rsd,
+              amount_eur: fxBook.amount_eur,
               pl_impact: true,
               pl_category: fxScript.pl_category || null,
               pl_subcategory: fxScript.pl_subcategory || null,
@@ -1413,7 +1468,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       {opexType === 'split' && (
         <div style={{ marginTop: '14px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={{ fontSize: '11px', color: DIALOG.dim, fontWeight: '500', marginBottom: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.07em' }}>
-            Split by value — total: {amount ? `${parseFloat(amount).toLocaleString()} ${currency}` : '—'}
+            Split by value — total: {amount ? fmtMoney(parseFloat(amount), currency) : '—'}
           </div>
           <div style={s.row2}>
             <div style={s.field}>
@@ -1439,18 +1494,18 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
             <div style={{ marginTop: '10px', background: DIALOG.panel, borderRadius: '8px', padding: '10px 12px', border: '0.5px solid ' + DIALOG.border }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
                 <span style={{ color: DIALOG.dim }}>OPEX</span>
-                <span style={{ fontWeight: '500', color: DIALOG.blue }}>{parseFloat(opexVal).toLocaleString()} {currency}</span>
+                <span style={{ fontWeight: '500', color: DIALOG.blue }}>{fmtMoney(parseFloat(opexVal), currency)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '8px' }}>
                 <span style={{ color: DIALOG.dim }}>Performance</span>
-                <span style={{ fontWeight: '500', color: DIALOG.amber }}>{parseFloat(performanceVal).toLocaleString()} {currency}</span>
+                <span style={{ fontWeight: '500', color: DIALOG.amber }}>{fmtMoney(parseFloat(performanceVal), currency)}</span>
               </div>
               <div style={{ height: '6px', borderRadius: '3px', background: DIALOG.border, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${opexPct.op}%`, background: DIALOG.blue, borderRadius: '3px', display: 'inline-block' }} />
                 <div style={{ height: '100%', width: `${opexPct.perf}%`, background: DIALOG.amber, borderRadius: '3px', display: 'inline-block' }} />
               </div>
               {!opexSplitOk
-                ? <div style={{ fontSize: '11px', color: DIALOG.red, marginTop: '6px' }}>⚠️ Sum ({opexSplitTotal.toLocaleString()} {currency}) ≠ total ({parseFloat(amount).toLocaleString()} {currency})</div>
+                ? <div style={{ fontSize: '11px', color: DIALOG.red, marginTop: '6px' }}>⚠️ Sum ({fmtMoney(opexSplitTotal, currency)}) ≠ total ({fmtMoney(parseFloat(amount), currency)})</div>
                 : <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '6px' }}>✓ Split is valid</div>
               }
             </div>
@@ -1495,14 +1550,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <input type="number" style={{ ...s.input, flex: 1 }} value={cfNextMonthEst}
                 onChange={e => setCfNextMonthEst(e.target.value)}
-                placeholder={amount ? `Auto: ${parseFloat(amount).toLocaleString()}` : '0.00'} />
+                placeholder={amount ? `Auto: ${fmtNum(parseFloat(amount))}` : '0.00'} />
               {!cfNextMonthEst && amount && (
                 <button style={s.linkBtn} onClick={() => setCfNextMonthEst(amount)}>Use this amount</button>
               )}
             </div>
             {amount && (
               <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '4px' }}>
-                Auto: {cfFrequency === 'monthly' ? parseFloat(amount).toLocaleString() : cfFrequency === 'quarterly' ? (parseFloat(amount) / 3).toFixed(2) : (parseFloat(amount) / 12).toFixed(2)} {currency}/mo
+                Auto: {fmtNum(cfFrequency === 'monthly' ? parseFloat(amount) : cfFrequency === 'quarterly' ? parseFloat(amount) / 3 : parseFloat(amount) / 12)} {currency}/mo
               </div>
             )}
           </div>
@@ -1523,7 +1578,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           </div>
           {cfAccrualFrom && cfAccrualTo && amount && (
             <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '4px' }}>
-              {(() => { const m = Math.max(1, Math.round((new Date(cfAccrualTo).getTime() - new Date(cfAccrualFrom).getTime()) / (1000*60*60*24*30))); return `Monthly: ${(parseFloat(amount)/m).toFixed(2)} ${currency} × ${m} months` })()}
+              {(() => { const m = Math.max(1, Math.round((new Date(cfAccrualTo).getTime() - new Date(cfAccrualFrom).getTime()) / (1000*60*60*24*30))); return `Monthly: ${fmtMoney(parseFloat(amount)/m, currency)} × ${m} months` })()}
             </div>
           )}
         </div>
@@ -1744,8 +1799,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                 </label>
               </div>
               <div style={{ ...s.infoBox, margin: '10px 0' }}>
-                {currency === 'USD' ? 'No conversion needed — amount is already in USD.' : `Rate fetched on transaction date (${txDate}).`}
-                {txType === 'credit_payment' && ' EUR equivalent calculated automatically from USD amount.'}
+                {currency === 'RSD'
+                  ? `Booked in RSD; the NBS EUR rate on the transaction date (${txDate}) gives the EUR figure.`
+                  : `NBS middle rate on the transaction date (${txDate}), in RSD per 1 ${currency || 'unit'}.`}
+                {txType === 'credit_payment' && ` The instalments are paid down by the ${creditCurrency || 'credit currency'} figure.`}
               </div>
               <div style={s.row2}>
                 <div style={s.field}>
@@ -1755,21 +1812,33 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   {fieldErr('amount') && <span style={s.errorMsg}>{fieldErr('amount')}</span>}
                 </div>
                 <div style={s.field}>
-                  <label style={s.lbl}>Exchange rate {currency !== 'USD' && <span style={s.req}>*</span>}</label>
+                  <label style={s.lbl}>{currency && currency !== 'RSD' ? `RSD per 1 ${currency}` : 'RSD per 1 EUR'} <span style={s.req}>*</span></label>
                   <div style={{ display: 'flex', gap: '6px' }}>
-                    <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={exRate}
-                      onChange={e => { setExRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                      placeholder={currency === 'USD' ? 'N/A' : 'Click Fetch'} />
-                    {currency !== 'USD' && <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate}>{fetchingRate ? '...' : 'Fetch'}</button>}
+                    {currency && currency !== 'RSD' ? (
+                      <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={exRate}
+                        onChange={e => { setExRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
+                        placeholder="Click Fetch" />
+                    ) : (
+                      <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={eurRate}
+                        onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
+                        placeholder="Click Fetch" />
+                    )}
+                    <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate || !currency}>{fetchingRate ? '...' : 'Fetch'}</button>
                   </div>
-                  {rateSource && <div style={{ fontSize: '11px', color: rateIsFallback ? '#FF5B5A' : DIALOG.accent, fontWeight: rateIsFallback ? 600 : 400, marginTop: '4px' }}>Source: {rateSource}</div>}
+                  {currency === 'USD' && (
+                    <input type="number" style={{ ...s.input, marginTop: '6px' }} value={eurRate}
+                      onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
+                      placeholder="RSD per 1 EUR" aria-label="RSD per 1 EUR" />
+                  )}
+                  {rateSource && <div style={{ fontSize: '11px', color: rateMissing ? '#FF5B5A' : DIALOG.accent, fontWeight: rateMissing ? 600 : 400, marginTop: '4px' }}>Source: {rateSource}</div>}
                   {fieldErr('exRate') && <span style={s.errorMsg}>{fieldErr('exRate')}</span>}
                 </div>
               </div>
               <div style={s.convRow}>
-                <div><div style={s.convLabel}>Original amount</div><div style={s.convVal}>{amount ? `${parseFloat(amount).toLocaleString()} ${currency}` : '—'}</div></div>
+                <div><div style={s.convLabel}>Original amount</div><div style={s.convVal}>{amount ? fmtMoney(parseFloat(amount), currency) : '—'}</div></div>
                 <div style={{ fontSize: '20px', color: DIALOG.faint, alignSelf: 'flex-end', paddingBottom: '4px' }}>→</div>
-                <div><div style={s.convLabel}>USD equivalent</div><div style={{ ...s.convVal, color: DIALOG.accent }}>${usdAmount > 0 ? usdAmount.toFixed(2) : '0.00'}</div></div>
+                <div><div style={s.convLabel}>RSD (book)</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
+                <div><div style={s.convLabel}>EUR</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountEur, 'EUR') : '—'}</div></div>
               </div>
             </div>
           )}
@@ -1784,11 +1853,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   cost twice. */}
               {txType === 'direct' && (
                 <SplitEditor
-                  parent={{
-                    amount: parseFloat(amount) || 0,
-                    amount_usd: usdAmount,
-                    currency: currency || undefined,
-                  }}
+                  parent={paymentRow}
                   lines={splitLines}
                   onChange={setSplitLines}
                   scripts={quickFillScripts as any}
@@ -1886,10 +1951,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                     <div style={s.invoiceList}>
                       {filteredOpenInvoices.map(inv => {
                         const linked = isInvoiceLinked(inv.id)
-                        const origAmt = (inv.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                        const remOrig = inv.currency !== 'USD' && inv.exchange_rate > 0
-                          ? ((inv.remaining_usd || 0) * inv.exchange_rate).toFixed(0)
-                          : null
+                        // What is left, in the bill's own currency — the same
+                        // figure the allocation is judged against.
+                        const remOwn = outstandingOwn(inv)
                         return (
                           <div key={inv.id} style={{ ...s.invoiceRow, ...(linked ? s.invoiceRowLinked : {}) }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
@@ -1907,10 +1971,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                             </div>
                             <div style={{ textAlign: 'right' as const, marginRight: '10px', flexShrink: 0 }}>
                               <div style={{ fontSize: '13px', fontWeight: '600', color: DIALOG.text }}>
-                                {origAmt} {inv.currency}
+                                {fmtMoney(inv.amount || 0, inv.currency || 'RSD')}
                               </div>
-                              <div style={{ fontSize: '11px', color: (inv.remaining_usd || 0) > 0 ? DIALOG.red : DIALOG.accent, marginTop: '1px' }}>
-                                Rem: {remOrig ? `${remOrig} ${inv.currency}` : `$${(inv.remaining_usd || 0).toFixed(2)}`}
+                              <div style={{ fontSize: '11px', color: remOwn > 0 ? DIALOG.red : DIALOG.accent, marginTop: '1px' }}>
+                                Rem: {fmtMoney(remOwn, inv.currency || 'RSD')}
                               </div>
                             </div>
                             {!linked
@@ -1955,9 +2019,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                                 rather than explaining it. */}
                             {(() => {
                               // In the bill's own currency, because that is
-                              // what settles it. Read off the dollar columns
+                              // what settles it. Read off the book columns
                               // this line disagreed with the rule the status
-                              // is decided by, by about a dinar.
+                              // is decided by.
                               const left = Math.round(
                                 ((link.outstanding_own || 0) - (link.allocated_own || 0)) * 100) / 100
                               if (Math.abs(left) <= 0.01) {
@@ -1998,34 +2062,34 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                       {/* In the shared currency when the payment and every
                           invoice agree, which is the ordinary case. When they
                           do not, no single currency these totals mean anything
-                          in exists, so they fall back to dollars and say so
+                          in exists, so they fall back to dinars and say so
                           rather than converting something into nobody's money. */}
                       <div style={s.allocSummaryBox}>
                         <div style={s.allocSummaryRow}>
                           <span>Transaction total</span>
-                          <span style={{ fontWeight: '500' }}>{formatMoney(allocCurrency ? (parseFloat(amount) || 0) : usdAmount, allocCurrency || 'USD')}</span>
+                          <span style={{ fontWeight: '500' }}>{formatMoney(allocCurrency ? (parseFloat(amount) || 0) : amountRsd, allocCurrency || 'RSD')}</span>
                         </div>
                         <div style={s.allocSummaryRow}>
                           <span>Total allocated</span>
-                          <span style={{ fontWeight: '500', color: DIALOG.accent }}>{formatMoney(allocCurrency ? totalAllocatedOwn : totalAllocated, allocCurrency || 'USD')}</span>
+                          <span style={{ fontWeight: '500', color: DIALOG.accent }}>{formatMoney(allocCurrency ? totalAllocatedOwn : totalAllocatedRsd, allocCurrency || 'RSD')}</span>
                         </div>
-                        {Math.abs(allocCurrency ? unallocatedOwn : unallocated) > 0.01 && (
-                          <div style={{ ...s.allocSummaryRow, color: (allocCurrency ? unallocatedOwn : unallocated) > 0 ? DIALOG.amber : DIALOG.red }}>
-                            <span>{(allocCurrency ? unallocatedOwn : unallocated) > 0 ? 'Unallocated' : 'Over-allocated'}</span>
-                            <span style={{ fontWeight: '500' }}>{formatMoney(Math.abs(allocCurrency ? unallocatedOwn : unallocated), allocCurrency || 'USD')}</span>
+                        {Math.abs(allocCurrency ? unallocatedOwn : unallocatedRsd) > 0.01 && (
+                          <div style={{ ...s.allocSummaryRow, color: (allocCurrency ? unallocatedOwn : unallocatedRsd) > 0 ? DIALOG.amber : DIALOG.red }}>
+                            <span>{(allocCurrency ? unallocatedOwn : unallocatedRsd) > 0 ? 'Unallocated' : 'Over-allocated'}</span>
+                            <span style={{ fontWeight: '500' }}>{formatMoney(Math.abs(allocCurrency ? unallocatedOwn : unallocatedRsd), allocCurrency || 'RSD')}</span>
                           </div>
                         )}
                         {!allocCurrency && linkedInvoices.length > 0 && (
                           <div style={{ fontSize: '10.5px', color: DIALOG.dim, marginTop: '6px', lineHeight: 1.4 }}>
-                            Shown in USD: this payment and the invoices it closes are not all in the same currency.
+                            Shown in RSD (book): this payment and the invoices it closes are not all in the same currency.
                           </div>
                         )}
                       </div>
 
-                      {/* An invoice booked in dinars and indexed to the euro is
+                      {/* An invoice in, or indexed to, a foreign currency is
                           settled at a different rate than it was raised at, so
-                          it never lands exactly. What is left is not a part
-                          payment. */}
+                          in dinars it never lands exactly. What is left is not
+                          a part payment. */}
                       {fxInvoice && isBookable(fxDifference) && (
                         <div style={s.fxBox}>
                           <label style={s.fxHead}>
@@ -2077,7 +2141,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                           <div style={{ ...s.fxNote, color: DIALOG.amber, marginTop: 0 }}>{fxDifference.note}</div>
                         </div>
                       )}
-                      {linkedInvoices.length > 1 && (parseFloat(amount) || 0) > 0 && Math.abs(usdAmount - totalAllocated) > 0.01 && (
+                      {linkedInvoices.length > 1 && (parseFloat(amount) || 0) > 0 && Math.abs(unallocatedRsd) > 0.01 && (
                         <div style={s.fxBox}>
                           <div style={{ ...s.fxNote, marginTop: 0 }}>
                             A currency difference can only be booked when the payment closes one invoice — with
@@ -2270,7 +2334,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                         {revAlloc === 'byval' && (
                           <div style={{ marginTop: '14px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
                             <div style={{ fontSize: '11px', color: DIALOG.dim, fontWeight: '500', marginBottom: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.07em' }}>
-                              Split by value — total: {amount ? `${parseFloat(amount).toLocaleString()} ${currency}` : '—'}
+                              Split by value — total: {amount ? fmtMoney(parseFloat(amount), currency) : '—'}
                             </div>
                             <div style={s.row2}>
                               <div style={s.field}>
@@ -2343,7 +2407,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                       {revAlloc === 'byval' && (
                         <div style={{ marginTop: '14px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
                           <div style={{ fontSize: '11px', color: DIALOG.dim, fontWeight: '500', marginBottom: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.07em' }}>
-                            Split by value — total: {amount ? `${parseFloat(amount).toLocaleString()} ${currency}` : '—'}
+                            Split by value — total: {amount ? fmtMoney(parseFloat(amount), currency) : '—'}
                           </div>
                           <div style={s.row2}>
                             <div style={s.field}>
@@ -2406,7 +2470,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                       Closing {selectedInstallmentIds.length} installment{selectedInstallmentIds.length > 1 ? 's' : ''} from: {credits.find(c => c.id === selectedCreditId)?.name || '—'}
                     </div>
                     <div style={{ fontSize: '11px', fontFamily: "'DM Mono',monospace" }}>
-                      Total: {creditSelectedTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })} EUR
+                      Total: {fmtMoney(creditSelectedTotal, creditCurrency || 'RSD')}
                     </div>
                   </div>
                 </div>
@@ -2436,7 +2500,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   ['Date', txDate],
                   ['Type', txType === 'invoice_payment' ? 'Invoice payment' : txType === 'credit_payment' ? 'Credit payment' : txType === 'passthrough' ? 'Pass-through' : `Direct (${directSubtype})`],
                 ]},
-                ...(txType === 'invoice_payment' && linkedInvoices.length > 0 ? [{ title: 'Linked invoices', rows: linkedInvoices.map(l => [`${l.partner_name} (${l.invoice_number})`, `$${l.allocated_usd.toFixed(2)} allocated`]) }] : []),
+                ...(txType === 'invoice_payment' && linkedInvoices.length > 0 ? [{ title: 'Linked invoices', rows: linkedInvoices.map(l => [`${l.partner_name} (${l.invoice_number})`, `${formatMoney(l.allocated_own || 0, allocationCurrency(l))} allocated`]) }] : []),
                 ...(txType === 'direct' && directSubtype === 'expense' ? [{ title: 'P&L & expense type', rows: [
                   ['P&L Category', plCatName || '—'],
                   ['Department', deptName || '—'],
@@ -2446,9 +2510,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   ['CF Classification', cfLabel()],
                 ]}] : []),
                 { title: 'Amounts', rows: [
-                  ['Original amount', amount ? `${parseFloat(amount).toLocaleString()} ${currency}` : '—'],
-                  ['Exchange rate', exRate ? `${parseFloat(exRate).toFixed(4)} (${rateSource || 'Manual'})` : 'N/A'],
-                  ['USD equivalent', `$${usdAmount.toFixed(2)}`],
+                  ['Original amount', amount ? fmtMoney(parseFloat(amount), currency) : '—'],
+                  ['Exchange rate', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'Manual'})` : 'N/A'],
+                  ['RSD (book)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
+                  ['EUR', book.amounts ? fmtMoney(amountEur, 'EUR') : '—'],
                 ]},
               ].map(sec => (
                 <div key={sec.title} style={s.reviewSection}>

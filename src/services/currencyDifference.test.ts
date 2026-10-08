@@ -42,7 +42,7 @@ describe('the payment was short of the invoice', () => {
   })
 
   it('names the amount and the currency in the explanation', () => {
-    expect(d.note).toContain('6,074.04 RSD')
+    expect(d.note).toContain('6.074,04 RSD')
     expect(d.note).toContain('closes the invoice')
   })
 })
@@ -79,8 +79,8 @@ describe('an allocation that has not been finished', () => {
   })
 
   it('says what is left on each side, so the fix is in the sentence', () => {
-    expect(d.note).toContain('3,000.00 RSD')
-    expect(d.note).toContain('5,000.00 RSD')
+    expect(d.note).toContain('3.000,00 RSD')
+    expect(d.note).toContain('5.000,00 RSD')
     expect(d.note).toContain('Allocate what is left')
   })
 })
@@ -120,9 +120,9 @@ describe('entryNote', () => {
 })
 
 describe('the wording carries no currency when none was given', () => {
-  it('leaves the code off rather than guessing at dollars', () => {
+  it('leaves the code off rather than guessing at one', () => {
     const d = differenceFor({ invoiceShortfall: 100, paymentUnallocated: 0 })
-    expect(d.note).toContain('100.00')
-    expect(d.note).not.toContain('USD')
+    expect(d.note).toContain('100,00')
+    expect(d.note).not.toMatch(/RSD|EUR|USD/)
   })
 })

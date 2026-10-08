@@ -4,6 +4,7 @@ import {
   SPLIT_TOLERANCE, applyScript, scriptMatching, dominantLine,
   classificationFromSplit, type SplitLine,
 } from './expenseSplit'
+import { RateUnavailableError } from './bookAmounts'
 
 const key = (n: number) => `k${n}`
 
@@ -34,7 +35,7 @@ describe('what the lines come to', () => {
 })
 
 describe('what is unaccounted for', () => {
-  const parent = { amount: 120000, amount_usd: 1200 }
+  const parent = { amount: 120000 }
 
   it('is positive when the lines are short', () => {
     expect(remainderOf(parent, [line({ amount: 100000 })])).toBe(20000)
@@ -56,7 +57,7 @@ describe('what is unaccounted for', () => {
 })
 
 describe('why a split cannot be saved', () => {
-  const parent = { amount: 1000, amount_usd: 10 }
+  const parent = { amount: 1000 }
 
   it('has nothing to say about a row that is not split at all', () => {
     expect(whySplitNotSavable(parent, [])).toBeNull()
@@ -99,7 +100,7 @@ describe('why a split cannot be saved', () => {
 })
 
 describe('absorbing the remainder', () => {
-  const parent = { amount: 1000, amount_usd: 10 }
+  const parent = { amount: 1000 }
 
   /** One line absorbs one rounding, and it is visible which. */
   it('puts what is left on the last line by default', () => {
@@ -146,8 +147,11 @@ describe('starting from a half', () => {
   })
 })
 
+// 120,000 RSD at 117.5 RSD per EUR = 1,021.28 EUR.
+const RSD_PARENT = { amount: 120000, currency: 'RSD', exchange_rate: 1, eur_rate: 117.5, amount_rsd: 120000, amount_eur: 1021.28 }
+
 describe('the rows that get stored', () => {
-  const parent = { amount: 120000, amount_usd: 1178.21 }
+  const parent = RSD_PARENT
   const lines = [
     line({ amount: 40000, pl_category: 'Capital expenditures' }),
     line({ amount: 80000, pl_category: 'General Business' }),
@@ -164,16 +168,29 @@ describe('the rows that get stored', () => {
   })
 
   /**
-   * The whole reason the dollars are derived rather than converted line by
-   * line: a column short by a cent survives for years, because every single
-   * row in it looks right.
+   * The whole reason the book figures are derived rather than converted line
+   * by line: a column short by a para survives for years, because every
+   * single row in it looks right.
    */
-  it('makes the dollar column sum to the parent exactly', () => {
-    const rows = rowsFor({ amount: 100, amount_usd: 1 }, [
+  it('makes the RSD and EUR columns sum to the parent exactly', () => {
+    // 100 USD at 101.23 = 10,123 RSD; at 117.07 RSD per EUR = 86.47 EUR.
+    // Line by line, 33.33 USD is 3,374.0 RSD / 28.82 EUR; the last takes the rest.
+    const usdParent = { amount: 100, currency: 'USD', exchange_rate: 101.23, eur_rate: 117.07, amount_rsd: 10123, amount_eur: 86.47 }
+    const rows = rowsFor(usdParent, [
       line({ amount: 33.33 }), line({ amount: 33.33 }), line({ amount: 33.34 }),
     ])
-    const total = rows.reduce((s, r) => s + (r.amount_usd || 0), 0)
-    expect(Math.round(total * 100) / 100).toBe(1)
+    const sum = (k: 'amount_rsd' | 'amount_eur') => Math.round(rows.reduce((s, r) => s + r[k], 0) * 100) / 100
+    expect(sum('amount_rsd')).toBe(10123)
+    expect(sum('amount_eur')).toBe(86.47)
+    expect(rows[0].amount_rsd).toBe(3374)       // 33.33 * 101.23 = 3373.9959
+    expect(rows[0].amount_eur).toBe(28.82)      // 3374 / 117.07 = 28.820
+    expect(rows[2].amount_rsd).toBe(3375)       // 10123 - 2 * 3374
+  })
+
+  it('books a EUR parent exactly in EUR', () => {
+    const eurParent = { amount: 1000, currency: 'EUR', exchange_rate: 117.5, eur_rate: 117.5, amount_rsd: 117500, amount_eur: 1000 }
+    const rows = rowsFor(eurParent, [line({ amount: 400 }), line({ amount: 600 })])
+    expect(rows.map(r => [r.amount, r.amount_rsd, r.amount_eur])).toEqual([[400, 47000, 400], [600, 70500, 600]])
   })
 
   it('keeps the own-currency column summing to the parent too', () => {
@@ -181,9 +198,8 @@ describe('the rows that get stored', () => {
     expect(rows.reduce((s, r) => s + r.amount, 0)).toBe(120000)
   })
 
-  it('leaves the dollars null when the parent has none', () => {
-    const rows = rowsFor({ amount: 100, amount_usd: null }, lines)
-    expect(rows.every(r => r.amount_usd === null)).toBe(true)
+  it('refuses to book lines when the parent has no stored rates', () => {
+    expect(() => rowsFor({ amount: 100, currency: 'USD' }, lines)).toThrow(RateUnavailableError)
   })
 
   it('stores an empty classification as nothing rather than as an empty string', () => {
@@ -199,14 +215,14 @@ describe('the rows that get stored', () => {
 describe('reading a stored split back', () => {
   it('comes back in the order it was stored, whatever order it arrives in', () => {
     const lines = linesFrom([
-      { ...rowsFor({ amount: 2 }, [line({ amount: 2, pl_category: 'B' })])[0], sort_order: 1 },
-      { ...rowsFor({ amount: 1 }, [line({ amount: 1, pl_category: 'A' })])[0], sort_order: 0 },
+      { ...rowsFor({ ...RSD_PARENT, amount: 2, amount_rsd: 2, amount_eur: 0.02 }, [line({ amount: 2, pl_category: 'B' })])[0], sort_order: 1 },
+      { ...rowsFor({ ...RSD_PARENT, amount: 1, amount_rsd: 1, amount_eur: 0.01 }, [line({ amount: 1, pl_category: 'A' })])[0], sort_order: 0 },
     ], key)
     expect(lines.map(l => l.pl_category)).toEqual(['A', 'B'])
   })
 
   it('survives a round trip without changing a figure', () => {
-    const parent = { amount: 120000, amount_usd: 1178.21 }
+    const parent = RSD_PARENT
     const original = [
       line({ amount: 40000, pl_category: 'Capital expenditures', department: 'Product' }),
       line({ amount: 80000, pl_category: 'General Business', department: 'Admin' }),

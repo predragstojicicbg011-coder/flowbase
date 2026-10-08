@@ -2,13 +2,14 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { SkeletonRows } from '../components/motion'
-import { budgetFigureFormat } from '../utils/formatters'
+import { fmtMoneyCompact, fmtMoneyWhole, type BudgetFigureFormat } from '../utils/formatters'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import {
   classKeysUnder, nodeKeysUnder, classificationFor,
 } from '../services/budgetKeys'
 import {
   inLedgerOrder, variance,
-  type Adjustment, type RolledNode,
+  type Adjustment, type RolledNode, type BudgetCurrency,
 } from '../services/budgetForecast'
 import {
   loadBudgetTree, LEVELS,
@@ -33,9 +34,9 @@ interface MonthMeta {
  * How many months of the twelve the table draws.
  *
  * It decides how much room a figure gets and therefore how a figure is
- * printed: at three months the columns are wide enough for `$26,432`, beyond
- * that there is no room for anything but `$26.4K`. See `budgetFigureFormat`,
- * which holds that rule.
+ * printed: at three months the columns are wide enough for `3.097.828 RSD`,
+ * beyond that there is no room for anything but `3,1 mil. RSD`. See
+ * `figureFormat`, which holds that rule.
  *
  * It does NOT decide what is fetched or rolled up. Twelve months are loaded at
  * every horizon, because the Year column totals twelve months at every
@@ -65,10 +66,10 @@ const HORIZONS: Horizon[] = [3, 6, 12]
  * figure on the consolidated view, which is the point of deriving it from this
  * table rather than picking three more numbers.
  *
- * 82px carries `$262,432` at 12px monospace with the cell's own padding taken
- * off; 70px carries `-$26.4K`. The old table asked 36 columns to share 2,130px
- * — 59px apiece — which is where `$26.…` came from: not an abbreviation, the
- * text being cut off. Widening the twelve-month table costs nothing that was
+ * 82px carries a full figure at 12px monospace with the cell's own padding
+ * taken off; 70px carries `-3,1 mil. RSD`. The old table asked 36 columns to
+ * share 2,130px — 59px apiece — which is where truncated figures came from:
+ * not an abbreviation, the text being cut off. Widening the twelve-month table costs nothing that was
  * not already lost, since it scrolls either way.
  */
 const LAYOUT: Record<Horizon, {
@@ -99,7 +100,7 @@ function monthKey(date: Date): string {
 
 function monthLabel(key: string): string {
   const [y, m] = key.split('-').map(Number)
-  return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: 'numeric' })
+  return new Date(y, m - 1, 1).toLocaleString('en-GB', { month: 'short', year: 'numeric' })
 }
 
 function addMonths(key: string, n: number): string {
@@ -122,6 +123,23 @@ function addMonths(key: string, n: number): string {
 //
 // At module scope because the tree is not the only thing that walks them.
 
+/**
+ * The one rule for how a budget figure is printed: full figures when the
+ * horizon is three months, compact beyond it — in the currency the table is
+ * read in, its code always written beside it.
+ *
+ * Decided here rather than at each call site. The budget table prints a figure
+ * in a dozen places — actual, estimate, variance, direct, the totals row, the
+ * Year column and the drill-down under any of them — and a page where each of
+ * those picks its own formatter is a page where two of them eventually
+ * disagree about what a figure is.
+ */
+export function figureFormat(horizonMonths: number, currency: BudgetCurrency): BudgetFigureFormat {
+  return horizonMonths <= 3
+    ? (n: number, showSign?: boolean) => fmtMoneyWhole(n, currency, showSign)
+    : (n: number, showSign?: boolean) => fmtMoneyCompact(n, currency, showSign)
+}
+
 function varianceColor(variance: number): string {
   if (variance > 0) return '#00D47E'
   if (variance < 0) return '#FF5B5A'
@@ -140,14 +158,21 @@ export default function Budgeting() {
   /** What the last collapse-everything was done for — see the load effect. */
   const shapeRef = useRef('')
   const [refreshTick, setRefreshTick] = useState(0)
-  /** month -> nodeKey -> the rolled-up figures budgetForecast returned. */
-  const [rolled, setRolled] = useState<Record<string, Record<string, RolledNode>>>({})
+  /** month -> nodeKey -> the rolled-up figures budgetForecast returned, in RSD. */
+  const [rolledRsd, setRolledRsd] = useState<Record<string, Record<string, RolledNode>>>({})
+  /**
+   * The same tree read in EUR — from the EUR actuals and each ledger entry's
+   * EUR figure — or null where the ledger cannot be read in EUR.
+   */
+  const [rolledEur, setRolledEur] = useState<Record<string, Record<string, RolledNode>> | null>(null)
+  /** Why the budget has no EUR reading, said when EUR is asked for. */
+  const [eurUnavailable, setEurUnavailable] = useState<string | null>(null)
   /**
    * Benchmark-month spend that carries into no month at all. Shown under the
    * table: a forecast that leaves this out is not short by a knowable amount,
    * it is short by an unknown one.
    */
-  const [notCarried, setNotCarried] = useState(0)
+  const [notCarriedByCurrency, setNotCarriedByCurrency] = useState<Record<BudgetCurrency, number>>({ RSD: 0, EUR: 0 })
   const [drill, setDrill] = useState<DrillState | null>(null)
   /**
    * nodeKey -> month -> the change ledger, exactly as the cell read it.
@@ -168,24 +193,18 @@ export default function Budgeting() {
    */
   const [ledgerByNode, setLedgerByNode] = useState<Record<string, Record<string, Adjustment[]>>>({})
   /**
-   * The committed column is priced at a rate NBS could not be asked for.
-   *
-   * `getRatesForDate` answers an outage with a hardcoded USD=100 EUR=117, which
-   * is a plausible-looking number in every place a real one would appear: every
-   * EUR instalment prices at exactly 1.17 and the page looks untouched. The
-   * flag it comes back with is the only thing that can say otherwise, so it is
-   * kept and shown rather than destructured away.
+   * Credit instalments in the horizon the schedule could not price — a credit
+   * in a currency NBS gave no rate for today. Left out of the budget rather
+   * than priced at a guess, and counted here so the page can say so.
    */
-  const [ratesAreFallback, setRatesAreFallback] = useState(false)
-  /** What the credit schedule put into the horizon, so the rate warning knows. */
-  const [creditScheduled, setCreditScheduled] = useState(0)
+  const [creditUnpriced, setCreditUnpriced] = useState<Record<BudgetCurrency, number>>({ RSD: 0, EUR: 0 })
   /**
    * The budget cell a change is being made to, and which of the two things the
    * cell offers is open: the dialog that records a change, or the drill that
    * says what the current figure is made of.
    */
   const [budgetCell, setBudgetCell] = useState<
-    { row: BudgetRow; m: MonthMeta; current: number; seed: number } | null>(null)
+    { row: BudgetRow; m: MonthMeta; current: number; seed: number; seedEur: number | null } | null>(null)
   const [budgetView, setBudgetView] = useState<'change' | 'explain'>('change')
   /**
    * Whether the add-a-line dialog is open.
@@ -299,11 +318,12 @@ export default function Budgeting() {
         shapeRef.current = shape
         setCollapsed(new Set(tree.rows.filter(r => r.hasChildren).map(r => r.key)))
       }
-      setRolled(tree.rolled)
-      setNotCarried(tree.notCarried)
+      setRolledRsd(tree.rolledRsd)
+      setRolledEur(tree.rolledEur)
+      setEurUnavailable(tree.eurUnavailable)
+      setNotCarriedByCurrency({ RSD: tree.notCarried, EUR: tree.notCarriedEur })
       setLedgerByNode(tree.ledgerByNode)
-      setRatesAreFallback(tree.ratesAreFallback)
-      setCreditScheduled(tree.creditScheduled)
+      setCreditUnpriced(tree.creditUnpriced)
     }
     // Every query `run` makes reaches the database through `fetchAllPages`,
     // which throws on `error` rather than handing back an empty page — so a
@@ -326,8 +346,9 @@ export default function Budgeting() {
         // Cleared, not left standing. A figure from the last good load sitting
         // under an error message is read as the current one.
         setRows([])
-        setRolled({})
-        setNotCarried(0)
+        setRolledRsd({})
+        setRolledEur(null)
+        setNotCarriedByCurrency({ RSD: 0, EUR: 0 })
         setLedgerByNode({})
       } finally {
         if (!cancelled) setLoading(false)
@@ -380,8 +401,26 @@ export default function Budgeting() {
   }
 
 
+  // ── Which currency the table is read in ─────────────────────────────────
+  //
+  // The display currency where the budget has it. Budgets are planned in RSD
+  // and every figure carries EUR beside it, so EUR is a different column read,
+  // not a conversion — except where the ledger holds an entry recorded in
+  // dinars only. Then the whole table is read in RSD and says so: a table half
+  // in one currency and half in the other would add the two together, and an
+  // RSD figure printed as EUR is a wrong number, not a formatting choice.
+  const { currency: displayCurrency } = useDisplayCurrency()
+  const shownCurrency: BudgetCurrency = displayCurrency === 'EUR' && rolledEur ? 'EUR' : 'RSD'
+  const rolled = shownCurrency === 'EUR' && rolledEur ? rolledEur : rolledRsd
+  const notCarried = notCarriedByCurrency[shownCurrency]
+
   /** A node's figures for a month, or zeroes while the tree is being rebuilt. */
   const at = (rowKey: string, mk: string) => rolled[mk]?.[rowKey]
+  /** The same in RSD, whatever the table shows: a budget is changed in RSD. */
+  const atRsd = (rowKey: string, mk: string) => rolledRsd[mk]?.[rowKey]
+  /** The row's own EUR seed, recorded beside the RSD one; null without a EUR reading. */
+  const seedEurAt = (rowKey: string, mk: string): number | null =>
+    rolledEur ? (rolledEur[mk]?.[rowKey]?.seed || 0) : null
 
   /**
    * Every ledger entry the drilled cell's figure actually moved by.
@@ -470,10 +509,15 @@ export default function Budgeting() {
     // delta is taken against. `seed` is what the benchmark month puts on this
     // row ALONE, and is recorded so the figure stops moving when the benchmark
     // does. See `pinnedBase`.
+    //
+    // Both in RSD whatever the table is showing: budgets are planned in
+    // dinars, so the dialog takes the figure in dinars and measures it against
+    // the dinar figure. The EUR seed goes along to be recorded beside it.
     setBudgetCell({
       row, m,
-      current: at(row.key, m.key)?.budget || 0,
-      seed: at(row.key, m.key)?.seed || 0,
+      current: atRsd(row.key, m.key)?.budget || 0,
+      seed: atRsd(row.key, m.key)?.seed || 0,
+      seedEur: seedEurAt(row.key, m.key),
     })
     setBudgetView('change')
   }
@@ -485,15 +529,17 @@ export default function Budgeting() {
    * dialog exists for — but NOT assumed to be zero. The same dialog can be
    * pointed at a classification that already carries a seed, and the change
    * dialog behind it asks for the figure the line should READ. Told the
-   * current figure is zero when it is $1,000, a target of $4,000 would record
-   * a delta of +4,000 and the line would come back reading $5,000.
+   * current figure is zero when it is 1.000 RSD, a target of 4.000 RSD would
+   * record a delta of +4.000 and the line would come back reading 5.000 RSD.
+   *
+   * In RSD, for the same reason `openBudgetCell` hands over RSD.
    *
    * The same lookup `openBudgetCell` does, keyed the same way the tree keys
    * its nodes, so a line added here and a cell clicked there agree about what
    * the figure currently is.
    */
   const currentForPath = (pathLabels: string[], mk: string) =>
-    at(`${branch}:${pathLabels.join('|')}`, mk)?.budget || 0
+    atRsd(`${branch}:${pathLabels.join('|')}`, mk)?.budget || 0
 
   /**
    * What the benchmark month seeds that path with, on that row alone.
@@ -505,7 +551,9 @@ export default function Budgeting() {
    * it is.
    */
   const seedForPath = (pathLabels: string[], mk: string) =>
-    at(`${branch}:${pathLabels.join('|')}`, mk)?.seed || 0
+    atRsd(`${branch}:${pathLabels.join('|')}`, mk)?.seed || 0
+  const seedEurForPath = (pathLabels: string[], mk: string) =>
+    seedEurAt(`${branch}:${pathLabels.join('|')}`, mk)
 
   /**
    * The drill that is open: an actual cell's, or the explanation behind the
@@ -594,7 +642,7 @@ export default function Budgeting() {
         // base anchors the whole replay, so a line whose LAST entry carries
         // one is already anchored however many older ones do not.
         const last = [...entries].sort(inLedgerOrder).pop()
-        if (last && (last.seed_usd === null || last.seed_usd === undefined)) n++
+        if (last && (last.seed_rsd === null || last.seed_rsd === undefined)) n++
       }
     }
     return n
@@ -608,7 +656,7 @@ export default function Budgeting() {
    * way as the cell it was opened from, which is why it is handed this rather
    * than importing a formatter of its own.
    */
-  const fmtUSD = budgetFigureFormat(horizon)
+  const fmtFigure = figureFormat(horizon, shownCurrency)
 
   const layout = LAYOUT[horizon]
 
@@ -710,7 +758,7 @@ export default function Budgeting() {
 
               Three by default, because three months of full figures is what
               the page is actually read for — this month and the next one or
-              two — and twelve columns of `$26.4K` was the reason the figures
+              two — and twelve columns of compact figures was the reason the figures
               were squeezed until they truncated. Six and twelve are still
               there, still compact, because there is no room for anything
               else at that width. */}
@@ -751,6 +799,18 @@ export default function Budgeting() {
           )}
         </div>
       </div>
+
+      {/* EUR asked for and not available: said, and the table read in RSD
+          with RSD on every figure, rather than RSD figures called EUR. */}
+      {displayCurrency === 'EUR' && shownCurrency === 'RSD' && !loading && !loadError && rows.length > 0 && (
+        <div role="note" style={{
+          marginBottom: '14px', padding: '10px 14px',
+          background: 'rgba(245,166,35,0.12)', border: '0.5px solid rgba(245,166,35,0.3)',
+          borderRadius: '8px', fontSize: '12px', color: '#F5A623',
+        }}>
+          ⚠ {eurUnavailable || 'This budget cannot be read in EUR. It is shown in RSD.'}
+        </div>
+      )}
 
       {/* What failed. Above the table, not below it, because the thing it is
           warning about is the absence of the table. */}
@@ -972,7 +1032,7 @@ export default function Budgeting() {
                           title="Click to view the transactions behind the benchmark"
                           onClick={() => openDrill(row, { key: benchmark, label: monthLabel(benchmark), isPast: true }, 'actual')}
                         >
-                          {fmtUSD(benchActual)}
+                          {fmtFigure(benchActual)}
                         </span>
                       ) : <span style={{ color: 'rgba(255,255,255,0.15)' }}>—</span>}
                     </td>
@@ -994,7 +1054,7 @@ export default function Budgeting() {
                                 title="Click to view transactions"
                                 onClick={() => openDrill(row, m, 'actual')}
                               >
-                                {fmtUSD(actual)}
+                                {fmtFigure(actual)}
                               </span>
                             ) : <span style={{ color: 'rgba(255,255,255,0.15)' }}>—</span>}
                           </td>
@@ -1021,7 +1081,7 @@ export default function Budgeting() {
                                 title={budgetCellTitle(row)}
                                 onClick={() => openBudgetCell(row, m)}
                               >
-                                {budget !== 0 ? fmtUSD(budget) : '—'}
+                                {budget !== 0 ? fmtFigure(budget) : '—'}
                                 {edited && <span style={{ fontSize: '8px', color: '#4EA8FF' }}>✎</span>}
                               </span>
                             </td>
@@ -1031,7 +1091,7 @@ export default function Budgeting() {
                           {consolidated && (
                             <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: '12px', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', 'Fira Mono', monospace" }}>
                               {(actual > 0 || budget !== 0)
-                                ? <span style={{ color: varianceColor(varAmt), fontSize: '11px', fontWeight: '500' }}>{varAmt === 0 ? '—' : fmtUSD(varAmt, true)}</span>
+                                ? <span style={{ color: varianceColor(varAmt), fontSize: '11px', fontWeight: '500' }}>{varAmt === 0 ? '—' : fmtFigure(varAmt, true)}</span>
                                 : <span style={{ color: 'rgba(255,255,255,0.15)' }}>—</span>}
                             </td>
                           )}
@@ -1042,7 +1102,7 @@ export default function Budgeting() {
                     {/* YEAR */}
                     {consolidated && (
                       <td style={{ ...pg.td, textAlign: 'right', paddingRight: '12px', borderLeft: '0.5px solid rgba(255,255,255,0.10)', fontWeight: '500', color: '#00D47E', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', 'Fira Mono', monospace" }}>
-                        {fmtUSD(months.reduce((s, m) => s + (at(row.key, m.key)?.budget || 0), 0))}
+                        {fmtFigure(months.reduce((s, m) => s + (at(row.key, m.key)?.budget || 0), 0))}
                       </td>
                     )}
                   </tr>
@@ -1068,13 +1128,13 @@ export default function Budgeting() {
                         <React.Fragment key={m.key}>
                           <td style={{ ...pg.td, ...nowCell(m.key), borderLeft: '1px solid rgba(255,255,255,0.04)' }} />
                           <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: '8px', fontSize: '11px', color: '#7A9BB8', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', 'Fira Mono', monospace" }}>
-                            {fmtUSD(at(row.key, m.key)?.direct || 0)}
+                            {fmtFigure(at(row.key, m.key)?.direct || 0)}
                           </td>
                           <td style={{ ...pg.td, ...nowCell(m.key) }} />
                         </React.Fragment>
                       ))}
                       <td style={{ ...pg.td, textAlign: 'right', paddingRight: '12px', borderLeft: '0.5px solid rgba(255,255,255,0.10)', fontSize: '11px', color: '#7A9BB8', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', 'Fira Mono', monospace" }}>
-                        {fmtUSD(months.reduce((s, m) => s + (at(row.key, m.key)?.direct || 0), 0))}
+                        {fmtFigure(months.reduce((s, m) => s + (at(row.key, m.key)?.direct || 0), 0))}
                       </td>
                     </tr>
                   )}
@@ -1089,7 +1149,7 @@ export default function Budgeting() {
                   Total expenses
                 </td>
                 <td style={{ ...pg.td, textAlign: 'right', paddingRight: '8px', background: 'rgba(0,0,0,0.18)', borderRight: '0.5px solid rgba(255,255,255,0.10)', color: (totals[benchmark]?.actual || 0) > 0 ? '#4EA8FF' : 'rgba(255,255,255,0.20)', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace" }}>
-                  {(totals[benchmark]?.actual || 0) > 0 ? fmtUSD(totals[benchmark].actual) : '—'}
+                  {(totals[benchmark]?.actual || 0) > 0 ? fmtFigure(totals[benchmark].actual) : '—'}
                 </td>
                 {visibleMonths.map(m => {
                   const cell = totals[m.key] || { actual: 0, budget: 0, committed: 0 }
@@ -1100,16 +1160,16 @@ export default function Budgeting() {
                   return (
                     <React.Fragment key={m.key}>
                       <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: consolidated ? '8px' : '12px', color: cell.actual > 0 ? '#FF8080' : 'rgba(255,255,255,0.20)', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace", borderLeft: '1px solid rgba(255,255,255,0.06)' }}>
-                        {cell.actual > 0 ? fmtUSD(cell.actual) : '—'}
+                        {cell.actual > 0 ? fmtFigure(cell.actual) : '—'}
                       </td>
                       {consolidated && (
                         <>
                           <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: '8px', color: '#00D47E', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace" }}>
-                            {forecast !== 0 ? fmtUSD(forecast) : '—'}
+                            {forecast !== 0 ? fmtFigure(forecast) : '—'}
                           </td>
                           <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: '12px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace" }}>
                             <span style={{ color: varianceColor(varAmt) }}>
-                              {(cell.actual > 0 || forecast !== 0) ? fmtUSD(varAmt, true) : '—'}
+                              {(cell.actual > 0 || forecast !== 0) ? fmtFigure(varAmt, true) : '—'}
                             </span>
                           </td>
                         </>
@@ -1119,7 +1179,7 @@ export default function Budgeting() {
                 })}
                 {consolidated && (
                   <td style={{ ...pg.td, textAlign: 'right', paddingRight: '12px', borderLeft: '0.5px solid rgba(255,255,255,0.10)', color: '#00D47E', fontWeight: '700', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace" }}>
-                    {fmtUSD(months.reduce((s, m) => s + (totals[m.key]?.budget || 0), 0))}
+                    {fmtFigure(months.reduce((s, m) => s + (totals[m.key]?.budget || 0), 0))}
                   </td>
                 )}
               </tr>
@@ -1138,7 +1198,7 @@ export default function Budgeting() {
           background: 'rgba(245,166,35,0.12)', border: '0.5px solid rgba(245,166,35,0.3)',
           borderRadius: '8px', fontSize: '12px', color: '#F5A623',
         }}>
-          ⚠ {fmtUSD(notCarried)} of {benchmark ? monthLabel(benchmark) : 'benchmark'} spend is not carried forward —
+          ⚠ {fmtFigure(notCarried)} of {benchmark ? monthLabel(benchmark) : 'benchmark'} spend is not carried forward —
           one-time, capex or unclassified. The months ahead are short by at least this much.
         </div>
       )}
@@ -1160,20 +1220,19 @@ export default function Budgeting() {
         </div>
       )}
 
-      {/* The credit schedule is priced at a rate nobody published.
-          `getRatesForDate` answers an unreachable NBS with USD=100 EUR=117 and
-          a flag, and a flag that is dropped prices every EUR instalment at
-          exactly 1.17 on a page that looks completely normal. Shown only when
-          the schedule actually put something in the horizon — no instalments
-          and an unreachable NBS is not a warning worth showing. */}
-      {consolidated && !loading && ratesAreFallback && creditScheduled > 0 && (
+      {/* Credit instalments the schedule could not price. There is no
+          fallback rate any more — a made-up rate prices every instalment at a
+          plausible figure on a page that looks completely normal — so an
+          instalment with no rate is left out, and this says how many. */}
+      {consolidated && !loading && creditUnpriced[shownCurrency] > 0 && (
         <div style={{
           marginTop: '14px', padding: '10px 14px',
           background: 'rgba(245,166,35,0.12)', border: '0.5px solid rgba(245,166,35,0.3)',
           borderRadius: '8px', fontSize: '12px', color: '#F5A623',
         }}>
-          ⚠ The official exchange rate could not be read, so the Loans/Credits estimates are
-          priced at a fallback EUR rate — those figures are not reliable.
+          ⚠ The NBS exchange rate could not be read, so {creditUnpriced[shownCurrency]} credit
+          {creditUnpriced[shownCurrency] === 1 ? ' instalment is' : ' instalments are'} left out of
+          the Loans/Credits estimates — the months ahead are short by {creditUnpriced[shownCurrency] === 1 ? 'it' : 'them'}.
         </div>
       )}
 
@@ -1202,10 +1261,10 @@ export default function Budgeting() {
           // this node's own entries and every descendant's, because the cell
           // is the sum of them.
           ledgerEntries={ledgerUnder(drillOpen.rowKey, drillOpen.month)}
-          ratesAreFallback={ratesAreFallback}
+          currency={shownCurrency}
           // The horizon's formatter, so the drill prints the figure it was
           // opened from exactly as the cell printed it.
-          format={fmtUSD}
+          format={fmtFigure}
           onChange={budgetCell ? () => setBudgetView('change') : undefined}
           onClose={() => { setDrill(null); setBudgetCell(null) }}
           onEditDone={() => { setDrill(null); setBudgetCell(null); refresh() }}
@@ -1224,6 +1283,7 @@ export default function Budgeting() {
           rowLabel={budgetCell.row.label}
           current={budgetCell.current}
           seed={budgetCell.seed}
+          seedEur={budgetCell.seedEur}
           // The dialog says what the change is about to land ON, not merely
           // which row was clicked. It needs the children to do that, and the
           // tree is here.
@@ -1248,6 +1308,7 @@ export default function Budgeting() {
           months={visibleMonths}
           currentFor={currentForPath}
           seedFor={seedForPath}
+          seedEurFor={seedEurForPath}
           seedPath={addingLine.seed}
           onClose={() => setAddingLine(null)}
           // The row itself needs nothing new to appear: `ledgerPaths` builds a

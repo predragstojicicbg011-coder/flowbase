@@ -2,8 +2,8 @@
 //
 // What is left over when a bill and its payment cannot agree.
 //
-// A dinar invoice indexed to the euro is booked in dinars at the issue date's
-// rate and settled at the payment date's. The two are never the same figure,
+// A dinar invoice indexed to the euro, or a euro invoice paid in dinars, is
+// booked in dinars at the issue date's rate and settled at the payment date's. The two are never the same figure,
 // so every such invoice ends with a gap that is not a part payment and not an
 // error — it is the exchange moving between the two dates.
 //
@@ -28,6 +28,8 @@
 // This module decides the figure and the direction. It does not know what a
 // transaction looks like, which classification carries it, or which dialog is
 // asking.
+
+import { fmtMoney, fmtNum } from '../utils/formatters'
 
 /** Under this much, in the invoice's own currency, there is nothing to book. */
 export const TOLERANCE = 0.01
@@ -68,8 +70,7 @@ export interface DifferenceInput {
 }
 
 const money = (n: number, currency?: string) =>
-  n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  + (currency ? ' ' + currency : '')
+  currency ? fmtMoney(n, currency) : fmtNum(n)
 
 /**
  * The difference to book, if there is one.

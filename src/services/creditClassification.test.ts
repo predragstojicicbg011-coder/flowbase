@@ -5,7 +5,7 @@ import {
 import { buildTree, UNASSIGNED, PlEntry } from './expenseTree'
 
 const leg = (c: typeof CREDIT_PRINCIPAL, amount: number): PlEntry => ({
-  tx_type: 'expense', pl_date: '2026-08-31', amount_usd: amount,
+  tx_type: 'expense', pl_date: '2026-08-31', amount_rsd: amount, amount_eur: null,
   pl_category: c.pl_category, pl_subcategory: c.pl_subcategory,
   department: c.department, dept_subcategory: c.dept_subcategory,
   expense_description: c.expense_description,
@@ -54,7 +54,7 @@ describe('credit classification', () => {
   it('leaves no credit row under Unassigned in either branch', () => {
     const rows = [leg(CREDIT_PRINCIPAL, 1840.22), leg(CREDIT_INTEREST, 126.75)]
     for (const branch of ['pl', 'department'] as const) {
-      const tree = buildTree(rows, branch)
+      const tree = buildTree(rows, branch, 'RSD')
       const flat: string[] = []
       const walk = (ns: any[]) => ns.forEach(n => { flat.push(n.label); walk(n.children) })
       walk(tree)
@@ -67,7 +67,7 @@ describe('credit classification', () => {
     // payments produced 200 leaves and the report could not group them.
     const rows = Array.from({ length: 12 }, (_, i) =>
       ({ ...leg(CREDIT_PRINCIPAL, 1800 + i), pl_date: `2026-${String(i + 1).padStart(2, '0')}-28` }))
-    const leaves = buildTree(rows, 'department').flatMap(n => n.children).flatMap(n => n.children)
+    const leaves = buildTree(rows, 'department', 'RSD').flatMap(n => n.children).flatMap(n => n.children)
     expect(leaves).toHaveLength(1)
     expect(leaves[0].count).toBe(12)
   })
@@ -76,17 +76,23 @@ describe('credit classification', () => {
 describe('creditNote', () => {
   it('records which installment the leg paid', () => {
     expect(creditNote('principal', 'Investicioni kredit', 7, 1840.22))
-      .toBe('Principal — Investicioni kredit #7 (€1840.22)')
+      .toBe('Principal — Investicioni kredit #7 (1.840,22 EUR)')
   })
 
   it('labels the interest leg', () => {
     expect(creditNote('interest', 'Investicioni kredit', 7, 126.75))
-      .toBe('Interest — Investicioni kredit #7 (€126.75)')
+      .toBe('Interest — Investicioni kredit #7 (126,75 EUR)')
+  })
+
+  it('names the credit\'s own currency rather than assuming euros', () => {
+    // A loan may be taken in dinars; its instalment is then a dinar figure.
+    expect(creditNote('principal', 'Kredit za mehanizaciju', 4, 215640.5, null, 'RSD'))
+      .toBe('Principal — Kredit za mehanizaciju #4 (215.640,50 RSD)')
   })
 
   it('leads with the leg, so a truncated note still says what the row is', () => {
     expect(creditNote('principal', 'Kredit', 3, 500, 'Paid early'))
-      .toBe('Principal — Kredit #3 (€500.00) | bank line: Paid early')
+      .toBe('Principal — Kredit #3 (500,00 EUR) | bank line: Paid early')
   })
 
   it('does not let the bank wording contradict the leg at a glance', () => {

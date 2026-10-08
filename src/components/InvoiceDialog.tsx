@@ -8,7 +8,7 @@ import {
 } from '../services/expenseSplit'
 import { saveSplits, loadSplits } from '../services/saveSplits'
 import InlineCategoryAdd from './InlineCategoryAdd'
-import { getRate, convertToUSD } from '../services/currencyService'
+import { bookAmountsAtRate, getBookRates, rateFor, type BookAmounts } from '../services/bookAmounts'
 import PartnerDialog from './PartnerDialog'
 import { DIALOG, chrome } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
@@ -16,7 +16,7 @@ import { reallocateInvoiceLink } from '../services/writeOrder'
 import {
   chooseAccount, carriedAccountOf, defaultAccount,
 } from '../services/partnerAccountChoice'
-import { fmtLocal } from '../utils/formatters'
+import { fmtLocal, fmtMoney, fmtNum } from '../utils/formatters'
 import { fetchAllPartners } from '../services/allPartners'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 
@@ -86,10 +86,13 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const [refNum, setRefNum] = useState('')
   const [currency, setCurrency] = useState('')
   const [amount, setAmount] = useState('')
+  // RSD per 1 unit of `currency`, and RSD per 1 EUR — fetched from NBS or
+  // typed by hand. On a EUR invoice the two are the same number.
   const [exRate, setExRate] = useState('')
+  const [eurRate, setEurRate] = useState('')
   const [isIndexed, setIsIndexed] = useState(false)
   const [rateSource, setRateSource] = useState('')
-  const [rateIsFallback, setRateIsFallback] = useState(false)
+  const [rateMissing, setRateMissing] = useState(false)
   const [fetchingRate, setFetchingRate] = useState(false)
 
   // By value split
@@ -248,11 +251,31 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     ? { op: ((parseFloat(opexVal) || 0) / parseFloat(amount) * 100).toFixed(1), perf: ((parseFloat(performanceVal) || 0) / parseFloat(amount) * 100).toFixed(1) }
     : { op: '0', perf: '0' }
 
-  const usdAmount = (() => {
-    const a = parseFloat(amount) || 0
-    const r = parseFloat(exRate) || 0
-    return convertToUSD(a, currency, r)
+  // The four stored columns, from the rates in hand (bookAmountsAtRate, so a
+  // hand-typed rate is booked exactly like a fetched one). A missing rate is
+  // an error to show, never a figure to guess.
+  const book: { amounts: BookAmounts | null; error: string } = (() => {
+    const a = parseFloat(amount)
+    if (!currency || !(a > 0)) return { amounts: null, error: '' }
+    const own = currency === 'RSD' ? 1 : parseFloat(exRate)
+    const eur = currency === 'EUR' ? parseFloat(exRate) : parseFloat(eurRate)
+    try {
+      return { amounts: bookAmountsAtRate(a, currency, own, eur), error: '' }
+    } catch (err) {
+      return { amounts: null, error: err instanceof Error ? err.message : String(err) }
+    }
   })()
+  const amountRsd = book.amounts?.amount_rsd ?? 0
+  const amountEur = book.amounts?.amount_eur ?? 0
+  /** The bill as a split parent: its own figure and its book columns. */
+  const splitParent = {
+    amount: parseFloat(amount) || 0,
+    currency: currency || undefined,
+    exchange_rate: book.amounts?.exchange_rate ?? null,
+    eur_rate: book.amounts?.eur_rate ?? null,
+    amount_rsd: book.amounts?.amount_rsd ?? null,
+    amount_eur: book.amounts?.amount_eur ?? null,
+  }
 
   /**
    * Why the split cannot be posted, or null. Guards the button as well as
@@ -260,8 +283,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
    * and a bill posted with a split that does not add up is a P&L short by the
    * difference in one category and long in none.
    */
-  const whySplit = whySplitNotSavable(
-    { amount: parseFloat(amount) || 0, amount_usd: usdAmount }, splitLines)
+  const whySplit = whySplitNotSavable(splitParent, splitLines)
 
   const splitActive = splitLines.length > 0
 
@@ -302,7 +324,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     if (!invoiceDate) e.invoiceDate = 'Invoice date is required'
     if (!partnerId && !(showNewPartner && newPartnerName.trim())) e.partnerId = 'Partner is required'
     if (!amount || parseFloat(amount) <= 0) e.amount = 'Amount must be greater than 0'
-    if (currency && currency !== 'USD' && (!exRate || parseFloat(exRate) <= 0)) e.exRate = 'Exchange rate is required'
+    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Exchange rate is required'
     if (invType === 'expense' && plImpact && !linkedTxId) {
       // A split bill is classified by its lines, and the fields below are
       // filled from them. Demanding them again would refuse a bill that is
@@ -318,7 +340,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, plImpact, linkedTxId, revAlloc, aimfoxVal, sgVal, opexType, opexVal, performanceVal]) // eslint-disable-line
+  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, revAlloc, aimfoxVal, sgVal, opexType, opexVal, performanceVal]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -349,7 +371,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     const load = async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('id, transaction_date, amount, amount_usd, currency, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, rev_alloc_type, dept_split_type, tags, note, exchange_rate, is_indexed, banks(id,name), partners(id,name)')
+        .select('id, transaction_date, amount, amount_rsd, amount_eur, currency, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, rev_alloc_type, dept_split_type, tags, note, exchange_rate, eur_rate, is_indexed, banks(id,name), partners(id,name)')
         .eq('company_id', companyId).eq('type', 'direct').eq('status', 'posted')
         .order('transaction_date', { ascending: false }).limit(150)
       if (error) console.error('transactions load error:', error)
@@ -440,6 +462,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     if (tx.amount) setAmount(tx.amount.toString())
     if (tx.currency) setCurrency(tx.currency)
     if (tx.exchange_rate) { setExRate(tx.exchange_rate.toString()); setRateSource('From transaction') }
+    if (tx.eur_rate) setEurRate(tx.eur_rate.toString())
     if (tx.is_indexed !== undefined) setIsIndexed(tx.is_indexed)
     if (invoiceNumber) setRefNum(invoiceNumber)
   }
@@ -460,6 +483,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     setModel(invoice.model || ''); setRefNum(invoice.reference_number || '')
     setCurrency(invoice.currency || ''); setAmount(invoice.amount?.toString() || '')
     setExRate(invoice.exchange_rate?.toString() || ''); setIsIndexed(invoice.is_indexed || false)
+    setEurRate(invoice.eur_rate?.toString() || '')
     setPlImpact(invoice.pl_impact !== false)
     setOpexType(invoice.opex_type || 'opex')
     setOpexVal(invoice.opex_amount?.toString() || '')
@@ -507,21 +531,22 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     return (stepFields[n] || []).some(f => !!errors[f])
   }
 
+  // Both NBS rates for the invoice date. An RSD invoice still needs the EUR
+  // rate, for amount_eur.
   const fetchRate = async () => {
-    if (!currency || currency === 'USD') { setExRate('1'); setRateSource('N/A'); setRateIsFallback(false); return }
+    if (!currency) return
     setFetchingRate(true)
     try {
-      const rateData = await getRate(currency, invoiceDate, isIndexed)
-      setExRate(rateData.rate.toString()); setRateSource(rateData.source)
-      setRateIsFallback(rateData.isFallback)
+      const rates = await getBookRates(invoiceDate)
+      setExRate(String(rateFor(currency, rates)))
+      setEurRate(String(rates.eurRate))
+      setRateSource(rates.source)
+      setRateMissing(false)
     } catch (err) {
-      // Ranije se ovde upisivao hardkodovan kurs ({ RSD: 117, EUR: 1.08, ... }),
-      // sto je davalo tih i pogresan iznos — EUR: 1.08 je uz to bio USD/EUR,
-      // a ne RSD/EUR. Bolje ostaviti prazno i traziti rucni unos.
-      console.error('[InvoiceDialog] getRate neuspesan:', err)
-      setExRate('')
-      setRateSource('⚠ No official rate — enter it manually')
-      setRateIsFallback(true)
+      // RateUnavailableError, in its own words. Nothing is guessed; the
+      // person can retry or type the rate.
+      setRateSource(err instanceof Error ? `${err.message} — enter it manually` : 'No official rate — enter it manually')
+      setRateMissing(true)
     }
     setFetchingRate(false)
   }
@@ -561,6 +586,8 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     setTouched({ companyId: true, currency: true, invoiceDate: true, partnerId: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true, split: true, opexSplit: true })
     const e = runValidation()
     if (Object.keys(e).length > 0) { setShowValidationSummary(true); return }
+    const booked = book.amounts
+    if (!booked) { setSaveError(book.error || 'Exchange rate is required'); return }
     setSaveError('')
     setSaving(true)
     try {
@@ -598,7 +625,8 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         cf_capex_months: cfType === 'capex' ? (cfCapexMonths ? parseInt(cfCapexMonths) : null) : null,
         cf_reimbursable_date: cfType === 'reimbursable' ? (cfReimbursableDate || null) : null,
         currency, amount: parseFloat(amount),
-        exchange_rate: parseFloat(exRate) || null, amount_usd: usdAmount,
+        exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
+        amount_rsd: booked.amount_rsd, amount_eur: booked.amount_eur,
         is_indexed: isIndexed, account_number: accNum || null,
         model: model || null, reference_number: refNum || null,
         note: note || null, tags: tags.length > 0 ? tags : null,
@@ -647,7 +675,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       {
         const outcome = await saveSplits(
           supabase, 'invoice', invoiceId,
-          { amount: parseFloat(amount) || 0, amount_usd: usdAmount },
+          { amount: parseFloat(amount) || 0, currency, ...booked },
           splitLines)
         if (!outcome.ok) {
           setSaving(false)
@@ -666,8 +694,10 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         const outcome = await reallocateInvoiceLink(supabase, {
           invoiceId,
           transactionId: linkedTxId,
+          // The whole bill, so its book columns are the bill's own.
           allocatedAmount: parseFloat(amount),
-          allocatedAmountUsd: usdAmount,
+          allocatedAmountRsd: booked.amount_rsd,
+          allocatedAmountEur: booked.amount_eur,
           note: 'Reconciled — P&L already booked via Direct transaction',
         })
         if (!outcome.ok) throw new Error(outcome.message)
@@ -728,7 +758,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       {opexType === 'split' && (
         <div style={{ marginTop: '14px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={{ fontSize: '11px', color: DIALOG.dim, fontWeight: '500', marginBottom: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.07em' }}>
-            Split by value — total: {amount ? `${parseFloat(amount).toLocaleString()} ${currency}` : '—'}
+            Split by value — total: {amount ? fmtMoney(parseFloat(amount), currency) : '—'}
           </div>
           <div style={s.row2}>
             <div style={s.field}>
@@ -796,14 +826,14 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <input type="number" style={{ ...s.input, flex: 1 }} value={cfNextMonthEst}
                 onChange={e => setCfNextMonthEst(e.target.value)}
-                placeholder={amount ? `Auto: ${parseFloat(amount).toLocaleString()}` : '0.00'} />
+                placeholder={amount ? `Auto: ${fmtNum(parseFloat(amount))}` : '0.00'} />
               {!cfNextMonthEst && amount && (
                 <button style={s.linkBtn} onClick={() => setCfNextMonthEst(amount)}>Use this amount</button>
               )}
             </div>
             {amount && (
               <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '4px' }}>
-                Auto: {cfFrequency === 'monthly' ? parseFloat(amount).toLocaleString() : cfFrequency === 'quarterly' ? (parseFloat(amount) / 3).toFixed(2) : (parseFloat(amount) / 12).toFixed(2)} {currency}/mo
+                Auto: {fmtNum(cfFrequency === 'monthly' ? parseFloat(amount) : cfFrequency === 'quarterly' ? parseFloat(amount) / 3 : parseFloat(amount) / 12)} {currency}/mo
               </div>
             )}
           </div>
@@ -937,7 +967,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                         <span style={{ fontSize: '16px' }}>✅</span>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.accent }}>{linkedTx.partners?.name || '—'}</div>
-                          <div style={{ fontSize: '11px', color: DIALOG.accent }}>{linkedTx.transaction_date} · {linkedTx.pl_category || '—'} · {linkedTx.banks?.name || '—'} · ${(linkedTx.amount_usd || 0).toFixed(2)}</div>
+                          <div style={{ fontSize: '11px', color: DIALOG.accent }}>{linkedTx.transaction_date} · {linkedTx.pl_category || '—'} · {linkedTx.banks?.name || '—'} · {fmtMoney(linkedTx.amount_rsd || 0, 'RSD')}</div>
                         </div>
                       </div>
                       <div style={{ ...s.infoBox, marginTop: '10px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, fontSize: '11px' }}>
@@ -960,7 +990,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                               </div>
                               <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
                                 <div style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.red }}>{fmtLocal(tx.amount || 0, tx.currency)}</div>
-                                <div style={{ fontSize: '11px', color: DIALOG.dim }}>${(tx.amount_usd || 0).toFixed(2)}</div>
+                                <div style={{ fontSize: '11px', color: DIALOG.dim }}>{fmtMoney(tx.amount_rsd || 0, 'RSD')}</div>
                               </div>
                             </div>
                           ))}
@@ -1111,7 +1141,9 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                 </div>
               )}
               <div style={{ ...s.infoBox, margin: '10px 0' }}>
-                {currency === 'USD' ? 'No conversion needed — amount is already in USD.' : 'Rate fetched on invoice date.'}
+                {currency === 'RSD'
+                  ? 'Booked in RSD; the NBS EUR rate on the invoice date gives the EUR figure.'
+                  : `NBS middle rate on the invoice date, in RSD per 1 ${currency || 'unit'}.`}
               </div>
               <div style={s.row2}>
                 <div style={s.field}>
@@ -1121,21 +1153,33 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                   {fieldErr('amount') && <span style={s.errorMsg}>{fieldErr('amount')}</span>}
                 </div>
                 <div style={s.field}>
-                  <label style={s.lbl}>Exchange rate {currency !== 'USD' && <span style={s.req}>*</span>}</label>
+                  <label style={s.lbl}>{currency && currency !== 'RSD' ? `RSD per 1 ${currency}` : 'RSD per 1 EUR'} <span style={s.req}>*</span></label>
                   <div style={{ display: 'flex', gap: '6px' }}>
-                    <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={exRate}
-                      onChange={e => { setExRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                      placeholder={currency === 'USD' ? 'N/A' : 'Click Fetch'} />
-                    {currency !== 'USD' && <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate}>{fetchingRate ? '...' : 'Fetch'}</button>}
+                    {currency && currency !== 'RSD' ? (
+                      <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={exRate}
+                        onChange={e => { setExRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
+                        placeholder="Click Fetch" />
+                    ) : (
+                      <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={eurRate}
+                        onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
+                        placeholder="Click Fetch" />
+                    )}
+                    <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate || !currency}>{fetchingRate ? '...' : 'Fetch'}</button>
                   </div>
-                  {rateSource && <div style={{ fontSize: '11px', color: rateIsFallback ? '#FF5B5A' : DIALOG.accent, fontWeight: rateIsFallback ? 600 : 400, marginTop: '4px' }}>Source: {rateSource}</div>}
+                  {currency === 'USD' && (
+                    <input type="number" style={{ ...s.input, marginTop: '6px' }} value={eurRate}
+                      onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
+                      placeholder="RSD per 1 EUR" aria-label="RSD per 1 EUR" />
+                  )}
+                  {rateSource && <div style={{ fontSize: '11px', color: rateMissing ? '#FF5B5A' : DIALOG.accent, fontWeight: rateMissing ? 600 : 400, marginTop: '4px' }}>Source: {rateSource}</div>}
                   {fieldErr('exRate') && <span style={s.errorMsg}>{fieldErr('exRate')}</span>}
                 </div>
               </div>
               <div style={s.convRow}>
                 <div><div style={s.convLabel}>Invoice amount</div><div style={s.convVal}>{amount ? fmtLocal(parseFloat(amount), currency) : '—'}</div></div>
                 <div style={{ fontSize: '20px', color: DIALOG.faint, alignSelf: 'flex-end', paddingBottom: '4px' }}>→</div>
-                <div><div style={s.convLabel}>USD equivalent</div><div style={{ ...s.convVal, color: DIALOG.accent }}>${usdAmount > 0 ? usdAmount.toFixed(2) : '0.00'}</div></div>
+                <div><div style={s.convLabel}>RSD (book)</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
+                <div><div style={s.convLabel}>EUR</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountEur, 'EUR') : '—'}</div></div>
               </div>
               {dueDate && <div style={{ ...s.infoBox, marginTop: '12px', background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber }}>📅 Due date: <strong>{dueDate}</strong></div>}
             </div>
@@ -1150,11 +1194,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                   more than one, the fields underneath stop being the answer
                   and become the fallback the rest of the application reads. */}
               <SplitEditor
-                parent={{
-                  amount: parseFloat(amount) || 0,
-                  amount_usd: usdAmount,
-                  currency: currency || undefined,
-                }}
+                parent={splitParent}
                 lines={splitLines}
                 onChange={setSplitLines}
                 scripts={quickFillScripts as any}
@@ -1408,8 +1448,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                         .filter(Boolean).join(' › ') || 'nothing picked'}
                       {' — '}
                       <strong>
-                        {(l.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        {currency ? ` ${currency}` : ''}
+                        {currency ? fmtMoney(l.amount || 0, currency) : fmtNum(l.amount || 0)}
                       </strong>
                     </div>
                   ))}
@@ -1446,8 +1485,9 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                 ]},
                 { title: 'Amounts', rows: [
                   ['Original amount', amount ? fmtLocal(parseFloat(amount), currency) : '—'],
-                  ['Exchange rate', exRate ? `${parseFloat(exRate).toFixed(4)} (${rateSource || 'Manual'})` : 'N/A'],
-                  ['USD equivalent', `$${usdAmount.toFixed(2)}`],
+                  ['Exchange rate', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'Manual'})` : 'N/A'],
+                  ['RSD (book)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
+                  ['EUR', book.amounts ? fmtMoney(amountEur, 'EUR') : '—'],
                 ]},
                 { title: 'P&L & CF classification', rows: [
                   ['P&L Category', plCatName || '—'],

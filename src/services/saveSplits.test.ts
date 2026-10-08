@@ -5,7 +5,8 @@ const line = (amount: number, category = 'General Business'): SplitLine => ({
   ...emptyLine(`k${amount}`), amount, pl_category: category,
 })
 
-const parent = { amount: 120000, amount_usd: 1178.21 }
+// 120,000 RSD at 117.5 RSD per EUR = 1,021.28 EUR.
+const parent = { amount: 120000, currency: 'RSD', exchange_rate: 1, eur_rate: 117.5, amount_rsd: 120000, amount_eur: 1021.28 }
 
 /** A PostgREST that records what it was asked to do. */
 function fakeClient(over: { delError?: string; insError?: string; insRows?: number } = {}) {
@@ -61,6 +62,9 @@ describe('writing a split', () => {
     expect(calls[1].payload).toHaveLength(2)
     expect(calls[1].payload.every((r: any) => r.source === 'transaction' && r.source_id === 'tx-9'))
       .toBe(true)
+    // 40000 / 117.5 = 340.43; the last line takes 1021.28 - 340.43.
+    expect(calls[1].payload.map((r: any) => [r.amount_rsd, r.amount_eur]))
+      .toEqual([[40000, 340.43], [80000, 680.85]])
   })
 
   it('reports how many lines the payment now carries', async () => {
@@ -84,6 +88,15 @@ describe('when it cannot be written', () => {
     const out = await saveSplits(client, 'invoice', 'inv-1', parent, [line(40000), line(70000)])
     expect(out.ok).toBe(false)
     expect(out.message).toMatch(/not accounted for/)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('refuses a parent without stored rates before it touches anything', async () => {
+    const { client, calls } = fakeClient()
+    const out = await saveSplits(client, 'invoice', 'inv-1', { amount: 120000, currency: 'EUR' },
+      [line(40000), line(80000)])
+    expect(out.ok).toBe(false)
+    expect(out.message).toMatch(/nema/)   // the RateUnavailableError's own words
     expect(calls).toHaveLength(0)
   })
 

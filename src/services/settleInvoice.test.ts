@@ -2,19 +2,20 @@ import {
   CLOSED_WITHIN, outstandingOwn, paysInInvoiceCurrency, settledStatus, settlementFor,
   toleranceFor,
 } from './settleInvoice'
+import { RateUnavailableError } from './bookAmounts'
 
-// A real shape: 220,996.00 RSD booked on a day the NBS said 102.3456, so the
-// dollar column holds 2,159.31. The implied rate reads back off the row.
-const bill = { currency: 'RSD', amount: 220996, amount_usd: 2159.31 }
-const euro = { currency: 'EUR', amount: 1200, amount_usd: 1284.5 }
-const dollars = { currency: 'USD', amount: 1200, amount_usd: 1200 }
+// Rates checkable by hand: 117.2 RSD per EUR, 100.5 RSD per USD.
+// 220,996 RSD / 117.2 = 1,885.63 EUR; 1,200 USD * 100.5 = 120,600 RSD = 1,029.01 EUR.
+const bill = { currency: 'RSD', amount: 220996, exchange_rate: 1, eur_rate: 117.2, amount_rsd: 220996, amount_eur: 1885.63 }
+const euro = { currency: 'EUR', amount: 1200, exchange_rate: 117.2, eur_rate: 117.2, amount_rsd: 140640, amount_eur: 1200 }
+const dollars = { currency: 'USD', amount: 1200, exchange_rate: 100.5, eur_rate: 117.2, amount_rsd: 120600, amount_eur: 1029.01 }
 
 describe('what an invoice is still owed', () => {
-  it('is read in the currency the bill was written in, not in dollars', () => {
+  it('is read in the currency the bill was written in, not in the book currency', () => {
     // `paid_amount` is the view's sum of `allocated_amount` — the same column
     // the settled/partial rule is decided on. Deriving the remainder from the
-    // DOLLAR column instead is how the dialog came to show an outstanding
-    // figure that disagreed with the rule it was judged against.
+    // BOOK column (remaining_rsd) instead is how the dialog came to show an
+    // outstanding figure that disagreed with the rule it was judged against.
     expect(outstandingOwn({ ...bill, paid_amount: 100000 })).toBe(120996)
   })
 
@@ -45,74 +46,59 @@ describe('whether the payment is in the currency of the bill', () => {
     expect(paysInInvoiceCurrency('EUR', bill)).toBe(false)
   })
 
-  it('treats a missing currency on either side as dollars', () => {
-    expect(paysInInvoiceCurrency(null, dollars)).toBe(true)
-    expect(paysInInvoiceCurrency('USD', {})).toBe(true)
-    expect(paysInInvoiceCurrency(null, bill)).toBe(false)
+  it('treats a missing currency on either side as dinars, the book currency', () => {
+    expect(paysInInvoiceCurrency(null, bill)).toBe(true)
+    expect(paysInInvoiceCurrency('RSD', {})).toBe(true)
+    expect(paysInInvoiceCurrency(null, dollars)).toBe(false)
   })
 })
 
 describe('a payment in the same currency as the bill', () => {
-  it('SETTLES IT TO THE PARA, whatever the dollar columns say', () => {
-    // THE DEFECT. 220,996 dinars were paid against a bill of 220,996 dinars.
-    // The old path converted the payment to dollars at the PAYMENT date's
-    // rate, capped it against the invoice's dollars at the INVOICE date's
-    // rate, and converted back — so a rate that had moved half a percent
-    // between the two dates left the bill short by over a thousand dinars,
-    // and an unmoved rate still left it short by the value of half a US cent.
-    // Dinars paid a dinar bill. Nothing here needs a rate at all.
+  it('SETTLES IT TO THE PARA, whatever a payment-date rate says', () => {
+    // Dinars paid a dinar bill. The payment's RSD figure is deliberately
+    // something else, to show it plays no part.
     const s = settlementFor({
-      invoice: bill,
-      paymentCurrency: 'RSD',
-      paymentOwn: 220996,
-      paymentUsd: 2157.89,   // a later day's rate — deliberately NOT the invoice's
+      invoice: bill, paymentCurrency: 'RSD', paymentOwn: 220996, paymentRsd: 1,
     })
-    expect(s.own).toBe(220996)
-    expect(s.leftOnInvoice).toBe(0)
-    expect(s.direct).toBe(true)
+    expect(s).toEqual({ own: 220996, rsd: 220996, eur: 1885.63, leftOnInvoice: 0, leftOnPayment: 0, direct: true })
   })
 
-  it('records a part payment exactly as it was paid', () => {
-    // The figure a person typed is never shown back to them altered, and is
-    // never stored altered either.
+  it('records a part payment exactly as it was paid, booked at the invoice rates', () => {
     const s = settlementFor({
-      invoice: bill, paymentCurrency: 'RSD', paymentOwn: 110498, paymentUsd: 1079.66,
+      invoice: bill, paymentCurrency: 'RSD', paymentOwn: 110498, paymentRsd: 110498,
     })
     expect(s.own).toBe(110498)
+    expect(s.rsd).toBe(110498)
+    expect(s.eur).toBe(942.82)   // 110498 / 117.2 = 942.8157
     expect(s.leftOnInvoice).toBe(110498)
   })
 
   it('closes a bill with two part payments that leave NOTHING behind', () => {
-    // Each leg used to be quantised to a whole US cent, worth about a dinar,
-    // so two legs drifted by up to a dinar between them and the bill sat
-    // there owing "par para" for ever.
     const first = settlementFor({
-      invoice: bill, paymentCurrency: 'RSD', paymentOwn: 110498, paymentUsd: 1079.66,
+      invoice: bill, paymentCurrency: 'RSD', paymentOwn: 110498, paymentRsd: 110498,
     })
     const second = settlementFor({
       invoice: { ...bill, paid_amount: first.own },
-      paymentCurrency: 'RSD', paymentOwn: 110498, paymentUsd: 1079.66,
+      paymentCurrency: 'RSD', paymentOwn: 110498, paymentRsd: 110498,
     })
     expect(first.own + second.own).toBe(220996)
+    expect(first.rsd + second.rsd).toBe(220996)
     expect(second.leftOnInvoice).toBe(0)
   })
 
   it('gives the bill only what it is owed and hands the rest back', () => {
     const s = settlementFor({
-      invoice: bill, paymentCurrency: 'RSD', paymentOwn: 250000, paymentUsd: 2442.5,
+      invoice: bill, paymentCurrency: 'RSD', paymentOwn: 250000, paymentRsd: 250000,
     })
     expect(s.own).toBe(220996)
     expect(s.leftOnPayment).toBe(29004)
     expect(s.leftOnInvoice).toBe(0)
   })
 
-  it('closes a bill left a hair short by an older, lossier allocation', () => {
-    // There are rows in the database already short by the value of half a
-    // cent. A payment for the round figure should finish them, not leave the
-    // remainder to be chased.
+  it('closes a bill left a hair short by an older allocation', () => {
     const s = settlementFor({
       invoice: { ...bill, paid_amount: 220995.99 },
-      paymentCurrency: 'RSD', paymentOwn: 0.01, paymentUsd: 0,
+      paymentCurrency: 'RSD', paymentOwn: 0.01, paymentRsd: 0.01,
     })
     expect(s.own).toBe(0.01)
     expect(s.leftOnInvoice).toBe(0)
@@ -121,86 +107,104 @@ describe('a payment in the same currency as the bill', () => {
   it('allocates nothing to a bill that is already settled', () => {
     const s = settlementFor({
       invoice: { ...bill, paid_amount: 220996 },
-      paymentCurrency: 'RSD', paymentOwn: 50000, paymentUsd: 488.5,
+      paymentCurrency: 'RSD', paymentOwn: 50000, paymentRsd: 50000,
     })
     expect(s.own).toBe(0)
     expect(s.leftOnPayment).toBe(50000)
   })
 
-  it('works the same for a dollar bill paid in dollars', () => {
+  it('works the same for a dollar bill paid in dollars, booked at the bill rates', () => {
     const s = settlementFor({
-      invoice: dollars, paymentCurrency: 'USD', paymentOwn: 1200, paymentUsd: 1200,
+      invoice: dollars, paymentCurrency: 'USD', paymentOwn: 1200, paymentRsd: 121000,
     })
-    expect(s).toMatchObject({ own: 1200, usd: 1200, leftOnInvoice: 0, direct: true })
+    expect(s).toMatchObject({ own: 1200, rsd: 120600, eur: 1029.01, leftOnInvoice: 0, direct: true })
+  })
+
+  it('gives a euro bill its euros exactly', () => {
+    const s = settlementFor({
+      invoice: euro, paymentCurrency: 'EUR', paymentOwn: 600, paymentRsd: 70350,
+    })
+    expect(s).toMatchObject({ own: 600, rsd: 70320, eur: 600 })   // 600 * 117.2
   })
 })
 
 describe('a payment in another currency', () => {
   it('still settles the bill EXACTLY when it covers the whole remainder', () => {
-    // Converting the remainder to dollars and back is what left the para
-    // behind. Where the payment covers it, the allocation IS the remainder —
-    // there is no arithmetic to get wrong.
+    // 1,885 EUR at the payment date's 117.3 is 221,110.50 RSD — more than the
+    // 220,996 owed, so the allocation is the remainder itself.
     const s = settlementFor({
-      invoice: bill, paymentCurrency: 'EUR', paymentOwn: 1885, paymentUsd: 2200,
+      invoice: bill, paymentCurrency: 'EUR', paymentOwn: 1885, paymentRsd: 221110.5,
     })
     expect(s.own).toBe(220996)
+    expect(s.rsd).toBe(220996)
+    expect(s.eur).toBe(1885.63)
     expect(s.leftOnInvoice).toBe(0)
+    // What is left of the payment: 1885 * (1 - 220996 / 221110.5) = 0.976…
+    expect(s.leftOnPayment).toBe(0.98)
     expect(s.direct).toBe(false)
   })
 
   it('allocates what the payment reaches, and no more', () => {
+    // 900 EUR at 117.3 = 105,570 RSD, which on a dinar bill is 105,570 RSD.
     const s = settlementFor({
-      invoice: bill, paymentCurrency: 'EUR', paymentOwn: 900, paymentUsd: 1050,
+      invoice: bill, paymentCurrency: 'EUR', paymentOwn: 900, paymentRsd: 105570,
     })
-    // 1,050 dollars at the invoice's own implied rate of 102.34565.
-    expect(s.own).toBe(107462.94)
-    expect(s.own).toBeLessThan(220996)
-    expect(s.leftOnInvoice).toBeCloseTo(220996 - s.own, 2)
+    expect(s.own).toBe(105570)
+    expect(s.leftOnInvoice).toBe(115426)
+    expect(s.leftOnPayment).toBe(0)
+  })
+
+  it('expresses a part in the bill currency at the bill rate', () => {
+    // 60,000 RSD of a USD payment against a EUR bill: 60000 / 117.2 = 511.95 EUR,
+    // booked back at the bill's rate as 511.95 * 117.2 = 60,000.54 RSD.
+    const s = settlementFor({
+      invoice: euro, paymentCurrency: 'USD', paymentOwn: 597, paymentRsd: 60000,
+    })
+    expect(s).toMatchObject({ own: 511.95, rsd: 60000.54, eur: 511.95, leftOnInvoice: 688.05 })
   })
 
   it('never gives a bill more than it is owed, whatever the rate does', () => {
     const s = settlementFor({
-      invoice: euro, paymentCurrency: 'USD', paymentOwn: 5000, paymentUsd: 5000,
+      invoice: euro, paymentCurrency: 'USD', paymentOwn: 5000, paymentRsd: 502500,
     })
     expect(s.own).toBe(1200)
+    expect(s.rsd).toBe(140640)
     expect(s.leftOnInvoice).toBe(0)
   })
 
   it('leaves the payment alone when the bill wants nothing', () => {
     const s = settlementFor({
       invoice: { ...euro, paid_amount: 1200 },
-      paymentCurrency: 'USD', paymentOwn: 500, paymentUsd: 500,
+      paymentCurrency: 'USD', paymentOwn: 500, paymentRsd: 50250,
     })
     expect(s.own).toBe(0)
-    expect(s.usd).toBe(0)
+    expect(s.rsd).toBe(0)
+    expect(s.eur).toBe(0)
   })
 })
 
 describe('the figures it refuses to produce', () => {
   it('does not return NaN from a payment that is not a number', () => {
     const s = settlementFor({
-      invoice: bill, paymentCurrency: 'RSD', paymentOwn: NaN, paymentUsd: NaN,
+      invoice: bill, paymentCurrency: 'RSD', paymentOwn: NaN, paymentRsd: NaN,
     })
     expect(s.own).toBe(0)
-    expect(s.usd).toBe(0)
+    expect(s.rsd).toBe(0)
   })
 
   it('does not go negative on a payment that is', () => {
     const s = settlementFor({
-      invoice: bill, paymentCurrency: 'RSD', paymentOwn: -500, paymentUsd: -5,
+      invoice: bill, paymentCurrency: 'RSD', paymentOwn: -500, paymentRsd: -500,
     })
     expect(s.own).toBe(0)
   })
 
-  it('falls back to the amount itself where the invoice carries no rate', () => {
-    // Not right for a foreign bill, but it is the only figure available, and
-    // inventing a rate would be a quieter kind of wrong.
-    const s = settlementFor({
+  it('refuses to book a link when the invoice carries no stored rate', () => {
+    // A guessed rate looks exactly like a correct one.
+    expect(() => settlementFor({
       invoice: { currency: 'RSD', amount: 5000 },
-      paymentCurrency: 'RSD', paymentOwn: 5000, paymentUsd: 48.9,
-    })
-    expect(s.own).toBe(5000)
-    expect(s.usd).toBe(5000)
+      paymentCurrency: 'RSD', paymentOwn: 5000, paymentRsd: 5000,
+    })).toThrow(RateUnavailableError)
   })
 })
 
@@ -253,36 +257,28 @@ describe('what the ledger says about a bill', () => {
   })
 })
 
-// ─── A dinar, not a para ────────────────────────────────────────────────────
+// ─── The same tolerance as v_invoice_status ─────────────────────────────────
 //
-// The absolute tolerance was right in shape and wrong in size for the currency
-// this ledger mostly runs in. A para is a hundredth of a dinar and nothing
-// settles to a hundredth of a dinar; what arrives is a bank rounding to the
-// dinar, or a transfer sent as a round number.
+// One para (0.01 RSD) expressed in the bill's currency at its booked rate,
+// never less than 0.01 of that currency: GREATEST(0.01, round(0.01 * amount /
+// amount_rsd, 2)). For a dinar, euro or dollar bill that is 0.01.
 
 describe('toleranceFor', () => {
-  it('is about a dinar on a dinar bill', () => {
-    // 505,023.01 RSD against $4,941.37 — roughly 102 dinars to the dollar.
-    expect(toleranceFor(505023.01, 4941.37)).toBeCloseTo(1.02, 2)
+  it('is a para on a dinar bill', () => {
+    expect(toleranceFor(505023.01, 505023.01)).toBe(0.01)
   })
 
-  /** A euro cent is already wider than a cent's worth, so it is kept. */
-  it('leaves a euro bill its para', () => {
-    expect(toleranceFor(920, 1000)).toBe(0.01)
+  it('is a cent on a euro or dollar bill', () => {
+    expect(toleranceFor(1200, 140640)).toBe(0.01)
+    expect(toleranceFor(1200, 120600)).toBe(0.01)
   })
 
-  it('leaves a dollar bill its cent', () => {
-    expect(toleranceFor(1000, 1000)).toBe(0.01)
+  it('follows the view where a unit is worth less than a para', () => {
+    // Not a currency this ledger takes; it shows the expression is the view's.
+    expect(toleranceFor(1000, 10)).toBe(1)
   })
 
-  /** It can only ever loosen: tightening would reopen settled invoices. */
-  it('never returns less than the para it replaced', () => {
-    for (const [amount, usd] of [[1, 1000], [0.5, 900], [100, 100000]]) {
-      expect(toleranceFor(amount, usd)).toBeGreaterThanOrEqual(0.01)
-    }
-  })
-
-  it('falls back to a para when there is no dollar figure to size it with', () => {
+  it('falls back to a para when there is no dinar figure to size it with', () => {
     expect(toleranceFor(505023.01, null)).toBe(0.01)
     expect(toleranceFor(505023.01, 0)).toBe(0.01)
     expect(toleranceFor(505023.01, undefined)).toBe(0.01)
@@ -290,34 +286,23 @@ describe('toleranceFor', () => {
   })
 })
 
-describe('settling within a dinar', () => {
-  const RSD = { amount: 505023.01, usd: 4941.37 }
+describe('settling within a para', () => {
+  const RSD = { amount: 505023.01, rsd: 505023.01 }
 
-  it('settles a dinar bill that is 60 para short', () => {
-    expect(settledStatus(RSD.amount, RSD.amount - 0.60, RSD.usd)).toBe('paid')
+  it('does not settle a dinar bill that is 60 para short', () => {
+    expect(settledStatus(RSD.amount, RSD.amount - 0.60, RSD.rsd)).toBe('partial')
   })
 
-  it('settles one that is a whole dinar short', () => {
-    expect(settledStatus(RSD.amount, RSD.amount - 1.00, RSD.usd)).toBe('paid')
-  })
-
-  /** A dinar is the tolerance, not a licence. Two is a difference. */
-  it('does not settle one that is two dinars short', () => {
-    expect(settledStatus(RSD.amount, RSD.amount - 2.00, RSD.usd)).toBe('partial')
+  it('settles one that is a para short', () => {
+    expect(settledStatus(RSD.amount, RSD.amount - 0.01, RSD.rsd)).toBe('paid')
   })
 
   it('still settles an exact payment, and an overpayment', () => {
-    expect(settledStatus(RSD.amount, RSD.amount, RSD.usd)).toBe('paid')
-    expect(settledStatus(RSD.amount, RSD.amount + 0.80, RSD.usd)).toBe('paid')
+    expect(settledStatus(RSD.amount, RSD.amount, RSD.rsd)).toBe('paid')
+    expect(settledStatus(RSD.amount, RSD.amount + 0.80, RSD.rsd)).toBe('paid')
   })
 
   it('is unpaid when nothing has been allocated at all', () => {
-    expect(settledStatus(RSD.amount, 0, RSD.usd)).toBe('unpaid')
-  })
-
-  /** Without the dollar figure it behaves exactly as it did before. */
-  it('keeps the old answer when it is not told the dollar amount', () => {
-    expect(settledStatus(RSD.amount, RSD.amount - 0.60)).toBe('partial')
-    expect(settledStatus(RSD.amount, RSD.amount - 0.01)).toBe('paid')
+    expect(settledStatus(RSD.amount, 0, RSD.rsd)).toBe('unpaid')
   })
 })

@@ -21,10 +21,9 @@ export interface Allocation {
    *
    * IN WHATEVER UNIT THE CALLER SETTLES IN, and nothing here converts it or
    * compares it with anything else — only whether it is more than nothing
-   * decides anything. It was called `allocatedUsd` while the dialog allocated
-   * in dollars; the dialog now settles in the currency of the bill, and a
-   * field whose name says dollars while it carries dinars is the exact shape
-   * of every unit fault this chain has had.
+   * decides anything. The dialog settles in the currency of the bill, and a
+   * field whose name says one currency while it carries another is the exact
+   * shape of every unit fault this chain has had.
    */
   allocated: number
 }

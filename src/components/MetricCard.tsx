@@ -47,7 +47,7 @@ function Sparkline({ data, color, w = 95, h = 36 }: {
 // ── MetricCard ────────────────────────────────────────────
 interface MetricCardProps {
   label: string
-  value: string            // formatted, e.g. "$90,500"
+  value: string            // formatted, e.g. "90.500 RSD"
   /**
    * The raw figure and how to write it, where the card should COUNT to a
    * new value rather than swap to it.

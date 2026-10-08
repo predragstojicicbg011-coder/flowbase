@@ -21,7 +21,7 @@ describe('what the change dialog refuses to record', () => {
   })
 
   it('refuses a reason that is only whitespace', () => {
-    // The point of the ledger is the reason. A figure moved by $200 with a
+    // The point of the ledger is the reason. A figure moved by 200 RSD with a
     // space typed into the box is exactly the record it exists to prevent, and
     // ' ' is truthy, so a plain falsiness check lets it straight through.
     expect(whyNotRecordable(change({ reason: '   \n\t ' }))).toMatch(/why this is changing/i)
@@ -115,7 +115,7 @@ describe('what the dialog says the change is about to land on', () => {
   })
 
   it('counts them once naming sixty of them would be worse than counting', () => {
-    // "Marketing: $8,000 without itemising sixty lines" is a supported thing
+    // "Marketing: 8.000.000 RSD without itemising sixty lines" is a supported thing
     // to do. Sixty names in a notice is a wall, and a wall is not read.
     const scope = scopeOfChange('Marketing', Array.from({ length: 60 }, (_, i) => `Line ${i + 1}`))
     expect(scope?.text).toMatch(/has 60 lines under it, including Line 1, Line 2, Line 3\./)

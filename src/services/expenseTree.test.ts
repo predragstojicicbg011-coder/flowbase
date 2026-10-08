@@ -6,7 +6,7 @@ import {
   SOCIAL_GROWTH, AIMFOX, OPEX, PERFORMANCE, Branch,
 } from './expenseTree'
 
-const e = (o: Partial<PlEntry> & { amount_usd: number }): PlEntry => ({
+const e = (o: Partial<PlEntry> & { amount_rsd: number }): PlEntry => ({
   pl_category: 'Professional and Production Services',
   pl_subcategory: 'LinkedIn Account Rentals',
   department: 'Sales Expenses',
@@ -18,26 +18,26 @@ const e = (o: Partial<PlEntry> & { amount_usd: number }): PlEntry => ({
 
 describe('what counts as an expense', () => {
   it('accepts both transaction and invoice expenses', () => {
-    expect(isExpenseRow(e({ amount_usd: 1, tx_type: 'expense' }))).toBe(true)
-    expect(isExpenseRow(e({ amount_usd: 1, tx_type: 'invoice_expense' }))).toBe(true)
+    expect(isExpenseRow(e({ amount_rsd: 1, tx_type: 'expense' }))).toBe(true)
+    expect(isExpenseRow(e({ amount_rsd: 1, tx_type: 'invoice_expense' }))).toBe(true)
   })
 
   it('rejects cash movements that are not a cost', () => {
     for (const t of ['passthrough', 'credit_payment', 'invoice_payment', 'direct']) {
-      expect(isExpenseRow(e({ amount_usd: 1, tx_type: t }))).toBe(false)
+      expect(isExpenseRow(e({ amount_rsd: 1, tx_type: t }))).toBe(false)
     }
   })
 
   it('rejects a row with no transaction type rather than guessing', () => {
-    expect(isExpenseRow(e({ amount_usd: 1, tx_type: null }))).toBe(false)
+    expect(isExpenseRow(e({ amount_rsd: 1, tx_type: null }))).toBe(false)
   })
 
   it('splits a mixed set into the two sides', () => {
     const rows = [
-      e({ amount_usd: 10, tx_type: 'expense' }),
-      e({ amount_usd: 20, tx_type: 'revenue' }),
-      e({ amount_usd: 30, tx_type: 'passthrough' }),
-      e({ amount_usd: 40, tx_type: 'invoice_revenue' }),
+      e({ amount_rsd: 10, tx_type: 'expense' }),
+      e({ amount_rsd: 20, tx_type: 'revenue' }),
+      e({ amount_rsd: 30, tx_type: 'passthrough' }),
+      e({ amount_rsd: 40, tx_type: 'invoice_revenue' }),
     ]
     expect(rowsFor(rows, 'expense')).toHaveLength(1)
     expect(rowsFor(rows, 'revenue')).toHaveLength(2)
@@ -71,11 +71,11 @@ describe('byDateDesc', () => {
 
   it('breaks a tie on the larger amount, so the order is stable', () => {
     const rows = [
-      { date: '2026-06-05', amountUsd: 120 },
-      { date: '2026-06-05', amountUsd: 900 },
-      { date: '2026-06-05', amountUsd: 400 },
+      { date: '2026-06-05', amount_rsd: 120 },
+      { date: '2026-06-05', amount_rsd: 900 },
+      { date: '2026-06-05', amount_rsd: 400 },
     ]
-    expect([...rows].sort(byDateDesc).map(r => r.amountUsd)).toEqual([900, 400, 120])
+    expect([...rows].sort(byDateDesc).map(r => r.amount_rsd)).toEqual([900, 400, 120])
   })
 
   it('sorts a missing date last rather than dropping the row', () => {
@@ -86,17 +86,17 @@ describe('byDateDesc', () => {
 
 describe('pathFor', () => {
   it('uses two levels for the P&L branch', () => {
-    expect(pathFor(e({ amount_usd: 1 }), 'pl'))
+    expect(pathFor(e({ amount_rsd: 1 }), 'pl'))
       .toEqual(['Professional and Production Services', 'LinkedIn Account Rentals'])
   })
 
   it('uses three levels for the department branch', () => {
-    expect(pathFor(e({ amount_usd: 1 }), 'department'))
+    expect(pathFor(e({ amount_rsd: 1 }), 'department'))
       .toEqual(['Sales Expenses', 'Outsourcing services and Associates', 'Scaffolding rental'])
   })
 
   it('substitutes Unassigned for a missing level instead of dropping the row', () => {
-    const row = e({ amount_usd: 1, department: null, dept_subcategory: '  ' })
+    const row = e({ amount_rsd: 1, department: null, dept_subcategory: '  ' })
     expect(pathFor(row, 'department'))
       .toEqual([UNASSIGNED, UNASSIGNED, 'Scaffolding rental'])
   })
@@ -104,18 +104,18 @@ describe('pathFor', () => {
 
 describe('buildTree — the two branches must tie', () => {
   const rows = [
-    e({ amount_usd: 100 }),
-    e({ amount_usd: 250, pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries', department: null, dept_subcategory: null }),
-    e({ amount_usd: 75, pl_subcategory: 'Affiliates Payment', expense_description: 'Growth Engine' }),
+    e({ amount_rsd: 100 }),
+    e({ amount_rsd: 250, pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries', department: null, dept_subcategory: null }),
+    e({ amount_rsd: 75, pl_subcategory: 'Affiliates Payment', expense_description: 'Growth Engine' }),
   ]
 
   it('both branches total the same', () => {
-    expect(totalOf(buildTree(rows, 'pl'))).toBe(425)
-    expect(totalOf(buildTree(rows, 'department'))).toBe(425)
+    expect(totalOf(buildTree(rows, 'pl', 'RSD'))).toBe(425)
+    expect(totalOf(buildTree(rows, 'department', 'RSD'))).toBe(425)
   })
 
   it('a row with no department lands under Unassigned, not lost', () => {
-    const dept = buildTree(rows, 'department')
+    const dept = buildTree(rows, 'department', 'RSD')
     const un = dept.find(n => n.label === UNASSIGNED)
     expect(un).toBeDefined()
     expect(un!.amount).toBe(250)
@@ -123,7 +123,7 @@ describe('buildTree — the two branches must tie', () => {
 
   it('parent amount equals the sum of its children', () => {
     for (const branch of ['pl', 'department'] as const) {
-      flatten(buildTree(rows, branch))
+      flatten(buildTree(rows, branch, 'RSD'))
         .filter(n => n.children.length > 0)
         .forEach(n => {
           expect(n.amount).toBeCloseTo(n.children.reduce((s, c) => s + c.amount, 0), 6)
@@ -132,34 +132,52 @@ describe('buildTree — the two branches must tie', () => {
   })
 
   it('sorts siblings by amount, largest first', () => {
-    const pl = buildTree(rows, 'pl')
+    const pl = buildTree(rows, 'pl', 'RSD')
     expect(pl.map(n => n.amount)).toEqual([250, 175])
   })
 
   it('counts rows and accumulates monthly buckets', () => {
     const t = buildTree([
-      e({ amount_usd: 10, pl_date: '2026-07-01' }),
-      e({ amount_usd: 20, pl_date: '2026-08-01' }),
-      e({ amount_usd: 30, pl_date: '2026-08-15' }),
-    ], 'pl')
+      e({ amount_rsd: 10, pl_date: '2026-07-01' }),
+      e({ amount_rsd: 20, pl_date: '2026-08-01' }),
+      e({ amount_rsd: 30, pl_date: '2026-08-15' }),
+    ], 'pl', 'RSD')
     expect(t[0].count).toBe(3)
     expect(t[0].monthly).toEqual({ '2026-07': 10, '2026-08': 50 })
   })
 
   it('ignores zero amounts and treats negatives as magnitude', () => {
-    const t = buildTree([e({ amount_usd: 0 }), e({ amount_usd: -40 })], 'pl')
+    const t = buildTree([e({ amount_rsd: 0 }), e({ amount_rsd: -40 })], 'pl', 'RSD')
     expect(totalOf(t)).toBe(40)
     expect(t[0].count).toBe(1)
+  })
+
+  it('sums each row’s own EUR figure in the EUR view, never a converted total', () => {
+    // Two rows booked at different rates: no single rate turns 23,450 RSD
+    // into 200 EUR, so the EUR total can only come from amount_eur.
+    const rows = [
+      e({ amount_rsd: 11720, amount_eur: 100, pl_date: '2026-07-01' }),
+      e({ amount_rsd: 11730, amount_eur: 100, pl_date: '2026-08-01' }),
+    ]
+    expect(totalOf(buildTree(rows, 'pl', 'RSD'))).toBe(23450)
+    expect(totalOf(buildTree(rows, 'pl', 'EUR'))).toBe(200)
+    expect(buildTree(rows, 'pl', 'EUR')[0].monthly).toEqual({ '2026-07': 100, '2026-08': 100 })
+  })
+
+  it('counts a row with no EUR figure as zero in the EUR view', () => {
+    const rows = [e({ amount_rsd: 5000 }), e({ amount_rsd: 11720, amount_eur: 100 })]
+    expect(totalOf(buildTree(rows, 'pl', 'EUR'))).toBe(100)
+    expect(totalOf(buildTree(rows, 'pl', 'RSD'))).toBe(16720)
   })
 })
 
 describe('hiding excludes from the total', () => {
   const rows = [
-    e({ amount_usd: 100, pl_category: 'A', pl_subcategory: 'A1' }),
-    e({ amount_usd: 300, pl_category: 'A', pl_subcategory: 'A2' }),
-    e({ amount_usd: 600, pl_category: 'B', pl_subcategory: 'B1' }),
+    e({ amount_rsd: 100, pl_category: 'A', pl_subcategory: 'A1' }),
+    e({ amount_rsd: 300, pl_category: 'A', pl_subcategory: 'A2' }),
+    e({ amount_rsd: 600, pl_category: 'B', pl_subcategory: 'B1' }),
   ]
-  const tree = buildTree(rows, 'pl')
+  const tree = buildTree(rows, 'pl', 'RSD')
 
   it('nothing hidden leaves the total intact', () => {
     expect(adjustedTotal(tree, new Set())).toBe(1000)
@@ -188,13 +206,13 @@ describe('hiding excludes from the total', () => {
 
 describe('withComparison', () => {
   const cur = buildTree([
-    e({ amount_usd: 150, pl_category: 'A', pl_subcategory: 'A1' }),
-    e({ amount_usd: 50, pl_category: 'C', pl_subcategory: 'C1' }),
-  ], 'pl')
+    e({ amount_rsd: 150, pl_category: 'A', pl_subcategory: 'A1' }),
+    e({ amount_rsd: 50, pl_category: 'C', pl_subcategory: 'C1' }),
+  ], 'pl', 'RSD')
   const prior = buildTree([
-    e({ amount_usd: 100, pl_category: 'A', pl_subcategory: 'A1' }),
-    e({ amount_usd: 80, pl_category: 'B', pl_subcategory: 'B1' }),
-  ], 'pl')
+    e({ amount_rsd: 100, pl_category: 'A', pl_subcategory: 'A1' }),
+    e({ amount_rsd: 80, pl_category: 'B', pl_subcategory: 'B1' }),
+  ], 'pl', 'RSD')
   const merged = withComparison(cur, prior)
 
   it('computes delta and percentage against the prior period', () => {
@@ -223,20 +241,20 @@ describe('withComparison', () => {
 describe('topMovers', () => {
   it('ranks by absolute change, so a large drop outranks a small rise', () => {
     const cur = buildTree([
-      e({ amount_usd: 110, pl_category: 'Small', pl_subcategory: 'x' }),
-      e({ amount_usd: 20, pl_category: 'Big', pl_subcategory: 'y' }),
-    ], 'pl')
+      e({ amount_rsd: 110, pl_category: 'Small', pl_subcategory: 'x' }),
+      e({ amount_rsd: 20, pl_category: 'Big', pl_subcategory: 'y' }),
+    ], 'pl', 'RSD')
     const prior = buildTree([
-      e({ amount_usd: 100, pl_category: 'Small', pl_subcategory: 'x' }),
-      e({ amount_usd: 500, pl_category: 'Big', pl_subcategory: 'y' }),
-    ], 'pl')
+      e({ amount_rsd: 100, pl_category: 'Small', pl_subcategory: 'x' }),
+      e({ amount_rsd: 500, pl_category: 'Big', pl_subcategory: 'y' }),
+    ], 'pl', 'RSD')
     const movers = topMovers(withComparison(cur, prior), 0, 5)
     expect(movers[0].label).toBe('Big')
     expect(movers[0].delta).toBe(-480)
   })
 
   it('leaves out lines that did not move', () => {
-    const same = buildTree([e({ amount_usd: 100, pl_category: 'A', pl_subcategory: 'x' })], 'pl')
+    const same = buildTree([e({ amount_rsd: 100, pl_category: 'A', pl_subcategory: 'x' })], 'pl', 'RSD')
     expect(topMovers(withComparison(same, same))).toHaveLength(0)
   })
 })
@@ -244,12 +262,12 @@ describe('topMovers', () => {
 describe('paretoCut', () => {
   it('reports how few lines make up most of the spend', () => {
     const rows = [
-      e({ amount_usd: 800, pl_category: 'A', pl_subcategory: 'big' }),
-      e({ amount_usd: 100, pl_category: 'A', pl_subcategory: 'mid' }),
+      e({ amount_rsd: 800, pl_category: 'A', pl_subcategory: 'big' }),
+      e({ amount_rsd: 100, pl_category: 'A', pl_subcategory: 'mid' }),
       ...Array.from({ length: 10 }, (_, i) =>
-        e({ amount_usd: 10, pl_category: 'A', pl_subcategory: `tiny${i}` })),
+        e({ amount_rsd: 10, pl_category: 'A', pl_subcategory: `tiny${i}` })),
     ]
-    const p = paretoCut(buildTree(rows, 'pl'), 80)
+    const p = paretoCut(buildTree(rows, 'pl', 'RSD'), 80)
     expect(p.total).toBe(1000)
     expect(p.cutoff).toBe(1)          // one line alone clears 80%
     expect(p.sharePct).toBeCloseTo(80, 6)
@@ -266,16 +284,16 @@ describe('paretoCut', () => {
 describe('monthsIn', () => {
   it('returns the distinct months, ascending', () => {
     expect(monthsIn([
-      e({ amount_usd: 1, pl_date: '2026-08-02' }),
-      e({ amount_usd: 1, pl_date: '2026-06-30' }),
-      e({ amount_usd: 1, pl_date: '2026-08-20' }),
+      e({ amount_rsd: 1, pl_date: '2026-08-02' }),
+      e({ amount_rsd: 1, pl_date: '2026-06-30' }),
+      e({ amount_rsd: 1, pl_date: '2026-08-20' }),
     ])).toEqual(['2026-06', '2026-08'])
   })
 })
 
 describe('allocated branches', () => {
   const ALL: Branch[] = ['pl', 'department', 'stream', 'type']
-  const total = (rows: PlEntry[], b: Branch) => totalOf(buildTree(rows, b))
+  const total = (rows: PlEntry[], b: Branch) => totalOf(buildTree(rows, b, 'RSD'))
 
   it('knows which branches divide a row and which file it', () => {
     expect(isAllocated('stream')).toBe(true)
@@ -285,70 +303,80 @@ describe('allocated branches', () => {
   })
 
   it('gives a whole row to the stream that owns all of it', () => {
-    const row = e({ amount_usd: 1000, rev_alloc_type: 'sg100' })
-    const tree = buildTree([row], 'stream')
+    const row = e({ amount_rsd: 1000, rev_alloc_type: 'sg100' })
+    const tree = buildTree([row], 'stream', 'RSD')
     expect(tree.map(n => n.label)).toEqual([SOCIAL_GROWTH])
     expect(tree[0].amount).toBe(1000)
   })
 
   it('splits a by-value row across both streams', () => {
     const row = e({
-      amount_usd: 1000, amount: 1000,
+      amount_rsd: 1000, amount: 1000,
       rev_alloc_type: 'byval', rev_alloc_sg: 600, rev_alloc_aimfox: 400,
     })
-    const by = Object.fromEntries(buildTree([row], 'stream').map(n => [n.label, n.amount]))
+    const by = Object.fromEntries(buildTree([row], 'stream', 'RSD').map(n => [n.label, n.amount]))
     expect(by[SOCIAL_GROWTH]).toBe(600)
     expect(by[AIMFOX]).toBe(400)
   })
 
   /**
    * The bug this branch inherits a fix for: the split is typed in the
-   * currency of the bill. 220,996 RSD split 120,000 / 100,996 against a
-   * $2,188 total must read as dollars, not as $120,000.
+   * currency of the bill. 1,886 EUR split 1,000 / 886 against a
+   * 221,039.20 RSD total must read as dinars, not as 1,000 RSD.
    */
   it('converts a split typed in the currency of the bill', () => {
     const row = e({
-      amount: 220996, amount_usd: 2188,
-      rev_alloc_type: 'byval', rev_alloc_sg: 120000, rev_alloc_aimfox: 100996,
+      amount: 1886, amount_rsd: 221039.2, amount_eur: 1886,
+      rev_alloc_type: 'byval', rev_alloc_sg: 1000, rev_alloc_aimfox: 886,
     })
-    const by = Object.fromEntries(buildTree([row], 'stream').map(n => [n.label, n.amount]))
-    expect(by[SOCIAL_GROWTH]).toBeCloseTo(1188.0758, 4)
-    expect(by[AIMFOX]).toBeCloseTo(999.9242, 4)
-    expect(by[SOCIAL_GROWTH] + by[AIMFOX]).toBeCloseTo(2188, 6)
+    const by = Object.fromEntries(buildTree([row], 'stream', 'RSD').map(n => [n.label, n.amount]))
+    expect(by[SOCIAL_GROWTH]).toBeCloseTo(117200, 4)
+    expect(by[AIMFOX]).toBeCloseTo(103839.2, 4)
+    expect(by[SOCIAL_GROWTH] + by[AIMFOX]).toBeCloseTo(221039.2, 6)
+  })
+
+  it('reads the same split in euros when the viewer reads the books in EUR', () => {
+    const row = e({
+      amount: 1886, amount_rsd: 221039.2, amount_eur: 1886,
+      rev_alloc_type: 'byval', rev_alloc_sg: 1000, rev_alloc_aimfox: 886,
+    })
+    const by = Object.fromEntries(buildTree([row], 'stream', 'EUR').map(n => [n.label, n.amount]))
+    expect(by[SOCIAL_GROWTH]).toBe(1000)
+    expect(by[AIMFOX]).toBe(886)
   })
 
   it('treats a row classified before the field existed as pure OPEX', () => {
-    const tree = buildTree([e({ amount_usd: 500, opex_type: null })], 'type')
+    const tree = buildTree([e({ amount_rsd: 500, opex_type: null })], 'type', 'RSD')
     expect(tree.map(n => n.label)).toEqual([OPEX])
     expect(tree[0].amount).toBe(500)
   })
 
   it('splits performance spend from fixed cost', () => {
     const row = e({
-      amount_usd: 800, amount: 800,
+      amount_rsd: 800, amount: 800,
       opex_type: 'split', opex_amount: 300, performance_amount: 500,
     })
-    const by = Object.fromEntries(buildTree([row], 'type').map(n => [n.label, n.amount]))
+    const by = Object.fromEntries(buildTree([row], 'type', 'RSD').map(n => [n.label, n.amount]))
     expect(by[OPEX]).toBe(300)
     expect(by[PERFORMANCE]).toBe(500)
   })
 
   it('shows an expense as a cost whichever sign it was stored with', () => {
     const row = e({
-      amount: -800, amount_usd: -800,
+      amount: -800, amount_rsd: -800,
       opex_type: 'split', opex_amount: -300, performance_amount: -500,
     })
-    const by = Object.fromEntries(buildTree([row], 'type').map(n => [n.label, n.amount]))
+    const by = Object.fromEntries(buildTree([row], 'type', 'RSD').map(n => [n.label, n.amount]))
     expect(by[OPEX]).toBe(300)
     expect(by[PERFORMANCE]).toBe(500)
   })
 
   it('breaks each half down by cost category underneath', () => {
     const row = e({
-      amount_usd: 1000, amount: 1000, pl_category: 'Marketing', pl_subcategory: 'Ads',
+      amount_rsd: 1000, amount: 1000, pl_category: 'Marketing', pl_subcategory: 'Ads',
       rev_alloc_type: 'byval', rev_alloc_sg: 600, rev_alloc_aimfox: 400,
     })
-    const sg = buildTree([row], 'stream').find(n => n.label === SOCIAL_GROWTH)!
+    const sg = buildTree([row], 'stream', 'RSD').find(n => n.label === SOCIAL_GROWTH)!
     expect(sg.children.map(c => c.label)).toEqual(['Marketing'])
     expect(sg.children[0].children.map(c => c.label)).toEqual(['Ads'])
     expect(sg.children[0].children[0].amount).toBe(600)
@@ -360,11 +388,11 @@ describe('allocated branches', () => {
    */
   it('totals the same on all four branches', () => {
     const rows = [
-      e({ amount_usd: 1000, amount: 1000, rev_alloc_type: 'byval', rev_alloc_sg: 600, rev_alloc_aimfox: 400, opex_type: 'performance' }),
-      e({ amount_usd: 250, rev_alloc_type: 'af100', opex_type: 'opex' }),
-      e({ amount_usd: 80, amount: 80, opex_type: 'split', opex_amount: 30, performance_amount: 50 }),
-      e({ amount_usd: 1000, amount: 1000, rev_alloc_type: 'sg100', department: null, pl_category: null }),
-      e({ amount_usd: -120 }),
+      e({ amount_rsd: 1000, amount: 1000, rev_alloc_type: 'byval', rev_alloc_sg: 600, rev_alloc_aimfox: 400, opex_type: 'performance' }),
+      e({ amount_rsd: 250, rev_alloc_type: 'af100', opex_type: 'opex' }),
+      e({ amount_rsd: 80, amount: 80, opex_type: 'split', opex_amount: 30, performance_amount: 50 }),
+      e({ amount_rsd: 1000, amount: 1000, rev_alloc_type: 'sg100', department: null, pl_category: null }),
+      e({ amount_rsd: -120 }),
     ]
     const totals = ALL.map(b => total(rows, b))
     for (const t of totals) expect(t).toBeCloseTo(totals[0], 6)
@@ -372,15 +400,15 @@ describe('allocated branches', () => {
   })
 
   it('halves a row nobody classified rather than dropping it', () => {
-    const row = e({ amount_usd: 1000, rev_alloc_type: null })
-    const by = Object.fromEntries(buildTree([row], 'stream').map(n => [n.label, n.amount]))
+    const row = e({ amount_rsd: 1000, rev_alloc_type: null })
+    const by = Object.fromEntries(buildTree([row], 'stream', 'RSD').map(n => [n.label, n.amount]))
     expect(by[SOCIAL_GROWTH]).toBe(500)
     expect(by[AIMFOX]).toBe(500)
   })
 
   it('places a row with no category under Unassigned inside its stream', () => {
-    const row = e({ amount_usd: 400, rev_alloc_type: 'af100', pl_category: '  ', pl_subcategory: null })
-    const af = buildTree([row], 'stream').find(n => n.label === AIMFOX)!
+    const row = e({ amount_rsd: 400, rev_alloc_type: 'af100', pl_category: '  ', pl_subcategory: null })
+    const af = buildTree([row], 'stream', 'RSD').find(n => n.label === AIMFOX)!
     expect(af.children[0].label).toBe(UNASSIGNED)
     expect(af.children[0].children[0].label).toBe(UNASSIGNED)
   })
@@ -388,45 +416,45 @@ describe('allocated branches', () => {
 
 describe('the rows behind an allocated figure', () => {
   const split = e({
-    amount_usd: 1000, amount: 1000, pl_category: 'Marketing', pl_subcategory: 'Ads',
+    amount_rsd: 1000, amount: 1000, pl_category: 'Marketing', pl_subcategory: 'Ads',
     rev_alloc_type: 'byval', rev_alloc_sg: 600, rev_alloc_aimfox: 400,
   })
-  const onlySg = e({ amount_usd: 500, pl_category: 'Marketing', pl_subcategory: 'Ads', rev_alloc_type: 'sg100' })
+  const onlySg = e({ amount_rsd: 500, pl_category: 'Marketing', pl_subcategory: 'Ads', rev_alloc_type: 'sg100' })
 
   it('lists a split transaction under both halves', () => {
-    expect(contributesTo(split, 'stream', [SOCIAL_GROWTH])).toBe(true)
-    expect(contributesTo(split, 'stream', [AIMFOX])).toBe(true)
+    expect(contributesTo(split, 'stream', [SOCIAL_GROWTH], 'RSD')).toBe(true)
+    expect(contributesTo(split, 'stream', [AIMFOX], 'RSD')).toBe(true)
   })
 
   it('keeps a whole-row allocation out of the other half', () => {
-    expect(contributesTo(onlySg, 'stream', [SOCIAL_GROWTH])).toBe(true)
-    expect(contributesTo(onlySg, 'stream', [AIMFOX])).toBe(false)
+    expect(contributesTo(onlySg, 'stream', [SOCIAL_GROWTH], 'RSD')).toBe(true)
+    expect(contributesTo(onlySg, 'stream', [AIMFOX], 'RSD')).toBe(false)
   })
 
   it('matches on the deeper path too, not just the root', () => {
-    expect(contributesTo(split, 'stream', [AIMFOX, 'Marketing', 'Ads'])).toBe(true)
-    expect(contributesTo(split, 'stream', [AIMFOX, 'Marketing', 'Travel'])).toBe(false)
+    expect(contributesTo(split, 'stream', [AIMFOX, 'Marketing', 'Ads'], 'RSD')).toBe(true)
+    expect(contributesTo(split, 'stream', [AIMFOX, 'Marketing', 'Travel'], 'RSD')).toBe(false)
   })
 
   /**
-   * What the drill-down has to say out loud: the list adds up to $1,500 while
-   * the figure above it says $1,100, because one of the rows is in the figure
+   * What the drill-down has to say out loud: the list adds up to 1,500 while
+   * the figure above it says 1,100, because one of the rows is in the figure
    * for part of its value.
    */
   it('reports the share a row contributes, not the row', () => {
-    expect(contributionTo(split, 'stream', [SOCIAL_GROWTH])).toBe(600)
-    expect(contributionTo(onlySg, 'stream', [SOCIAL_GROWTH])).toBe(500)
-    const shown = contributionTo(split, 'stream', [SOCIAL_GROWTH])
-      + contributionTo(onlySg, 'stream', [SOCIAL_GROWTH])
+    expect(contributionTo(split, 'stream', [SOCIAL_GROWTH], 'RSD')).toBe(600)
+    expect(contributionTo(onlySg, 'stream', [SOCIAL_GROWTH], 'RSD')).toBe(500)
+    const shown = contributionTo(split, 'stream', [SOCIAL_GROWTH], 'RSD')
+      + contributionTo(onlySg, 'stream', [SOCIAL_GROWTH], 'RSD')
     expect(shown).toBe(1100)
   })
 
   it('gives the whole row on a filing branch', () => {
-    expect(contributionTo(split, 'pl', ['Marketing'])).toBe(1000)
+    expect(contributionTo(split, 'pl', ['Marketing'], 'RSD')).toBe(1000)
   })
 
   it('returns both halves of a row even when one of them is nothing', () => {
-    const cs = contributionsFor(onlySg, 'stream')
+    const cs = contributionsFor(onlySg, 'stream', 'RSD')
     expect(cs).toHaveLength(2)
     expect(cs[1].amount).toBe(0)
   })

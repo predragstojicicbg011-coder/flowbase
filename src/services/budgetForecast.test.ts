@@ -6,7 +6,7 @@ const entry = (over: Partial<SourceEntry> = {}): SourceEntry => ({
   department: 'Administration',
   dept_subcategory: 'Office',
   expense_description: 'Telekom',
-  amount_usd: 100,
+  amount_rsd: 100,
   cf_type: 'recurring',
   cf_frequency: 'monthly',
   pl_date: '2026-08-14',
@@ -63,9 +63,9 @@ describe('seedFromEntries', () => {
 
   it('reports what it refused to carry, so the shortfall is visible', () => {
     const { notCarried } = seedFromEntries([
-      entry({ cf_type: 'one_time', amount_usd: 300 }),
-      entry({ cf_type: null, amount_usd: 40 }),
-      entry({ amount_usd: 100 }),
+      entry({ cf_type: 'one_time', amount_rsd: 300 }),
+      entry({ cf_type: null, amount_rsd: 40 }),
+      entry({ amount_rsd: 100 }),
     ], MONTHS, '2026-08')
     expect(notCarried).toBe(340)
   })
@@ -79,12 +79,12 @@ describe('seedFromEntries', () => {
   })
 
   it('adds up two entries of the same classification', () => {
-    const { byKey } = seedFromEntries([entry({ amount_usd: 60 }), entry({ amount_usd: 40 })], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry({ amount_rsd: 60 }), entry({ amount_rsd: 40 })], MONTHS, '2026-08')
     expect(byKey[classificationKey(entry())]['2026-09']).toBe(100)
   })
 
   it('treats a missing amount as zero rather than NaN', () => {
-    const { byKey } = seedFromEntries([entry({ amount_usd: null })], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry({ amount_rsd: null })], MONTHS, '2026-08')
     expect(byKey[classificationKey(entry())]['2026-09']).toBe(0)
   })
 
@@ -100,7 +100,7 @@ describe('commitmentsByMonth', () => {
   const inst = (over: Partial<Installment> = {}): Installment => ({
     id: 'i1', credit_name: 'Intesa 100k', installment_no: 14,
     due_date: '2026-10-05', principal_amount: 5343.9, interest_amount: 241.83,
-    status: 'outstanding', eurUsd: 1.15, ...over,
+    status: 'outstanding', currency: 'EUR', exchangeRate: 117.2, eurRate: 117.2, ...over,
   })
 
   // Dated before the benchmark month by default, so the ordinary cases below
@@ -108,7 +108,7 @@ describe('commitmentsByMonth', () => {
   // way.
   const inv = (over: Partial<OpenInvoice> = {}): OpenInvoice => ({
     id: 'v1', partner_name: 'Telekom', invoice_date: '2026-07-10',
-    due_date: '2026-09-20', remaining_usd: 420, pl_impact: true,
+    due_date: '2026-09-20', remaining_rsd: 420, pl_impact: true,
     cf_type: 'recurring', cf_frequency: 'monthly', ...over,
   })
 
@@ -116,8 +116,8 @@ describe('commitmentsByMonth', () => {
   const BENCHMARK = '2026-08'
 
   it('CARRIES NO CREDIT INSTALMENT AT ALL any more', () => {
-    // It used to, and this row showed $6,654 of Intesa and $3,159 of Halkbank
-    // beside an $11 payment-card invoice. "Committed" sits under the table
+    // It used to, and this row showed two banks' instalments
+    // beside a small payment-card invoice. "Committed" sits under the table
     // with no category, so the largest outflow of the month was the only one
     // a reader could not look up — while the credit rows above it estimated
     // nothing. The schedule belongs on those rows; see `creditScheduleByMonth`.
@@ -145,7 +145,7 @@ describe('commitmentsByMonth', () => {
   })
 
   it('adds up several commitments in one month', () => {
-    const r = commitmentsByMonth([inv(), inv({ id: 'v2', remaining_usd: 80 })], MONTHS, BENCHMARK)
+    const r = commitmentsByMonth([inv(), inv({ id: 'v2', remaining_rsd: 80 })], MONTHS, BENCHMARK)
     expect(r.byMonth['2026-09'].total).toBe(500)
   })
 
@@ -161,8 +161,8 @@ describe('commitmentsByMonth', () => {
   // the seed for every month ahead. Counting it again as a commitment at its
   // due date reads one bill twice.
   it('does not count an invoice the benchmark month already seeded', () => {
-    // Telekom, dated 2026-08-20, due 2026-09-20, $420, unpaid, recurring
-    // monthly. September's seed already carries the $420.
+    // Telekom, dated 2026-08-20, due 2026-09-20, 420 RSD, unpaid, recurring
+    // monthly. September's seed already carries the 420 RSD.
     const r = commitmentsByMonth([inv({ invoice_date: '2026-08-20' })], MONTHS, BENCHMARK)
     expect(r.byMonth['2026-09']).toBeUndefined()
   })
@@ -179,7 +179,7 @@ describe('commitmentsByMonth', () => {
   // `cf_type` is `recurring` — so everything else dated in the benchmark month
   // was absent from the seed, absent from this row, and present only inside
   // the `notCarried` total under the table, which names no invoice and no
-  // month. September's Committed row read $11 with a year of bills behind it.
+  // month. September's Committed row read 11 RSD with a year of bills behind it.
 
   it('COUNTS A ONE-TIME INVOICE dated in the benchmark month, which no seed carried', () => {
     const r = commitmentsByMonth(
@@ -260,7 +260,7 @@ describe('commitmentsByMonth', () => {
   // payable `pl_impact: false` and the per-employee P&L rows as children with
   // `pl_impact: true`.
   it('counts an unpaid invoice the seed never saw, dated in the benchmark month', () => {
-    // A payroll filing dated 2026-08-31, due 2026-09-20, $420, unpaid. The
+    // A payroll filing dated 2026-08-31, due 2026-09-20, 420 RSD, unpaid. The
     // seed skips it for its pl_impact, so the Committed row is its only home.
     const r = commitmentsByMonth([inv({ invoice_date: '2026-08-31', pl_impact: false })], MONTHS, BENCHMARK)
     expect(r.byMonth['2026-09'].total).toBe(420)
@@ -286,7 +286,7 @@ describe('the credit schedule, on the rows it is classified to', () => {
   const inst2 = (over: Partial<Installment> = {}): Installment => ({
     id: 'i1', credit_name: 'Intesa 100k', installment_no: 14,
     due_date: '2026-10-05', principal_amount: 5343.9, interest_amount: 241.83,
-    status: 'outstanding', eurUsd: 1.15, ...over,
+    status: 'outstanding', currency: 'EUR', exchangeRate: 117.2, eurRate: 117.2, ...over,
   })
   const HZ = ['2026-09', '2026-10', '2026-11']
   const pKey = classificationKey(CREDIT_PRINCIPAL)
@@ -296,9 +296,11 @@ describe('the credit schedule, on the rows it is classified to', () => {
     // Which is the whole gain over the Committed row: principal and interest
     // are different costs, the P&L keeps them apart, and the schedule states
     // them apart. A single total throws that away on the way in.
+    // A EUR credit, priced in dinars at the planning rate of 117.2:
+    // 5,343.90 × 117.2 = 626,305.08 and 241.83 × 117.2 = 28,342.476 → 28,342.48.
     const { byKey } = creditScheduleByMonth([inst2()], HZ)
-    expect(byKey[pKey]['2026-10']).toBeCloseTo(5343.9 * 1.15, 2)
-    expect(byKey[iKey]['2026-10']).toBeCloseTo(241.83 * 1.15, 2)
+    expect(byKey[pKey]['2026-10']).toBe(626305.08)
+    expect(byKey[iKey]['2026-10']).toBe(28342.48)
   })
 
   it('keys both legs exactly as the dialogs that book a payment do', () => {
@@ -314,8 +316,9 @@ describe('the credit schedule, on the rows it is classified to', () => {
     // variance reads as an overspend of the whole amount.
     // The cents, stated, because each leg is rounded to them on the way in
     // and the unrounded product is not what any column shows.
+    // 626,305.08 + 28,342.48.
     const { total } = creditScheduleByMonth([inst2({ status: 'paid' })], HZ)
-    expect(total).toBe(6423.58)
+    expect(total).toBe(654647.56)
   })
 
   it('files each instalment in the month it falls due', () => {
@@ -328,7 +331,8 @@ describe('the credit schedule, on the rows it is classified to', () => {
   it('adds two instalments falling in one month together', () => {
     const { byKey } = creditScheduleByMonth(
       [inst2(), inst2({ id: 'i2', principal_amount: 1000, interest_amount: 0 })], HZ)
-    expect(byKey[pKey]['2026-10']).toBeCloseTo((5343.9 + 1000) * 1.15, 2)
+    // 626,305.08 + 1,000 × 117.2 = 743,505.08
+    expect(byKey[pKey]['2026-10']).toBe(743505.08)
   })
 
   it('leaves out anything outside the horizon', () => {
@@ -344,11 +348,31 @@ describe('the credit schedule, on the rows it is classified to', () => {
     expect(byKey[iKey]).toBeUndefined()
   })
 
-  it('prices it in dollars, because the schedule is in euros', () => {
-    const cheap = creditScheduleByMonth([inst2({ eurUsd: 1 })], HZ).total
-    const dear = creditScheduleByMonth([inst2({ eurUsd: 1.15 })], HZ).total
-    expect(cheap).toBe(5585.73)          // the euros, unconverted
-    expect(dear / cheap).toBeCloseTo(1.15, 4)
+  it('prices a EUR schedule in dinars, and reads it in euros as it stands', () => {
+    const inRsd = creditScheduleByMonth([inst2()], HZ, 'RSD').total
+    const inEur = creditScheduleByMonth([inst2()], HZ, 'EUR').total
+    expect(inEur).toBe(5585.73)          // the euros, unconverted
+    expect(inRsd).toBe(654647.56)        // at 117.2 RSD per EUR
+    // A dearer euro is a dearer instalment in dinars, and the same in euros.
+    const dear = { currency: 'EUR', exchangeRate: 118, eurRate: 118 }
+    expect(creditScheduleByMonth([inst2(dear)], HZ, 'RSD').total).toBe(659116.14) // 630,580.20 + 28,535.94
+    expect(creditScheduleByMonth([inst2(dear)], HZ, 'EUR').total).toBe(5585.73)
+  })
+
+  it('prices an RSD credit in dinars without any rate, and in euros at the EUR rate', () => {
+    const rsd = { currency: 'RSD', exchangeRate: null, eurRate: null }
+    expect(creditScheduleByMonth([inst2(rsd)], HZ, 'RSD').total).toBe(5585.73)
+    // 5,343.90 / 117.2 = 45.596 → 45.60; 241.83 / 117.2 = 2.063 → 2.06
+    expect(creditScheduleByMonth([inst2({ currency: 'RSD', exchangeRate: 1, eurRate: 117.2 })], HZ, 'EUR').total)
+      .toBe(47.66)
+  })
+
+  it('LEAVES OUT AND NAMES an instalment it has no rate for, rather than guessing one', () => {
+    const r = creditScheduleByMonth([inst2({ exchangeRate: null, eurRate: null })], HZ, 'RSD')
+    expect(r.total).toBe(0)
+    expect(r.unpriced).toEqual(['i1'])
+    // In its own currency it needs no rate at all.
+    expect(creditScheduleByMonth([inst2({ exchangeRate: null, eurRate: null })], HZ, 'EUR').total).toBe(5585.73)
   })
 })
 
@@ -358,8 +382,8 @@ describe('the credit schedule, on the rows it is classified to', () => {
 // cf_type: 'recurring', cf_frequency: 'monthly'` — correctly, because that is
 // what the payment is. So a payment made in the benchmark month used to seed
 // into every month of the horizon, while `credit_installments` put the real
-// dated schedule on top of it. In production that was roughly $26K a month
-// counted twice, about $300K across twelve months.
+// dated schedule on top of it. In production that was every instalment
+// counted twice across the horizon.
 //
 // Resolved the opposite way to the invoice overlap: the SEED goes, not the
 // commitment, because the schedule is exact — dated, principal and interest
@@ -403,7 +427,7 @@ describe('isCreditPayment', () => {
 
 describe('seedFromEntries and a credit instalment', () => {
   const creditEntry = (leg: typeof CREDIT_PRINCIPAL, amount: number): SourceEntry =>
-    entry({ ...leg, amount_usd: amount })
+    entry({ ...leg, amount_rsd: amount })
 
   it('seeds a credit payment into no month at all', () => {
     const { byKey } = seedFromEntries(
@@ -431,7 +455,7 @@ describe('seedFromEntries and a credit instalment', () => {
 
   it('does not report it as a shortfall even when it was booked one-time', () => {
     const { notCarried } = seedFromEntries(
-      [entry({ ...CREDIT_PRINCIPAL, amount_usd: 20000, cf_type: 'one_time' })],
+      [entry({ ...CREDIT_PRINCIPAL, amount_rsd: 20000, cf_type: 'one_time' })],
       MONTHS, '2026-08')
     expect(notCarried).toBe(0)
   })
@@ -439,7 +463,7 @@ describe('seedFromEntries and a credit instalment', () => {
   it('still seeds an ordinary recurring cost carrying the same cf_type', () => {
     const { byKey, notCarried } = seedFromEntries([
       creditEntry(CREDIT_PRINCIPAL, 20000),
-      entry({ amount_usd: 100 }),
+      entry({ amount_rsd: 100 }),
     ], MONTHS, '2026-08')
     expect(byKey[classificationKey(entry())]['2026-09']).toBe(100)
     expect(Object.keys(byKey)).toHaveLength(1)
@@ -447,7 +471,7 @@ describe('seedFromEntries and a credit instalment', () => {
   })
 
   it('still seeds spend that matches only part of the credit classification', () => {
-    const almost = entry({ ...CREDIT_PRINCIPAL, department: 'Administration', amount_usd: 900 })
+    const almost = entry({ ...CREDIT_PRINCIPAL, department: 'Administration', amount_rsd: 900 })
     const { byKey } = seedFromEntries([almost], MONTHS, '2026-08')
     expect(byKey[classificationKey(almost)]['2026-09']).toBe(900)
   })
@@ -460,17 +484,17 @@ describe('a benchmark-month credit payment and its schedule, end to end', () => 
   })
   const BENCHMARK = '2026-08'
 
-  /** August's payment: €20,000 principal + €6,000 interest, booked at par. */
+  /** August's payment: 20,000 RSD principal + 6,000 RSD interest, on an RSD credit. */
   const paid = [
-    entry({ ...CREDIT_PRINCIPAL, amount_usd: 20000, pl_date: '2026-08-31' }),
-    entry({ ...CREDIT_INTEREST, amount_usd: 6000, pl_date: '2026-08-31' }),
+    entry({ ...CREDIT_PRINCIPAL, amount_rsd: 20000, pl_date: '2026-08-31' }),
+    entry({ ...CREDIT_INTEREST, amount_rsd: 6000, pl_date: '2026-08-31' }),
   ]
 
   /** The same credit's real schedule: one instalment in each month ahead. */
   const schedule: Installment[] = HORIZON.map((m, i) => ({
     id: `i${i}`, credit_name: 'Intesa 100k', installment_no: 18 + i,
     due_date: `${m}-05`, principal_amount: 20000, interest_amount: 6000,
-    status: 'outstanding', eurUsd: 1,
+    status: 'outstanding', currency: 'RSD', exchangeRate: 1, eurRate: 117.2,
   }))
 
   const seededOver = (months: string[], byKey: Record<string, Record<string, number>>) =>
@@ -483,7 +507,7 @@ describe('a benchmark-month credit payment and its schedule, end to end', () => 
 
     const seeded = seededOver(HORIZON, byKey)
 
-    // The schedule states $26,000 a month for twelve months.
+    // The schedule states 26,000 RSD a month for twelve months.
     expect(sched.total).toBe(312000)
     // And the seed states nothing, because the schedule already said it.
     expect(seeded).toBe(0)
@@ -494,7 +518,7 @@ describe('a benchmark-month credit payment and its schedule, end to end', () => 
   // number rather than a memory. An entry identical to the principal leg in
   // every way except its classification still seeds — which is exactly what the
   // credit legs did before this fix.
-  it('used to produce it twice — $624,000 for a $312,000 schedule', () => {
+  it('used to produce it twice — 624,000 RSD for a 312,000 RSD schedule', () => {
     const asOrdinarySpend = paid.map((e, i) => ({
       ...e, department: 'Administration', dept_subcategory: 'Office',
       expense_description: `Leg ${i}`,
@@ -506,7 +530,7 @@ describe('a benchmark-month credit payment and its schedule, end to end', () => 
     expect(seededOver(HORIZON, byKey) + sched.total).toBe(624000)
   })
 
-  it('leaves a single month reading $26,000 rather than $52,000', () => {
+  it('leaves a single month reading 26,000 RSD rather than 52,000 RSD', () => {
     const { byKey } = seedFromEntries(paid, HORIZON, BENCHMARK)
     const sched = creditScheduleByMonth(schedule, ['2026-09'])
     expect(seededOver(['2026-09'], byKey) + sched.total).toBe(26000)
@@ -517,7 +541,7 @@ import { applyLedger, deltaForTarget, type Adjustment } from './budgetForecast'
 
 describe('applyLedger', () => {
   const adj = (over: Partial<Adjustment>): Adjustment => ({
-    id: 'a1', kind: 'adjust', amount_usd: 0, reason: 'r',
+    id: 'a1', kind: 'adjust', amount_rsd: 0, reason: 'r',
     created_at: '2026-09-01T10:00:00Z', ...over,
   })
 
@@ -526,43 +550,43 @@ describe('applyLedger', () => {
   })
 
   it('adds a positive adjustment', () => {
-    expect(applyLedger(800, [adj({ amount_usd: 200 })])).toBe(1000)
+    expect(applyLedger(800, [adj({ amount_rsd: 200 })])).toBe(1000)
   })
 
   it('subtracts a negative one', () => {
-    expect(applyLedger(800, [adj({ amount_usd: -150 })])).toBe(650)
+    expect(applyLedger(800, [adj({ amount_rsd: -150 })])).toBe(650)
   })
 
   it('replaces the base with a set, ignoring the seed', () => {
-    expect(applyLedger(800, [adj({ kind: 'set', amount_usd: 500 })])).toBe(500)
+    expect(applyLedger(800, [adj({ kind: 'set', amount_rsd: 500 })])).toBe(500)
   })
 
   it('applies adjustments recorded after a set, and none from before it', () => {
     expect(applyLedger(800, [
-      adj({ id: 'a1', amount_usd: 100, created_at: '2026-09-01T10:00:00Z' }),
-      adj({ id: 'a2', kind: 'set', amount_usd: 500, created_at: '2026-09-02T10:00:00Z' }),
-      adj({ id: 'a3', amount_usd: 50, created_at: '2026-09-03T10:00:00Z' }),
+      adj({ id: 'a1', amount_rsd: 100, created_at: '2026-09-01T10:00:00Z' }),
+      adj({ id: 'a2', kind: 'set', amount_rsd: 500, created_at: '2026-09-02T10:00:00Z' }),
+      adj({ id: 'a3', amount_rsd: 50, created_at: '2026-09-03T10:00:00Z' }),
     ])).toBe(550)
   })
 
   it('honours the latest set when there are several', () => {
     expect(applyLedger(800, [
-      adj({ id: 'a1', kind: 'set', amount_usd: 500, created_at: '2026-09-01T10:00:00Z' }),
-      adj({ id: 'a2', kind: 'set', amount_usd: 300, created_at: '2026-09-05T10:00:00Z' }),
+      adj({ id: 'a1', kind: 'set', amount_rsd: 500, created_at: '2026-09-01T10:00:00Z' }),
+      adj({ id: 'a2', kind: 'set', amount_rsd: 300, created_at: '2026-09-05T10:00:00Z' }),
     ])).toBe(300)
   })
 
   it('reads in time order whatever order it is given them in', () => {
     expect(applyLedger(800, [
-      adj({ id: 'a3', amount_usd: 50, created_at: '2026-09-03T10:00:00Z' }),
-      adj({ id: 'a2', kind: 'set', amount_usd: 500, created_at: '2026-09-02T10:00:00Z' }),
+      adj({ id: 'a3', amount_rsd: 50, created_at: '2026-09-03T10:00:00Z' }),
+      adj({ id: 'a2', kind: 'set', amount_rsd: 500, created_at: '2026-09-02T10:00:00Z' }),
     ])).toBe(550)
   })
 
   it('cancels a change with a counter-entry, since nothing is deleted', () => {
     expect(applyLedger(800, [
-      adj({ id: 'a1', amount_usd: 200 }),
-      adj({ id: 'a2', amount_usd: -200, created_at: '2026-09-04T10:00:00Z' }),
+      adj({ id: 'a1', amount_rsd: 200 }),
+      adj({ id: 'a2', amount_rsd: -200, created_at: '2026-09-04T10:00:00Z' }),
     ])).toBe(800)
   })
 
@@ -580,7 +604,7 @@ describe('applyLedger', () => {
 
   it('reads back what was typed even after the seed has moved', () => {
     // Typed in October against a September-seeded 800, to read 1000.
-    const typed = adj({ amount_usd: 200, seed_usd: 800 })
+    const typed = adj({ amount_rsd: 200, seed_rsd: 800 })
     // November arrives, the benchmark becomes October, the seed is now 1,350.
     expect(applyLedger(1350, [typed])).toBe(1000)
   })
@@ -596,9 +620,9 @@ describe('applyLedger', () => {
    */
   it('pins to the most recent entry and replays every delta on it', () => {
     expect(applyLedger(9999, [
-      adj({ id: 'a1', amount_usd: 200, seed_usd: 800, created_at: '2026-10-02T10:00:00Z' }),
+      adj({ id: 'a1', amount_rsd: 200, seed_rsd: 800, created_at: '2026-10-02T10:00:00Z' }),
       // The cell read 1000 when this was typed; the owner asked for 1,500.
-      adj({ id: 'a2', amount_usd: 500, seed_usd: 800, created_at: '2026-10-09T10:00:00Z' }),
+      adj({ id: 'a2', amount_rsd: 500, seed_rsd: 800, created_at: '2026-10-09T10:00:00Z' }),
     ])).toBe(1500)
   })
 
@@ -608,7 +632,7 @@ describe('applyLedger', () => {
    * at what the seed used to be is a figure the owner never typed.
    */
   it('falls back to the live seed for an entry that recorded no base', () => {
-    expect(applyLedger(1350, [adj({ amount_usd: 200 })])).toBe(1550)
+    expect(applyLedger(1350, [adj({ amount_rsd: 200 })])).toBe(1550)
   })
 
   /**
@@ -617,11 +641,11 @@ describe('applyLedger', () => {
    * 11900500 rather than 12400. Read as a figure or not used at all.
    */
   it('reads a base that arrived as a string', () => {
-    expect(applyLedger(1350, [adj({ amount_usd: 200, seed_usd: '800' as any })])).toBe(1000)
+    expect(applyLedger(1350, [adj({ amount_rsd: 200, seed_rsd: '800' as any })])).toBe(1000)
   })
 
   it('ignores a base that is not a figure at all', () => {
-    expect(applyLedger(1350, [adj({ amount_usd: 200, seed_usd: 'n/a' as any })])).toBe(1550)
+    expect(applyLedger(1350, [adj({ amount_rsd: 200, seed_rsd: 'n/a' as any })])).toBe(1550)
   })
 
   /**
@@ -630,8 +654,8 @@ describe('applyLedger', () => {
    */
   it('lets a newer entry pin a line whose older entries never did', () => {
     expect(applyLedger(9999, [
-      adj({ id: 'a1', amount_usd: 200, created_at: '2026-09-02T10:00:00Z' }),
-      adj({ id: 'a2', amount_usd: 50, seed_usd: 800, created_at: '2026-11-02T10:00:00Z' }),
+      adj({ id: 'a1', amount_rsd: 200, created_at: '2026-09-02T10:00:00Z' }),
+      adj({ id: 'a2', amount_rsd: 50, seed_rsd: 800, created_at: '2026-11-02T10:00:00Z' }),
     ])).toBe(1050)
   })
 })
@@ -770,5 +794,63 @@ describe('carriesInto', () => {
   it('carries nothing backwards, and nothing into the benchmark itself', () => {
     expect(asks({}, '2026-08')).toBe(false)
     expect(asks({}, '2026-07')).toBe(false)
+  })
+})
+
+// ── The same arithmetic, read in EUR ────────────────────────────────────────
+//
+// Budgets are planned in RSD, and every input carries its EUR figure beside
+// the RSD one. Reading the budget in EUR is reading the other column — never
+// a conversion of the RSD result.
+
+import { ledgerReadableIn, ledgerFigure, pinnedBase } from './budgetForecast'
+
+describe('reading the budget in EUR', () => {
+  const adjE = (over: Partial<Adjustment>): Adjustment => ({
+    id: 'a1', kind: 'adjust', amount_rsd: 0, amount_eur: 0, reason: 'r',
+    created_at: '2026-09-01T10:00:00Z', ...over,
+  })
+
+  it('seeds from the EUR actuals, not from the RSD ones', () => {
+    const e = entry({ amount_rsd: 11720, amount_eur: 100 })
+    expect(seedFromEntries([e], MONTHS, '2026-08', 'EUR').byKey[classificationKey(e)]['2026-09']).toBe(100)
+    expect(seedFromEntries([e], MONTHS, '2026-08', 'RSD').byKey[classificationKey(e)]['2026-09']).toBe(11720)
+    expect(seedFromEntries([e], MONTHS, '2026-08').byKey[classificationKey(e)]['2026-09']).toBe(11720)
+  })
+
+  it('counts what is not carried in the currency asked for', () => {
+    const e = entry({ cf_type: 'one_time', amount_rsd: 23440, amount_eur: 200 })
+    expect(seedFromEntries([e], MONTHS, '2026-08', 'EUR').notCarried).toBe(200)
+    expect(seedFromEntries([e], MONTHS, '2026-08', 'RSD').notCarried).toBe(23440)
+  })
+
+  it('replays the ledger on the EUR seed with the EUR amounts', () => {
+    const typed = adjE({ amount_rsd: 23440, amount_eur: 200, seed_rsd: 93760, seed_eur: 800 })
+    expect(applyLedger(1000, [typed], 'EUR')).toBe(1000)      // 800 + 200, pinned
+    expect(applyLedger(117200, [typed], 'RSD')).toBe(117200)  // 93,760 + 23,440, pinned
+  })
+
+  it('pins on the EUR seed recorded with the entry, as it does on the RSD one', () => {
+    expect(pinnedBase([adjE({ seed_rsd: 93760, seed_eur: 800 })], 5, 'EUR')).toBe(800)
+    expect(pinnedBase([adjE({ seed_rsd: 93760, seed_eur: null })], 5, 'EUR')).toBe(5)
+  })
+
+  it('says a ledger with a dinar-only entry cannot be read in EUR, and refuses to read it as zero', () => {
+    const dinarOnly = adjE({ id: 'old', amount_rsd: 5000, amount_eur: null })
+    expect(ledgerReadableIn([dinarOnly], 'RSD')).toBe(true)
+    expect(ledgerReadableIn([dinarOnly], 'EUR')).toBe(false)
+    expect(() => ledgerFigure(dinarOnly, 'EUR')).toThrow(/no EUR figure/)
+    expect(() => applyLedger(0, [dinarOnly], 'EUR')).toThrow(/no EUR figure/)
+    expect(applyLedger(0, [dinarOnly], 'RSD')).toBe(5000)
+  })
+
+  it('files commitments at their EUR remainder when asked in EUR', () => {
+    const v: OpenInvoice = {
+      id: 'v1', partner_name: 'Telekom', invoice_date: '2026-07-10',
+      due_date: '2026-09-20', remaining_rsd: 49224, remaining_eur: 420, pl_impact: true,
+      cf_type: 'recurring', cf_frequency: 'monthly',
+    }
+    expect(commitmentsByMonth([v], ['2026-09'], '2026-08', 'EUR').byMonth['2026-09'].total).toBe(420)
+    expect(commitmentsByMonth([v], ['2026-09'], '2026-08').byMonth['2026-09'].total).toBe(49224)
   })
 })

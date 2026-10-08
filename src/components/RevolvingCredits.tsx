@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabase'
+import { fmtMoney, fmtMoneyCompact } from '../utils/formatters'
 import { runWrite } from '../services/writeOrder'
 import {
   rateOn, revolvingSchedule, outstandingOf, defaultMaturity,
@@ -46,14 +47,32 @@ export interface RevolvingCredit {
   notes: string | null
 }
 
-const fmtEUR = (n: number | null) =>
-  n === null ? '—' : '€' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+/** A tranche's figure in the tranche's own currency — a line may be in EUR or RSD. */
+const fmtIn = (n: number | null, currency: string) =>
+  n === null ? '—' : fmtMoney(n, currency || 'RSD')
 
-const fmtEURCompact = (n: number | null) => {
-  if (n === null) return '—'
-  if (n >= 1000000) return `€${(n / 1000000).toFixed(1)}M`
-  if (n >= 1000) return `€${(n / 1000).toFixed(0)}K`
-  return `€${n.toFixed(0)}`
+const fmtInCompact = (n: number | null, currency: string) =>
+  n === null ? '—' : fmtMoneyCompact(n, currency || 'RSD')
+
+/**
+ * The section's totals, one per currency the tranches are in.
+ *
+ * A EUR line and an RSD line cannot be added without a rate, and this section
+ * has no business choosing one: the page's overview converts at the day's NBS
+ * rate. Here each currency is totalled on its own and the totals are listed.
+ */
+export function summariseByCurrency(
+  credits: RevolvingCredit[], resets: Record<string, RateReset[]>,
+): { currency: string; principal: number; interest: number | null; unpriced: number }[] {
+  const groups = new Map<string, RevolvingCredit[]>()
+  for (const c of credits) {
+    const cur = (c.currency || 'RSD').toUpperCase()
+    if (!groups.has(cur)) groups.set(cur, [])
+    groups.get(cur)!.push(c)
+  }
+  return Array.from(groups.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, cs]) => ({ currency, ...summarise(cs, resets) }))
 }
 
 const thisMonth = () => new Date().toISOString().slice(0, 7)
@@ -143,7 +162,7 @@ export default function RevolvingCredits({ credits, onRefresh, onEdit }: {
 
   useEffect(() => { loadResets() }, [loadResets])
 
-  const totals = useMemo(() => summarise(credits, resets), [credits, resets])
+  const totals = useMemo(() => summariseByCurrency(credits, resets), [credits, resets])
 
   if (credits.length === 0) return null
 
@@ -153,10 +172,15 @@ export default function RevolvingCredits({ credits, onRefresh, onEdit }: {
         <div style={{ flex: 1 }} />
         <div style={{ fontSize: '11px', color: '#7A9BB8' }}>
           {credits.length} tranche{credits.length === 1 ? '' : 's'} ·{' '}
-          <strong style={{ color: '#DCE9F6' }}>{fmtEURCompact(totals.principal)}</strong> principal
-          {totals.interest === null
-            ? <span style={{ color: '#F5A623' }}> · interest not priced</span>
-            : <> · {fmtEURCompact(totals.interest)} interest to maturity</>}
+          {totals.map((t, i) => (
+            <React.Fragment key={t.currency}>
+              {i > 0 && ' · '}
+              <strong style={{ color: '#DCE9F6' }}>{fmtInCompact(t.principal, t.currency)}</strong> principal
+              {t.interest === null
+                ? <span style={{ color: '#F5A623' }}> · interest not priced</span>
+                : <> · {fmtInCompact(t.interest, t.currency)} interest to maturity</>}
+            </React.Fragment>
+          ))}
         </div>
       </div>
 
@@ -291,7 +315,7 @@ function Tranche({ credit, resets, open, onToggle, onExtend, onPrice, onEdit, on
           </div>
         </div>
 
-        <Cell label="Principal" value={fmtEUR(credit.principal_amount)} />
+        <Cell label="Principal" value={fmtIn(credit.principal_amount, credit.currency)} />
 
         <Cell label="Rate"
           value={rate === null ? '—' : `${rate.toFixed(2)}%`}
@@ -299,7 +323,7 @@ function Tranche({ credit, resets, open, onToggle, onExtend, onPrice, onEdit, on
           warn={rate === null} />
 
         <Cell label="Interest / month"
-          value={monthly === null ? '—' : fmtEUR(monthly)}
+          value={monthly === null ? '—' : fmtIn(monthly, credit.currency)}
           sub={monthly === null ? 'enter the benchmark' : ''}
           warn={monthly === null} />
 
@@ -338,12 +362,12 @@ function Tranche({ credit, resets, open, onToggle, onExtend, onPrice, onEdit, on
 
           <div style={{ fontSize: '11.5px', color: '#7A9BB8', lineHeight: 1.7, marginBottom: '14px' }}>
             Interest only until <strong style={{ color: '#DCE9F6' }}>{credit.maturity_date || 'maturity'}</strong>,
-            then <strong style={{ color: '#DCE9F6' }}>{fmtEUR(credit.principal_amount)}</strong> repaid in one payment.
+            then <strong style={{ color: '#DCE9F6' }}>{fmtIn(credit.principal_amount, credit.currency)}</strong> repaid in one payment.
             {' '}Still owed from this month:{' '}
-            <strong style={{ color: '#DCE9F6' }}>{fmtEUR(owed.principal)}</strong> principal
+            <strong style={{ color: '#DCE9F6' }}>{fmtIn(owed.principal, credit.currency)}</strong> principal
             {owed.interest === null
               ? <span style={{ color: '#F5A623' }}> and an unpriced amount of interest — record the benchmark to see it</span>
-              : <> plus <strong style={{ color: '#DCE9F6' }}>{fmtEUR(owed.interest)}</strong> interest over {schedule.length} month{schedule.length === 1 ? '' : 's'}</>}
+              : <> plus <strong style={{ color: '#DCE9F6' }}>{fmtIn(owed.interest, credit.currency)}</strong> interest over {schedule.length} month{schedule.length === 1 ? '' : 's'}</>}
             {existing !== null && existing > 0 && (
               <> · <span style={{ color: '#F5A623' }}>{existing} outstanding instalment{existing === 1 ? '' : 's'} already on the schedule — generating replaces the ones from this month on</span></>
             )}

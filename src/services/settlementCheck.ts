@@ -13,7 +13,7 @@
 // refused. The dialog closed on a green tick.
 //
 // So the claim is checked against the database after the writes, in the
-// database's own terms — the same tenth of a percent, in the invoice's own
+// database's own terms — the same para, in the invoice's own
 // currency, that `v_invoice_status` applies.
 //
 // NOT TO ROLL ANYTHING BACK. By then the rows are there, and undoing them
@@ -38,19 +38,20 @@ export interface Expectation {
   /** Everything that will be allocated to it, in the same currency. */
   allocated: number
   /**
-   * The same bill in dollars, which is what sizes the tolerance.
+   * The same bill in dinars (`amount_rsd`), which sizes the tolerance exactly
+   * as `v_invoice_status` does.
    *
-   * Optional, and where it is missing the tolerance falls back to a para —
-   * the old rule — rather than being guessed at.
+   * Optional, and where it is missing the tolerance is a para rather than
+   * being guessed at.
    */
-  amountUsd?: number | null
+  amountRsd?: number | null
 }
 
 /** What `v_invoice_status` will say, given those two figures. */
 export function expectedStatus(
-  amount: number, allocated: number, amountUsd?: number | null,
+  amount: number, allocated: number, amountRsd?: number | null,
 ): Settlement {
-  return settledStatus(amount, allocated, amountUsd)
+  return settledStatus(amount, allocated, amountRsd)
 }
 
 export interface Mismatch {
@@ -72,7 +73,7 @@ export function mismatches(
 ): Mismatch[] {
   const out: Mismatch[] = []
   for (const e of expectations) {
-    const want = expectedStatus(e.amount, e.allocated)
+    const want = expectedStatus(e.amount, e.allocated, e.amountRsd)
     const got = actual[e.invoiceId]
     if (got === undefined) {
       out.push({ invoiceId: e.invoiceId, invoiceNumber: e.invoiceNumber, expected: want, actual: 'missing' })

@@ -1,5 +1,7 @@
 import React from 'react'
 import { C, Empty, TipHead, TipRow, type Tip } from './chartChrome'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { fmtMoney } from '../utils/formatters'
 import { niceMax, shortMoney, monthLabel, OTHER } from '../services/expenseCharts'
 import {
   moverBars, moverScale, heatGrid, binOf, rowBin, facingRows,
@@ -40,11 +42,20 @@ const HEAT_EMPTY = 'rgba(255,255,255,0.035)'
 export const SIDE_LEFT = '#3585D0'
 export const SIDE_RIGHT = '#C08020'
 
-const money = (n: number) =>
-  (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
-
-const signed = (n: number) =>
-  (n > 0 ? '+' : n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
+/**
+ * The panels' money, in the viewer's display currency: whole units in the
+ * tooltips (`12.345 RSD`), signed on the movers' bars, and the compact scale
+ * on the axes and bar ends. The tree handed in was already summed in that
+ * currency; this only names it.
+ */
+function useMoney() {
+  const { currency } = useDisplayCurrency()
+  return {
+    currency,
+    money: (n: number) => fmtMoney(n, currency, 0),
+    signed: (n: number) => (n > 0 ? '+' : '') + fmtMoney(n, currency, 0),
+  }
+}
 
 /** Cuts a label to fit a gutter, because an SVG will not do it for you. */
 function clip(text: string, chars: number): string {
@@ -63,6 +74,7 @@ export function MoversChart({ compared, depth, limit, w, onTip, onSelect, priorL
   priorLabel: string
   periodLabel: string
 }) {
+  const { money, signed } = useMoney()
   const bars = moverBars(compared, depth, limit)
   if (bars.length === 0) {
     return <Empty h={280} text={`Nothing moved between ${priorLabel} and ${periodLabel} at this level.`} />
@@ -183,6 +195,7 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
   onSelect: (k: string | null) => void
   selected: string | null
 }) {
+  const { money } = useMoney()
   const grid = heatGrid(tree, months, depth, limit)
   if (grid.rows.length === 0 || months.length === 0) {
     return <Empty h={240} text="No spend in this period." />
@@ -272,7 +285,7 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
   )
 }
 
-/** The bin legend. Printed in dollars, because a shade nobody can price is decoration. */
+/** The bin legend. Printed in money, because a shade nobody can price is decoration. */
 export function HeatLegend({ tree, months, depth, limit, byRow }: {
   tree: Parameters<typeof heatGrid>[0]
   months: string[]
@@ -333,6 +346,7 @@ export function FacingChart({ tree, leftLabel, rightLabel, limit, w, onTip, onSe
   onTip: (t: Tip) => void
   onSelect: (k: string | null) => void
 }) {
+  const { money } = useMoney()
   const chart = facingRows(tree, leftLabel, rightLabel, limit)
   if (chart.rows.length === 0) return <Empty h={240} text="No spend in this period." />
 

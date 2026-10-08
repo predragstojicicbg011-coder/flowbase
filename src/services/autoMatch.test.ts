@@ -6,8 +6,9 @@ const row = (o: Partial<PassthroughRow> & { id: string; direction: 'in' | 'out' 
   partner_name: null,
   transaction_date: '2026-08-10',
   amount: 1000,
-  amount_usd: 1000,
-  currency: 'USD',
+  amount_rsd: 1000,
+  amount_eur: 8.53,
+  currency: 'RSD',
   note: null,
   reference_number: null,
   ...o,
@@ -37,7 +38,7 @@ describe('scorePair', () => {
     )
     expect(p).not.toBeNull()
     expect(p!.confidence).toBe('high')
-    expect(p!.amountDiffUsd).toBe(0)
+    expect(p!.amountDiffRsd).toBe(0)
     expect(p!.dayGap).toBe(0)
   })
 
@@ -51,19 +52,19 @@ describe('scorePair', () => {
 
   it('amount difference above 3% is not proposed', () => {
     const p = scorePair(
-      row({ id: 'A', direction: 'in', partner_id: 'P1', amount_usd: 1000 }),
-      row({ id: 'B', direction: 'out', partner_id: 'P1', amount_usd: 950 }),
+      row({ id: 'A', direction: 'in', partner_id: 'P1', amount_rsd: 1000 }),
+      row({ id: 'B', direction: 'out', partner_id: 'P1', amount_rsd: 950 }),
     )
     expect(p).toBeNull()
   })
 
   it('small amount difference passes as a possible fee', () => {
     const p = scorePair(
-      row({ id: 'A', direction: 'in', partner_id: 'P1', amount_usd: 1000 }),
-      row({ id: 'B', direction: 'out', partner_id: 'P1', amount_usd: 985 }),
+      row({ id: 'A', direction: 'in', partner_id: 'P1', amount_rsd: 1000 }),
+      row({ id: 'B', direction: 'out', partner_id: 'P1', amount_rsd: 985 }),
     )
     expect(p).not.toBeNull()
-    expect(p!.amountDiffUsd).toBe(15)
+    expect(p!.amountDiffRsd).toBe(15)
   })
 
   it('gap over 45 days is not proposed', () => {
@@ -91,8 +92,8 @@ describe('scorePair', () => {
 
   it('zero amount is not paired', () => {
     const p = scorePair(
-      row({ id: 'A', direction: 'in', partner_id: 'P1', amount_usd: 0 }),
-      row({ id: 'B', direction: 'out', partner_id: 'P1', amount_usd: 0 }),
+      row({ id: 'A', direction: 'in', partner_id: 'P1', amount_rsd: 0 }),
+      row({ id: 'B', direction: 'out', partner_id: 'P1', amount_rsd: 0 }),
     )
     expect(p).toBeNull()
   })
@@ -136,6 +137,18 @@ describe('proposePairs - 1:1 assignment', () => {
   it('no proposals when there are no candidates', () => {
     expect(proposePairs([])).toEqual([])
     expect(proposePairs([row({ id: 'A', direction: 'in' })])).toEqual([])
+  })
+
+  it('compares the RSD book figures, whatever the EUR beside them says', () => {
+    // A EUR transfer in and out on different days: the same 1,000 EUR books
+    // at two rates. The legs are matched on amount_rsd, the book currency,
+    // so toggling the page to EUR can never change which pairs are proposed.
+    const p = scorePair(
+      row({ id: 'A', direction: 'in', partner_id: 'P1', amount_rsd: 117200, amount_eur: 1000 }),
+      row({ id: 'B', direction: 'out', partner_id: 'P1', amount_rsd: 117200, amount_eur: 999.9 }),
+    )
+    expect(p!.reasons).toContain('exact amount')
+    expect(p!.amountDiffRsd).toBe(0)
   })
 
   it('summarize counts by confidence', () => {

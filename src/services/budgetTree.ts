@@ -23,10 +23,10 @@ import { fetchAllPages } from '../utils/fetchAllPages'
 import {
   makeClassKey, valueAt, placeEntry, seedForEntry,
 } from './budgetKeys'
-import { getRatesForDate } from './currencyService'
+import { getBookRates, rateFor, type BookRates } from './bookAmounts'
 import {
-  seedFromEntries, creditScheduleByMonth, applyLedger, rollUp,
-  type Adjustment, type Installment,
+  seedFromEntries, creditScheduleByMonth, applyLedger, rollUp, figureIn, ledgerReadableIn,
+  type Adjustment, type Installment, type BudgetCurrency,
   type ForecastNode, type RolledNode, type Level,
 } from './budgetForecast'
 
@@ -85,27 +85,55 @@ export interface BudgetTreeRequest {
   /** One company, or `''` for the consolidated group. Scopes the ledger. */
   companyId: string
   branch: BranchId
+  /**
+   * The currency `rolled` is wanted in. RSD when not said. EUR is honoured
+   * where the ledger can be read in EUR; otherwise `rolled` is RSD and
+   * `currency` says so.
+   */
+  currency?: BudgetCurrency
 }
 
 export interface BudgetTree {
   /** Depth-first, parents before children, siblings alphabetical. */
   rows: BudgetRow[]
-  /** month -> nodeKey -> the rolled-up figures. */
-  rolled: Record<string, Record<string, RolledNode>>
-  /** Benchmark spend that carries into no month at all. */
-  notCarried: number
-  /** nodeKey -> month -> the change ledger, exactly as the cell reads it. */
-  ledgerByNode: Record<string, Record<string, Adjustment[]>>
   /**
-   * What the credit schedule put into the horizon, in dollars.
-   *
-   * Only so the page can say whether a fallback exchange rate is actually
-   * pricing anything. Zero instalments and an unreachable NBS is not a
-   * warning worth showing.
+   * month -> nodeKey -> the rolled-up figures, in `currency`: the one asked
+   * for, or RSD when EUR was asked for and cannot be read (`eurUnavailable`).
    */
+  rolled: Record<string, Record<string, RolledNode>>
+  /** The currency `rolled` is actually in. */
+  currency: BudgetCurrency
+  /** The same tree in RSD — the currency budgets are planned in — always. */
+  rolledRsd: Record<string, Record<string, RolledNode>>
+  /**
+   * The same tree read in EUR: seeded from the EUR actuals, the ledger
+   * replayed with each entry's EUR figure, the credit schedule priced in EUR.
+   *
+   * Null when the ledger cannot be read in EUR — an entry recorded in dinars
+   * only. Reading its missing figure as zero would drop a decision somebody
+   * typed, so the page shows the budget in RSD and says why (`eurUnavailable`).
+   */
+  rolledEur: Record<string, Record<string, RolledNode>> | null
+  /** Why `rolledEur` is null; null when it is not. */
+  eurUnavailable: string | null
+  /** Benchmark spend that carries into no month at all, in RSD. */
+  notCarried: number
+  /** The same in EUR. */
+  notCarriedEur: number
+  /**
+   * nodeKey -> month -> the change ledger, exactly as the cell reads it. Each
+   * entry carries its RSD figure and, where it has one, its EUR figure.
+   */
+  ledgerByNode: Record<string, Record<string, Adjustment[]>>
+  /** What the credit schedule put into the horizon, in RSD. */
   creditScheduled: number
-  /** True when the credit schedule is priced at a rate NBS could not give. */
-  ratesAreFallback: boolean
+  /**
+   * Instalments in the horizon that could not be priced — a credit in a
+   * currency NBS gave no rate for today — per currency the tree is read in.
+   * They are left out of the budget, never priced at a guess, and the page
+   * says how many.
+   */
+  creditUnpriced: Record<BudgetCurrency, number>
 }
 
 /**
@@ -146,7 +174,7 @@ export async function loadBudgetTree(
       // cf_type and cf_frequency ride along: the seed is built from these
       // same rows, so the forecast and the actuals cannot disagree about
       // which universe they describe.
-      .select('id, amount_usd, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, cf_type, cf_frequency')
+      .select('id, amount_rsd, amount_eur, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, cf_type, cf_frequency')
       // The view carries revenue as well: its tx_type is the transaction's
       // tx_subtype. Without this filter revenue lands in an expense budget.
       .eq('tx_type', 'expense')
@@ -169,9 +197,13 @@ export async function loadBudgetTree(
   // Sales spend. `seedsByCompany` is the same money kept apart, and it is
   // what a carried-over `set` is measured against — a figure recorded on
   // one company's line says nothing about another's. See `seedForEntry`.
-  const {
-    byKey: seeds, byCompany: seedsByCompany, notCarried: shortfall,
-  } = seedFromEntries(actuals, monthKeys, benchmark)
+  //
+  // Seeded twice, once per currency, from the same rows: each actual carries
+  // its figure in both, so the EUR seed is read, not converted.
+  const seeded = {
+    RSD: seedFromEntries(actuals, monthKeys, benchmark, 'RSD'),
+    EUR: seedFromEntries(actuals, monthKeys, benchmark, 'EUR'),
+  }
 
   // The change ledger. Append-only, so this is every change ever recorded
   // against these months, replayed in `created_at` order by `applyLedger`.
@@ -182,10 +214,10 @@ export async function loadBudgetTree(
       // on. Every row this app writes now carries null there, meaning the
       // group; the rows that name a company came from the carry-across of
       // `budget_entries` and are resolved against that company's seed.
-      // `seed_usd` is what stops a typed figure moving when the benchmark
+      // `seed_rsd` / `seed_eur` are what stop a typed figure moving when the benchmark
       // month rolls over. Left out of this list, every cell on the page goes
       // back to drifting and nothing says so. See `pinnedBase`.
-      .select('id, company_id, budget_month, level, pl_category, pl_subcategory, department, dept_subcategory, expense_description, kind, amount_usd, reason, created_at, seed_usd')
+      .select('id, company_id, budget_month, level, pl_category, pl_subcategory, department, dept_subcategory, expense_description, kind, amount_rsd, amount_eur, reason, created_at, seed_rsd, seed_eur')
       .gte('budget_month', `${firstMonth}-01`)
       .lte('budget_month', `${lastMonth}-01`)
     // NO company filter on the consolidated view, deliberately. The budget
@@ -249,10 +281,15 @@ export async function loadBudgetTree(
     // with them, or a +200 on one company's Sales line becomes a -800 the
     // moment a second company is selected and the group total stops being
     // the sum of the companies in it.
+    //
+    // Resolved in each currency against that currency's own seed. An entry
+    // with no EUR figure stays without one; see `ledgerReadableIn`.
+    const eur = figureIn(a, 'amount', 'EUR')
     const entry: Adjustment = a.kind !== 'set' ? a : {
       ...a,
       kind: 'adjust',
-      amount_usd: a.amount_usd - seedForEntry(a, seedsByCompany, mk),
+      amount_rsd: Number(a.amount_rsd) - seedForEntry(a, seeded.RSD.byCompany, mk),
+      amount_eur: eur === null ? null : eur - seedForEntry(a, seeded.EUR.byCompany, mk),
     }
 
     if (!ledger[nodeKey]) ledger[nodeKey] = {}
@@ -279,7 +316,7 @@ export async function loadBudgetTree(
   // rebuild itself added.
   const [installmentRows] = await Promise.all([
     fetchAllPages<any>((from, to) => client.from('credit_installments')
-      .select('id, installment_no, due_date, principal_amount, interest_amount, status, credits(name, company_id)')
+      .select('id, installment_no, due_date, principal_amount, interest_amount, status, credits(name, company_id, currency)')
       // EVERY instalment in the horizon, paid or not. One paid on the 3rd
       // cost the month exactly what one still due on the 30th will, and a
       // schedule that counts only what is outstanding melts away as the month
@@ -297,9 +334,21 @@ export async function loadBudgetTree(
 
   // One rate for the horizon is honest here in a way it is not in the
   // ledger: this is a forecast of a future payment, and nobody knows the
-  // rate on a date that has not arrived.
-  const rates = await getRatesForDate(new Date().toISOString().slice(0, 10))
-  const eurUsd = rates.eurRsdRate / rates.usdRsdRate
+  // rate on a date that has not arrived. Today's NBS list.
+  //
+  // Unavailable is not a reason to fail the whole budget, and not a reason to
+  // guess either: an RSD credit still reads in RSD without it, and anything
+  // that needs it is left out and counted (`creditUnpriced`).
+  let rates: BookRates | null = null
+  try {
+    rates = await getBookRates(new Date().toISOString().slice(0, 10))
+  } catch {
+    rates = null
+  }
+  const planningRate = (currency: string): number | null => {
+    if (!rates) return (currency || 'RSD').toUpperCase() === 'RSD' ? 1 : null
+    try { return rateFor(currency || 'RSD', rates) } catch { return null }
+  }
 
   const inScope = (cid: any) => companyIds.length === 0 || companyIds.includes(cid)
 
@@ -309,44 +358,61 @@ export async function loadBudgetTree(
   // exactly. It used to land in the Committed row, which has no category, so
   // the biggest single outflow of the month was the only one a reader could
   // not look up — while the credit rows above it estimated nothing at all.
-  const schedule = creditScheduleByMonth(
-    installmentRows
-      .filter((i: any) => inScope((i.credits as any)?.company_id))
-      .map((i: any): Installment => ({
+  const installments = installmentRows
+    .filter((i: any) => inScope((i.credits as any)?.company_id))
+    .map((i: any): Installment => {
+      const currency = (i.credits as any)?.currency || 'RSD'
+      return {
         id: i.id, credit_name: (i.credits as any)?.name || 'Credit',
         installment_no: i.installment_no, due_date: i.due_date,
         principal_amount: i.principal_amount || 0, interest_amount: i.interest_amount || 0,
-        status: i.status, eurUsd,
-      })),
-    monthKeys,
-  )
+        status: i.status, currency,
+        exchangeRate: planningRate(currency), eurRate: rates ? rates.eurRate : null,
+      }
+    })
+
+  const CURRENCIES: BudgetCurrency[] = ['RSD', 'EUR']
+  const schedule = {
+    RSD: creditScheduleByMonth(installments, monthKeys, 'RSD'),
+    EUR: creditScheduleByMonth(installments, monthKeys, 'EUR'),
+  }
 
   // nodeKey -> month -> actual recorded against this node itself, before
   // any roll-up. `rollUp` does the adding; handing it pre-rolled figures
-  // would count every child twice.
-  const actualByNode: Record<string, Record<string, number>> = {}
-  const actualMap: Record<string, Record<string, number>> = {}
+  // would count every child twice. One map per currency, read off the same
+  // rows.
+  const actualByNode: Record<BudgetCurrency, Record<string, Record<string, number>>> = { RSD: {}, EUR: {} }
+  const actualMap: Record<BudgetCurrency, Record<string, Record<string, number>>> = { RSD: {}, EUR: {} }
   for (const tx of actuals) {
     const mk = tx.pl_date.slice(0, 7)
     const ck = makeClassKey(tx)
-    if (!actualMap[ck]) actualMap[ck] = {}
-    actualMap[ck][mk] = (actualMap[ck][mk] || 0) + (tx.amount_usd || 0)
+    for (const c of CURRENCIES) {
+      const m = actualMap[c]
+      if (!m[ck]) m[ck] = {}
+      m[ck][mk] = (m[ck][mk] || 0) + (figureIn(tx, 'amount', c) || 0)
+    }
   }
 
   // The schedule is merged into the seed rather than carried beside it: a
   // budget cell is seed + ledger + children, and a third source would be a
   // third thing `rollUp` has to know about. What it replaces is the estimate
   // those two rows never had.
-  for (const [ck, byMonth] of Object.entries(schedule.byKey)) {
-    if (!seeds[ck]) seeds[ck] = {}
-    for (const [mk, amount] of Object.entries(byMonth)) {
-      seeds[ck][mk] = Math.round(((seeds[ck][mk] || 0) + amount) * 100) / 100
+  const seeds: Record<BudgetCurrency, Record<string, Record<string, number>>> = {
+    RSD: seeded.RSD.byKey, EUR: seeded.EUR.byKey,
+  }
+  for (const c of CURRENCIES) {
+    for (const [ck, byMonth] of Object.entries(schedule[c].byKey)) {
+      if (!seeds[c][ck]) seeds[c][ck] = {}
+      for (const [mk, amount] of Object.entries(byMonth)) {
+        seeds[c][ck][mk] = Math.round(((seeds[c][ck][mk] || 0) + amount) * 100) / 100
+      }
     }
   }
 
+  // The rows are one tree whichever currency it is read in.
   const allKeys = new Set<string>([
-    ...Object.keys(actualMap),
-    ...Object.keys(seeds),
+    ...Object.keys(actualMap.RSD), ...Object.keys(actualMap.EUR),
+    ...Object.keys(seeds.RSD), ...Object.keys(seeds.EUR),
   ])
 
   const rowMap: Record<string, BudgetRow> = {}
@@ -389,7 +455,7 @@ export async function loadBudgetTree(
   // the key on every ancestor too, because the drill has to list them all,
   // but seeding an ancestor from that set as well would count every
   // descendant twice once `rollUp` adds the children in.
-  const seedByNode: Record<string, Record<string, number>> = {}
+  const seedByNode: Record<BudgetCurrency, Record<string, Record<string, number>>> = { RSD: {}, EUR: {} }
 
   for (const ck of allKeys) {
     const parts = ck.split('|')
@@ -407,16 +473,18 @@ export async function loadBudgetTree(
     const row = rowMap[nodeKey]
     if (!row) continue
 
-    for (const mk of cellMonths) {
-      const a = actualMap[ck]?.[mk] || 0
-      if (a) {
-        if (!actualByNode[nodeKey]) actualByNode[nodeKey] = {}
-        actualByNode[nodeKey][mk] = (actualByNode[nodeKey][mk] || 0) + a
-      }
-      const s = seeds[ck]?.[mk] || 0
-      if (s) {
-        if (!seedByNode[nodeKey]) seedByNode[nodeKey] = {}
-        seedByNode[nodeKey][mk] = (seedByNode[nodeKey][mk] || 0) + s
+    for (const c of CURRENCIES) {
+      for (const mk of cellMonths) {
+        const a = actualMap[c][ck]?.[mk] || 0
+        if (a) {
+          if (!actualByNode[c][nodeKey]) actualByNode[c][nodeKey] = {}
+          actualByNode[c][nodeKey][mk] = (actualByNode[c][nodeKey][mk] || 0) + a
+        }
+        const s = seeds[c][ck]?.[mk] || 0
+        if (s) {
+          if (!seedByNode[c][nodeKey]) seedByNode[c][nodeKey] = {}
+          seedByNode[c][nodeKey][mk] = (seedByNode[c][nodeKey][mk] || 0) + s
+        }
       }
     }
   }
@@ -448,19 +516,30 @@ export async function loadBudgetTree(
   // alike. By the time the ledger gets here that is all there is: the
   // assembly loop above has already resolved each carried-over `set` into
   // its own branch-independent delta.
-  const rolledByMonth: Record<string, Record<string, RolledNode>> = {}
-  for (const mk of cellMonths) {
-    const nodes: ForecastNode[] = Object.values(rowMap).map(r => {
-      const seed = seedByNode[r.key]?.[mk] || 0
-      return {
-        key: r.key, label: r.label, level: r.level, parent: r.parent ?? null,
-        seed,
-        ledger: applyLedger(seed, ledger[r.key]?.[mk] || []) - seed,
-        actual: actualByNode[r.key]?.[mk] || 0,
-      }
-    })
-    rolledByMonth[mk] = Object.fromEntries(rollUp(nodes).map(n => [n.key, n]))
+  const rollIn = (c: BudgetCurrency): Record<string, Record<string, RolledNode>> => {
+    const rolledByMonth: Record<string, Record<string, RolledNode>> = {}
+    for (const mk of cellMonths) {
+      const nodes: ForecastNode[] = Object.values(rowMap).map(r => {
+        const seed = seedByNode[c][r.key]?.[mk] || 0
+        return {
+          key: r.key, label: r.label, level: r.level, parent: r.parent ?? null,
+          seed,
+          ledger: applyLedger(seed, ledger[r.key]?.[mk] || [], c) - seed,
+          actual: actualByNode[c][r.key]?.[mk] || 0,
+        }
+      })
+      rolledByMonth[mk] = Object.fromEntries(rollUp(nodes).map(n => [n.key, n]))
+    }
+    return rolledByMonth
   }
+
+  // In EUR only where every entry can be: one recorded in dinars alone would
+  // otherwise vanish from the EUR reading. The count goes to the page.
+  const dinarOnly = adjustments.filter((a: any) => !ledgerReadableIn([a], 'EUR')).length
+  const eurUnavailable = dinarOnly === 0 ? null
+    : `${dinarOnly} budget ${dinarOnly === 1 ? 'figure was' : 'figures were'} recorded in RSD only, `
+      + 'so this budget cannot be read in EUR without dropping '
+      + (dinarOnly === 1 ? 'it' : 'them') + '. It is shown in RSD.'
 
   const finalRows = Object.values(rowMap)
   const ordered: BudgetRow[] = []
@@ -481,12 +560,20 @@ export async function loadBudgetTree(
   roots.sort((a, b) => a.label.localeCompare(b.label))
   for (const root of roots) addRow(root.key)
 
+  const rolledRsd = rollIn('RSD')
+  const rolledEur = eurUnavailable ? null : rollIn('EUR')
+  const currency: BudgetCurrency = req.currency === 'EUR' && rolledEur ? 'EUR' : 'RSD'
   return {
     rows: ordered,
-    rolled: rolledByMonth,
-    notCarried: shortfall,
-    creditScheduled: schedule.total,
+    rolled: currency === 'EUR' && rolledEur ? rolledEur : rolledRsd,
+    currency,
+    rolledRsd,
+    rolledEur,
+    eurUnavailable,
+    notCarried: seeded.RSD.notCarried,
+    notCarriedEur: seeded.EUR.notCarried,
+    creditScheduled: schedule.RSD.total,
+    creditUnpriced: { RSD: schedule.RSD.unpriced.length, EUR: schedule.EUR.unpriced.length },
     ledgerByNode: ledger,
-    ratesAreFallback: rates.isFallback,
   }
 }

@@ -25,10 +25,23 @@
 // cost. That is a real difference and it is not modelled here — it is said on
 // screen instead, because a lag invented in code is a lag nobody can check.
 // The dated items are exact, and they are listed separately for that reason.
+//
+// ── Currency ────────────────────────────────────────────────────────────────
+//
+// Everything is read in `req.currency`, the viewer's display currency: each
+// transaction's, invoice's and cash reading's own amount_rsd / amount_eur.
+// A credit instalment is the exception — it is a future payment in the
+// credit's own currency with no booked rate yet, so one in the other
+// currency is converted at today's NBS rate, and the page is told so. If no
+// rate can be had, those instalments are left out and that is said too.
+// The budget is asked for in `req.currency` too; when it can only be read in
+// RSD and the line is in EUR, the projected outflow is left out and said so.
 
 import { fetchAllPages } from '../utils/fetchAllPages'
 import { CASH_ONLY_FILTER } from './cashBasis'
 import { loadBudgetTree } from './budgetTree'
+import { bookAmounts, getBookRates, type BookRates } from './bookAmounts'
+import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import {
   cashMovement, cashTimeline, datedByMonth, monthsAround,
   type CashPosition, type CashTimeline, type DatedOutflow, type MonthKey,
@@ -47,6 +60,8 @@ export interface CashRequest {
   /** How many settled months to show behind today, and how many ahead. */
   back?: number
   forward?: number
+  /** The viewer's display currency; every figure returned is in it. */
+  currency: DisplayCurrency
 }
 
 export interface LoadedCashTimeline {
@@ -61,9 +76,13 @@ const lastDayOf = (month: MonthKey): string => {
   return `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`
 }
 
+const withNotes = (t: CashTimeline, notes: string[]): CashTimeline =>
+  notes.length > 0 ? { ...t, problems: [...t.problems, ...notes] } : t
+
 export async function loadCashTimeline(
   client: QueryClient, req: CashRequest,
 ): Promise<LoadedCashTimeline> {
+  const cur = req.currency
   const back = req.back ?? 5
   const forward = req.forward ?? 6
   const months = monthsAround(req.currentMonth, back, forward)
@@ -80,7 +99,7 @@ export async function loadCashTimeline(
       // the P&L and never touched the bank.
       fetchAllPages<any>((lo, hi) => scoped(
         client.from('transactions')
-          .select('transaction_date, amount_usd, type, tx_subtype')
+          .select('transaction_date, amount_rsd, amount_eur, type, tx_subtype')
           .gte('transaction_date', `${first}-01`)
           .lte('transaction_date', lastDayOf(last))
           .eq('status', 'posted')
@@ -88,23 +107,24 @@ export async function loadCashTimeline(
         .order('transaction_date').order('id').range(lo, hi)),
 
       fetchAllPages<any>((lo, hi) => client.from('credit_installments')
-        .select('id, installment_no, due_date, principal_amount, interest_amount, status, credits(name, company_id)')
+        .select('id, installment_no, due_date, principal_amount, interest_amount, status, credits(name, company_id, currency)')
         .gte('due_date', `${req.currentMonth}-01`)
         .lte('due_date', lastDayOf(last))
         .order('due_date').order('id').range(lo, hi)),
 
       fetchAllPages<any>((lo, hi) => scoped(
         client.from('v_invoice_status')
-          .select('id, partner_name, due_date, remaining_usd, type, calculated_status, company_id')
+          .select('id, partner_name, due_date, remaining_rsd, remaining_eur, type, calculated_status, company_id')
           .in('calculated_status', ['unpaid', 'partial'])
           .lte('due_date', lastDayOf(last)))
         .order('due_date').order('id').range(lo, hi)),
 
-      client.from('v_cash_position_latest').select('as_of, amount_usd').maybeSingle(),
+      client.from('v_cash_position_latest').select('as_of, amount_rsd, amount_eur').maybeSingle(),
 
       loadBudgetTree(client as any, {
         monthKeys: future, benchmark: req.benchmark,
         companyIds: req.companyIds, companyId: '', branch: 'pl',
+        currency: cur,
       }),
     ])
 
@@ -116,7 +136,7 @@ export async function loadCashTimeline(
     if (!actual[m]) actual[m] = { inflow: 0, outflow: 0 }
     // The allowlist, once. A transfer between our own accounts is the same
     // money twice and is not cash flow — see `cashMovement`.
-    const moved = cashMovement(t)
+    const moved = cashMovement(t, cur)
     actual[m].inflow += moved.inflow
     actual[m].outflow += moved.outflow
   }
@@ -131,7 +151,21 @@ export async function loadCashTimeline(
 
   // Out: the budget's own total for the month, summed from the roots the way
   // the Budgeting page sums it, so the two pages state the same figure.
+  //
+  // Only in the timeline's own currency. A budget that could not be read in
+  // EUR comes back in RSD (`eurUnavailable`); adding dinars to a euro line
+  // would be wrong by a factor of 117, so the projected outflow is left out
+  // and the page is told why.
+  const notes: string[] = []
+  const budgetInCurrency = budget.currency === cur
+  if (!budgetInCurrency) {
+    notes.push(
+      `The budget could not be read in ${cur}, so future months show no projected outflow`
+      // The budget's own reason, less its "It is shown in RSD." — here it is not shown.
+      + (budget.eurUnavailable ? `: ${budget.eurUnavailable.replace(/\s*It is shown in RSD\.\s*$/, '')}` : '.'))
+  }
   for (const m of future) {
+    if (!budgetInCurrency) continue
     const rolled = budget.rolled[m] || {}
     projected[m].outflow = cents(
       budget.rows.filter(r => !r.parent)
@@ -144,15 +178,48 @@ export async function loadCashTimeline(
 
   // ── The outflows that carry a date of their own ────────────────────────
   const inScope = (cid: any) => req.companyIds.length === 0 || req.companyIds.includes(cid)
+  const instalments = instRows.filter((i: any) => inScope((i.credits as any)?.company_id))
+
+  // An instalment in the other currency needs a rate; today's NBS list is the
+  // only honest one for a payment that has not happened. Fetched only when
+  // some instalment needs it.
+  const creditCurrency = (i: any): string => String((i.credits as any)?.currency || 'RSD').toUpperCase()
+  let rates: BookRates | null = null
+  if (instalments.some((i: any) => creditCurrency(i) !== cur)) {
+    try {
+      rates = await getBookRates(req.today)
+      notes.push(
+        `Credit instalments not in ${cur} are converted at the NBS rate of ${rates.date}; `
+        + 'they are future payments and have no booked rate yet.')
+    } catch {
+      notes.push(
+        `No NBS rate could be read for ${req.today}, so credit instalments not in ${cur} `
+        + 'are left out of the dated outflows.')
+    }
+  }
+  const instalmentAmount = (i: any): number | null => {
+    const own = cents((Number(i.principal_amount) || 0) + (Number(i.interest_amount) || 0))
+    const c = creditCurrency(i)
+    if (c === cur) return own
+    if (!rates) return null
+    try {
+      const b = bookAmounts(own, c, rates)
+      return cur === 'RSD' ? b.amount_rsd : b.amount_eur
+    } catch {
+      return null
+    }
+  }
+
   const dated = datedByMonth([
-    ...instRows
-      .filter((i: any) => inScope((i.credits as any)?.company_id))
-      .map((i: any): DatedOutflow => ({
+    ...instalments.flatMap((i: any): DatedOutflow[] => {
+      const amount = instalmentAmount(i)
+      return amount === null ? [] : [{
         date: i.due_date,
         label: `${(i.credits as any)?.name || 'Credit'} #${i.installment_no}`,
-        amountUsd: cents(((i.principal_amount || 0) + (i.interest_amount || 0))),
+        amount,
         kind: 'instalment',
-      })),
+      }]
+    }),
     ...invRows
       .filter((v: any) => v.type === 'expense' && v.due_date)
       .map((v: any): DatedOutflow => ({
@@ -161,14 +228,17 @@ export async function loadCashTimeline(
         // does not draw.
         date: v.due_date < `${req.currentMonth}-01` ? `${req.currentMonth}-01` : v.due_date,
         label: v.partner_name || '—',
-        amountUsd: Math.abs(Number(v.remaining_usd) || 0),
+        amount: Math.abs(pickAmount(v, cur, 'remaining') ?? 0),
         kind: 'invoice',
       })),
   ], months)
 
   const position: CashPosition | null = cashRow
-    ? { amount: Number(cashRow.amount_usd) || 0, asOf: cashRow.as_of }
+    ? { amount: pickAmount(cashRow, cur) ?? 0, asOf: cashRow.as_of }
     : null
+  if (cashRow && pickAmount(cashRow, cur) === null) {
+    notes.push(`The cash position of ${cashRow.as_of} has no ${cur} figure, so it is read as zero.`)
+  }
 
   // Posted after the reading, inside its own month: the reading is a point and
   // the balance column is month-end.
@@ -177,7 +247,7 @@ export async function loadCashTimeline(
     for (const t of txRows) {
       const d = t.transaction_date || ''
       if (d <= position.asOf || d.slice(0, 7) !== position.asOf.slice(0, 7)) continue
-      const moved = cashMovement(t)
+      const moved = cashMovement(t, cur)
       postedAfterReading.inflow += moved.inflow
       postedAfterReading.outflow += moved.outflow
     }
@@ -190,9 +260,9 @@ export async function loadCashTimeline(
   return {
     months,
     dated,
-    timeline: cashTimeline({
+    timeline: withNotes(cashTimeline({
       months, currentMonth: req.currentMonth, actual, projected, position,
-      postedAfterReading,
-    }),
+      postedAfterReading, currency: cur,
+    }), notes),
   }
 }

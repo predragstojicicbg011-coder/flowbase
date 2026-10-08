@@ -16,7 +16,8 @@ import AutoMatchPanel from '../components/AutoMatchPanel'
 import PayrollDialog from '../components/PayrollDialog'
 import PayrollImportDialog from '../components/PayrollImportDialog'
 import SearchableSelect, { type SelectOption } from '../components/SearchableSelect'
-import { fmtUSD, fmtAmount } from '../utils/formatters'
+import { fmtMoney } from '../utils/formatters'
+import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import {
   TABS, CURRENCIES, REVENUE_STREAMS, PRESET_LABELS,
   emptyFiltersByTab, buildPredicates, activeChips, clearFields, clearTab,
@@ -62,6 +63,9 @@ const ordered = (q: any, tab: Tab) =>
 export default function Transactions() {
   const { user } = useAuth()
   const { companies, showPicker } = useCompanies()
+  // Book figures print, total and filter in the viewer's display currency:
+  // amount_rsd / amount_eur, remaining_rsd / remaining_eur.
+  const { currency, pick, field, format } = useDisplayCurrency()
 
   const { invalidate } = useDataRefresh()
   const [activeTab, setActiveTab] = useState<Tab>('invoices')
@@ -155,8 +159,8 @@ export default function Transactions() {
   }, [lk.partners])
 
   const predsFor = useCallback((tab: Tab): Predicate[] =>
-    buildPredicates(tab, filters[tab], { today, partnerIds: partnerIdsFor(filters[tab].search) }),
-  [filters, today, partnerIdsFor])
+    buildPredicates(tab, filters[tab], { today, partnerIds: partnerIdsFor(filters[tab].search), currency }),
+  [filters, today, partnerIdsFor, currency])
 
   // ── The page of rows ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -239,15 +243,15 @@ export default function Transactions() {
     Promise.all([
       applyPredicates(supabase.from(cfg.table).select('id', { count: 'exact', head: true }), preds)
         .then((r: any) => { if (r.error) throw r.error; return r.count || 0 }),
-      fetchAllPages<{ amount_usd: number | null }>((from, to) =>
-        ordered(applyPredicates(supabase.from(cfg.table).select('amount_usd'), preds), tab).range(from, to)),
+      fetchAllPages<Record<string, number | null>>((from, to) =>
+        ordered(applyPredicates(supabase.from(cfg.table).select(field()), preds), tab).range(from, to)),
     ]).then(([count, all]) => {
       if (cancelled) return
       setCounts(prev => ({ ...prev, [tab]: count }))
-      setTotals({ status: 'ready', rows: all.length, sum: all.reduce((acc, r) => acc + (r.amount_usd || 0), 0) })
+      setTotals({ status: 'ready', rows: all.length, sum: all.reduce((acc, r) => acc + (pick(r) ?? 0), 0) })
     }).catch(() => { if (!cancelled) setTotals({ status: 'error', sum: 0, rows: 0 }) })
     return () => { cancelled = true }
-  }, [activeTab, predsFor, lkReady, refreshTick])
+  }, [activeTab, predsFor, lkReady, refreshTick, field, pick])
 
   const refresh = useCallback(() => setRefreshTick(t => t + 1), [])
 
@@ -374,11 +378,11 @@ export default function Transactions() {
       // PostgREST vraca najvise 1000 redova, pa je `.length` bio odsjecen
       // i metrika je pokazivala tacno 1000 umjesto stvarnog broja.
       const [{ data: unpaidData }, { count: ptCount }, { count: directCount }] = await Promise.all([
-        supabase.from('v_invoice_status').select('remaining_usd,due_date,calculated_status').in('calculated_status', ['unpaid', 'partial']),
+        supabase.from('v_invoice_status').select('remaining_rsd,remaining_eur,due_date,calculated_status').in('calculated_status', ['unpaid', 'partial']),
         supabase.from('passthrough').select('id', { count: 'exact', head: true }).eq('status', 'unpaired'),
         supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('type', 'direct').eq('pl_impact', true).neq('status', 'reconciled'),
       ])
-      const unpaidTotal = (unpaidData || []).reduce((s, i) => s + (i.remaining_usd || 0), 0)
+      const unpaidTotal = (unpaidData || []).reduce((s, i: any) => s + (pick(i, 'remaining') ?? 0), 0)
       const overdueCount = (unpaidData || []).filter(i => i.due_date && i.due_date < today).length
       setSummaryStats({
         unpaidTotal,
@@ -389,7 +393,7 @@ export default function Transactions() {
       })
     }
     fetchStats()
-  }, [])
+  }, [field, pick])
   const { unpaidTotal, overdueCount, unpairedPt, directWithPL } = summaryStats
 
   // Switching tabs no longer wipes anything: each tab keeps the filters it was
@@ -440,7 +444,7 @@ export default function Transactions() {
     partner: (id: string) => lk.partners.find(p => p.id === id)?.name || '',
     bank: (id: string) => lk.banks.find(b => b.id === id)?.name || '',
   }), [lk, companies])
-  const chips = useMemo(() => activeChips(activeTab, f, chipNames), [activeTab, f, chipNames])
+  const chips = useMemo(() => activeChips(activeTab, f, chipNames, currency), [activeTab, f, chipNames, currency])
 
   const clearAll = () => {
     setDraft({ tab: activeTab, value: '' })
@@ -544,7 +548,7 @@ export default function Transactions() {
         <div style={s.summaryRow} className="mf-stagger">
           <div style={s.summaryCard}>
             <div style={s.summaryLabel}>Outstanding invoices</div>
-            <div style={s.summaryVal}>{fmtUSD(unpaidTotal)}</div>
+            <div style={s.summaryVal}>{format(unpaidTotal, 0)}</div>
             <div style={s.summarySub}>{summaryStats.unpaidCount} invoices unpaid</div>
           </div>
           <div style={{ ...s.summaryCard, ...(overdueCount > 0 ? s.summaryCardAlert : {}) }}>
@@ -609,7 +613,7 @@ export default function Transactions() {
                 : <span style={s.resultSum} title={sumShort
                   ? `Summed ${totals.rows.toLocaleString()} of ${matched.toLocaleString()} matching rows — the total is at least this.`
                   : `Every one of the ${totals.rows.toLocaleString()} matching rows, not the page below.`}>
-                  {sumShort ? '≥ ' : ''}{fmtUSD(totals.sum)}
+                  {sumShort ? '≥ ' : ''}{format(totals.sum, 0)}
                 </span>}
             {sumShort && (
               <span style={s.resultWarn}>
@@ -670,10 +674,10 @@ export default function Transactions() {
               style={{ ...s.filterSelect, color: f.dateTo ? '#DCE9F6' : '#7A9BB8' }}
               value={f.dateTo} onChange={e => setFilter({ dateTo: e.target.value, datePreset: 'custom' })} />
 
-            <input type="number" placeholder="Min $" title="Minimum amount in USD"
+            <input type="text" inputMode="decimal" placeholder={`Min ${currency}`} title={`Minimum amount in ${currency}`}
               style={{ ...s.filterSelect, width: '92px' }}
               value={f.amountFrom} onChange={e => setFilter({ amountFrom: e.target.value })} />
-            <input type="number" placeholder="Max $" title="Maximum amount in USD"
+            <input type="text" inputMode="decimal" placeholder={`Max ${currency}`} title={`Maximum amount in ${currency}`}
               style={{ ...s.filterSelect, width: '92px' }}
               value={f.amountTo} onChange={e => setFilter({ amountTo: e.target.value })} />
 
@@ -765,8 +769,8 @@ export default function Transactions() {
                         <td style={s.td}><span style={{ ...s.badge, background: inv.type === 'expense' ? '#FCEBEB' : '#E1F5EE', color: inv.type === 'expense' ? '#A32D2D' : '#085041' }}>{inv.type}</span></td>
                         <td style={s.td}><span style={s.catCell}>{inv.pl_category || inv.revenue_stream || '—'}</span></td>
                         <td style={s.td}><span style={s.compCell}>{inv.company_name || '—'}</span></td>
-                        <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{fmtAmount(inv.amount || 0, inv.currency)}</span></td>
-                        <td style={{ ...s.td, textAlign: 'right' as const }}><span style={{ ...s.amtCell, color: (inv.remaining_usd || 0) > 0.01 ? '#FF5B5A' : '#00D47E' }}>{fmtUSD(inv.remaining_usd || 0)}</span></td>
+                        <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{fmtMoney(inv.amount || 0, inv.currency)}</span></td>
+                        <td style={{ ...s.td, textAlign: 'right' as const }}><span style={{ ...s.amtCell, color: (pick(inv, 'remaining') ?? 0) > 0.01 ? '#FF5B5A' : '#00D47E' }}>{format(pick(inv, 'remaining'))}</span></td>
                         <td style={s.td}><span style={{ ...s.badge, background: invoiceStatusColors[inv.calculated_status]?.bg, color: invoiceStatusColors[inv.calculated_status]?.color }}>{inv.calculated_status}</span></td>
                         <td style={s.td} onClick={e => e.stopPropagation()}>
                           <div style={{ position: 'relative' }}>
@@ -809,7 +813,7 @@ export default function Transactions() {
                     <th style={s.th}>Date</th><th style={s.th}>Partner</th><th style={s.th}>Type</th>
                     <th style={s.th}>P&L / Invoice</th><th style={s.th}>Note</th><th style={s.th}>Company</th>
                     <th style={s.th}>Bank</th><th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
-                    <th style={{ ...s.th, textAlign: 'right' as const }}>USD</th><th style={s.th}>P&L</th><th style={s.th}></th>
+                    <th style={{ ...s.th, textAlign: 'right' as const }}>{currency}</th><th style={s.th}>P&L</th><th style={s.th}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -822,8 +826,8 @@ export default function Transactions() {
                       <td style={s.td}><span style={s.descCell}>{t.note || '—'}</span></td>
                       <td style={s.td}><span style={s.compCell}>{t.companies?.name || '—'}</span></td>
                       <td style={s.td}><span style={s.compCell}>{t.banks?.name || '—'}</span></td>
-                      <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{(t.amount || 0).toLocaleString()} {t.currency}</span></td>
-                      <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.usdCell}>{fmtUSD(t.amount_usd || 0)}</span></td>
+                      <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{fmtMoney(t.amount || 0, t.currency)}</span></td>
+                      <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.bookCell}>{format(pick(t))}</span></td>
                       <td style={s.td}>{t.pl_impact ? <span style={{ ...s.badge, background: '#E1F5EE', color: '#085041' }}>✓ P&L</span> : <span style={{ ...s.badge, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.30)' }}>Cash only</span>}</td>
                       <td style={s.td} onClick={e => e.stopPropagation()}>
                         <div style={{ position: 'relative' }}>
@@ -858,7 +862,7 @@ export default function Transactions() {
                     <th style={s.th}>Date</th><th style={s.th}>Period</th><th style={s.th}>Partner</th>
                     <th style={s.th}>Direction</th><th style={s.th}>Company</th><th style={s.th}>Bank</th>
                     <th style={s.th}>Note</th><th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
-                    <th style={{ ...s.th, textAlign: 'right' as const }}>USD</th><th style={s.th}>Status</th><th style={s.th}></th>
+                    <th style={{ ...s.th, textAlign: 'right' as const }}>{currency}</th><th style={s.th}>Status</th><th style={s.th}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -871,8 +875,8 @@ export default function Transactions() {
                       <td style={s.td}><span style={s.compCell}>{p.companies?.name || '—'}</span></td>
                       <td style={s.td}><span style={s.compCell}>{p.banks?.name || '—'}</span></td>
                       <td style={s.td}><span style={s.descCell}>{p.note || '—'}</span></td>
-                      <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{(p.amount || 0).toLocaleString()} {p.currency}</span></td>
-                      <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.usdCell}>${(p.amount_usd || 0).toLocaleString()}</span></td>
+                      <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{fmtMoney(p.amount || 0, p.currency)}</span></td>
+                      <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.bookCell}>{format(pick(p))}</span></td>
                       <td style={s.td}><span style={{ ...s.badge, background: ptStatusColors[p.status]?.bg, color: ptStatusColors[p.status]?.color }}>{p.status}</span></td>
                       <td style={s.td} onClick={e => e.stopPropagation()}>
                         <div style={{ position: 'relative' }}>
@@ -1012,7 +1016,7 @@ const s: Record<string, React.CSSProperties> = {
   descCell: { fontSize: '11px', color: '#7A9BB8', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, display: 'block' },
   compCell: { fontSize: '11px', color: '#7A9BB8' },
   amtCell: { fontSize: '13px', fontWeight: '500', color: '#DCE9F6', whiteSpace: 'nowrap' as const },
-  usdCell: { fontSize: '13px', fontWeight: '500', color: '#00D47E', whiteSpace: 'nowrap' as const },
+  bookCell: { fontSize: '13px', fontWeight: '500', color: '#00D47E', whiteSpace: 'nowrap' as const },
   badge: { fontSize: '10px', fontWeight: '500', padding: '2px 8px', borderRadius: '20px', textTransform: 'capitalize' as const, whiteSpace: 'nowrap' as const },
   editBtn: { background: 'none', border: '1px solid rgba(255,255,255,0.10)', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#7A9BB8', fontSize: '14px' },
   contextMenu: { position: 'absolute' as const, right: 0, top: '100%', marginTop: '4px', background: '#0D1B2C', border: '1px solid rgba(255,255,255,0.10)', borderRadius: '8px', zIndex: 9999, minWidth: '140px', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' },

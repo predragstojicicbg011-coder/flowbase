@@ -213,7 +213,9 @@ export default function AdditionsTab({ month, people, eurRate }: {
               onChange={e => setDraft({ ...draft, currency: e.target.value })}>
               <option value="RSD">RSD</option>
               <option value="EUR">EUR</option>
-              <option value="USD">USD</option>
+              {/* A payroll converts contract terms at the EUR rate only; USD stays for a term written before. */}
+
+              {draft.currency === 'USD' && <option value="USD">USD</option>}
             </select>
           </div>
         </Field>

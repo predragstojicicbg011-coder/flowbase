@@ -9,82 +9,50 @@
 // decides paid or partial in. It was the only thing in the chain that was not
 // doing the arithmetic.
 //
-// What the four settlement paths used to do, every one of them, was:
-//
-//     own ──► dollars (rounded to the cent) ──► own (rounded again)
-//
-// and write the far end of that into `allocated_amount`, which is the column
-// the settled/partial rule reads. Two separate faults rode on it.
-//
-// ONE. A US cent is worth about a dinar. Quantising the dinar figure to a
-// whole cent moved it by up to half a dinar per link, in whichever direction
-// the rounding fell. Two part payments and a bill that had been paid in full
-// sat there owing sixty para — the "par para i dinara" that started this.
-//
-// TWO, and much worse at size. A dinar payment against a dinar bill was
-// converted to dollars at the PAYMENT date's rate and capped against the
-// bill's dollars at the INVOICE date's rate:
-//
-//     allocUsd = Math.min(rowUsd, remainingUsd)
-//
-// Those two rates are not the same number. Half a percent between the invoice
-// date and the payment date left a 12,500,000 dinar bill short by 62,000
-// dinars, and the shortfall then presented itself as an unpaid remainder or
-// as a currency difference to book. It is neither. Dinars paid a dinar bill
-// in full. There is no exposure, nothing was gained or lost on a rate, and
-// there is no reason for a rate to appear in the arithmetic at all.
+// What the settlement paths once did was round-trip the figure through the
+// reporting currency — own ──► book (rounded) ──► own (rounded again) — and
+// write the far end into `allocated_amount`, the column the settled/partial
+// rule reads. Two faults rode on it: the rounding left bills a para or two
+// short for ever, and a same-currency payment converted at the PAYMENT date's
+// rate but capped at the INVOICE date's rate left a large bill short by the
+// rate move between the two days. Dinars paying a dinar bill involve no rate
+// at all.
 //
 // So: when the payment and the bill are in the same currency, NOTHING IS
 // CONVERTED. The allocation is the payment, capped at what the bill is owed,
-// and the dollar column is derived from it afterwards for reporting. When
-// they genuinely differ, the conversion happens once, and a payment that
-// covers the whole remainder settles the remainder EXACTLY rather than
-// settling a round trip of it.
+// and the dinar and euro columns are derived from it afterwards at the
+// invoice's stored rates. When they genuinely differ, the comparison happens
+// once, in dinars (the book currency), and a payment that covers the whole
+// remainder settles the remainder EXACTLY rather than settling a round trip
+// of it.
 //
-// The rate, where one is needed, comes from the invoice's own
-// `amount / amount_usd` — the same source `invoiceLinks` uses — so the
-// conversion agrees with how that row was booked rather than with a rate
-// fetched separately and rounded differently.
+// Every book figure of an allocation is the invoice's own part at the
+// invoice's STORED exchange_rate and eur_rate (`partBookAmounts`), so the
+// links of a bill paid in full add up to the bill in every currency. What the
+// payment is worth at its own date's rate, against that, is the currency
+// difference — see currencyDifference.ts.
 
-import { impliedRate, type InvoiceMoney } from './invoiceLinks'
+import { type InvoiceMoney } from './invoiceLinks'
+import { partBookAmounts, partFromRsd, round2 } from './bookAmounts'
 
 /**
- * Under this much left, a bill is settled.
- *
- * One para. One cent. An absolute figure, because money rounds to a fixed
- * place and not to a proportion of itself: `v_invoice_status` still allows a
- * tenth of a percent, which is 0.22 dinars on a 220 dinar bill and 12,500 on
- * one of twelve and a half million. The first is too tight to absorb a
- * rounding artefact and the second is loose enough to call a materially short
- * invoice paid. Nothing written through this module needs either, because
- * what it writes lands exactly.
+ * Under this much left, a bill is settled: one para, the floor of the rule.
  */
 export const CLOSED_WITHIN = 0.01
 
 /**
- * The tolerance for one bill, in its own currency.
+ * The tolerance for one bill, in its own currency — the same expression
+ * `v_invoice_status` uses: one para (0.01 RSD) at the invoice's own booked
+ * rate, `amount / amount_rsd`, never less than 0.01 of the invoice's currency.
  *
- * One para was right about the SHAPE — absolute, not a proportion — and wrong
- * about the size for the currency most of this ledger is in. A para is a
- * hundredth of a dinar, and nothing in this business settles to a hundredth
- * of a dinar: the differences that actually arrive are a bank rounding to the
- * dinar, or a transfer sent as a round number.
- *
- * So the floor is a US cent, converted at THE INVOICE'S OWN RATE — `amount /
- * amount_usd`, the rate it was booked at rather than one looked up separately
- * and right about a different day. About 1.02 on a dinar bill, 0.0092 on a
- * euro one: a dinar either way.
- *
- * `GREATEST`, never less than the para it already allowed. Tightening this
- * would reopen invoices somebody has already treated as closed, which is not
- * a thing to do as a side effect of loosening a tolerance.
+ * For a dinar or euro bill that is simply 0.01. It is written out so the
+ * application and the view cannot disagree about any bill.
  */
-export function toleranceFor(amount: number, amountUsd?: number | null): number {
-  if (!(amount > 0) || !(typeof amountUsd === 'number') || !(amountUsd > 0)) {
+export function toleranceFor(amount: number, amountRsd?: number | null): number {
+  if (!(amount > 0) || !(typeof amountRsd === 'number') || !(amountRsd > 0)) {
     return CLOSED_WITHIN
   }
-  const perUsd = amount / amountUsd
-  return Math.max(CLOSED_WITHIN, Math.round(CLOSED_WITHIN * perUsd * 100) / 100)
+  return Math.max(CLOSED_WITHIN, round2((CLOSED_WITHIN * amount) / amountRsd))
 }
 
 export type SettledStatus = 'paid' | 'partial' | 'unpaid'
@@ -113,19 +81,17 @@ export type SettledStatus = 'paid' | 'partial' | 'unpaid'
  * An absolute para works at both ends, and it is what the writes now land on.
  */
 export function settledStatus(
-  amount: number, allocated: number, amountUsd?: number | null,
+  amount: number, allocated: number, amountRsd?: number | null,
 ): SettledStatus {
   if (!(allocated > 0)) return 'unpaid'
   // Rounded to the para BEFORE the comparison. `220.49 - 0.01` is
   // 220.48000000000002 in binary floating point, so a bill settled to the
   // para read `partial` — a tolerance that cannot survive its own subtraction
   // is worse than none.
-  const short = Math.round(((amount || 0) - allocated) * 100) / 100
-  return short <= toleranceFor(amount, amountUsd) ? 'paid' : 'partial'
+  const short = round2((amount || 0) - allocated)
+  return short <= toleranceFor(amount, amountRsd) ? 'paid' : 'partial'
 }
 
-/** Two decimal places, the way both amount columns are stored. */
-const cents = (n: number): number => Math.round(n * 100) / 100
 const positive = (n: unknown): number =>
   typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0
 
@@ -135,8 +101,8 @@ export interface InvoiceSettlement extends InvoiceMoney {
    * `paid_amount`, which is `sum(allocated_amount)`.
    *
    * The same column the settled/partial rule is decided on. Deriving the
-   * remainder from `remaining_usd` instead is how the dialog came to show an
-   * outstanding figure that disagreed with the rule it was judged against.
+   * remainder from `remaining_rsd` instead is how a dialog comes to show an
+   * outstanding figure that disagrees with the rule it is judged against.
    */
   paid_amount?: number | null
 }
@@ -145,45 +111,45 @@ export interface InvoiceSettlement extends InvoiceMoney {
 export function outstandingOwn(invoice: InvoiceSettlement): number {
   const amount = positive(invoice.amount)
   const paid = positive(invoice.paid_amount)
-  return cents(Math.max(0, amount - paid))
+  return round2(Math.max(0, amount - paid))
 }
 
 /**
  * Is the payment in the currency the bill is written in?
  *
- * A missing currency on either side means dollars, which is what every other
- * module in this chain assumes and what the columns default to.
+ * A missing currency on either side means dinars, the book currency and what
+ * the columns default to.
  */
 export function paysInInvoiceCurrency(
   paymentCurrency: string | null | undefined,
   invoice: InvoiceMoney,
 ): boolean {
-  return (paymentCurrency || 'USD') === (invoice.currency || 'USD')
+  return (paymentCurrency || 'RSD') === (invoice.currency || 'RSD')
 }
 
 export interface SettlementRequest {
-  /** The bill, carrying what it already holds. */
+  /** The bill, carrying what it already holds and its stored rates. */
   invoice: InvoiceSettlement
   /** The currency the payment is in. */
   paymentCurrency?: string | null
   /** What is left of the payment, in the payment's own currency. */
   paymentOwn: number
   /**
-   * The same, in dollars.
+   * The same, in dinars at the PAYMENT's rate.
    *
-   * Used ONLY where the two currencies genuinely differ. Passing a figure
-   * converted at the payment date's rate is fine and expected — it is the
-   * comparison against the invoice's own rate that used to do the damage, and
-   * that comparison no longer happens for a same-currency payment.
+   * Used ONLY where the two currencies genuinely differ, to compare the
+   * payment with the bill in the one currency they both have.
    */
-  paymentUsd: number
+  paymentRsd: number
 }
 
 export interface Settlement {
   /** `allocated_amount` — in the INVOICE's currency. */
   own: number
-  /** `allocated_amount_usd` — derived from it, for reporting. */
-  usd: number
+  /** `allocated_amount_rsd` — `own` at the invoice's exchange_rate. */
+  rsd: number
+  /** `allocated_amount_eur` — at the invoice's eur_rate; `own` on a EUR bill. */
+  eur: number
   /** What the bill still wants afterwards, in its own currency. */
   leftOnInvoice: number
   /** What is left of the payment, in the payment's currency. */
@@ -198,22 +164,25 @@ export interface Settlement {
  * `own` is the figure to write, and it is never a round trip: for a
  * same-currency payment it is the payment itself, and for a payment that
  * covers the whole remainder it is the remainder itself. Both are exact by
- * construction, which is the property the settled/partial rule needs and
- * never had.
+ * construction, which is the property the settled/partial rule needs.
+ *
+ * Throws RateUnavailableError when the invoice carries no stored rates — the
+ * book columns of the link cannot be written without them.
  */
 export function settlementFor(req: SettlementRequest): Settlement {
   const { invoice } = req
+  const parent = { ...invoice, currency: invoice.currency || 'RSD' }
   const outstanding = outstandingOwn(invoice)
-  const payOwn = cents(positive(req.paymentOwn))
+  const payOwn = round2(positive(req.paymentOwn))
   const direct = paysInInvoiceCurrency(req.paymentCurrency, invoice)
-  const rate = impliedRate(invoice)
 
-  /** The dollar side, derived from the figure that was actually settled. */
-  const usdFor = (own: number): number =>
-    cents(direct && rate === null ? own : rate === null ? own : own / rate)
+  const booked = (own: number) => {
+    const b = partBookAmounts(own, parent)
+    return { rsd: b.amount_rsd, eur: b.amount_eur }
+  }
 
   if (outstanding <= 0 || payOwn <= 0) {
-    return { own: 0, usd: 0, leftOnInvoice: outstanding, leftOnPayment: payOwn, direct }
+    return { own: 0, rsd: 0, eur: 0, leftOnInvoice: outstanding, leftOnPayment: payOwn, direct }
   }
 
   if (direct) {
@@ -223,36 +192,34 @@ export function settlementFor(req: SettlementRequest): Settlement {
     const own = payOwn >= outstanding - CLOSED_WITHIN ? outstanding : payOwn
     return {
       own,
-      usd: usdFor(own),
-      leftOnInvoice: cents(outstanding - own),
-      leftOnPayment: cents(payOwn - own),
+      ...booked(own),
+      leftOnInvoice: round2(outstanding - own),
+      leftOnPayment: round2(payOwn - own),
       direct: true,
     }
   }
 
-  // Genuinely two currencies. The comparison has to happen in the one they
-  // both have, but the ANSWER is still written in the invoice's.
-  const payUsd = cents(positive(req.paymentUsd))
-  const outstandingUsd = rate === null ? outstanding : cents(outstanding / rate)
+  // Genuinely two currencies. The comparison happens in dinars, but the
+  // ANSWER is still written in the invoice's currency.
+  const payRsd = round2(positive(req.paymentRsd))
+  const outstandingRsd = booked(outstanding).rsd
 
-  if (payUsd >= outstandingUsd - CLOSED_WITHIN) {
-    // It covers the remainder, so the allocation IS the remainder. Converting
-    // it to dollars and back would move it by the value of half a cent and
-    // leave the bill owing the difference for ever.
+  if (payRsd >= outstandingRsd - CLOSED_WITHIN) {
+    // It covers the remainder, so the allocation IS the remainder.
     return {
       own: outstanding,
-      usd: outstandingUsd,
+      ...booked(outstanding),
       leftOnInvoice: 0,
-      leftOnPayment: cents(payOwn * (payUsd > 0 ? 1 - outstandingUsd / payUsd : 0)),
+      leftOnPayment: round2(payOwn * (payRsd > 0 ? 1 - outstandingRsd / payRsd : 0)),
       direct: false,
     }
   }
 
-  const own = Math.min(outstanding, cents(rate === null ? payUsd : payUsd * rate))
+  const own = Math.min(outstanding, partFromRsd(payRsd, parent).amount)
   return {
     own,
-    usd: payUsd,
-    leftOnInvoice: cents(outstanding - own),
+    ...booked(own),
+    leftOnInvoice: round2(outstanding - own),
     leftOnPayment: 0,
     direct: false,
   }

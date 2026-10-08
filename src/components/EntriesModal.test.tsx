@@ -1,4 +1,7 @@
-import { buildEntryItems, DRILL_CAP } from './EntriesModal'
+import React from 'react'
+import { render, screen } from '@testing-library/react'
+import { buildEntryItems, DRILL_CAP, EntryRow, type EntryItem } from './EntriesModal'
+import { DisplayCurrencyProvider } from '../contexts/DisplayCurrencyContext'
 
 // The module imports the real Supabase client for `useEntryEditor`, and the
 // two dialogs it opens drag in half the app. None of that is needed to test
@@ -33,7 +36,7 @@ const ascendingMonth = () => {
     const d = day(1 + Math.floor(i / 40))   // 40 rows a day, days 1–28
     rows.push({ id, source: 'transaction', pl_date: d })
     tx[id] = {
-      id, transaction_date: d, amount: 100, amount_usd: 100, currency: 'USD',
+      id, transaction_date: d, amount: 100, amount_rsd: 100, currency: 'RSD',
       pl_category: 'Opex', department: 'Sales', expense_description: 'Ads',
       cf_type: null, note: null, partners: { name: `Vendor ${i}` },
     }
@@ -82,9 +85,9 @@ describe('building the entries behind a drill-down', () => {
       { id: 'c', source: 'transaction', pl_date: day(3) },
     ]
     const client = stubClient({
-      a: { id: 'a', transaction_date: day(1), amount: 1, amount_usd: 1, currency: 'USD', partners: null },
-      b: { id: 'b', invoice_date: day(2), invoice_number: 'INV-1', amount: 2, amount_usd: 2, currency: 'USD', partners: null },
-      c: { id: 'c', transaction_date: day(3), amount: 3, amount_usd: 3, currency: 'USD', partners: null },
+      a: { id: 'a', transaction_date: day(1), amount: 1, amount_rsd: 1, currency: 'RSD', partners: null },
+      b: { id: 'b', invoice_date: day(2), invoice_number: 'INV-1', amount: 2, amount_rsd: 2, currency: 'RSD', partners: null },
+      c: { id: 'c', transaction_date: day(3), amount: 3, amount_rsd: 3, currency: 'RSD', partners: null },
     })
 
     const { items, capped } = await buildEntryItems(rows, client)
@@ -97,11 +100,38 @@ describe('building the entries behind a drill-down', () => {
   it('reports an uncapped list as the whole list', async () => {
     const rows = [{ id: 'a', source: 'transaction', pl_date: day(1) }]
     const client = stubClient({
-      a: { id: 'a', transaction_date: day(1), amount: 1, amount_usd: 1, currency: 'USD', partners: null },
+      a: { id: 'a', transaction_date: day(1), amount: 1, amount_rsd: 1, currency: 'RSD', partners: null },
     })
     const { items, total, capped } = await buildEntryItems(rows, client)
     expect(total).toBe(1)
     expect(capped).toBe(false)
     expect(items).toHaveLength(1)
+  })
+})
+
+describe('an entry row', () => {
+  const item: EntryItem = {
+    id: 'x', title: 'Telekom Srbija', date: '2026-03-04',
+    amount: 100, currency: 'EUR', amount_rsd: 11720, amount_eur: 100,
+    edit: { table: 'transactions', id: 'x' },
+  }
+
+  it('leads with the display-currency figure and keeps the original beneath it', () => {
+    render(<EntryRow item={item} onEdit={() => {}} />)
+    expect(screen.getByText('11.720,00 RSD')).toBeInTheDocument()
+    expect(screen.getByText('100,00 EUR')).toBeInTheDocument()
+  })
+
+  it('prints the EUR figure once, not twice, when the viewer reads EUR', () => {
+    render(<DisplayCurrencyProvider initial="EUR"><EntryRow item={item} onEdit={() => {}} /></DisplayCurrencyProvider>)
+    expect(screen.getAllByText('100,00 EUR')).toHaveLength(1)
+    expect(screen.queryByText(/RSD/)).not.toBeInTheDocument()
+  })
+
+  it('falls back to the original amount where the row has no figure in the display currency', () => {
+    render(<DisplayCurrencyProvider initial="EUR">
+      <EntryRow item={{ ...item, currency: 'RSD', amount: 5000, amount_rsd: 5000, amount_eur: null }} onEdit={() => {}} />
+    </DisplayCurrencyProvider>)
+    expect(screen.getByText('5.000,00 RSD')).toBeInTheDocument()
   })
 })

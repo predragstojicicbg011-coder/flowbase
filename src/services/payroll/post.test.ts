@@ -6,7 +6,7 @@ import type { PostingPlan } from './posting'
 
 const CONTEXT: PostContext = {
   companyId: 'c1', paymentDate: '2026-09-05', dueDate: null,
-  currency: 'RSD', usdRate: 100, exchangeRate: 117.3586,
+  currency: 'RSD', eurRate: 117.3586,
 }
 
 const plan = (over: Partial<PostingPlan> = {}): PostingPlan => ({
@@ -89,6 +89,9 @@ describe('claiming the month', () => {
     expect(c.calls.postings).toHaveLength(1)
     expect(c.calls.postings[0].period_month).toBe('2026-08-01')
     expect(c.calls.postings[0].run_key).toBe('regular')
+    // Payroll is posted in dinars: 1 RSD per RSD, and the day's EUR rate.
+    expect(c.calls.postings[0].exchange_rate).toBe(1)
+    expect(c.calls.postings[0].eur_rate).toBe(117.3586)
   })
 
   it('refuses a second posting and writes NOTHING', async () => {
@@ -142,7 +145,7 @@ describe('the order the invoices go in', () => {
 })
 
 describe('what each invoice carries', () => {
-  it('puts the payment date, currency and dollar amount on every one', async () => {
+  it('puts the payment date, currency and book amounts on every one', async () => {
     const c = client()
     await postPlan(c, plan(), CONTEXT, 'Salaries')
     for (const i of c.calls.invoices) {
@@ -151,16 +154,27 @@ describe('what each invoice carries', () => {
       expect(i.company_id).toBe('c1')
     }
     const net = c.calls.invoices.find((i: any) => i.note.startsWith('net'))
-    expect(net.amount_usd).toBe(10)  // 1000 at 100 RSD to the dollar
+    for (const i of c.calls.invoices) {
+      expect(i.exchange_rate).toBe(1)
+      expect(i.eur_rate).toBe(117.3586)
+      expect(i.amount_rsd).toBe(i.amount)
+      expect('amount_usd' in i).toBe(false)
+    }
+    expect(net.amount_rsd).toBe(1000)
+    expect(net.amount_eur).toBe(8.52)  // 1000 / 117.3586 = 8.5209 → 8.52
     expect(net.rev_alloc_type).toBe('af100')
     expect(net.cf_type).toBe('recurring')
     expect(net.cf_next_month_est).toBe(1000)
   })
 
-  it('leaves the dollar amount empty rather than guessing when no rate is known', async () => {
+  it('writes nothing at all, not even the claim, when the EUR rate is not known', async () => {
+    // A row without its euro figure would be right in dinars and missing from
+    // every report read in euros — refused, rather than guessed or left null.
     const c = client()
-    await postPlan(c, plan(), { ...CONTEXT, usdRate: null }, 'Salaries')
-    expect(c.calls.invoices[0].amount_usd).toBeNull()
+    await expect(postPlan(c, plan(), { ...CONTEXT, eurRate: null }, 'Salaries'))
+      .rejects.toThrow(/EUR/)
+    expect(c.calls.postings).toHaveLength(0)
+    expect(c.calls.invoices).toHaveLength(0)
   })
 
   it('stamps the posting id into the note, so an entry can be traced back', async () => {
@@ -184,7 +198,10 @@ describe('retained deductions', () => {
     }), CONTEXT, 'Salaries')
     expect(c.calls.transactions).toHaveLength(1)
     expect(c.calls.transactions[0].amount).toBe(-1000)
-    expect(c.calls.transactions[0].amount_usd).toBe(-10)
+    expect(c.calls.transactions[0].amount_rsd).toBe(-1000)
+    expect(c.calls.transactions[0].amount_eur).toBe(-8.52)  // the exact mirror of +1000
+    expect(c.calls.transactions[0].exchange_rate).toBe(1)
+    expect(c.calls.transactions[0].eur_rate).toBe(117.3586)
     expect(c.calls.transactions[0].status).toBe('posted')
     // The allocation codes come from the plan, not from a constant: they used
     // to be hard-coded, which was one revenue stream for twenty-five people.

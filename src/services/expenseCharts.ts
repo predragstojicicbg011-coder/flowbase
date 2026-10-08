@@ -33,7 +33,7 @@ export interface MonthlySeries {
  * Monthly composition from the top `topN` roots, everything else folded into
  * one Other band.
  *
- * Folding matters: nine colours of five-dollar categories is noise, and it
+ * Folding matters: nine colours of five-dinar categories is noise, and it
  * hides whether the big bands are moving. Other is kept rather than dropped so
  * the columns still add up to the real monthly total.
  */
@@ -227,13 +227,28 @@ export function axisTicks(max: number, count = 4): number[] {
   return Array.from({ length: count + 1 }, (_, i) => (top / count) * i)
 }
 
-/** Compact money for axis labels: 1.2M, 340k, 850. */
-export function shortMoney(n: number): string {
+/**
+ * Compact money for axis labels and bar values, in the Serbian scale the
+ * shared formatters use: `850`, `1,2 hilj.`, `67 hilj.`, `2,1 mil.`,
+ * `1,5 mlrd.` — one decimal below ten of a unit, none above.
+ *
+ * `currency` appends the code (`2,1 mil. RSD`); axis ticks leave it out
+ * because the chart's heading already names the currency, and the code on
+ * every tick would crowd the axis.
+ */
+export function shortMoney(n: number, currency?: string): string {
   const a = Math.abs(n)
   const sign = n < 0 ? '-' : ''
-  if (a >= 1_000_000) return `${sign}$${(a / 1_000_000).toFixed(a >= 10_000_000 ? 0 : 1)}M`
-  if (a >= 1_000) return `${sign}$${(a / 1_000).toFixed(a >= 10_000 ? 0 : 1)}k`
-  return `${sign}$${Math.round(a)}`
+  const fix = (v: number, d: number) =>
+    v.toLocaleString('sr-RS', { minimumFractionDigits: d, maximumFractionDigits: d })
+  const scaled = (div: number, unit: string) =>
+    `${fix(a / div, a >= 10 * div ? 0 : 1)} ${unit}`
+  const body =
+    a >= 1_000_000_000 ? scaled(1_000_000_000, 'mlrd.')
+    : a >= 1_000_000 ? scaled(1_000_000, 'mil.')
+    : a >= 1_000 ? scaled(1_000, 'hilj.')
+    : fix(Math.round(a), 0)
+  return `${sign}${body}${currency ? ` ${currency}` : ''}`
 }
 
 /** 'YYYY-MM' → 'Aug' / 'Aug ’25' when the series crosses a year boundary. */
@@ -302,7 +317,7 @@ export interface MoverAxis {
   /** Dollars reaching left of the zero line, and right of it. */
   down: number
   up: number
-  /** Pixels per dollar — ONE number, which is the whole point. */
+  /** Pixels per unit of money — ONE number, which is the whole point. */
   perDollar: number
   /** Where the zero line sits, in pixels from the plot's left edge. */
   zeroX: number
@@ -322,8 +337,8 @@ export interface MoverAxis {
  * up half its resolution to draw a symmetry the data did not have. So each
  * side gets the width its own extent asks for.
  *
- * The end allowance is in PIXELS and not in dollars, because what it holds is
- * a piece of text. Rounding the dollar span up and hoping the slack landed on
+ * The end allowance is in PIXELS and not in money, because what it holds is
+ * a piece of text. Rounding the money span up and hoping the slack landed on
  * the right side put the longest bar's label outside the frame on a one-sided
  * chart — it only ever had slack on the side the rounding happened to favour.
  */
@@ -363,7 +378,7 @@ export function moverScale(
 // Quantiles put roughly the same number of cells in each colour, so the grid
 // has something to say at every level. The price is that colour is no longer
 // proportional to value, and that price is paid openly: the legend prints the
-// dollar edge of every bin, so a reader can see what a shade is worth instead
+// money edge of every bin, so a reader can see what a shade is worth instead
 // of guessing.
 //
 // The per-row scale answers the other question. Against the whole grid a

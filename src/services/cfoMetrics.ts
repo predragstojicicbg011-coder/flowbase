@@ -24,7 +24,15 @@
 // no revenue — each returns null and says why, because a zero on a CFO panel
 // is read as a measurement and acted on.
 
+import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
+
 const cents = (n: number): number => Math.round(n * 100) / 100
+
+// Every money row carries amount_rsd and amount_eur. The functions that read
+// rows take the viewer's display currency and sum that column; a row with no
+// figure in it counts as zero. Functions handed plain amounts (concentration,
+// costStructure, tornado) are currency-neutral: their inputs are already in
+// the display currency.
 
 // ─── 1. Twelve months of in and out ─────────────────────────────────────────
 
@@ -42,7 +50,8 @@ export interface MonthPoint {
 
 export interface TrendEntry {
   pl_date: string
-  amount_usd: number | null
+  amount_rsd: number | null
+  amount_eur?: number | null
   tx_type: string | null
 }
 
@@ -69,14 +78,14 @@ export function monthsEndingAt(last: string, n: number): string[] {
  * it differently and the arithmetic below can skip it.
  */
 export function monthlyTrend(
-  entries: TrendEntry[], months: string[], currentMonth?: string,
+  entries: TrendEntry[], currency: DisplayCurrency, months: string[], currentMonth?: string,
 ): MonthPoint[] {
   const rev = new Map<string, number>()
   const exp = new Map<string, number>()
 
   for (const e of entries) {
     const mk = (e.pl_date || '').slice(0, 7)
-    const amount = Number(e.amount_usd) || 0
+    const amount = pickAmount(e, currency) ?? 0
     if (!amount) continue
     if (REVENUE_TYPES.includes(e.tx_type || '')) rev.set(mk, (rev.get(mk) || 0) + amount)
     else if (EXPENSE_TYPES.includes(e.tx_type || '')) exp.set(mk, (exp.get(mk) || 0) + Math.abs(amount))
@@ -234,7 +243,7 @@ export interface CostStructure {
   breakEven: number | null
   /** Variable cost as a fraction of the revenue it was measured against. */
   variableRatio: number | null
-  /** What is left of a marginal dollar after the variable costs, 0–1. */
+  /** What is left of a marginal dinar (or euro) after the variable costs, 0–1. */
   contributionMargin: number | null
 }
 
@@ -309,7 +318,7 @@ export function costStructure(
 export interface Driver {
   id: string
   label: string
-  /** What a move in this driver does to the result, in dollars. */
+  /** What a move in this driver does to the result, in the display currency. */
   effect: (pct: number) => number
 }
 
@@ -403,7 +412,8 @@ export interface Receivables {
 
 export interface OpenInvoice {
   due_date: string | null
-  remaining_usd: number | null
+  remaining_rsd: number | null
+  remaining_eur?: number | null
   type?: string | null
 }
 
@@ -427,14 +437,14 @@ const daysBetween = (a: string, b: string): number =>
  * nobody checks.
  */
 export function receivables(
-  invoices: OpenInvoice[], today: string, revenueInWindow: number, overDays = 90,
+  invoices: OpenInvoice[], currency: DisplayCurrency, today: string, revenueInWindow: number, overDays = 90,
 ): Receivables {
   const buckets: AgeingBucket[] = AGEING_BUCKETS.map(b => ({ ...b, amount: 0, count: 0 }))
   let total = 0
   let overdue = 0
 
   for (const inv of invoices) {
-    const amount = Number(inv.remaining_usd) || 0
+    const amount = pickAmount(inv, currency, 'remaining') ?? 0
     if (amount <= 0) continue
     total += amount
 

@@ -12,15 +12,15 @@
 // All four MUST total the same. Rows missing a level are placed under an
 // explicit Unassigned node rather than dropped, so the totals always tie and
 // the unclassified amount is a visible item to fix instead of a silent
-// shortfall. On 2026 data that is $146k sitting outside the department branch.
+// shortfall.
 //
 // ── Why a row is a set of contributions and not a path ──────────────────────
 //
 // The first two branches FILE a row: one invoice belongs to one category and
 // one department, so its whole amount goes down one path. The last two
-// ALLOCATE it: a $1,000 bill can be 60% Social Growth and 40% Aimfox, and
-// there is no single path it belongs to. Forcing it down one would either
-// hand a stream money it did not spend or drop $400 on the floor.
+// ALLOCATE it: a 100,000 RSD bill can be 60% Social Growth and 40% Aimfox,
+// and there is no single path it belongs to. Forcing it down one would either
+// hand a stream money it did not spend or drop 40,000 RSD on the floor.
 //
 // So `contributionsFor` returns a LIST — one entry for the filing branches,
 // up to two for the allocating ones — and the tree adds each of them where it
@@ -33,8 +33,16 @@
 //
 // `side` exists so the revenue half can be added later without reshaping any
 // of this; today every caller passes 'expense'.
+//
+// ── Which figure ────────────────────────────────────────────────────────────
+//
+// Every row carries amount_rsd and amount_eur. The tree sums the one for the
+// viewer's display currency (`currency`, passed in by the page) — never a
+// total converted afterwards at one rate. A row with no EUR figure counts as
+// zero in the EUR view.
 
-import { allocAmount, opexAlloc, type AllocEntry } from './allocation'
+import { allocAmount, opexAlloc, bookAmount, type AllocEntry } from './allocation'
+import type { DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 export type Branch = 'pl' | 'department' | 'stream' | 'type'
 export type Side = 'expense' | 'revenue'
@@ -70,7 +78,8 @@ export const BRANCH_COLUMNS: Record<Branch, string> = {
 export interface PlEntry extends AllocEntry {
   id?: string
   tx_type?: string | null
-  amount_usd: number | null
+  amount_rsd: number | null
+  amount_eur?: number | null
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
@@ -134,13 +143,14 @@ export function rowsFor(entries: PlEntry[], side: Side): PlEntry[] {
  * can be several hundred rows. Equal dates fall back to the larger amount, so
  * the order is stable rather than whatever the source happened to return.
  */
-export function byDateDesc<T extends { date?: string | null; pl_date?: string | null; amountUsd?: number | null; amount_usd?: number | null }>(
+export function byDateDesc<T extends { date?: string | null; pl_date?: string | null; amount_rsd?: number | null }>(
   a: T, b: T,
 ): number {
   const da = a.date ?? a.pl_date ?? ''
   const db = b.date ?? b.pl_date ?? ''
   if (da !== db) return db < da ? -1 : 1
-  return Math.abs(b.amountUsd ?? b.amount_usd ?? 0) - Math.abs(a.amountUsd ?? a.amount_usd ?? 0)
+  // The book figure, so the order is the same whichever currency is on screen.
+  return Math.abs(b.amount_rsd ?? 0) - Math.abs(a.amount_rsd ?? 0)
 }
 
 const SEP = ' › '            // › — will not occur inside a category name
@@ -175,63 +185,63 @@ export interface Contribution {
  * The filing branches give one contribution carrying the whole row. The
  * allocating ones give two, whose amounts come from services/allocation.ts —
  * the same functions the old P&L page's two analytic columns were printed
- * from, including the currency factor that stops a 220,996 RSD split being
- * read as dollars.
+ * from, including the currency factor that stops a 1,886 EUR split being
+ * read as dinars.
  *
  * `Math.abs` for the same reason the rest of this file uses it: an expense is
  * shown as a positive cost whichever sign it was stored with. Applied to each
- * share rather than to the row, so a 60/40 split of an $800 credit note is
- * $480 and $320 — and still adds back to $800.
+ * share rather than to the row, so a 60/40 split of an 80,000 RSD credit note
+ * is 48,000 and 32,000 — and still adds back to 80,000.
  *
  * Zero-value contributions are returned rather than filtered: `buildTree`
  * skips them, and a caller asking "does this row touch Aimfox" gets a truthful
  * zero instead of a missing entry it has to interpret.
  */
-export function contributionsFor(e: PlEntry, branch: Branch): Contribution[] {
-  const whole = Math.abs(e.amount_usd || 0)
+export function contributionsFor(e: PlEntry, branch: Branch, currency: DisplayCurrency): Contribution[] {
+  const whole = Math.abs(bookAmount(e, currency))
 
   if (branch === 'pl' || branch === 'department') {
     return [{ path: pathFor(e, branch), amount: whole }]
   }
 
   // Both allocated branches then break down the same way the P&L itself did:
-  // by cost category. "Aimfox spent $12k" is a fact; "Aimfox spent $12k, of
-  // which $9k on ads" is the one that can be acted on.
+  // by cost category. "Aimfox spent 1.2m" is a fact; "Aimfox spent 1.2m, of
+  // which 900k on ads" is the one that can be acted on.
   const tail = [norm(e.pl_category), norm(e.pl_subcategory)]
 
   if (branch === 'stream') {
     return [
-      { path: [SOCIAL_GROWTH, ...tail], amount: Math.abs(allocAmount(e, 'sg')) },
-      { path: [AIMFOX, ...tail], amount: Math.abs(allocAmount(e, 'af')) },
+      { path: [SOCIAL_GROWTH, ...tail], amount: Math.abs(allocAmount(e, 'sg', currency)) },
+      { path: [AIMFOX, ...tail], amount: Math.abs(allocAmount(e, 'af', currency)) },
     ]
   }
   return [
-    { path: [OPEX, ...tail], amount: Math.abs(opexAlloc(e, 'opex')) },
-    { path: [PERFORMANCE, ...tail], amount: Math.abs(opexAlloc(e, 'performance')) },
+    { path: [OPEX, ...tail], amount: Math.abs(opexAlloc(e, 'opex', currency)) },
+    { path: [PERFORMANCE, ...tail], amount: Math.abs(opexAlloc(e, 'performance', currency)) },
   ]
 }
 
 /** Whether a row puts any money under `path` — the drill-down's predicate. */
-export function contributesTo(e: PlEntry, branch: Branch, path: string[]): boolean {
-  return contributionsFor(e, branch).some(
+export function contributesTo(e: PlEntry, branch: Branch, path: string[], currency: DisplayCurrency): boolean {
+  return contributionsFor(e, branch, currency).some(
     c => c.amount > 0 && path.every((seg, i) => c.path[i] === seg))
 }
 
 /** How much of a row sits under `path`. Equals the row in a filing branch. */
-export function contributionTo(e: PlEntry, branch: Branch, path: string[]): number {
-  return contributionsFor(e, branch)
+export function contributionTo(e: PlEntry, branch: Branch, path: string[], currency: DisplayCurrency): number {
+  return contributionsFor(e, branch, currency)
     .filter(c => path.every((seg, i) => c.path[i] === seg))
     .reduce((sum, c) => sum + c.amount, 0)
 }
 
-export function buildTree(entries: PlEntry[], branch: Branch): TreeNode[] {
+export function buildTree(entries: PlEntry[], branch: Branch, currency: DisplayCurrency): TreeNode[] {
   const roots: TreeNode[] = []
   const index = new Map<string, TreeNode>()
 
   for (const e of entries) {
     const month = (e.pl_date || '').slice(0, 7)
 
-    for (const { path, amount } of contributionsFor(e, branch)) {
+    for (const { path, amount } of contributionsFor(e, branch, currency)) {
       if (!amount) continue
 
       let siblings = roots

@@ -21,6 +21,8 @@
 // Financial Expenses / Interest is left alone — it is still where interest that
 // is not a credit instalment belongs.
 
+import { fmtMoney } from '../utils/formatters'
+
 export interface CreditClassification {
   pl_category: string
   pl_subcategory: string
@@ -66,11 +68,16 @@ export function creditNote(
   leg: 'principal' | 'interest',
   creditName: string,
   installmentNo: number | string,
-  eurAmount: number,
+  amount: number,
   userNote?: string | null,
+  /**
+   * The credit's own currency — what `amount` is in. A loan may be indexed to
+   * EUR or taken in RSD; the note names which rather than assuming euros.
+   */
+  currency: string = 'EUR',
 ): string {
   const label = leg === 'principal' ? 'Principal' : 'Interest'
-  const detail = `${label} — ${creditName} #${installmentNo} (€${eurAmount.toFixed(2)})`
+  const detail = `${label} — ${creditName} #${installmentNo} (${fmtMoney(amount, currency)})`
   const typed = (userNote || '').trim()
   return typed ? `${detail} | bank line: ${typed}` : detail
 }

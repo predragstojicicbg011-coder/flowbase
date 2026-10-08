@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react'
 import SearchableSelect from './SearchableSelect'
 import SplitScriptBuilder, { type ClassificationOptions } from './SplitScriptBuilder'
 import { DIALOG } from './dialogTheme'
+import { fmtMoney, fmtNum } from '../utils/formatters'
 import {
   emptyLine, splitInHalf, sumOf, remainderOf, isBalanced, whySplitNotSavable,
   absorbRemainder, applyScript, scriptMatching,
@@ -30,7 +31,7 @@ import {
 // button that puts it on a line rather than leaving the person to subtract.
 
 export interface SplitEditorProps {
-  parent: SplitParent & { currency?: string }
+  parent: SplitParent
   lines: SplitLine[]
   onChange: (lines: SplitLine[]) => void
   scripts: ScriptLike[]
@@ -51,9 +52,8 @@ export interface SplitEditorProps {
   onScriptsChanged?: () => void
 }
 
-const money = (n: number, currency?: string) =>
-  n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  + (currency ? ` ${currency}` : '')
+const money = (n: number, currency?: string | null) =>
+  currency ? fmtMoney(n, currency) : fmtNum(n)
 
 export default function SplitEditor({
   parent, lines, onChange, scripts, disabled = false, hint,

@@ -7,12 +7,12 @@ import {
 type Row = {
   id: string
   pl_date: string
-  amount_usd: number | null
+  amount_rsd: number | null
   expense_description?: string | null
 }
 
-const row = (id: string, pl_date: string, amount_usd: number | null, expense_description?: string): Row =>
-  ({ id, pl_date, amount_usd, expense_description })
+const row = (id: string, pl_date: string, amount_rsd: number | null, expense_description?: string): Row =>
+  ({ id, pl_date, amount_rsd, expense_description })
 
 describe('the month a row belongs to', () => {
   it('reads pl_date or date, whichever the row carries', () => {
@@ -54,24 +54,24 @@ describe('grouping a drill-down into months', () => {
   ]
 
   it('puts the newest month first', () => {
-    expect(groupByMonth(rows).map(g => g.key)).toEqual(['2026-09', '2026-08', '2026-07'])
+    expect(groupByMonth(rows, 'RSD').map(g => g.key)).toEqual(['2026-09', '2026-08', '2026-07'])
   })
 
   it('labels, counts and totals each month', () => {
-    const [sep] = groupByMonth(rows)
+    const [sep] = groupByMonth(rows, 'RSD')
     expect(sep.label).toBe('September 2026')
     expect(sep.count).toBe(3)
     expect(sep.total).toBe(325)
   })
 
   it('orders the rows inside a month newest first', () => {
-    const [sep] = groupByMonth(rows)
+    const [sep] = groupByMonth(rows, 'RSD')
     expect(sep.rows.map(r => r.id)).toEqual(['e', 'b', 'c'])
   })
 
   it('does not reorder the caller array', () => {
     const before = rows.map(r => r.id)
-    groupByMonth(rows)
+    groupByMonth(rows, 'RSD')
     expect(rows.map(r => r.id)).toEqual(before)
   })
 
@@ -79,43 +79,56 @@ describe('grouping a drill-down into months', () => {
     // The property the whole design rests on: every row lands in exactly one
     // month, so summing the month headers reproduces the figure the modal's
     // own header shows. Nothing here is fetched, capped or sampled.
-    const groups = groupByMonth(rows)
+    const groups = groupByMonth(rows, 'RSD')
     const summed = groups.reduce((s, g) => s + g.total, 0)
     const counted = groups.reduce((s, g) => s + g.count, 0)
-    expect(summed).toBe(rows.reduce((s, r) => s + (r.amount_usd || 0), 0))
+    expect(summed).toBe(rows.reduce((s, r) => s + (r.amount_rsd || 0), 0))
     expect(counted).toBe(rows.length)
   })
 
   it('keeps undated rows in a trailing group rather than dropping them', () => {
-    const groups = groupByMonth([...rows, row('x', '', 999)])
+    const groups = groupByMonth([...rows, row('x', '', 999)], 'RSD')
     expect(groups[groups.length - 1].key).toBe('')
     expect(groups[groups.length - 1].label).toBe('Undated')
     expect(groups.reduce((s, g) => s + g.count, 0)).toBe(6)
   })
 
   it('totals magnitudes, the same arithmetic the tree above it uses', () => {
-    // `buildTree` sums `Math.abs(amount_usd)`, so the node total in the modal
+    // `buildTree` sums the magnitude of each book figure, so the node total in the modal
     // header is a total of magnitudes. A month that netted a refund off
     // against the spend around it would print less than the header and the
     // months would stop adding up to it.
     const [g] = groupByMonth([
       row('a', '2026-09-01', 300),
       row('b', '2026-09-02', -100),
-    ])
+    ], 'RSD')
     expect(g.total).toBe(400)
     expect(g.count).toBe(2)
   })
 
   it('treats a missing amount as zero rather than NaN', () => {
-    const [g] = groupByMonth([row('a', '2026-09-01', null), row('b', '2026-09-02', 10)])
+    const [g] = groupByMonth([row('a', '2026-09-01', null), row('b', '2026-09-02', 10)], 'RSD')
     expect(g.total).toBe(10)
     expect(g.count).toBe(2)
   })
 
-  it('reads the amount under either name', () => {
-    expect(amountOf({ amount_usd: 5 })).toBe(5)
-    expect(amountOf({ amountUsd: 7 })).toBe(7)
-    expect(amountOf({})).toBe(0)
+  it('reads the figure for the currency asked for', () => {
+    expect(amountOf({ amount_rsd: 586, amount_eur: 5 }, 'RSD')).toBe(586)
+    expect(amountOf({ amount_rsd: 586, amount_eur: 5 }, 'EUR')).toBe(5)
+    expect(amountOf({ amount_rsd: 586 }, 'EUR')).toBe(0)
+    expect(amountOf({}, 'RSD')).toBe(0)
+  })
+
+  it('totals each month in EUR from amount_eur when the viewer reads EUR', () => {
+    const groups = groupByMonth([
+      { pl_date: '2026-09-01', amount_rsd: 11720, amount_eur: 100 },
+      { pl_date: '2026-09-15', amount_rsd: 23460, amount_eur: 200 },
+      { pl_date: '2026-08-15', amount_rsd: 5000, amount_eur: null },
+    ], 'EUR')
+    expect(groups.map(g => [g.key, g.count, g.total])).toEqual([
+      ['2026-09', 2, 300],
+      ['2026-08', 1, 0],
+    ])
   })
 
   it('handles the owner case: one big node spread over a year', () => {
@@ -125,7 +138,7 @@ describe('grouping a drill-down into months', () => {
         many.push(row(`${m}-${i}`, `2026-${String(m).padStart(2, '0')}-0${(i % 9) + 1}`, 100))
       }
     }
-    const groups = groupByMonth(many)
+    const groups = groupByMonth(many, 'RSD')
     expect(groups).toHaveLength(12)
     expect(groups[0].key).toBe('2026-12')
     expect(groups.reduce((s, g) => s + g.count, 0)).toBe(1140)
@@ -159,9 +172,22 @@ describe('reading what was typed into the filter box', () => {
     expect(parseFilter('=50').amount).toMatchObject({ op: '=', value: 50 })
   })
 
-  it('ignores the dollar sign and the thousands separators', () => {
-    expect(parseFilter('$1,200').amount).toMatchObject({ op: '=', value: 1200 })
-    expect(parseFilter('> $1,200').amount).toMatchObject({ op: '>', value: 1200 })
+  it('ignores the thousands separators and a trailing currency code', () => {
+    expect(parseFilter('1,200').amount).toMatchObject({ op: '=', value: 1200 })
+    expect(parseFilter('1.200').amount).toMatchObject({ op: '=', value: 1200 })
+    expect(parseFilter('> 1.200 RSD').amount).toMatchObject({ op: '>', value: 1200 })
+    expect(parseFilter('1 200 eur').amount).toMatchObject({ op: '=', value: 1200 })
+  })
+
+  it('reads the app’s own Serbian notation back, decimals and all', () => {
+    expect(parseFilter('1.234,56').amount).toEqual({ op: '=', value: 1234.56, tolerance: 0.005 })
+    expect(parseFilter('1.234.567,8').amount).toMatchObject({ value: 1234567.8 })
+    expect(parseFilter('500,00').amount).toEqual({ op: '=', value: 500, tolerance: 0.005 })
+    expect(parseFilter('1,234.56').amount).toMatchObject({ value: 1234.56 })
+  })
+
+  it('no longer reads a dollar sign as part of an amount', () => {
+    expect(parseFilter('$1,200').kind).toBe('text')
   })
 
   it('reads anything else as text, lower-cased', () => {
@@ -232,26 +258,26 @@ describe('matching a row', () => {
   const detail = { title: 'Slack Technologies', note: 'renewed annually', path: 'Opex / Eng' }
 
   it('lets every row through when nothing is typed', () => {
-    expect(rowMatches(r, undefined, NO_FILTER)).toBe(true)
+    expect(rowMatches(r, undefined, NO_FILTER, 'RSD')).toBe(true)
   })
 
   it('searches the description without any detail having been fetched', () => {
-    expect(rowMatches(r, undefined, parseFilter('subscriptions'))).toBe(true)
+    expect(rowMatches(r, undefined, parseFilter('subscriptions'), 'RSD')).toBe(true)
   })
 
   it('searches the vendor name, which only the fetched detail carries', () => {
-    expect(rowMatches(r, undefined, parseFilter('slack'))).toBe(false)
-    expect(rowMatches(r, detail, parseFilter('slack'))).toBe(true)
+    expect(rowMatches(r, undefined, parseFilter('slack'), 'RSD')).toBe(false)
+    expect(rowMatches(r, detail, parseFilter('slack'), 'RSD')).toBe(true)
   })
 
   it('searches the note and the classification path too', () => {
-    expect(rowMatches(r, detail, parseFilter('annually'))).toBe(true)
-    expect(rowMatches(r, detail, parseFilter('eng'))).toBe(true)
+    expect(rowMatches(r, detail, parseFilter('annually'), 'RSD')).toBe(true)
+    expect(rowMatches(r, detail, parseFilter('eng'), 'RSD')).toBe(true)
   })
 
   it('never consults the detail for an amount filter', () => {
     const boom = () => { throw new Error('detail must not be needed to filter by amount') }
-    expect(filterRows([r], parseFilter('250'), boom as any)).toEqual([r])
+    expect(filterRows([r], parseFilter('250'), 'RSD', boom as any)).toEqual([r])
   })
 })
 
@@ -266,11 +292,11 @@ describe('filtering a row set', () => {
   }
 
   it('returns the same array when nothing is typed', () => {
-    expect(filterRows(rows, NO_FILTER)).toBe(rows)
+    expect(filterRows(rows, NO_FILTER, 'RSD')).toBe(rows)
   })
 
   it('keeps month counts and totals honest after an amount filter', () => {
-    const groups = groupByMonth(filterRows(rows, parseFilter('250')))
+    const groups = groupByMonth(filterRows(rows, parseFilter('250'), 'RSD'), 'RSD')
     expect(groups.map(g => [g.key, g.count, g.total])).toEqual([
       ['2026-09', 1, 250],
       ['2026-08', 1, 250],
@@ -279,15 +305,15 @@ describe('filtering a row set', () => {
 
   it('finds a vendor once its month detail has been loaded', () => {
     const detailFor = (r: Row) => byId[r.id]
-    expect(filterRows(rows, parseFilter('slack'), detailFor).map(r => r.id)).toEqual(['a'])
+    expect(filterRows(rows, parseFilter('slack'), 'RSD', detailFor).map(r => r.id)).toEqual(['a'])
   })
 
   it('finds nothing for a vendor whose month has not been loaded', () => {
     // Exactly why the component loads every month before claiming to search:
     // this is what a half-loaded text search silently looks like.
     const partial = (r: Row) => (r.id === 'b' ? byId[r.id] : undefined)
-    expect(filterRows(rows, parseFilter('slack'), partial)).toEqual([])
-    expect(filterRows(rows, parseFilter('aws'), partial).map(r => r.id)).toEqual(['b'])
+    expect(filterRows(rows, parseFilter('slack'), 'RSD', partial)).toEqual([])
+    expect(filterRows(rows, parseFilter('aws'), 'RSD', partial).map(r => r.id)).toEqual(['b'])
   })
 })
 
@@ -297,7 +323,7 @@ describe('summarising what matched', () => {
       row('a', '2026-09-14', 250),
       row('b', '2026-09-01', 50),
       row('c', '2026-07-09', 100),
-    ])
+    ], 'RSD')
     expect(summarise(groups)).toEqual({ months: 2, count: 3, total: 400 })
   })
 
@@ -307,7 +333,7 @@ describe('summarising what matched', () => {
 
   it('does not count a month that filtered down to nothing', () => {
     const empty: ParsedFilter = parseFilter('99999')
-    expect(summarise(groupByMonth(filterRows([row('a', '2026-09-14', 250)], empty))))
+    expect(summarise(groupByMonth(filterRows([row('a', '2026-09-14', 250)], empty, 'RSD'), 'RSD')))
       .toEqual({ months: 0, count: 0, total: 0 })
   })
 })
