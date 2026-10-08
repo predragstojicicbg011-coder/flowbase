@@ -347,7 +347,7 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
   onChanged: () => void
 }) {
   const [draft, setDraft] = useState({
-    valid_from: '', currency: 'EUR', net_amount: '', service_years: '', note: '',
+    valid_from: '', currency: 'RSD', net_amount: '', service_years: '', note: '',
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -364,7 +364,7 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
    */
   const [editing, setEditing] = useState<ContractRow | null>(null)
   const [edit, setEdit] = useState({
-    valid_from: '', valid_to: '', currency: 'EUR', net_amount: '',
+    valid_from: '', valid_to: '', currency: 'RSD', net_amount: '',
     service_years: '', note: '',
   })
 
@@ -481,7 +481,7 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
     }
 
     setBusy(false)
-    setDraft({ valid_from: '', currency: 'EUR', net_amount: '', service_years: '', note: '' })
+    setDraft({ valid_from: '', currency: 'RSD', net_amount: '', service_years: '', note: '' })
     onChanged()
   }
 
@@ -590,8 +590,8 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
             <Field label="Currency">
               <select style={s.input} value={edit.currency}
                 onChange={e => setEdit({ ...edit, currency: e.target.value })}>
-                <option value="EUR">EUR</option>
                 <option value="RSD">RSD</option>
+                <option value="EUR">EUR</option>
                 {/* A payroll converts contract terms at the EUR rate only; USD stays for a term written before. */}
 
                 {edit.currency === 'USD' && <option value="USD">USD</option>}
@@ -640,8 +640,8 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
         <Field label="Currency">
           <select style={s.input} value={draft.currency}
             onChange={e => setDraft({ ...draft, currency: e.target.value })}>
-            <option value="EUR">EUR</option>
             <option value="RSD">RSD</option>
+            <option value="EUR">EUR</option>
             {/* A payroll converts contract terms at the EUR rate only; USD stays for a term written before. */}
 
             {draft.currency === 'USD' && <option value="USD">USD</option>}

@@ -36,23 +36,27 @@ import { type InvoiceMoney } from './invoiceLinks'
 import { partBookAmounts, partFromRsd, round2 } from './bookAmounts'
 
 /**
- * Under this much left, a bill is settled: one para, the floor of the rule.
+ * The floor of the rule: under this much left, in any currency, a bill is
+ * settled.
  */
 export const CLOSED_WITHIN = 0.01
 
+/** How much a bill may be left short and still count as paid, in dinars. */
+export const PAID_WITHIN_RSD = 1
+
 /**
  * The tolerance for one bill, in its own currency — the same expression
- * `v_invoice_status` uses: one para (0.01 RSD) at the invoice's own booked
- * rate, `amount / amount_rsd`, never less than 0.01 of the invoice's currency.
+ * `v_invoice_status` uses: one dinar at the invoice's own booked rate,
+ * `1 * amount / amount_rsd`, never less than 0.01 of the invoice's currency.
  *
- * For a dinar or euro bill that is simply 0.01. It is written out so the
- * application and the view cannot disagree about any bill.
+ * A dinar bill may be 1.00 RSD short, a euro bill 0.01 EUR. It is written
+ * out so the application and the view cannot disagree about any bill.
  */
 export function toleranceFor(amount: number, amountRsd?: number | null): number {
   if (!(amount > 0) || !(typeof amountRsd === 'number') || !(amountRsd > 0)) {
     return CLOSED_WITHIN
   }
-  return Math.max(CLOSED_WITHIN, round2((CLOSED_WITHIN * amount) / amountRsd))
+  return Math.max(CLOSED_WITHIN, round2((PAID_WITHIN_RSD * amount) / amountRsd))
 }
 
 export type SettledStatus = 'paid' | 'partial' | 'unpaid'

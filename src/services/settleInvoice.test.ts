@@ -264,8 +264,8 @@ describe('what the ledger says about a bill', () => {
 // amount_rsd, 2)). For a dinar, euro or dollar bill that is 0.01.
 
 describe('toleranceFor', () => {
-  it('is a para on a dinar bill', () => {
-    expect(toleranceFor(505023.01, 505023.01)).toBe(0.01)
+  it('is a dinar on a dinar bill', () => {
+    expect(toleranceFor(505023.01, 505023.01)).toBe(1)
   })
 
   it('is a cent on a euro or dollar bill', () => {
@@ -273,9 +273,9 @@ describe('toleranceFor', () => {
     expect(toleranceFor(1200, 120600)).toBe(0.01)
   })
 
-  it('follows the view where a unit is worth less than a para', () => {
+  it('follows the view where a unit is worth less than a dinar', () => {
     // Not a currency this ledger takes; it shows the expression is the view's.
-    expect(toleranceFor(1000, 10)).toBe(1)
+    expect(toleranceFor(1000, 10)).toBe(100)
   })
 
   it('falls back to a para when there is no dinar figure to size it with', () => {
@@ -286,15 +286,24 @@ describe('toleranceFor', () => {
   })
 })
 
-describe('settling within a para', () => {
+describe('settling within a dinar', () => {
   const RSD = { amount: 505023.01, rsd: 505023.01 }
 
-  it('does not settle a dinar bill that is 60 para short', () => {
-    expect(settledStatus(RSD.amount, RSD.amount - 0.60, RSD.rsd)).toBe('partial')
+  it('settles a dinar bill that is 60 para short', () => {
+    expect(settledStatus(RSD.amount, RSD.amount - 0.60, RSD.rsd)).toBe('paid')
   })
 
-  it('settles one that is a para short', () => {
-    expect(settledStatus(RSD.amount, RSD.amount - 0.01, RSD.rsd)).toBe('paid')
+  it('settles one that is exactly a dinar short', () => {
+    expect(settledStatus(RSD.amount, RSD.amount - 1, RSD.rsd)).toBe('paid')
+  })
+
+  it('does not settle one that is a dinar and a para short', () => {
+    expect(settledStatus(RSD.amount, RSD.amount - 1.01, RSD.rsd)).toBe('partial')
+  })
+
+  it('holds a euro bill to a cent', () => {
+    expect(settledStatus(1200, 1199.99, 140850)).toBe('paid')
+    expect(settledStatus(1200, 1199.98, 140850)).toBe('partial')
   })
 
   it('still settles an exact payment, and an overpayment', () => {
