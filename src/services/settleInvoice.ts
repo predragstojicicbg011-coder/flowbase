@@ -61,6 +61,11 @@ export function toleranceFor(amount: number, amountRsd?: number | null): number 
 
 export type SettledStatus = 'paid' | 'partial' | 'unpaid'
 
+const positive = (n: unknown): number => {
+  const v = typeof n === 'string' ? Number(n) : n
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0
+}
+
 /**
  * What the ledger says about a bill, given everything allocated against it.
  *
@@ -72,6 +77,11 @@ export type SettledStatus = 'paid' | 'partial' | 'unpaid'
  *
  * `amount` and `allocated` are both in the invoice's own currency. Nothing
  * here converts anything; see the note at the top of this file for why.
+ *
+ * `advanceDeducted` (a revenue billing's `advance_deducted`, same currency)
+ * counts as settled, exactly as v_invoice_status counts it since
+ * 20261008180000: within tolerance of `amount` is paid, even with no money
+ * received; short of it with no money received is unpaid, not partial.
  *
  * ONE PARA, NOT A TENTH OF A PERCENT. The old rule scaled the slack with the
  * bill, which is the wrong shape for money twice over:
@@ -85,19 +95,21 @@ export type SettledStatus = 'paid' | 'partial' | 'unpaid'
  * An absolute para works at both ends, and it is what the writes now land on.
  */
 export function settledStatus(
-  amount: number, allocated: number, amountRsd?: number | null,
+  amount: number, allocated: number, amountRsd?: number | null, advanceDeducted = 0,
 ): SettledStatus {
-  if (!(allocated > 0)) return 'unpaid'
+  const advance = positive(advanceDeducted)
+  const paid = positive(allocated)
+  if (!(paid + advance > 0)) return 'unpaid'
   // Rounded to the para BEFORE the comparison. `220.49 - 0.01` is
   // 220.48000000000002 in binary floating point, so a bill settled to the
   // para read `partial` — a tolerance that cannot survive its own subtraction
   // is worse than none.
-  const short = round2((amount || 0) - allocated)
-  return short <= toleranceFor(amount, amountRsd) ? 'paid' : 'partial'
+  const short = round2((amount || 0) - (paid + advance))
+  if (short <= toleranceFor(amount, amountRsd)) return 'paid'
+  // An advance deducted on a billing is not money from the investor: until
+  // something is paid against what is left, the billing is unpaid.
+  return paid > 0 ? 'partial' : 'unpaid'
 }
-
-const positive = (n: unknown): number =>
-  typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0
 
 export interface InvoiceSettlement extends InvoiceMoney {
   /**
@@ -109,13 +121,20 @@ export interface InvoiceSettlement extends InvoiceMoney {
    * outstanding figure that disagrees with the rule it is judged against.
    */
   paid_amount?: number | null
+  /**
+   * The part of a revenue billing covered by the project's advance, in the
+   * bill's own currency (`invoices.advance_deducted`). Settled as surely as
+   * a payment: the investor owes `amount − advance_deducted`.
+   */
+  advance_deducted?: number | string | null
 }
 
 /** What the bill is still owed, in the currency it was written in. */
 export function outstandingOwn(invoice: InvoiceSettlement): number {
   const amount = positive(invoice.amount)
   const paid = positive(invoice.paid_amount)
-  return round2(Math.max(0, amount - paid))
+  const advance = positive(invoice.advance_deducted)
+  return round2(Math.max(0, amount - advance - paid))
 }
 
 /**

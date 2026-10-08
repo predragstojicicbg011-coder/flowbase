@@ -8,8 +8,9 @@
 //   A project is a construction site (kind 'construction', "gradilište") or a
 //   rental building (kind 'rental', "objekat u zakupu").
 //
-//   `project_id` sits on transactions, invoices, pl_splits, revenue_entries,
-//   budget_adjustments (and the unused budget_entries). It is ONE project, or
+//   `project_id` sits on transactions, invoices, pl_splits,
+//   budget_adjustments (and the unused budget_entries), and revenue_plan and
+//   rental_leases point at a project (20261008180000_accrual_revenue.sql). It is ONE project, or
 //   null. Null means company overhead — "Opšti troškovi" (OVERHEAD_LABEL).
 //   A document shared by several projects is split with pl_splits, one line
 //   per project; the split line's project is what counts, not the parent's.
@@ -67,6 +68,11 @@ export interface Project {
   contract_date: string | null
   contract_value_rsd: number | null
   contract_value_eur: number | null
+  /**
+   * The investor's payment term in days (default 45). Planned billings reach
+   * the cash forecast this many days after their month — see revenuePlan.ts.
+   */
+  payment_days: number
   active: boolean
   note: string | null
   created_at?: string
@@ -109,9 +115,19 @@ export function normaliseProject(r: any): Project {
     contract_date: r.contract_date ?? null,
     contract_value_rsd: num(r.contract_value_rsd),
     contract_value_eur: num(r.contract_value_eur),
+    payment_days: normalisePaymentDays(r.payment_days),
     active: r.active !== false,
     note: r.note ?? null,
   }
+}
+
+/** The default payment term, as the column default says. */
+export const DEFAULT_PAYMENT_DAYS = 45
+
+/** A stored or typed payment term; anything unusable is the default. */
+export function normalisePaymentDays(v: unknown): number {
+  const n = num(v)
+  return n !== null && Number.isInteger(n) && n >= 0 && n <= 365 ? n : DEFAULT_PAYMENT_DAYS
 }
 
 // ── Labels ──────────────────────────────────────────────────────────────────
@@ -165,6 +181,8 @@ export interface ProjectDraft {
   contract_currency: ContractCurrency
   /** yyyy-mm-dd; empty means "today" at save time. */
   contract_date: string
+  /** As typed; digits only. Empty means the default (45). */
+  payment_days: string
   active: boolean
   note: string
 }
@@ -172,7 +190,8 @@ export interface ProjectDraft {
 export function emptyDraft(): ProjectDraft {
   return {
     name: '', code: '', kind: 'construction', investor_partner_id: '',
-    contract_value: '', contract_currency: 'RSD', contract_date: '', active: true, note: '',
+    contract_value: '', contract_currency: 'RSD', contract_date: '', payment_days: String(DEFAULT_PAYMENT_DAYS),
+    active: true, note: '',
   }
 }
 
@@ -186,6 +205,7 @@ export function draftFromProject(p: Project): ProjectDraft {
     contract_value: p.contract_value === null ? '' : String(p.contract_value),
     contract_currency: p.contract_currency || 'RSD',
     contract_date: p.contract_date || '',
+    payment_days: String(p.payment_days ?? DEFAULT_PAYMENT_DAYS),
     active: p.active,
     note: p.note || '',
   }
@@ -248,6 +268,10 @@ export function validateProject(draft: ProjectDraft, existing: readonly Project[
   if (draft.contract_date && !/^\d{4}-\d{2}-\d{2}$/.test(draft.contract_date)) {
     return 'Datum ugovora nije ispravan.'
   }
+  const days = (draft.payment_days ?? '').trim()
+  if (days && (!/^\d+$/.test(days) || Number(days) > 365)) {
+    return 'Rok plaćanja mora biti ceo broj dana, od 0 do 365.'
+  }
   return null
 }
 
@@ -289,6 +313,7 @@ export function projectRow(
     contract_date: hasValue ? book!.contract_date : (draft.contract_date || null),
     contract_value_rsd: hasValue ? book!.contract_value_rsd : null,
     contract_value_eur: hasValue ? book!.contract_value_eur : null,
+    payment_days: normalisePaymentDays((draft.payment_days ?? '').trim() || DEFAULT_PAYMENT_DAYS),
     active: draft.active,
     note: draft.note.trim() || null,
     updated_at: new Date().toISOString(),

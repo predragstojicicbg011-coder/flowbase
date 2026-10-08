@@ -6,7 +6,7 @@ jest.mock('../supabase', () => ({ supabase: {} }))
 const stored: Project = {
   id: 'p1', company_id: 'c1', name: 'Zemun', code: null, kind: 'construction', investor_partner_id: 'i',
   contract_value: 100000, contract_currency: 'EUR', contract_date: '2026-03-01',
-  contract_value_rsd: 11720000, contract_value_eur: 100000, active: true, note: null,
+  contract_value_rsd: 11720000, contract_value_eur: 100000, payment_days: 45, active: true, note: null,
 }
 
 describe('bookStillValid — a re-save does not re-book the contract', () => {

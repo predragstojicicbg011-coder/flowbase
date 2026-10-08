@@ -315,3 +315,20 @@ describe('settling within a dinar', () => {
     expect(settledStatus(RSD.amount, 0, RSD.rsd)).toBe('unpaid')
   })
 })
+
+describe('a billing that deducts the advance', () => {
+  it('counts the deduction as settled, as v_invoice_status does', () => {
+    expect(outstandingOwn({ amount: 1000, paid_amount: 300, advance_deducted: 200 })).toBe(500)
+    expect(outstandingOwn({ amount: 1000, paid_amount: 0, advance_deducted: '1000' })).toBe(0)
+  })
+
+  it('is paid when advance and payments cover it, unpaid while no money came', () => {
+    expect(settledStatus(1000, 800, 117200, 200)).toBe('paid')
+    expect(settledStatus(1000, 0, 117200, 1000)).toBe('paid')
+    expect(settledStatus(1000, 0, 117200, 200)).toBe('unpaid')
+    expect(settledStatus(1000, 100, 117200, 200)).toBe('partial')
+    // Without a deduction, the rule is what it was.
+    expect(settledStatus(1000, 0, 117200)).toBe('unpaid')
+    expect(settledStatus(1000, 999.99, 117200)).toBe('paid')
+  })
+})

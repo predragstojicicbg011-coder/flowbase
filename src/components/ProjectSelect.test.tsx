@@ -16,7 +16,7 @@ jest.mock('../supabase', () => {
 const p = (id: string, name: string, over: Partial<Project> = {}): Project => ({
   id, company_id: 'c1', name, code: null, kind: 'construction', investor_partner_id: null,
   contract_value: null, contract_currency: null, contract_date: null,
-  contract_value_rsd: null, contract_value_eur: null, active: true, note: null, ...over,
+  contract_value_rsd: null, contract_value_eur: null, payment_days: 45, active: true, note: null, ...over,
 })
 
 const projects = [

@@ -43,7 +43,9 @@ describe('revenue streams', () => {
   it('matches the CHECK the migration puts on the database', () => {
     const sql = fs.readFileSync(
       path.join(__dirname, '../../supabase/migrations/20261008170000_projects.sql'), 'utf8')
-    const check = sql.match(/add constraint revenue_entries_revenue_stream_check\s+check \(revenue_stream = any \(array\[([^\]]+)\]/)
+    // On invoices: revenue_entries, which carried the same CHECK, was dropped
+    // in 20261008180000.
+    const check = sql.match(/add constraint invoices_revenue_stream_check\s+check \(revenue_stream is null or revenue_stream = any \(array\[([^\]]+)\]/)
     expect(check).not.toBeNull()
     const values = check![1].split(',').map(s => s.trim().replace(/::text$/, '').replace(/^'|'$/g, ''))
     expect(values).toEqual([...REVENUE_STREAMS])

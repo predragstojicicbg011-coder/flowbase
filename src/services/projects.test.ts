@@ -17,7 +17,7 @@ jest.mock('./currencyService', () => {
 const project = (over: Partial<Project> = {}): Project => ({
   id: 'p1', company_id: 'c1', name: 'Novi Beograd A1', code: null, kind: 'construction',
   investor_partner_id: 'inv1', contract_value: null, contract_currency: null, contract_date: null,
-  contract_value_rsd: null, contract_value_eur: null, active: true, note: null, ...over,
+  contract_value_rsd: null, contract_value_eur: null, payment_days: 45, active: true, note: null, ...over,
 })
 
 const draft = (over: Partial<ProjectDraft> = {}): ProjectDraft => ({
@@ -179,7 +179,7 @@ describe('contract value', () => {
     expect(row).toMatchObject({
       company_id: 'c1', name: 'Zemun B2', code: null, kind: 'construction', investor_partner_id: 'inv1',
       contract_value: 100000, contract_currency: 'EUR', contract_date: '2026-10-08',
-      contract_value_rsd: 11720000, contract_value_eur: 100000, active: true, note: null,
+      contract_value_rsd: 11720000, contract_value_eur: 100000, payment_days: 45, active: true, note: null,
     })
 
     const bare = projectRow(draft({ kind: 'rental', investor_partner_id: '' }), 'c1', null)
@@ -197,7 +197,7 @@ describe('contract value', () => {
     const p = project({ code: 'Z2', contract_value: 2500.5, contract_currency: 'EUR', contract_date: '2026-01-15', note: 'n' })
     expect(draftFromProject(p)).toEqual({
       id: 'p1', name: 'Novi Beograd A1', code: 'Z2', kind: 'construction', investor_partner_id: 'inv1',
-      contract_value: '2500.5', contract_currency: 'EUR', contract_date: '2026-01-15', active: true, note: 'n',
+      contract_value: '2500.5', contract_currency: 'EUR', contract_date: '2026-01-15', payment_days: '45', active: true, note: 'n',
     })
   })
 })
@@ -280,5 +280,23 @@ describe('projectProfitability', () => {
   it('rounds to the cent after summing, not before', () => {
     const r = projectProfitability([row('a', 'revenue', 0.1, 0), row('a', 'revenue', 0.2, 0)], 'RSD', projects)
     expect(r.projects[0].revenue).toBe(0.3)
+  })
+})
+
+describe('payment term', () => {
+  it('defaults to 45 days and keeps a usable stored value', () => {
+    expect(normaliseProject({ ...project(), payment_days: undefined }).payment_days).toBe(45)
+    expect(normaliseProject({ ...project(), payment_days: '30' }).payment_days).toBe(30)
+    expect(normaliseProject({ ...project(), payment_days: -3 }).payment_days).toBe(45)
+    expect(emptyDraft().payment_days).toBe('45')
+    expect(draftFromProject(project({ payment_days: 60 })).payment_days).toBe('60')
+  })
+
+  it('validates and saves the typed term', () => {
+    expect(validateProject(draft({ payment_days: '400' }), [])).toMatch(/Rok plaćanja/)
+    expect(validateProject(draft({ payment_days: '4.5' }), [])).toMatch(/Rok plaćanja/)
+    expect(validateProject(draft({ payment_days: '60' }), [])).toBeNull()
+    expect(projectRow(draft({ payment_days: '60' }), 'c1', null).payment_days).toBe(60)
+    expect(projectRow(draft({ payment_days: '' }), 'c1', null).payment_days).toBe(45)
   })
 })

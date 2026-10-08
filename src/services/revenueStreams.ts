@@ -1,13 +1,13 @@
 // ─── Revenue streams: what kind of income a row is ──────────────────────────
 //
-// `revenue_stream` on transactions, invoices and revenue_entries CLASSIFIES
+// `revenue_stream` on transactions and invoices CLASSIFIES
 // income. It says nothing about who earned it — that is the project
 // (`project_id`, see ./projects.ts). Mintflow used this column for its two
 // businesses, Aimfox and Social Growth; MCFlow is one construction company,
 // so the list is the kinds of money a construction company takes in.
 //
 // The stored values are Serbian, because the UI is, and they are stable: a
-// database CHECK on all three tables (20261008170000_projects.sql) allows
+// database CHECK on both tables (20261008170000_projects.sql) allows
 // exactly REVENUE_STREAMS. Renaming one is a migration, not an edit here.
 //
 // This is the one list. TransactionDialog, InvoiceDialog, BankStatementDialog,
@@ -51,7 +51,8 @@ export function isRevenueStream(v: unknown): v is RevenueStream {
 
 /**
  * Mintflow's values, and the one each became. Both spellings Mintflow used
- * are here: the dialogs' labels and revenue_entries' lower-case codes.
+ * are here: the dialogs' labels and the lower-case codes of the old
+ * revenue_entries table (dropped in 20261008180000).
  * The migration applies the same mapping in SQL.
  */
 export const LEGACY_REVENUE_STREAMS: Readonly<Record<string, RevenueStream>> = {
