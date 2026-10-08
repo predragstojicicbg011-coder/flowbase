@@ -42,7 +42,7 @@ import { OVERHEAD_LABEL } from './projects'
 export type Branch = 'pl' | 'department' | 'project'
 export type Side = 'expense' | 'revenue'
 
-export const UNASSIGNED = 'Unassigned'
+export const UNASSIGNED = 'Nedodeljeno'
 
 /** What a project-branch root is called when the row names a project id the view gave no name for. */
 export const UNKNOWN_PROJECT = 'Nepoznat projekat'
@@ -50,16 +50,16 @@ export const UNKNOWN_PROJECT = 'Nepoznat projekat'
 export const BRANCHES: readonly Branch[] = ['pl', 'department', 'project']
 
 export const BRANCH_LABEL: Record<Branch, string> = {
-  pl: 'By P&L category',
-  department: 'By department',
-  project: 'By project',
+  pl: 'Po P&L kategoriji',
+  department: 'Po sektoru',
+  project: 'Po projektu',
 }
 
 /** Column heading over the tree's first column, per branch. */
 export const BRANCH_COLUMNS: Record<Branch, string> = {
-  pl: 'Category / sub-category',
-  department: 'Department / sub-category / description',
-  project: 'Project / category / sub-category',
+  pl: 'Kategorija / potkategorija',
+  department: 'Sektor / podsektor / opis',
+  project: 'Projekat / kategorija / potkategorija',
 }
 
 export interface PlEntry {

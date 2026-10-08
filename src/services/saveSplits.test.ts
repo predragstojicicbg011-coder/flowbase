@@ -99,7 +99,7 @@ describe('when it cannot be written', () => {
     const { client, calls } = fakeClient()
     const out = await saveSplits(client, 'invoice', 'inv-1', parent, [line(40000), line(70000)])
     expect(out.ok).toBe(false)
-    expect(out.message).toMatch(/not accounted for/)
+    expect(out.message).toMatch(/nije raspoređeno/)
     expect(calls).toHaveLength(0)
   })
 
@@ -123,7 +123,7 @@ describe('when it cannot be written', () => {
     const { client } = fakeClient({ delError: 'permission denied' })
     const out = await saveSplits(client, 'invoice', 'inv-1', parent, [line(40000), line(80000)])
     expect(out.ok).toBe(false)
-    expect(out.message).toMatch(/still carries the split it had/)
+    expect(out.message).toMatch(/Ostala je podela koju je imalo/)
   })
 
   /**
@@ -135,7 +135,7 @@ describe('when it cannot be written', () => {
     const { client } = fakeClient({ insError: 'violates check constraint' })
     const out = await saveSplits(client, 'invoice', 'inv-1', parent, [line(40000), line(80000)])
     expect(out.ok).toBe(false)
-    expect(out.message).toMatch(/booked as one expense/)
+    expect(out.message).toMatch(/knjiženo kao jedan trošak/)
   })
 
   /** A silent partial write is what a refused policy looks like from here. */
@@ -143,7 +143,7 @@ describe('when it cannot be written', () => {
     const { client } = fakeClient({ insRows: 1 })
     const out = await saveSplits(client, 'invoice', 'inv-1', parent, [line(40000), line(80000)])
     expect(out.ok).toBe(false)
-    expect(out.message).toMatch(/1 of 2 lines/)
+    expect(out.message).toMatch(/1 od 2 stavke/)
   })
 })
 

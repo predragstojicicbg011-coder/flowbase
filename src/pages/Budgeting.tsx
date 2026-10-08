@@ -3,6 +3,8 @@ import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { SkeletonRows } from '../components/motion'
 import { fmtMoneyCompact, fmtMoneyWhole, type BudgetFigureFormat } from '../utils/formatters'
+import { countOf, plural } from '../utils/plural'
+import { capitalize, monthLongLabel, monthShortLabel } from '../utils/months'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import {
   classKeysUnder, nodeKeysUnder, classificationFor, agreedProject,
@@ -101,10 +103,13 @@ function monthKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
+/** 'YYYY-MM' → 'Okt 2026': a column header, so it starts with a capital. */
 function monthLabel(key: string): string {
-  const [y, m] = key.split('-').map(Number)
-  return new Date(y, m - 1, 1).toLocaleString('en-GB', { month: 'short', year: 'numeric' })
+  return capitalize(monthShortLabel(key))
 }
+
+/** '3 meseca', '6 meseci', '12 meseci'. */
+const monthsCount = (n: number) => countOf(n, 'mesec', 'meseca', 'meseci')
 
 function addMonths(key: string, n: number): string {
   const [y, m] = key.split('-').map(Number)
@@ -276,7 +281,7 @@ export default function Budgeting() {
   }, [companiesError])
 
   /** What the whole-group view is called: the company itself, when it is the only one. */
-  const groupLabel = showPicker ? 'All companies (consolidated)' : (defaultCompany?.name || 'All companies')
+  const groupLabel = showPicker ? 'Sve firme (konsolidovano)' : (defaultCompany?.name || 'Sve firme')
 
   /**
    * The companies in scope: the one selected, or every company for the
@@ -756,11 +761,11 @@ export default function Budgeting() {
    * than two unrelated sentences.
    */
   const budgetCellTitle = (row: BudgetRow) => {
-    const base = 'Click to change this figure — or to see how it was arrived at'
+    const base = 'Kliknite da izmenite ovaj iznos — ili da vidite kako je dobijen'
     if (!row.hasChildren) return base + '.'
     // The same count the dialog will state, from the same reading of the tree.
     const n = childLabelsOf(row).length
-    return `${base}. The change sits on ${row.label} itself, not on the ${n === 1 ? 'line' : `${n} lines`} under it.`
+    return `${base}. Izmena se beleži na samoj stavci ${row.label}, ne na ${n === 1 ? 'stavci' : countOf(n, 'stavci', 'stavke', 'stavki')} ispod nje.`
   }
 
   const levelIndent = [0, 20, 36, 50]
@@ -776,12 +781,12 @@ export default function Budgeting() {
       {/* Header */}
       <div style={pg.pageHeader}>
         <div>
-          <div style={pg.pageTitle}>Budgeting &amp; Forecasting</div>
+          <div style={pg.pageTitle}>Budžet i prognoza</div>
           <div style={pg.pageSub}>
-            Expense forecast · {horizon} months ahead · benchmarked against {benchmark ? monthLabel(benchmark) : '—'}
+            Prognoza troškova · {monthsCount(horizon)} unapred · referentni mesec: {benchmark ? monthLabel(benchmark) : '—'}
             {companyId === '' && showPicker && (
               <span style={{ marginLeft: '10px', color: '#F5A623', fontWeight: '500' }}>
-                · All companies
+                · Sve firme
               </span>
             )}
           </div>
@@ -789,7 +794,7 @@ export default function Budgeting() {
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {/* The same money, read two ways. The total must not move. */}
           <div style={pg.toggle}>
-            {([['department', 'Department'], ['pl', 'P&L']] as const).map(([id, label]) => (
+            {([['department', 'Sektor'], ['pl', 'P&L']] as const).map(([id, label]) => (
               <button key={id}
                 style={{ ...pg.toggleBtn, ...(branch === id ? pg.toggleBtnOn : null) }}
                 aria-pressed={branch === id}
@@ -809,7 +814,7 @@ export default function Budgeting() {
               <button key={h}
                 style={{ ...pg.toggleBtn, ...(horizon === h ? pg.toggleBtnOn : null) }}
                 aria-pressed={horizon === h}
-                title={`Show the next ${h} months`}
+                title={`Prikaži ${plural(h, 'naredni', 'naredna', 'narednih')} ${monthsCount(h)}`}
                 onClick={() => setHorizon(h)}>{h}m</button>
             ))}
           </div>
@@ -819,11 +824,11 @@ export default function Budgeting() {
           <select
             style={pg.companySelect}
             value={projectFilter}
-            aria-label="Project"
-            title="Project"
+            aria-label="Projekat"
+            title="Projekat"
             onChange={e => setProjectFilter(e.target.value)}
           >
-            <option value="">All projects</option>
+            <option value="">Svi projekti</option>
             <option value={PROJECT_FILTER_OVERHEAD}>{OVERHEAD_LABEL}</option>
             {projects
               .filter(p => !companyId || p.company_id === companyId)
@@ -832,7 +837,7 @@ export default function Budgeting() {
           {showPicker && (
             <select
               style={pg.companySelect}
-              aria-label="Companies"
+              aria-label="Firme"
               value={companyId}
               onChange={e => setCompanyId(e.target.value)}
             >
@@ -849,12 +854,12 @@ export default function Budgeting() {
               actuals would promise a per-company budget that is not a thing. */}
           {consolidated && companies.length > 0 && (
             <button style={pg.addLineBtn} onClick={() => setAddingLine({ seed: [] })}
-              title="Budget for something that has not been spent on yet">
-              + Add budget line
+              title="Budžetirajte nešto na šta još ništa nije potrošeno">
+              + Dodaj budžetsku stavku
             </button>
           )}
           {(companyId !== '' || companies.length > 0) && (
-            <button style={pg.refreshBtn} onClick={refresh}>↻ Refresh</button>
+            <button style={pg.refreshBtn} onClick={refresh}>↻ Osveži</button>
           )}
         </div>
       </div>
@@ -867,7 +872,7 @@ export default function Budgeting() {
           background: 'rgba(245,166,35,0.12)', border: '0.5px solid rgba(245,166,35,0.3)',
           borderRadius: '8px', fontSize: '12px', color: '#F5A623',
         }}>
-          ⚠ {eurUnavailable || 'This budget cannot be read in EUR. It is shown in RSD.'}
+          ⚠ {eurUnavailable || 'Ovaj budžet ne može da se prikaže u EUR, pa je prikazan u RSD.'}
         </div>
       )}
 
@@ -879,7 +884,7 @@ export default function Budgeting() {
           background: 'rgba(255,91,90,0.12)', border: '0.5px solid rgba(255,91,90,0.35)',
           borderRadius: '8px', fontSize: '12px', color: '#FF5B5A',
         }}>
-          ⚠ The budget could not be loaded: {loadError}
+          ⚠ Budžet nije učitan: {loadError}
         </div>
       )}
 
@@ -891,8 +896,8 @@ export default function Budgeting() {
           is, and where the per-company question is actually answered. */}
       {!consolidated && !loadError && (
         <div style={pg.groupNote}>
-          Budgets are set for the group, not per company — pick <strong style={{ color: '#DCE9F6', fontWeight: '600' }}>{groupLabel}</strong> to
-          see the budget, variance and Year columns. To break spend down by company, Expense Analysis does it properly.
+          Budžeti se postavljaju za grupu, ne po firmi — izaberite <strong style={{ color: '#DCE9F6', fontWeight: '600' }}>{groupLabel}</strong> da
+          biste videli kolone budžeta, odstupanja i godine. Troškove po firmama raščlanjuje P&amp;L analiza.
         </div>
       )}
 
@@ -913,8 +918,8 @@ export default function Budgeting() {
         </div>
       ) : rows.length === 0 ? (
         <div style={pg.empty}>
-          <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '8px' }}>No expense data yet</div>
-          <div style={{ fontSize: '13px', color: '#7A9BB8' }}>Tag transactions with Cash Flow Classification to populate the budget</div>
+          <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '8px' }}>Još nema podataka o troškovima</div>
+          <div style={{ fontSize: '13px', color: '#7A9BB8' }}>Klasifikujte transakcije po novčanom toku i budžet će se popuniti</div>
         </div>
       ) : (
         <div style={pg.tableWrap}>
@@ -922,7 +927,7 @@ export default function Budgeting() {
             <thead>
               <tr>
                 <th style={{ ...pg.th, textAlign: 'left', width: `${layout.label}px`, paddingLeft: '16px', background: '#0A1525' }}>
-                  {branch === 'department' ? 'Department' : 'Expense category'}
+                  {branch === 'department' ? 'Sektor' : 'Kategorija troška'}
                 </th>
                 {/* One benchmark column, left of the horizon: the last closed
                     month's actual, the figure every budget to its right is set
@@ -933,7 +938,7 @@ export default function Budgeting() {
                   fontSize: '12px', fontWeight: '500', textTransform: 'none', letterSpacing: '0',
                 }}>
                   {benchmark ? monthLabel(benchmark) : '—'}
-                  <div style={{ fontSize: '10px', fontWeight: '400', color: '#7A9BB8' }}>actual</div>
+                  <div style={{ fontSize: '10px', fontWeight: '400', color: '#7A9BB8' }}>ostvareno</div>
                 </th>
                 {/* The month we are in, in the foreground: the header carries
                     the accent and says so in words, and the three columns
@@ -952,7 +957,7 @@ export default function Budgeting() {
                     {m.isPast ? `← ${m.label}` : m.label}
                     {isNow(m.key) && (
                       <div style={{ fontSize: '9px', fontWeight: '500', letterSpacing: '0.08em', color: DIALOG.accent }}>
-                        THIS MONTH
+                        OVAJ MESEC
                       </div>
                     )}
                   </th>
@@ -970,8 +975,8 @@ export default function Budgeting() {
                     borderLeft: '0.5px solid rgba(255,255,255,0.10)',
                     fontSize: '12px', fontWeight: '500', textTransform: 'none', letterSpacing: '0',
                   }}>
-                    Year
-                    <div style={{ fontSize: '10px', fontWeight: '400', color: '#7A9BB8' }}>all 12 months</div>
+                    Godina
+                    <div style={{ fontSize: '10px', fontWeight: '400', color: '#7A9BB8' }}>svih 12 meseci</div>
                   </th>
                 )}
               </tr>
@@ -980,21 +985,21 @@ export default function Budgeting() {
                   {companyId === '' ? groupLabel : companies.find(c => c.id === companyId)?.name}
                 </th>
                 <th style={{ ...pg.thSub, color: 'rgba(255,255,255,0.45)', textAlign: 'right', paddingRight: '8px', background: '#070F1C', borderRight: '0.5px solid rgba(255,255,255,0.10)' }}>
-                  BENCHMARK
+                  REFERENCA
                 </th>
                 {visibleMonths.map(m => (
                   <React.Fragment key={m.key}>
-                    <th style={{ ...pg.thSub, ...nowSubCell(m.key), color: m.isPast ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.45)', textAlign: 'right', paddingRight: consolidated ? '8px' : '12px', borderLeft: '1px solid rgba(255,255,255,0.05)' }}>ACTUAL</th>
+                    <th style={{ ...pg.thSub, ...nowSubCell(m.key), color: m.isPast ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.45)', textAlign: 'right', paddingRight: consolidated ? '8px' : '12px', borderLeft: '1px solid rgba(255,255,255,0.05)' }}>OSTVARENO</th>
                     {consolidated && (
                       <>
-                        <th style={{ ...pg.thSub, ...nowSubCell(m.key), color: m.isPast ? 'rgba(255,255,255,0.20)' : '#5DCAA5', textAlign: 'right', paddingRight: '8px' }}>ESTIMATE</th>
-                        <th style={{ ...pg.thSub, ...nowSubCell(m.key), color: m.isPast ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.30)', textAlign: 'right', paddingRight: '12px' }}>VAR</th>
+                        <th style={{ ...pg.thSub, ...nowSubCell(m.key), color: m.isPast ? 'rgba(255,255,255,0.20)' : '#5DCAA5', textAlign: 'right', paddingRight: '8px' }}>PROCENA</th>
+                        <th style={{ ...pg.thSub, ...nowSubCell(m.key), color: m.isPast ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.30)', textAlign: 'right', paddingRight: '12px' }}>ODST.</th>
                       </>
                     )}
                   </React.Fragment>
                 ))}
                 {consolidated && (
-                  <th style={{ ...pg.thSub, color: '#5DCAA5', textAlign: 'right', paddingRight: '12px', borderLeft: '0.5px solid rgba(255,255,255,0.10)' }}>BUDGET</th>
+                  <th style={{ ...pg.thSub, color: '#5DCAA5', textAlign: 'right', paddingRight: '12px', borderLeft: '0.5px solid rgba(255,255,255,0.10)' }}>BUDŽET</th>
                 )}
               </tr>
             </thead>
@@ -1065,8 +1070,8 @@ export default function Budgeting() {
                           <button
                             className="mf-add-under"
                             style={pg.addUnder}
-                            title={`Budget an expense description under ${row.label} that has never been spent on`}
-                            aria-label={`Add a budget line under ${row.label}`}
+                            title={`Budžetirajte opis troška pod ${row.label} na koji još ništa nije potrošeno`}
+                            aria-label={`Dodaj budžetsku stavku pod ${row.label}`}
                             onClick={ev => {
                               ev.stopPropagation()
                               setAddingLine({ seed: row.pathLabels })
@@ -1088,7 +1093,7 @@ export default function Budgeting() {
                       {benchActual > 0 ? (
                         <span
                           style={{ color: '#4EA8FF', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'rgba(78,168,255,0.4)', textUnderlineOffset: '3px' }}
-                          title="Click to view the transactions behind the benchmark"
+                          title="Kliknite da vidite transakcije referentnog meseca"
                           onClick={() => openDrill(row, { key: benchmark, label: monthLabel(benchmark), isPast: true }, 'actual')}
                         >
                           {fmtFigure(benchActual)}
@@ -1110,7 +1115,7 @@ export default function Budgeting() {
                             {actual > 0 ? (
                               <span
                                 style={{ color: '#FF8080', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'rgba(255,128,128,0.4)', textUnderlineOffset: '3px' }}
-                                title="Click to view transactions"
+                                title="Kliknite da vidite transakcije"
                                 onClick={() => openDrill(row, m, 'actual')}
                               >
                                 {fmtFigure(actual)}
@@ -1178,9 +1183,9 @@ export default function Budgeting() {
                           the full sentence is on hover. */}
                       <td
                         style={{ ...pg.td, paddingLeft: `${16 + levelIndent[Math.min(depth + 1, levelIndent.length - 1)]}px`, fontSize: '11px', color: '#7A9BB8', fontStyle: 'italic' }}
-                        title={`Budgeted on ${row.label} itself rather than on any of the lines under it. Not uncategorised and not an error: a parent's figure is everything under it plus whatever was entered on the parent, and this row is that second part.`}
+                        title={`Budžetirano na samoj stavci ${row.label}, a ne na nekoj od stavki ispod nje. Nije nerazvrstano i nije greška: iznos nadređene stavke je zbir svega ispod nje plus onoga što je uneto na nju samu, a ovaj red je taj drugi deo.`}
                       >
-                        on {row.label} itself — not on a line under it
+                        na samoj stavci {row.label} — ne na stavci ispod nje
                       </td>
                       <td style={{ ...pg.td, background: 'rgba(0,0,0,0.18)', borderRight: '0.5px solid rgba(255,255,255,0.10)' }} />
                       {visibleMonths.map(m => (
@@ -1205,7 +1210,7 @@ export default function Budgeting() {
               {/* TOTALS */}
               <tr style={{ background: '#0A1525', borderTop: '2px solid #00D47E' }}>
                 <td style={{ ...pg.td, paddingLeft: '16px', fontWeight: '700', fontSize: '11px', color: '#DCE9F6', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                  Total expenses
+                  Ukupni troškovi
                 </td>
                 <td style={{ ...pg.td, textAlign: 'right', paddingRight: '8px', background: 'rgba(0,0,0,0.18)', borderRight: '0.5px solid rgba(255,255,255,0.10)', color: (totals[benchmark]?.actual || 0) > 0 ? '#4EA8FF' : 'rgba(255,255,255,0.20)', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace" }}>
                   {(totals[benchmark]?.actual || 0) > 0 ? fmtFigure(totals[benchmark].actual) : '—'}
@@ -1257,8 +1262,8 @@ export default function Budgeting() {
           background: 'rgba(245,166,35,0.12)', border: '0.5px solid rgba(245,166,35,0.3)',
           borderRadius: '8px', fontSize: '12px', color: '#F5A623',
         }}>
-          ⚠ {fmtFigure(notCarried)} of {benchmark ? monthLabel(benchmark) : 'benchmark'} spend is not carried forward —
-          one-time, capex or unclassified. The months ahead are short by at least this much.
+          ⚠ {fmtFigure(notCarried)} potrošnje iz referentnog meseca{benchmark ? ` (${monthLongLabel(benchmark)})` : ''} ne
+          prenosi se dalje — jednokratno, kapitalno ili nerazvrstano. Naredni meseci su potcenjeni najmanje za toliko.
         </div>
       )}
 
@@ -1272,10 +1277,10 @@ export default function Budgeting() {
           background: 'rgba(245,166,35,0.12)', border: '0.5px solid rgba(245,166,35,0.3)',
           borderRadius: '8px', fontSize: '12px', color: '#F5A623', lineHeight: 1.6,
         }}>
-          ⚠ {driftingCount} budgeted {driftingCount === 1 ? 'figure was' : 'figures were'} recorded
-          before budgets were held in place, so {driftingCount === 1 ? 'it still moves' : 'they still move'} with
-          the benchmark month and {driftingCount === 1 ? 'is' : 'are'} no longer what was typed.
-          Click each green figure and record what it should be — recording it once anchors it for good.
+          ⚠ {countOf(driftingCount, 'budžetski iznos', 'budžetska iznosa', 'budžetskih iznosa')} {plural(driftingCount, 'je unet', 'su uneta', 'je uneto')} pre
+          nego što su budžeti fiksirani, pa se još {plural(driftingCount, 'pomera', 'pomeraju', 'pomera')} sa
+          referentnim mesecom i više {plural(driftingCount, 'nije', 'nisu', 'nije')} ono što je uneto.
+          Kliknite svaki zeleni iznos i unesite koliki treba da bude — jedan unos ga trajno fiksira.
         </div>
       )}
 
@@ -1289,23 +1294,23 @@ export default function Budgeting() {
           background: 'rgba(245,166,35,0.12)', border: '0.5px solid rgba(245,166,35,0.3)',
           borderRadius: '8px', fontSize: '12px', color: '#F5A623',
         }}>
-          ⚠ The NBS exchange rate could not be read, so {creditUnpriced[shownCurrency]} credit
-          {creditUnpriced[shownCurrency] === 1 ? ' instalment is' : ' instalments are'} left out of
-          the Loans/Credits estimates — the months ahead are short by {creditUnpriced[shownCurrency] === 1 ? 'it' : 'them'}.
+          ⚠ Kurs NBS nije dostupan, pa {countOf(creditUnpriced[shownCurrency], 'rata kredita', 'rate kredita', 'rata kredita')}{' '}
+          {plural(creditUnpriced[shownCurrency], 'nije uračunata', 'nisu uračunate', 'nije uračunato')} u procene
+          za kredite — naredni meseci su za toliko potcenjeni. Pokušajte ponovo kasnije.
         </div>
       )}
 
       {/* Legend */}
       {rows.length > 0 && (
         <div style={pg.legend}>
-          <div style={pg.legendItem}><span style={{ ...pg.legendDot, background: '#FF8080' }} /> Actual — click to view transactions</div>
+          <div style={pg.legendItem}><span style={{ ...pg.legendDot, background: '#FF8080' }} /> Ostvareno — kliknite da vidite transakcije</div>
           {/* The rest of the legend explains columns that are only drawn for
               the group. Left standing on one company it would name three
               colours that are not on screen. */}
           {consolidated && <>
-            <div style={pg.legendItem}><span style={{ ...pg.legendDot, background: '#00D47E' }} /> Budget — seeded from the benchmark month, click to change it</div>
-            <div style={pg.legendItem}><span style={{ ...pg.legendDot, background: '#4EA8FF' }} /> <span style={{ fontSize: '9px' }}>✎</span> Changed by a ledger entry</div>
-            <div style={pg.legendItem}><span style={{ color: '#00D47E', fontWeight: '600' }}>+</span> Under budget · <span style={{ color: '#FF5B5A', fontWeight: '600' }}>−</span> Over budget</div>
+            <div style={pg.legendItem}><span style={{ ...pg.legendDot, background: '#00D47E' }} /> Budžet — preuzet iz referentnog meseca, kliknite da ga izmenite</div>
+            <div style={pg.legendItem}><span style={{ ...pg.legendDot, background: '#4EA8FF' }} /> <span style={{ fontSize: '9px' }}>✎</span> Promenjeno izmenom budžeta</div>
+            <div style={pg.legendItem}><span style={{ color: '#00D47E', fontWeight: '600' }}>+</span> Ispod budžeta · <span style={{ color: '#FF5B5A', fontWeight: '600' }}>−</span> Iznad budžeta</div>
           </>}
         </div>
       )}
@@ -1315,7 +1320,7 @@ export default function Budgeting() {
           drill={drillOpen}
           companyIds={companyIds}
           benchmark={benchmark}
-          benchmarkLabel={benchmark ? monthLabel(benchmark) : 'the benchmark month'}
+          benchmarkLabel={benchmark ? monthLabel(benchmark) : '—'}
           // The ledger the cell itself read, not a second query for it —
           // this node's own entries and every descendant's, because the cell
           // is the sum of them.

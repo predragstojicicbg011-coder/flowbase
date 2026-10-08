@@ -30,7 +30,7 @@ function AppContent() {
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: "'Inter', system-ui, sans-serif", color: '#888' }}>
-      Loading MCFlow...
+      Učitavanje MCFlow…
     </div>
   )
 

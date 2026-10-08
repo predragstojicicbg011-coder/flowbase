@@ -42,6 +42,7 @@ import {
 import { CREDIT_PRINCIPAL, CREDIT_INTEREST, creditNote, allocatePayment } from '../services/creditClassification'
 import { creditLegBooker, checkCreditCurrency, UnsupportedCreditCurrencyError } from '../services/creditPayment'
 import { fetchAllPartners } from '../services/allPartners'
+import { countOf } from '../utils/plural'
 
 // credit payment P&L logic is inline
 
@@ -140,6 +141,11 @@ interface ImportRow {
 }
 
 const PAYMENT_METHODS = ['Wire transfer', 'ACH transfer', 'Cash', 'Check', 'Credit card', 'Direct debit', 'Other']
+/** Display labels for the stored payment-method keys. */
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  'Wire transfer': 'Bankovni transfer', 'ACH transfer': 'ACH transfer', Cash: 'Gotovina', Check: 'Ček',
+  'Credit card': 'Kreditna kartica', 'Direct debit': 'Direktno zaduženje', Other: 'Ostalo',
+}
 
 function detectFormat(content: string, fileName: string): 'raiffeisen' | 'truist' | 'boa' | 'amex' | 'wio' | 'paypal' | 'unknown' {
   if (fileName.toLowerCase().endsWith('.xlsx') || fileName.toLowerCase().endsWith('.xls')) return 'amex'
@@ -742,7 +748,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
     }).select('id,partner_id,account_number,bank_name,is_primary').single()
     if (error) {
       console.error('saveAccount error:', error)
-      alert(`Could not save the account: ${error.message}`)
+      alert(`Račun nije sačuvan: ${error.message}`)
     } else if (newAcc) {
       setPartnerAccounts(prev => [...prev, newAcc])
     }
@@ -836,7 +842,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
         const workbook = XLSX.read(buffer, { type: 'array' })
         const parsed = parseAmex(workbook)
         setEncodingNote('')   // a workbook carries its own encoding
-        if (parsed.length === 0) { setParseError('Could not parse Amex file.'); return }
+        if (parsed.length === 0) { setParseError('Fajl Amex nije mogao da se pročita.'); return }
         setDetectedFormat('amex')
         const { accList, partList } = await fetchFreshData()
         const importRows = await markAlreadyImported(parsed.map(makeImportRow))
@@ -854,10 +860,10 @@ export default function BulkImport({ onClose, onImported }: Props) {
         const text = decoded.text
         setEncodingNote(
           hasLostCharacters(text)
-            ? 'Some characters in this file could not be read and have been replaced. Check the descriptions before posting.'
-            : decoded.fellBack ? 'Read as windows-1250' : '')
+            ? 'Neki znakovi u ovom fajlu nisu mogli da se pročitaju i zamenjeni su. Proverite opise pre knjiženja.'
+            : decoded.fellBack ? 'Pročitano kao windows-1250' : '')
         const format = detectFormat(text, file.name)
-        if (format === 'unknown') { setParseError('Unknown file format.'); return }
+        if (format === 'unknown') { setParseError('Nepoznat format fajla.'); return }
         setDetectedFormat(format)
         let parsed: ParsedRow[] = []
         if (format === 'raiffeisen') parsed = parseRaiffeisen(text)
@@ -865,7 +871,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
         else if (format === 'boa') parsed = parseBOA(text)
         else if (format === 'wio') parsed = parseWio(text)
         else if (format === 'paypal') parsed = parsePayPal(text)
-        if (parsed.length === 0) { setParseError('No transactions found in file.'); return }
+        if (parsed.length === 0) { setParseError('U fajlu nema transakcija.'); return }
         const { accList, partList } = await fetchFreshData()
         const importRows = await markAlreadyImported(parsed.map(makeImportRow))
         setRows(importRows.map(r => {
@@ -874,7 +880,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
         }))
       }
     } catch (err: any) {
-      setParseError(`Failed to read file: ${err.message}`)
+      setParseError(`Fajl nije pročitan: ${err.message}`)
     }
   }
 
@@ -902,7 +908,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
       return { ...row, parsed: { ...row.parsed, ...booked } }
     }))
     } catch (err: any) {
-      setAnalyzeError(`Exchange rate unavailable: ${err.message}. The analysis was stopped.`)
+      setAnalyzeError(`Kurs nije dostupan: ${err.message}. Analiza je zaustavljena.`)
       setAnalyzing(false)
       return
     }
@@ -952,7 +958,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
             }
           }
         }
-      } catch (err: any) { setAnalyzeError(`AI analysis failed: ${err.message}`); setAnalyzing(false); return }
+      } catch (err: any) { setAnalyzeError(`AI analiza nije uspela: ${err.message}`); setAnalyzing(false); return }
       setProgress(Math.round(((i + batchSize) / snapshot.length) * 100))
     }
     setRows(result)
@@ -1004,7 +1010,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
         splitLines: row.override_pl_splits.length,
       })
       if (why) {
-        setAnalyzeError(`${formatDate(row.parsed.date)} ${row.parsed.description || ''}: ${why} Nothing was posted.`)
+        setAnalyzeError(`${formatDate(row.parsed.date)} ${row.parsed.description || ''}: ${why} Ništa nije proknjiženo.`)
         setStep('review')
         return
       }
@@ -1020,8 +1026,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
       }
     } catch (err: any) {
       setAnalyzeError(err instanceof UnsupportedCreditCurrencyError
-        ? `${err.message}. Nothing was posted.`
-        : `Exchange rate unavailable: ${err.message}. Nothing was posted.`)
+        ? `${err.message}. Ništa nije proknjiženo.`
+        : `Kurs nije dostupan: ${err.message}. Ništa nije proknjiženo.`)
       setStep('review')
       return
     }
@@ -1122,7 +1128,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
         // u toj valuti po kursevima ovog reda izvoda, a poslednji deo nosi
         // zaokruzivanje - services/creditPayment.ts.
         const credit = credits.find((c: any) => c.id === row.override_credit_id)
-        const creditName = credit?.name || 'Credit'
+        const creditName = credit?.name || 'Kredit'
         const legs = creditLegBooker(credit?.currency, rowBook, creditName)
 
         // Ukupan plaćeni iznos u EUR — amount_eur reda (tačno `amount` za EUR red)
@@ -1416,14 +1422,14 @@ export default function BulkImport({ onClose, onImported }: Props) {
                   status: 'posted',
                   note: entryNote(inv.invoice_number || null, difference),
                 }).select('id').single()
-                if (fxErr) throw new Error(`The currency difference could not be posted: ${fxErr.message}`)
+                if (fxErr) throw new Error(`Kursna razlika nije proknjižena: ${fxErr.message}`)
 
                 if (difference.linksToInvoice && fxTx?.id) {
                   const { error: fxLinkErr } = await supabase.from('invoice_transaction_links').insert({
                     invoice_id: inv.id, transaction_id: fxTx.id,
                     ...linkAmountsFromOwn(shortfallOwn, inv),
                   })
-                  if (fxLinkErr) throw new Error(`The currency difference was posted but could not be linked to the invoice: ${fxLinkErr.message}`)
+                  if (fxLinkErr) throw new Error(`Kursna razlika je proknjižena, ali nije mogla da se poveže sa fakturom: ${fxLinkErr.message}`)
                   const seen = settlementExpectations.find(e => e.invoiceId === inv.id)
                   if (seen) seen.allocated += shortfallOwn
                   await supabase.from('invoices')
@@ -1451,8 +1457,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
         date_to: dateTo,
         row_count: accepted.length - skippedDuplicates,
         note: skippedDuplicates > 0
-          ? `${accepted.length - skippedDuplicates} rows posted, ${skippedDuplicates} preskoceno kao vec uvezeno`
-          : `${accepted.length} rows posted`,
+          ? `Proknjiženo stavki: ${accepted.length - skippedDuplicates}, preskočeno kao već uvezeno: ${skippedDuplicates}`
+          : `Proknjiženo stavki: ${accepted.length}`,
         filing_ref: importBatchId,
       })
     }
@@ -1539,7 +1545,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
   /** A row id means nothing to a person; its position in the list does. */
   const claimRowLabel = useCallback((rowId: string) => {
     const idx = rows.findIndex(r => r.parsed.id === rowId)
-    return idx >= 0 ? `line ${idx + 1}` : 'another line'
+    return idx >= 0 ? `stavka ${idx + 1}` : 'druga stavka'
   }, [rows])
 
   const alreadyImported = rows.filter(r => r.already_imported).length
@@ -1551,9 +1557,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
   }
 
   const getTxTypeBadge = (type: string) => {
-    if (type === 'direct') return { bg: DIALOG.accentFill, color: DIALOG.accent, label: '⚡ Direct' }
-    if (type === 'passthrough') return { bg: DIALOG.amberFill, color: DIALOG.amber, label: '🔄 Pass-through' }
-    return { bg: DIALOG.blueFill, color: DIALOG.blue, label: '💳 Inv. payment' }
+    if (type === 'direct') return { bg: DIALOG.accentFill, color: DIALOG.accent, label: '⚡ Direktna' }
+    if (type === 'passthrough') return { bg: DIALOG.amberFill, color: DIALOG.amber, label: '🔄 Prolazna' }
+    return { bg: DIALOG.blueFill, color: DIALOG.blue, label: '💳 Plać. fakture' }
   }
 
   if (step === 'done') return (
@@ -1562,8 +1568,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
         <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(0,212,126,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={DIALOG.accent} strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg>
         </div>
-        <div style={{ fontFamily: 'Georgia,serif', fontSize: '22px', color: '#DCE9F6' }}>Import complete!</div>
-        <div style={{ fontSize: '13px', color: '#7A9BB8', textAlign: 'center' as const }}>{accepted} entr{accepted !== 1 ? 'ies' : 'y'} posted.<br />{rejected} skipped.</div>
+        <div style={{ fontFamily: 'Georgia,serif', fontSize: '22px', color: '#DCE9F6' }}>Uvoz je završen.</div>
+        <div style={{ fontSize: '13px', color: '#7A9BB8', textAlign: 'center' as const }}>Proknjiženo stavki: {accepted}.<br />Preskočeno: {rejected}.</div>
         {settlementWarning && (
           <div style={{
             fontSize: '12px', lineHeight: 1.5, color: DIALOG.amber, background: DIALOG.amberFill,
@@ -1573,7 +1579,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
             ⚠ {settlementWarning}
           </div>
         )}
-        <button style={s.btnPrimary} onClick={() => { onImported(); onClose() }}>View transactions</button>
+        <button style={s.btnPrimary} onClick={() => { onImported(); onClose() }}>Prikaži transakcije</button>
       </div>
     </div>
   )
@@ -1581,7 +1587,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
   if (step === 'posting') return (
     <div style={s.overlay}>
       <div style={{ ...s.dialog, alignItems: 'center', justifyContent: 'center', gap: '16px', minHeight: '260px' }}>
-        <div style={{ fontSize: '13px', color: DIALOG.dim }}>Posting... {progress}%</div>
+        <div style={{ fontSize: '13px', color: DIALOG.dim }}>Knjiženje… {progress}%</div>
         <div style={{ ...s.progressBar, width: '300px' }}><div style={{ ...s.progressFill, width: `${progress}%` }} /></div>
       </div>
     </div>
@@ -1592,8 +1598,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
       <div style={s.dialog}>
         <div style={s.header}>
           <div>
-            <div style={s.headerTitle}>{step === 'upload' ? '📥 Bulk import — bank statement' : `📋 Review & post — ${rows.length} rows`}</div>
-            <div style={s.headerSub}>{step === 'upload' ? 'Supports: Raiffeisen/Intesa · Truist · Bank of America · Amex · Wio' : `${accepted} accepted · ${rejected} rejected · ${pending} pending`}</div>
+            <div style={s.headerTitle}>{step === 'upload' ? '📥 Grupni uvoz — izvod' : `📋 Pregled i knjiženje — stavki: ${rows.length}`}</div>
+            <div style={s.headerSub}>{step === 'upload' ? 'Podržano: Raiffeisen/Intesa · Truist · Bank of America · Amex · Wio' : `prihvaćeno: ${accepted} · odbijeno: ${rejected} · na čekanju: ${pending}`}</div>
           </div>
           <button style={s.closeBtn} onClick={onClose}>×</button>
         </div>
@@ -1602,28 +1608,28 @@ export default function BulkImport({ onClose, onImported }: Props) {
           {step === 'upload' && (
             <>
               <div style={s.section}>
-                <div style={s.sectionTitle}>Company & bank</div>
+                <div style={s.sectionTitle}>Firma i banka</div>
                 <div style={s.row2}>
                   {showPicker && (
                     <div style={s.field}>
-                      <label style={s.lbl}>Company <span style={s.req}>*</span></label>
+                      <label style={s.lbl}>Firma <span style={s.req}>*</span></label>
                       <select style={s.select} value={company} onChange={e => setCompany(e.target.value)}>
-                        <option value="">Select company...</option>
+                        <option value="">Izaberite firmu…</option>
                         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     </div>
                   )}
                   <div style={s.field}>
-                    <label style={s.lbl}>Bank account <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Tekući račun <span style={s.req}>*</span></label>
                     <select style={s.select} value={bank} onChange={e => setBank(e.target.value)} disabled={!company}>
-                      <option value="">Select bank...</option>
+                      <option value="">Izaberite banku…</option>
                       {banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                   </div>
                 </div>
               </div>
               <div style={s.section}>
-                <div style={s.sectionTitle}>Upload file</div>
+                <div style={s.sectionTitle}>Otpremanje fajla</div>
                 <div style={s.dropZone} onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => fileRef.current?.click()}>
                   <input ref={fileRef} type="file" accept=".txt,.csv,.xlsx,.xls" style={{ display: 'none' }}
                     onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }} />
@@ -1633,12 +1639,12 @@ export default function BulkImport({ onClose, onImported }: Props) {
                       <div style={{ fontSize: '14px', fontWeight: '500', color: DIALOG.accent }}>{fileName}</div>
                       {detectedFormat && <div style={{ fontSize: '12px', color: DIALOG.accent, marginTop: '4px', background: DIALOG.accentFill, padding: '3px 10px', borderRadius: '20px', display: 'inline-block' }}>{FORMAT_LABELS[detectedFormat]} detected</div>}
                       {encodingNote && <div style={{ fontSize: '11px', color: DIALOG.amber, marginTop: '4px' }}>{encodingNote}</div>}
-                      <div style={{ fontSize: '12px', color: DIALOG.dim, marginTop: '6px' }}>{rows.length} rows parsed — click to change</div>
+                      <div style={{ fontSize: '12px', color: DIALOG.dim, marginTop: '6px' }}>Učitano stavki: {rows.length} — kliknite za promenu</div>
                     </div>
                   ) : (
                     <div>
                       <div style={{ fontSize: '32px', marginBottom: '12px' }}>📂</div>
-                      <div style={{ fontSize: '14px', fontWeight: '500', color: DIALOG.text, marginBottom: '8px' }}>Drop file here or click to browse</div>
+                      <div style={{ fontSize: '14px', fontWeight: '500', color: DIALOG.text, marginBottom: '8px' }}>Prevucite fajl ovde ili kliknite da ga izaberete</div>
                       <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' as const }}>
                         {Object.entries(FORMAT_LABELS).map(([k, v]) => (
                           <span key={k} style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', background: DIALOG.raised, color: DIALOG.dim }}>{v}</span>
@@ -1651,12 +1657,12 @@ export default function BulkImport({ onClose, onImported }: Props) {
               </div>
               {rows.length > 0 && (
                 <div style={s.section}>
-                  <div style={s.sectionTitle}>Parsed preview</div>
+                  <div style={s.sectionTitle}>Pregled učitanog</div>
                   <div style={s.infoBox}>
-                    <strong>{rows.length} rows</strong> · <strong>{rows.filter(r => (r.parsed.debit || 0) > 0).length} expenses</strong> · <strong>{rows.filter(r => (r.parsed.credit || 0) > 0).length} revenues</strong>
+                    <strong>stavki: {rows.length}</strong> · <strong>troškova: {rows.filter(r => (r.parsed.debit || 0) > 0).length}</strong> · <strong>prihoda: {rows.filter(r => (r.parsed.credit || 0) > 0).length}</strong>
                     {detectedFormat && <span style={{ marginLeft: '8px', opacity: 0.8 }}>· {FORMAT_LABELS[detectedFormat]}</span>}
                     {rows.filter(r => r.override_partner_id).length > 0 && (
-                      <span style={{ marginLeft: '8px', color: DIALOG.accent }}>· ✓ {rows.filter(r => r.override_partner_id).length} partners matched by account number</span>
+                      <span style={{ marginLeft: '8px', color: DIALOG.accent }}>· ✓ partnera prepoznatih po broju računa: {rows.filter(r => r.override_partner_id).length}</span>
                     )}
                   </div>
                   <div style={s.previewList}>
@@ -1665,7 +1671,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                         <div style={{ flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <div style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6' }}>{r.override_partner_name || r.parsed.partner_name || '—'}</div>
-                            {r.override_partner_id && <span style={{ fontSize: '10px', color: DIALOG.accent, background: DIALOG.accentFill, padding: '1px 6px', borderRadius: '20px' }}>✓ matched</span>}
+                            {r.override_partner_id && <span style={{ fontSize: '10px', color: DIALOG.accent, background: DIALOG.accentFill, padding: '1px 6px', borderRadius: '20px' }}>✓ prepoznat</span>}
                           </div>
                           <div style={{ fontSize: '11px', color: '#7A9BB8' }}>{r.parsed.date} · {r.parsed.description?.slice(0, 60)}</div>
                         </div>
@@ -1675,7 +1681,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                         </div>
                       </div>
                     ))}
-                    {rows.length > 5 && <div style={{ padding: '8px 14px', fontSize: '12px', color: DIALOG.faint, textAlign: 'center' as const }}>+{rows.length - 5} more rows...</div>}
+                    {rows.length > 5 && <div style={{ padding: '8px 14px', fontSize: '12px', color: DIALOG.faint, textAlign: 'center' as const }}>+ još {rows.length - 5} stavki…</div>}
                   </div>
                 </div>
               )}
@@ -1684,31 +1690,31 @@ export default function BulkImport({ onClose, onImported }: Props) {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', paddingBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '10px' }}
                     onClick={() => setHistoryExpanded(prev => !prev)}>
                     <div style={{ fontSize: '10px', fontWeight: '600', color: '#7A9BB8', textTransform: 'uppercase' as const, letterSpacing: '0.1em' }}>
-                      🕐 Previous imports — this account
+                      🕐 Prethodni uvozi — ovaj račun
                       {importHistory.length > 0 && <span style={{ marginLeft: '8px', background: 'rgba(0,212,126,0.15)', color: '#00D47E', padding: '1px 7px', borderRadius: '20px', fontSize: '10px' }}>{importHistory.length}</span>}
                     </div>
-                    <span style={{ fontSize: '10px', color: '#7A9BB8' }}>{historyExpanded ? '▲ Hide' : '▼ Show'}</span>
+                    <span style={{ fontSize: '10px', color: '#7A9BB8' }}>{historyExpanded ? '▲ Sakrij' : '▼ Prikaži'}</span>
                   </div>
                   {historyExpanded && (
                     importHistory.length === 0 ? (
                       <div style={{ fontSize: '12px', color: '#7A9BB8', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        No previous imports for this account.
+                        Za ovaj račun nema prethodnih uvoza.
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '6px', maxHeight: '220px', overflowY: 'auto' as const }}>
                         {importHistory.map(log => (
                           <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
                             <div style={{ flex: 1 }}>
-                              <div style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6' }}>{log.file_name || 'Unknown file'}</div>
+                              <div style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6' }}>{log.file_name || 'Nepoznat fajl'}</div>
                               <div style={{ fontSize: '11px', color: '#7A9BB8', marginTop: '2px' }}>
                                 {log.date_from && log.date_to ? `${log.date_from} → ${log.date_to}` : log.date_from || '—'}
-                                {log.row_count ? ` · ${log.row_count} rows` : ''}
+                                {log.row_count ? ` · stavki: ${log.row_count}` : ''}
                               </div>
                             </div>
                             <div style={{ fontSize: '11px', color: '#7A9BB8', whiteSpace: 'nowrap' as const }}>
-                              {new Date(log.created_at).toLocaleDateString('en-GB')}
+                              {new Date(log.created_at).toLocaleDateString('sr-Latn-RS')}
                             </div>
-                            <div style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: 'rgba(0,212,126,0.10)', color: '#00D47E' }}>✓ Imported</div>
+                            <div style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: 'rgba(0,212,126,0.10)', color: '#00D47E' }}>✓ Uvezeno</div>
                           </div>
                         ))}
                       </div>
@@ -1718,9 +1724,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
               )}
               {analyzing && (
                 <div style={s.analyzingBox}>
-                  <div style={{ fontSize: '13px', color: DIALOG.accent, marginBottom: '8px' }}>🤖 AI analyzing {rows.length} rows...</div>
+                  <div style={{ fontSize: '13px', color: DIALOG.accent, marginBottom: '8px' }}>🤖 AI analizira stavke ({rows.length})…</div>
                   <div style={s.progressBar}><div style={{ ...s.progressFill, width: `${progress}%`, transition: 'width 0.5s' }} /></div>
-                  <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '6px' }}>{progress}% complete</div>
+                  <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '6px' }}>završeno {progress}%</div>
                 </div>
               )}
               {analyzeError && <div style={{ ...s.infoBox, background: DIALOG.redFill, borderColor: DIALOG.redSoft, color: DIALOG.red, marginTop: '12px' }}>⚠️ {analyzeError}</div>}
@@ -1730,19 +1736,19 @@ export default function BulkImport({ onClose, onImported }: Props) {
           {step === 'review' && (
             <>
               <div style={s.reviewSummary}>
-                <div style={s.reviewStat}><span style={{ fontSize: '20px', fontWeight: '600', color: DIALOG.accent }}>{accepted}</span><span style={{ fontSize: '11px', color: '#7A9BB8' }}>Accepted</span></div>
-                <div style={s.reviewStat}><span style={{ fontSize: '20px', fontWeight: '600', color: DIALOG.red }}>{rejected}</span><span style={{ fontSize: '11px', color: '#7A9BB8' }}>Rejected</span></div>
-                <div style={s.reviewStat}><span style={{ fontSize: '20px', fontWeight: '600', color: DIALOG.amber }}>{pending}</span><span style={{ fontSize: '11px', color: '#7A9BB8' }}>Pending</span></div>
-                <div style={s.reviewStat}><span style={{ fontSize: '20px', fontWeight: '600', color: DIALOG.accent }}>{rows.filter(r => r.override_partner_id).length}</span><span style={{ fontSize: '11px', color: '#7A9BB8' }}>Matched</span></div>
+                <div style={s.reviewStat}><span style={{ fontSize: '20px', fontWeight: '600', color: DIALOG.accent }}>{accepted}</span><span style={{ fontSize: '11px', color: '#7A9BB8' }}>Prihvaćeno</span></div>
+                <div style={s.reviewStat}><span style={{ fontSize: '20px', fontWeight: '600', color: DIALOG.red }}>{rejected}</span><span style={{ fontSize: '11px', color: '#7A9BB8' }}>Odbijeno</span></div>
+                <div style={s.reviewStat}><span style={{ fontSize: '20px', fontWeight: '600', color: DIALOG.amber }}>{pending}</span><span style={{ fontSize: '11px', color: '#7A9BB8' }}>Na čekanju</span></div>
+                <div style={s.reviewStat}><span style={{ fontSize: '20px', fontWeight: '600', color: DIALOG.accent }}>{rows.filter(r => r.override_partner_id).length}</span><span style={{ fontSize: '11px', color: '#7A9BB8' }}>Prepoznato</span></div>
                 {alreadyImported > 0 && (
                   <div style={s.reviewStat}>
                     <span style={{ fontSize: '20px', fontWeight: '600', color: '#4EA8FF' }}>{alreadyImported}</span>
-                    <span style={{ fontSize: '11px', color: '#7A9BB8' }}>Already imported</span>
+                    <span style={{ fontSize: '11px', color: '#7A9BB8' }}>Već uvezeno</span>
                   </div>
                 )}
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
-                  <button style={s.btnSmallGreen} onClick={acceptAll}>✓ Accept all</button>
-                  <button style={s.btnSmallRed} onClick={rejectAll}>✕ Reject all</button>
+                  <button style={s.btnSmallGreen} onClick={acceptAll}>✓ Prihvati sve</button>
+                  <button style={s.btnSmallRed} onClick={rejectAll}>✕ Odbij sve</button>
                 </div>
               </div>
 
@@ -1775,7 +1781,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', flexWrap: 'wrap' as const }}>
                             <span style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6' }}>{row.override_partner_name || p.partner_name || '—'}</span>
                             {row.override_partner_id && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: DIALOG.accentFill, color: DIALOG.accent }}>✓ baza</span>}
-                            {conf && row.proposal && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: conf.bg, color: conf.color }}>{row.proposal.confidence}</span>}
+                            {conf && row.proposal && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: conf.bg, color: conf.color }}>{({ high: 'visoka', medium: 'srednja', low: 'niska' } as Record<string, string>)[row.proposal.confidence] || row.proposal.confidence}</span>}
                             <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: typeBadge.bg, color: typeBadge.color }}>{typeBadge.label}</span>
                             <span style={{ fontSize: '10px', color: DIALOG.faint }}>{FORMAT_LABELS[p.source_format]}</span>
                             {row.already_imported && (
@@ -1783,7 +1789,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                 fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '4px',
                                 background: 'rgba(78,168,255,0.15)', color: '#4EA8FF',
                               }}>
-                                already imported
+                                već uvezeno
                               </span>
                             )}
                             {effectiveAdvance(row.override_tx_type, row.override_tx_subtype, row.override_is_advance) && (
@@ -1795,10 +1801,10 @@ export default function BulkImport({ onClose, onImported }: Props) {
                             <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '2px' }}>📊 {row.override_pl_category_name}{row.override_department_name ? ` · ${row.override_department_name}` : ''}</div>
                           )}
                           {row.override_tx_type === 'invoice_payment' && (
-                            <div style={{ fontSize: '11px', color: DIALOG.blue, marginTop: '2px' }}>💳 Cash flow only{linkedInvoice ? ` · Closes: ${linkedInvoice.partner_name || '—'}` : ' · No invoice linked'}</div>
+                            <div style={{ fontSize: '11px', color: DIALOG.blue, marginTop: '2px' }}>💳 Samo novčani tok{linkedInvoice ? ` · Zatvara: ${linkedInvoice.partner_name || '—'}` : ' · Bez povezane fakture'}</div>
                           )}
                           {row.override_tx_type === 'passthrough' && (
-                            <div style={{ fontSize: '11px', color: DIALOG.amber, marginTop: '2px' }}>🔄 {row.override_pt_direction === 'in' ? '📥 IN' : '📤 OUT'} · Period: {row.override_pt_period || '—'}</div>
+                            <div style={{ fontSize: '11px', color: DIALOG.amber, marginTop: '2px' }}>🔄 {row.override_pt_direction === 'in' ? '📥 UPLATA' : '📤 ISPLATA'} · Period: {row.override_pt_period || '—'}</div>
                           )}
                         </div>
                         <div style={{ textAlign: 'right' as const, flexShrink: 0, marginRight: '10px' }}>
@@ -1827,7 +1833,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                     setReviewPartnerSearch(prev => ({ ...prev, [p.id]: e.target.value }))
                                     updateRow(p.id, { override_partner_name: e.target.value, override_partner_id: '' })
                                   }}
-                                  placeholder="Search or type a partner..."
+                                  placeholder="Pretražite ili unesite partnera…"
                                 />
                                 <span style={{ position: 'absolute' as const, right: '8px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: row.override_partner_id ? DIALOG.accent : DIALOG.faint, pointerEvents: 'none' as const }}>
                                   {row.override_partner_id ? '✓' : '✎'}
@@ -1853,11 +1859,11 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                       if (!noMatch || !searchTerm.trim()) return null
                                       return (
                                         <div style={{ padding: '8px 10px', borderTop: '0.5px solid ' + DIALOG.border, background: DIALOG.raised }}>
-                                          <div style={{ fontSize: '11px', color: DIALOG.dim, marginBottom: '6px' }}>"{searchTerm}" nije u bazi partnera</div>
+                                          <div style={{ fontSize: '11px', color: DIALOG.dim, marginBottom: '6px' }}>„{searchTerm}“ nije u bazi partnera</div>
                                           <button
                                             style={{ fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '5px 12px', border: 'none', borderRadius: '6px', background: DIALOG.accent, color: DIALOG.onAccent, cursor: 'pointer', width: '100%' }}
                                             onMouseDown={e => { e.preventDefault(); setReviewPartnerSearch(prev => ({ ...prev, [p.id]: '' })); openPartnerDialog(p.id, searchTerm, p.account_number || '') }}>
-                                            ➕ Add "{searchTerm}" as a new partner (with NBS lookup-om)
+                                            ➕ Dodaj „{searchTerm}“ kao novog partnera (uz pretragu NBS)
                                           </button>
                                         </div>
                                       )
@@ -1869,10 +1875,10 @@ export default function BulkImport({ onClose, onImported }: Props) {
                               {/* Partner accounts */}
                               {rowAccounts.length > 0 && (
                                 <div style={{ marginTop: '6px' }}>
-                                  <label style={{ ...s.editLbl, display: 'block', marginBottom: '4px' }}>Account partnera ({rowAccounts.length})</label>
+                                  <label style={{ ...s.editLbl, display: 'block', marginBottom: '4px' }}>Račun partnera ({rowAccounts.length})</label>
                                   <select style={{ ...s.editSelect, border: '1.5px solid ' + DIALOG.accent, background: DIALOG.accentFill }}
                                     defaultValue={rowAccounts.find((a: any) => normalizeAccountNumber(a.account_number) === normalizeAccountNumber(parsedAccount || ''))?.account_number || rowAccounts.find((a: any) => a.is_primary)?.account_number || rowAccounts[0]?.account_number || ''}>
-                                    <option value="">— No account —</option>
+                                    <option value="">— Bez računa —</option>
                                     {rowAccounts.map((acc: any) => (
                                       <option key={acc.id} value={acc.account_number}>
                                         {acc.account_number}{acc.bank_name ? ` · ${acc.bank_name}` : ''}{acc.is_primary ? ' ★' : ''}
@@ -1885,36 +1891,36 @@ export default function BulkImport({ onClose, onImported }: Props) {
                               {/* Save account button if not in DB */}
                               {row.override_partner_id && parsedAccount && !accountInDB && (
                                 <div style={{ marginTop: '6px', background: DIALOG.amberFill, border: '0.5px solid ' + DIALOG.amber, borderRadius: '6px', padding: '7px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                                  <span style={{ fontSize: '11px', color: DIALOG.amber }}>Account <strong>{parsedAccount}</strong> is not on file for this partner</span>
+                                  <span style={{ fontSize: '11px', color: DIALOG.amber }}>Račun <strong>{parsedAccount}</strong> nije unet za ovog partnera</span>
                                   <button
                                     style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '3px 10px', border: 'none', borderRadius: '5px', background: DIALOG.amber, color: DIALOG.onAccent, cursor: 'pointer', whiteSpace: 'nowrap' as const }}
                                     onClick={() => saveAccountToPartner(p.id, row.override_partner_id, parsedAccount)}>
-                                    {savingAccount[p.id] ? '⏳' : '➕ Save account'}
+                                    {savingAccount[p.id] ? '⏳' : '➕ Sačuvaj račun'}
                                   </button>
                                 </div>
                               )}
                             </div>
 
                             <div style={s.editField}>
-                              <label style={s.editLbl}>Type</label>
+                              <label style={s.editLbl}>Tip</label>
                               <select style={s.editSelect} value={row.override_tx_type}
                                 onChange={e => updateRow(p.id, { override_tx_type: e.target.value as any, override_pl_category_id: '', override_pl_category_name: '', override_pl_subcategory_id: '', override_pl_subcategory_name: '', override_department_id: '', override_department_name: '', override_dept_subcategory_id: '', override_dept_subcategory_name: '', override_expense_description: '' })}>
-                                <option value="direct">⚡ Direct (P&L impact)</option>
-                                <option value="invoice_payment">💳 Invoice payment (cash only)</option>
-                                <option value="passthrough">🔄 Pass-through (transit)</option>
-                                <option value="credit_payment">🏦 Credit payment (close installments)</option>
+                                <option value="direct">⚡ Direktna (utiče na P&L)</option>
+                                <option value="invoice_payment">💳 Plaćanje fakture (samo novac)</option>
+                                <option value="passthrough">🔄 Prolazna stavka (tranzit)</option>
+                                <option value="credit_payment">🏦 Otplata kredita (zatvara rate)</option>
                               </select>
                             </div>
                           </div>
 
                           {row.override_tx_type === 'passthrough' && (
                             <>
-                              <div style={s.editSectionTitle}>Pass-through details</div>
+                              <div style={s.editSectionTitle}>Podaci o prolaznoj stavci</div>
                               <div style={s.editGrid2}>
                                 <div style={s.editField}>
                                   <label style={s.editLbl}>Smer</label>
                                   <select style={s.editSelect} value={row.override_pt_direction} onChange={e => updateRow(p.id, { override_pt_direction: e.target.value as 'in' | 'out' })}>
-                                    <option value="in">📥 IN — Uplata</option><option value="out">📤 OUT — Isplata</option>
+                                    <option value="in">📥 UPLATA</option><option value="out">📤 ISPLATA</option>
                                   </select>
                                 </div>
                                 <div style={s.editField}>
@@ -1933,7 +1939,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
                           {row.override_tx_type === 'credit_payment' && (
                             <div style={{ gridColumn: '1 / -1', marginTop: '8px' }}>
-                              <div style={s.editSectionTitle}>Credit installments</div>
+                              <div style={s.editSectionTitle}>Rate kredita</div>
                               <CreditInstallmentSelector
                                 credits={credits}
                                 selectedCreditId={row.override_credit_id}
@@ -1972,13 +1978,13 @@ export default function BulkImport({ onClose, onImported }: Props) {
                           {row.override_tx_type !== 'passthrough' && (
                             <div style={{ ...s.editGrid2, marginTop: '8px' }}>
                               <div style={s.editField}>
-                                <label style={s.editLbl}>Subtype</label>
+                                <label style={s.editLbl}>Podtip</label>
                                 <select style={s.editSelect} value={row.override_tx_subtype} onChange={e => updateRow(p.id, { override_tx_subtype: e.target.value as any })}>
-                                  <option value="expense">📤 Expense</option><option value="revenue">📥 Revenue</option>
+                                  <option value="expense">📤 Trošak</option><option value="revenue">📥 Prihod</option>
                                 </select>
                               </div>
                               <div style={s.editField}>
-                                <label style={s.editLbl}>Note</label>
+                                <label style={s.editLbl}>Napomena</label>
                                 <input style={s.editInput} value={row.override_note} onChange={e => updateRow(p.id, { override_note: e.target.value })} placeholder={p.description?.slice(0, 40)} />
                               </div>
                             </div>
@@ -1986,16 +1992,16 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
                           {row.override_tx_type === 'invoice_payment' && (
                             <>
-                              <div style={s.editSectionTitle}>Payment details</div>
+                              <div style={s.editSectionTitle}>Podaci za plaćanje</div>
                               <div style={s.editGrid2}>
                                 <div style={s.editField}>
-                                  <label style={s.editLbl}>Payment method</label>
+                                  <label style={s.editLbl}>Način plaćanja</label>
                                   <select style={s.editSelect} value={row.override_payment_method} onChange={e => updateRow(p.id, { override_payment_method: e.target.value })}>
-                                    {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
+                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{PAYMENT_METHOD_LABEL[m] || m}</option>)}
                                   </select>
                                 </div>
                                 <div style={s.editField}>
-                                  <label style={s.editLbl}>Link to open invoice</label>
+                                  <label style={s.editLbl}>Poveži sa otvorenom fakturom</label>
                                   {/* Selected invoices summary */}
                                   {(row.override_linked_invoice_ids?.length > 0) && !invoicePickerOpen[p.id] && (
                                     <div style={{ marginBottom: '6px' }}>
@@ -2006,7 +2012,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                           <div key={invId} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 8px', borderRadius: '6px', border: '1px solid rgba(0,212,126,0.4)', background: 'rgba(0,212,126,0.06)', marginBottom: '3px' }}>
                                             <span style={{ fontSize: '10px', color: '#7A9BB8', width: '14px' }}>{idx + 1}.</span>
                                             <span style={{ fontSize: '12px', fontWeight: '500', color: '#00D47E', flex: 1 }}>{sel.partner_name || '—'}</span>
-                                            <span style={{ fontSize: '10px', color: '#7A9BB8' }}>{fmtMoney(outstandingOwn(sel), sel.currency || 'RSD')} rem</span>
+                                            <span style={{ fontSize: '10px', color: '#7A9BB8' }}>preostalo {fmtMoney(outstandingOwn(sel), sel.currency || 'RSD')}</span>
                                             <button style={{ background: 'none', border: 'none', color: '#FF5B5A', fontSize: '13px', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}
                                               onClick={e => { e.stopPropagation(); updateRow(p.id, { override_linked_invoice_ids: row.override_linked_invoice_ids.filter(x => x !== invId), status: row.override_linked_invoice_ids.length <= 1 ? 'pending' as RowStatus : 'accepted' as RowStatus }) }}>×</button>
                                           </div>
@@ -2014,7 +2020,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                       })}
                                       <button style={{ fontSize: '11px', color: '#7A9BB8', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0' }}
                                         onClick={e => { e.stopPropagation(); setInvoicePickerOpen(prev => ({ ...prev, [p.id]: true })) }}>
-                                        ✎ Edit selection
+                                        ✎ Izmeni izbor
                                       </button>
                                     </div>
                                   )}
@@ -2026,7 +2032,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                     value={invoiceSearch[p.id] || ''}
                                     onChange={e => { e.stopPropagation(); setInvoiceSearch(prev => ({ ...prev, [p.id]: e.target.value })) }}
                                     onClick={e => e.stopPropagation()}
-                                    placeholder="Search partner or invoice #..."
+                                    placeholder="Pretraga po partneru ili broju fakture…"
                                     autoFocus={invoicePickerOpen[p.id]}
                                   />
                                   {(() => {
@@ -2042,13 +2048,13 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                     return (
                                       <div style={{ fontSize: '11px', color: '#7A9BB8', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                         <span>
-                                          {hidden} invoice{hidden === 1 ? '' : 's'} already taken by another line
-                                          {showTaken[p.id] ? ' — shown, greyed out' : ' — hidden'}
+                                          Faktura koje su već zauzete drugom stavkom: {hidden}
+                                          {showTaken[p.id] ? ' — prikazane, zasivljene' : ' — skrivene'}
                                         </span>
                                         <button
                                           style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.14)', borderRadius: '6px', color: '#7A9BB8', fontSize: '10.5px', padding: '2px 8px', cursor: 'pointer', fontFamily: "'Inter', system-ui, sans-serif" }}
                                           onClick={e => { e.stopPropagation(); setShowTaken(prev => ({ ...prev, [p.id]: !prev[p.id] })) }}>
-                                          {showTaken[p.id] ? 'Hide them' : 'Show them'}
+                                          {showTaken[p.id] ? 'Sakrij ih' : 'Prikaži ih'}
                                         </button>
                                       </div>
                                     )
@@ -2057,7 +2063,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                     <div
                                       style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)', cursor: 'pointer', fontSize: '12px', color: '#7A9BB8' }}
                                       onClick={e => { e.stopPropagation(); updateRow(p.id, { override_linked_invoice_ids: [], override_linked_invoice_id: '', status: 'pending' as RowStatus }); setInvoiceSearch(prev => ({ ...prev, [p.id]: '' })); setInvoicePickerOpen(prev => ({ ...prev, [p.id]: false })) }}>
-                                      — Clear selection —
+                                      — Poništi izbor —
                                     </div>
                                     {openInvoices
                                       .filter(inv => {
@@ -2112,13 +2118,13 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                                 {inv.invoice_number && <span style={{ fontSize: '10px', color: '#7A9BB8', background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '4px', fontFamily: 'monospace' }}>{inv.invoice_number}</span>}
                                               </div>
                                               <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '1px' }}>
-                                                {inv.invoice_date}{inv.due_date ? ` · Due: ${inv.due_date}` : ''}
+                                                {inv.invoice_date}{inv.due_date ? ` · Dospeće: ${inv.due_date}` : ''}
                                               </div>
                                             </div>
                                             <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
                                               <div style={{ fontSize: '11px', fontWeight: '600', color: '#DCE9F6' }}>{fmtMoney(inv.amount || 0, inv.currency || 'RSD')}</div>
                                               <div style={{ fontSize: '10px', color: remOwn > 0.01 ? '#FF5B5A' : '#00D47E', marginTop: '1px' }}>
-                                                Rem: {fmtMoney(remOwn, inv.currency || 'RSD')}
+                                                Preostalo: {fmtMoney(remOwn, inv.currency || 'RSD')}
                                               </div>
                                             </div>
                                           </div>
@@ -2128,7 +2134,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                   {(row.override_linked_invoice_ids?.length > 0) && invoicePickerOpen[p.id] && (
                                     <button style={{ marginTop: '6px', fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '5px 12px', border: '1px solid #00D47E', borderRadius: '6px', background: 'rgba(0,212,126,0.1)', color: '#00D47E', cursor: 'pointer', width: '100%' }}
                                       onClick={e => { e.stopPropagation(); setInvoicePickerOpen(prev => ({ ...prev, [p.id]: false })) }}>
-                                      ✓ Potvrdi selekciju ({row.override_linked_invoice_ids.length} invoice{row.override_linked_invoice_ids.length > 1 ? 'a' : ''})
+                                      ✓ Potvrdi izbor ({countOf(row.override_linked_invoice_ids.length, 'faktura', 'fakture', 'faktura')})
                                     </button>
                                   )}
                                     </>
@@ -2137,8 +2143,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
                               </div>
                               {(row.override_linked_invoice_ids?.length > 0) && (
                                 <div style={{ ...s.aiNotes, background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, marginTop: '8px' }}>
-                                  💳 Will close {row.override_linked_invoice_ids.length} invoice{row.override_linked_invoice_ids.length > 1 ? 's' : ''} sequentially ·
-                                  Total rem: <strong>{fmtRSD(row.override_linked_invoice_ids.reduce((s, id) => { const inv = openInvoices.find(i => i.id === id); return s + (inv?.remaining_rsd || 0) }, 0))}</strong>
+                                  💳 Zatvaraće redom {countOf(row.override_linked_invoice_ids.length, 'fakturu', 'fakture', 'faktura')} ·
+                                  Ukupno preostalo: <strong>{fmtRSD(row.override_linked_invoice_ids.reduce((s, id) => { const inv = openInvoices.find(i => i.id === id); return s + (inv?.remaining_rsd || 0) }, 0))}</strong>
                                 </div>
 
                               )}
@@ -2157,8 +2163,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                           onChange={e => updateRow(p.id, { override_fx_book: e.target.checked })}
                                           style={{ accentColor: '#00D47E', cursor: 'pointer' }} />
                                         <span>
-                                          Book the {fx.difference.kind === 'gain' ? 'gain' : 'shortfall'} of{' '}
-                                          <strong>{formatMoney(fx.amountOwn, fx.currency)}</strong> as a currency difference
+                                          Proknjiži {fx.difference.kind === 'gain' ? 'pozitivnu' : 'negativnu'} kursnu razliku od{' '}
+                                          <strong>{formatMoney(fx.amountOwn, fx.currency)}</strong>
                                         </span>
                                       </label>
                                       <div style={s.fxNote}>{fx.difference.note}</div>
@@ -2167,15 +2173,15 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                           <select style={{ ...s.editSelect, width: '100%', marginTop: '8px' }}
                                             value={script?.id || ''}
                                             onChange={e => updateRow(p.id, { override_fx_script_id: e.target.value })}>
-                                            {fxScripts.length === 0 && <option value="">No quick-fill templates saved</option>}
+                                            {fxScripts.length === 0 && <option value="">Nema sačuvanih šablona</option>}
                                             {fxScripts.map(sc => (
                                               <option key={sc.id} value={sc.id}>{sc.name} — {sc.pl_category}</option>
                                             ))}
                                           </select>
                                           {!script && (
                                             <div style={{ ...s.fxNote, color: DIALOG.red }}>
-                                              No template is set up for currency differences, so there is no
-                                              classification to book this under.
+                                              Nema šablona za kursne razlike, pa nema klasifikacije pod
+                                              kojom bi se ovo proknjižilo.
                                             </div>
                                           )}
                                         </>
@@ -2231,15 +2237,14 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                 classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
                                 client={supabase}
                                 onScriptsChanged={() => { fetchScripts(supabase).then(setQuickFillScripts as any) }}
-                                hint="One bank line, two or more expenses — each with its own classification."
+                                hint="Jedna stavka izvoda, dva ili više troškova — svaki sa svojom klasifikacijom."
                               />
 
                               {row.override_pl_splits.length > 0 && (
                                 <div style={{ fontSize: '11.5px', color: DIALOG.amber, margin: '2px 0 10px', lineHeight: 1.55 }}>
-                                  The classification below is taken from the largest line of the
-                                  split and locked while it stands. The split is what the P&amp;L
-                                  reads; this is what the ledger lists the line under. Each line
-                                  carries its own project.
+                                  Klasifikacija ispod je preuzeta iz najveće stavke podele i zaključana
+                                  je dok podela postoji. P&amp;L čita podelu; ovo je ono pod čim glavna
+                                  knjiga vodi stavku. Svaka stavka podele nosi svoj projekat.
                                 </div>
                               )}
                               <div style={{
@@ -2247,7 +2252,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                   ? { opacity: 0.5, pointerEvents: 'none' as const, userSelect: 'none' as const }
                                   : {}),
                               }}>
-                              <div style={s.editSectionTitle}>P&L Classification</div>
+                              <div style={s.editSectionTitle}>P&L klasifikacija</div>
                               {/* Quick Fill */}
                               <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', alignItems: 'center' }}>
                                 <div style={{ flex: 1, position: 'relative' as const }}>
@@ -2258,7 +2263,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                       onChange={e => setQfSearch(e.target.value)}
                                       onFocus={() => setQfOpen(p.id)}
                                       onBlur={() => setTimeout(() => setQfOpen(null), 150)}
-                                      placeholder="⚡ Quick fill — click or search…"
+                                      placeholder="⚡ Brza popuna — kliknite ili pretražite…"
                                     />
                                     <span style={{ position: 'absolute' as const, right: '8px', top: '50%', transform: 'translateY(-50%)', fontSize: '10px', color: '#00D47E', pointerEvents: 'none' as const }}>
                                       {qfOpen === p.id ? '▲' : '▼'}
@@ -2274,7 +2279,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                           sc.department.toLowerCase().includes(qfSearch.toLowerCase())
                                         )
                                         return filtered.length === 0
-                                          ? <div style={{ padding: '10px 12px', fontSize: '12px', color: '#7A9BB8' }}>No matches for "{qfSearch}"</div>
+                                          ? <div style={{ padding: '10px 12px', fontSize: '12px', color: '#7A9BB8' }}>Nema rezultata za „{qfSearch}“</div>
                                           : filtered.map(sc => (
                                               <div key={sc.id}
                                                 style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column' as const, gap: '2px' }}
@@ -2315,22 +2320,22 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                 <button
                                   style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '5px 10px', border: '1px solid rgba(0,212,126,0.3)', borderRadius: '6px', background: 'rgba(0,212,126,0.08)', color: '#00D47E', cursor: 'pointer', whiteSpace: 'nowrap' as const }}
                                   onClick={e => { e.stopPropagation(); setQfEditing({ ...EMPTY_SCRIPT, id: `script_${Date.now()}` }); setQfDialogOpen(true) }}>
-                                  + New
+                                  + Novi
                                 </button>
                                 <button
                                   style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '5px 10px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', background: 'transparent', color: '#7A9BB8', cursor: 'pointer', whiteSpace: 'nowrap' as const }}
                                   onClick={e => { e.stopPropagation(); setQfEditing(null); setQfDialogOpen(true) }}>
-                                  ✎ Edit
+                                  ✎ Izmeni
                                 </button>
                               </div>
                               <div style={s.editGrid2}>
                                 <div style={s.editField}>
-                                  <label style={s.editLbl}>P&L Category</label>
+                                  <label style={s.editLbl}>P&L kategorija</label>
                                   <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                   <SearchableSelect value={row.override_pl_category_id}
                                     onChange={v => { const c = plCategories.find(x => x.id === v); updateRow(p.id, { override_pl_category_id: v, override_pl_category_name: c?.name || '', override_pl_subcategory_id: '', override_pl_subcategory_name: '' }) }}
                                     options={plCategories.map(c => ({ value: c.id, label: c.name }))}
-                                    allLabel="Select category..." searchPlaceholder="Type to search categories…"
+                                    allLabel="Izaberite kategoriju…" searchPlaceholder="Pretraga kategorija…"
                                     style={pickerChrome} />
                                   <InlineCategoryAdd table="pl_categories"
                                     currentCount={plCategories.length}
@@ -2338,12 +2343,12 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                   </div>
                                 </div>
                                 <div style={s.editField}>
-                                  <label style={s.editLbl}>P&L Sub-category</label>
+                                  <label style={s.editLbl}>Potkategorija</label>
                                   <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                   <SearchableSelect value={row.override_pl_subcategory_id}
                                     onChange={v => { const sub = plSubcategories.find(x => x.id === v); updateRow(p.id, { override_pl_subcategory_id: v, override_pl_subcategory_name: sub?.name || '' }) }}
                                     options={plSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                                    allLabel="Select sub-category..." searchPlaceholder="Type to search sub-categories…"
+                                    allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
                                     disabled={!row.override_pl_category_id || plSubs.length === 0}
                                     style={pickerChrome} />
                                   <InlineCategoryAdd table="pl_subcategories" parentId={row.override_pl_category_id} parentField="category_id"
@@ -2352,15 +2357,15 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                   </div>
                                 </div>
                               </div>
-                              <div style={s.editSectionTitle}>Department</div>
+                              <div style={s.editSectionTitle}>Sektor</div>
                               <div style={s.editGrid2}>
                                 <div style={s.editField}>
-                                  <label style={s.editLbl}>Department</label>
+                                  <label style={s.editLbl}>Sektor</label>
                                   <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                   <SearchableSelect value={row.override_department_id}
                                     onChange={v => { const d = departments.find(x => x.id === v); updateRow(p.id, { override_department_id: v, override_department_name: d?.name || '', override_dept_subcategory_id: '', override_dept_subcategory_name: '', override_expense_description: '' }) }}
                                     options={departments.map(d => ({ value: d.id, label: d.name }))}
-                                    allLabel="Select department..." searchPlaceholder="Type to search departments…"
+                                    allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                                     style={pickerChrome} />
                                   <InlineCategoryAdd table="departments"
                                     currentCount={departments.length}
@@ -2368,12 +2373,12 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                   </div>
                                 </div>
                                 <div style={s.editField}>
-                                  <label style={s.editLbl}>Dept. Sub-category</label>
+                                  <label style={s.editLbl}>Podsektor</label>
                                   <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                   <SearchableSelect value={row.override_dept_subcategory_id}
                                     onChange={v => { const sub = deptSubcategories.find(x => x.id === v); updateRow(p.id, { override_dept_subcategory_id: v, override_dept_subcategory_name: sub?.name || '', override_expense_description: '' }) }}
                                     options={deptSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                                    allLabel="Select sub-category..." searchPlaceholder="Type to search sub-categories…"
+                                    allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
                                     disabled={!row.override_department_id || deptSubs.length === 0}
                                     style={pickerChrome} />
                                   <InlineCategoryAdd table="dept_subcategories" parentId={row.override_department_id} parentField="department_id"
@@ -2384,16 +2389,16 @@ export default function BulkImport({ onClose, onImported }: Props) {
                               </div>
                               <div style={{ marginTop: '8px' }}>
                                 <div style={s.editField}>
-                                  <label style={s.editLbl}>Expense description</label>
+                                  <label style={s.editLbl}>Opis troška</label>
                                   <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                     {expDescs.length > 0 ? (
                                       <SearchableSelect value={row.override_expense_description}
                                         onChange={v => updateRow(p.id, { override_expense_description: v })}
                                         options={expDescs.map(d => ({ value: d.name, label: d.name }))}
-                                        allLabel="Select description..." searchPlaceholder="Type to search descriptions…"
+                                        allLabel="Izaberite opis…" searchPlaceholder="Pretraga opisa…"
                                         style={{ ...pickerChrome, flex: 1 }} />
                                     ) : (
-                                      <input style={{ ...s.editInput, flex: 1 }} value={row.override_expense_description} onChange={e => updateRow(p.id, { override_expense_description: e.target.value })} placeholder="e.g. Telekom, AWS, Rent..." />
+                                      <input style={{ ...s.editInput, flex: 1 }} value={row.override_expense_description} onChange={e => updateRow(p.id, { override_expense_description: e.target.value })} placeholder="npr. Telekom, AWS, zakup…" />
                                     )}
                                     <InlineCategoryAdd table="expense_descriptions" parentId={row.override_dept_subcategory_id} parentField="dept_subcategory_id"
                                       currentCount={expDescs.length} disabled={!row.override_dept_subcategory_id}
@@ -2401,9 +2406,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                   </div>
                                 </div>
                               </div>
-                              <div style={s.editSectionTitle}>Cash flow classification</div>
+                              <div style={s.editSectionTitle}>Klasifikacija novčanog toka</div>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '6px', marginTop: '6px' }}>
-                                {[{ id: 'recurring', label: '🔁 Recurring' }, { id: 'one_time', label: '1️⃣ One-time' }, { id: 'accrual', label: '📅 Accrual' }, { id: 'capex', label: '🏗 CapEx' }, { id: 'reimbursable', label: '↩️ Reimb.' }].map(a => (
+                                {[{ id: 'recurring', label: '🔁 Ponavljajući' }, { id: 'one_time', label: '1️⃣ Jednokratni' }, { id: 'accrual', label: '📅 Razgraničenje' }, { id: 'capex', label: '🏗 Kap. izdatak' }, { id: 'reimbursable', label: '↩️ Refund.' }].map(a => (
                                   <div key={a.id} style={{ ...s.allocBtn, padding: '6px 4px', ...(row.override_cf_type === a.id ? { border: '2px solid ' + DIALOG.accent, background: DIALOG.accentFill } : {}) }}
                                     onClick={() => updateRow(p.id, { override_cf_type: row.override_cf_type === a.id ? '' : a.id })}>
                                     <div style={{ fontSize: '10px', fontWeight: '600', color: row.override_cf_type === a.id ? DIALOG.accent : DIALOG.text }}>{a.label}</div>
@@ -2413,7 +2418,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                               {row.override_cf_type === 'recurring' && (
                                 <div style={{ marginTop: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
                                   <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-                                    {[{ id: 'monthly', label: '📆 Monthly' }, { id: 'quarterly', label: '📊 Quarterly' }, { id: 'yearly', label: '📅 Yearly' }].map(f => (
+                                    {[{ id: 'monthly', label: '📆 Mesečno' }, { id: 'quarterly', label: '📊 Kvartalno' }, { id: 'yearly', label: '📅 Godišnje' }].map(f => (
                                       <div key={f.id}
                                         style={{ flex: 1, padding: '7px', border: row.override_cf_frequency === f.id ? '2px solid #00D47E' : '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', background: row.override_cf_frequency === f.id ? 'rgba(0,212,126,0.10)' : 'transparent', cursor: 'pointer', textAlign: 'center' as const, fontSize: '11px', fontWeight: row.override_cf_frequency === f.id ? '600' : '400', color: row.override_cf_frequency === f.id ? '#00D47E' : '#7A9BB8' }}
                                         onClick={() => updateRow(p.id, { override_cf_frequency: f.id })}>
@@ -2422,30 +2427,30 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                     ))}
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '4px' }}>
-                                    <label style={s.editLbl}>Next month estimate ({p.currency || '—'})</label>
+                                    <label style={s.editLbl}>Procena za sledeći mesec ({p.currency || '—'})</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                                       <input
                                         type="number"
                                         style={{ ...s.editInput, flex: 1 }}
                                         value={row.override_cf_next_month_est}
                                         onChange={e => updateRow(p.id, { override_cf_next_month_est: e.target.value })}
-                                        placeholder={`Auto: ${fmtNum(p.debit || p.credit || 0)}`}
+                                        placeholder={`Automatski: ${fmtNum(p.debit || p.credit || 0)}`}
                                       />
                                       {!row.override_cf_next_month_est && (
                                         <button
                                           style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '5px 10px', border: '1px solid rgba(0,212,126,0.3)', borderRadius: '6px', background: 'transparent', color: '#00D47E', cursor: 'pointer', whiteSpace: 'nowrap' as const }}
                                           onClick={() => updateRow(p.id, { override_cf_next_month_est: String(p.debit || p.credit || '') })}>
-                                          Use this amount
+                                          Preuzmi ovaj iznos
                                         </button>
                                       )}
                                     </div>
                                     {(p.debit || p.credit) && (
                                       <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px' }}>
-                                        Auto: {row.override_cf_frequency === 'quarterly'
-                                          ? ((p.debit || p.credit || 0) / 3).toFixed(2)
+                                        Automatski: {row.override_cf_frequency === 'quarterly'
+                                          ? fmtNum((p.debit || p.credit || 0) / 3)
                                           : row.override_cf_frequency === 'yearly'
-                                          ? ((p.debit || p.credit || 0) / 12).toFixed(2)
-                                          : fmtNum(p.debit || p.credit || 0)} {p.currency}/mo
+                                          ? fmtNum((p.debit || p.credit || 0) / 12)
+                                          : fmtNum(p.debit || p.credit || 0)} {p.currency}/mes.
                                       </div>
                                     )}
                                   </div>
@@ -2486,9 +2491,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                 ) : null
                               })()}
                               <div style={s.editField}>
-                                <label style={s.editLbl}>Revenue stream</label>
+                                <label style={s.editLbl}>Vrsta prihoda</label>
                                 <select style={s.editSelect} value={row.override_revenue_stream} onChange={e => updateRow(p.id, { override_revenue_stream: e.target.value })}>
-                                  <option value="">Select stream...</option>
+                                  <option value="">Izaberite vrstu prihoda…</option>
                                   {REVENUE_STREAMS.map(r => <option key={r}>{r}</option>)}
                                 </select>
                               </div>
@@ -2499,7 +2504,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                           {row.override_tx_type === 'direct' && row.override_pl_splits.length === 0 && (
                             <div style={{ marginTop: '8px' }}>
                               <div style={s.editField}>
-                                <label style={s.editLbl}>Project</label>
+                                <label style={s.editLbl}>Projekat</label>
                                 <ProjectSelect
                                   value={projectIdFromInput(row.override_project_id)}
                                   onChange={id => updateRow(p.id, { override_project_id: projectIdToInput(id) })}
@@ -2510,8 +2515,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
                           )}
 
                           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', gap: '6px' }}>
-                            <button style={s.btnSmallRed} onClick={() => rejectRow(p.id)}>✕ Reject</button>
-                            <button style={s.btnSmallGreen} onClick={() => { acceptRow(p.id); toggleExpand(p.id) }}>✓ Accept & close</button>
+                            <button style={s.btnSmallRed} onClick={() => rejectRow(p.id)}>✕ Odbij</button>
+                            <button style={s.btnSmallGreen} onClick={() => { acceptRow(p.id); toggleExpand(p.id) }}>✓ Prihvati i zatvori</button>
                           </div>
                         </div>
                       )}
@@ -2526,28 +2531,28 @@ export default function BulkImport({ onClose, onImported }: Props) {
         <div style={s.footer}>
           {step === 'upload' && (
             <>
-              <span style={{ fontSize: '12px', color: DIALOG.dim }}>{rows.length > 0 ? `${rows.length} rows ready` : 'Upload a file to begin'}</span>
+              <span style={{ fontSize: '12px', color: DIALOG.dim }}>{rows.length > 0 ? `Spremno stavki: ${rows.length}` : 'Otpremite fajl da biste počeli'}</span>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={s.btnGhost} onClick={onClose}>Cancel</button>
+                <button style={s.btnGhost} onClick={onClose}>Otkaži</button>
                 <button style={{ ...s.btnGhost, opacity: (!company || !bank || rows.length === 0 || analyzing) ? 0.5 : 1 }}
                   onClick={() => { if (company && bank && rows.length > 0) { setRows(prev => prev.map(r => r.already_imported ? r : ({ ...r, status: 'pending' as RowStatus }))); setStep('review') } }}
                   disabled={!company || !bank || rows.length === 0 || analyzing}>
-                  📋 Skip AI — review manually
+                  📋 Bez AI — pregledaj ručno
                 </button>
                 <button style={{ ...s.btnPrimary, opacity: (!company || !bank || rows.length === 0 || analyzing) ? 0.5 : 1 }}
                   onClick={analyzeWithAI} disabled={!company || !bank || rows.length === 0 || analyzing}>
-                  {analyzing ? `🤖 Analyzing... ${progress}%` : '🤖 Analyze with AI'}
+                  {analyzing ? `🤖 Analiza… ${progress}%` : '🤖 Analiziraj uz AI'}
                 </button>
               </div>
             </>
           )}
           {step === 'review' && (
             <>
-              <span style={{ fontSize: '12px', color: DIALOG.dim }}>{accepted} entr{accepted !== 1 ? 'ies' : 'y'} will be posted</span>
+              <span style={{ fontSize: '12px', color: DIALOG.dim }}>Biće proknjiženo stavki: {accepted}</span>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={s.btnGhost} onClick={() => setStep('upload')}>← Back</button>
+                <button style={s.btnGhost} onClick={() => setStep('upload')}>← Nazad</button>
                 <button style={{ ...s.btnPrimary, opacity: accepted === 0 ? 0.5 : 1 }} onClick={postAccepted} disabled={accepted === 0}>
-                  Post {accepted} entr{accepted !== 1 ? 'ies' : 'y'}
+                  Proknjiži ({accepted})
                 </button>
               </div>
             </>
@@ -2564,7 +2569,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
             {/* Header */}
             <div style={{ background: '#060E1A', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
               <div style={{ color: '#DCE9F6', fontSize: '14px', fontWeight: '500' }}>
-                {qfEditing && qfEditing.name === '' ? '➕ New script' : qfEditing ? `✎ Edit: ${qfEditing.name}` : '⚡ Quick Fill scripts'}
+                {qfEditing && qfEditing.name === '' ? '➕ Novi šablon' : qfEditing ? `✎ Izmena: ${qfEditing.name}` : '⚡ Šabloni za brzu popunu'}
               </div>
               <button style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', fontSize: '20px', cursor: 'pointer' }} onClick={() => { setQfDialogOpen(false); setQfEditing(null) }}>×</button>
             </div>
@@ -2579,44 +2584,44 @@ export default function BulkImport({ onClose, onImported }: Props) {
                       <input style={{ ...s.editInput, textAlign: 'center' as const, fontSize: '20px' }} value={qfEditing.icon} onChange={e => setQfEditing({ ...qfEditing, icon: e.target.value })} />
                     </div>
                     <div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Naziv skripte *</div>
-                      <input style={s.editInput} value={qfEditing.name} onChange={e => setQfEditing({ ...qfEditing, name: e.target.value })} placeholder="e.g. Bank fee — domestic" />
+                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Naziv šablona *</div>
+                      <input style={s.editInput} value={qfEditing.name} onChange={e => setQfEditing({ ...qfEditing, name: e.target.value })} placeholder="npr. Bankarska provizija — domaća" />
                     </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>P&L Category</div>
+                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>P&L kategorija</div>
                       <select style={s.editSelect} value={qfEditing.pl_category} onChange={e => setQfEditing({ ...qfEditing, pl_category: e.target.value, pl_subcategory: '' })}>
-                        <option value="">Select...</option>
+                        <option value="">Izaberite…</option>
                         {plCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                       </select>
                     </div>
                     <div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>P&L Sub-category</div>
+                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Potkategorija</div>
                       <select style={s.editSelect} value={qfEditing.pl_subcategory} onChange={e => setQfEditing({ ...qfEditing, pl_subcategory: e.target.value })}>
-                        <option value="">Select...</option>
+                        <option value="">Izaberite…</option>
                         {plSubcategories.filter(sub => { const cat = plCategories.find(c => c.name === qfEditing.pl_category); return cat && sub.category_id === cat.id }).map(sub => <option key={sub.id} value={sub.name}>{sub.name}</option>)}
                       </select>
                     </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Department</div>
+                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Sektor</div>
                       <select style={s.editSelect} value={qfEditing.department} onChange={e => setQfEditing({ ...qfEditing, department: e.target.value, dept_subcategory: '', expense_description: '' })}>
-                        <option value="">Select...</option>
+                        <option value="">Izaberite…</option>
                         {departments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                       </select>
                     </div>
                     <div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Dept. Sub-category</div>
+                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Podsektor</div>
                       <select style={s.editSelect} value={qfEditing.dept_subcategory} onChange={e => setQfEditing({ ...qfEditing, dept_subcategory: e.target.value, expense_description: '' })}>
-                        <option value="">Select...</option>
+                        <option value="">Izaberite…</option>
                         {deptSubcategories.filter(sub => { const dept = departments.find(d => d.name === qfEditing.department); return dept && sub.department_id === dept.id }).map(sub => <option key={sub.id} value={sub.name}>{sub.name}</option>)}
                       </select>
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Expense Description</div>
+                    <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Opis troška</div>
                     {(() => {
                       // Match dept_subcategory by BOTH name AND parent department to avoid cross-dept collisions
                       const parentDept = departments.find(d => d.name === qfEditing.department)
@@ -2627,27 +2632,27 @@ export default function BulkImport({ onClose, onImported }: Props) {
                       const descs = deptSub ? expenseDescriptions.filter(ed => ed.dept_subcategory_id === deptSub.id) : []
                       return descs.length > 0
                         ? <select style={s.editSelect} value={qfEditing.expense_description} onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })}>
-                            <option value="">Select...</option>
+                            <option value="">Izaberite…</option>
                             {descs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                           </select>
-                        : <input style={s.editInput} value={qfEditing.expense_description} onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })} placeholder="e.g. AWS, Telekom..." />
+                        : <input style={s.editInput} value={qfEditing.expense_description} onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })} placeholder="npr. AWS, Telekom…" />
                     })()}
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
                     <div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>CF Type</div>
+                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Tip novčanog toka</div>
                       <select style={s.editSelect} value={qfEditing.cf_type} onChange={e => setQfEditing({ ...qfEditing, cf_type: e.target.value })}>
-                        <option value="recurring">Recurring</option>
-                        <option value="one_time">One-time</option>
-                        <option value="accrual">Accrual</option>
-                        <option value="capex">CapEx</option>
-                        <option value="">— None —</option>
+                        <option value="recurring">Ponavljajući</option>
+                        <option value="one_time">Jednokratni</option>
+                        <option value="accrual">Razgraničenje</option>
+                        <option value="capex">Kapitalni izdatak</option>
+                        <option value="">— Bez —</option>
                       </select>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
                     <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '7px 16px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', background: 'transparent', color: '#7A9BB8', cursor: 'pointer' }}
-                      onClick={() => setQfEditing(null)}>← Back</button>
+                      onClick={() => setQfEditing(null)}>← Nazad</button>
                     <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '7px 16px', border: 'none', borderRadius: '8px', background: '#00D47E', color: '#060E1A', cursor: 'pointer', fontWeight: '600', opacity: !qfEditing.name.trim() ? 0.5 : 1 }}
                       disabled={!qfEditing.name.trim()}
                       onClick={async () => {
@@ -2656,7 +2661,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                           setQfEditing(null)
                         }
                       }}>
-                      ✓ Save script
+                      ✓ Sačuvaj šablon
                     </button>
                   </div>
                 </div>
@@ -2675,15 +2680,15 @@ export default function BulkImport({ onClose, onImported }: Props) {
                       </div>
                       <div style={{ display: 'flex', gap: '6px' }}>
                         <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '4px 10px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', background: 'transparent', color: '#7A9BB8', cursor: 'pointer' }}
-                          onClick={() => setQfEditing(sc)}>✎ Edit</button>
+                          onClick={() => setQfEditing(sc)}>✎ Izmeni</button>
                         <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '4px 10px', border: '1px solid rgba(255,91,90,0.3)', borderRadius: '6px', background: 'transparent', color: '#FF5B5A', cursor: 'pointer' }}
-                          onClick={() => { if (window.confirm(`Delete "${sc.name}"?\n\nIt is shared, so it goes for everyone. Entries already classified with it keep their classification.`)) removeScriptById(sc.id) }}>✕</button>
+                          onClick={() => { if (window.confirm(`Obrisati „${sc.name}“?\n\nŠablon je zajednički, pa se briše za sve. Stavke koje su već razvrstane njime zadržavaju klasifikaciju.`)) removeScriptById(sc.id) }}>✕</button>
                       </div>
                     </div>
                   ))}
                   <button style={{ marginTop: '8px', fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '8px', border: '1px dashed rgba(0,212,126,0.3)', borderRadius: '8px', background: 'transparent', color: '#00D47E', cursor: 'pointer', width: '100%' }}
                     onClick={() => setQfEditing({ ...EMPTY_SCRIPT, id: `script_${Date.now()}` })}>
-                    + Add a script
+                    + Dodaj šablon
                   </button>
                 </div>
               )}

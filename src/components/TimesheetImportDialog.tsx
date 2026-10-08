@@ -11,6 +11,8 @@ import {
 import { saveTimesheet, checkTimesheet, totalHours, type TimesheetRow } from '../services/payroll/timesheets'
 import type { EmployeeForMonth } from '../services/payroll/employees'
 import { fundForEmployee, type MonthFund } from '../services/payroll/holidays'
+import { countOf, plural } from '../utils/plural'
+import { monthLongLabel } from '../utils/months'
 
 /**
  * Reading a month of hours out of the department exports.
@@ -89,7 +91,7 @@ export default function TimesheetImportDialog({
       }
       setParsed(out)
     } catch (e: any) {
-      setError(`That file could not be read: ${e.message || e}`)
+      setError(`Fajl nije pročitan: ${e.message || e}. Proverite da je to izvoz u .xlsx formatu.`)
     }
     setReading(false)
   }
@@ -118,14 +120,14 @@ export default function TimesheetImportDialog({
       ? fundForEmployee(fund.monthHours, workingDays.forEmployee(person.employee), workingDays.total)
       : fund.monthHours
     const calendarsDisagree = person && Math.abs(derived - ownFund) > 0.005
-      ? [`The file says their month is ${ownFund} hours and this calendar makes it `
-        + `${derived} — from ${workingDays.forEmployee(person.employee)} working days of `
-        + `${workingDays.total}. One of the two is wrong about the month.`]
+      ? [`Po fajlu, fond sati za ovaj mesec je ${ownFund}, a po ovom kalendaru `
+        + `${derived} — ${workingDays.forEmployee(person.employee)} od ${workingDays.total} `
+        + 'radnih dana. Jedno od ta dva pogrešno vidi mesec.']
       : []
 
     const problems = [
       ...m.parsed.problems,
-      ...(m.employeeId ? [] : ['Not matched to anybody on the payroll.']),
+      ...(m.employeeId ? [] : ['Nije povezan ni sa jednim zaposlenim u obračunu.']),
       ...calendarsDisagree,
       ...(sheet ? checkTimesheet(sheet, ownFund)
         .filter(p => p.level === 'error').map(p => p.message) : []),
@@ -150,10 +152,10 @@ export default function TimesheetImportDialog({
     if (!companyId) return
     const { error: err } = await supabase.from('payroll_timesheet_aliases')
       .upsert({ company_id: companyId, file_name: fileName, employee_id: employeeId,
-        note: 'Linked while importing a month.' },
+        note: 'Povezano pri uvozu meseca.' },
         { onConflict: 'company_id,file_name' })
       .select('id')
-    if (err) { setError(`That link could not be saved: ${err.message}`); return }
+    if (err) { setError(`Veza nije sačuvana: ${err.message}`); return }
     // Remembered from now on, so next month pairs by itself.
     setAliases(a => ({ ...a, [fileName]: employeeId }))
   }
@@ -168,15 +170,15 @@ export default function TimesheetImportDialog({
         written += 1
       } catch (e: any) {
         setSaving(false)
-        setError(`${r.match.parsed.name}: ${e.message} — ${written} were saved before this, `
-          + 'and importing again is safe: each month has one row per person and a second '
-          + 'import replaces it rather than adding to it.')
+        setError(`${r.match.parsed.name}: ${e.message} — pre toga je sačuvano ${written}, `
+          + 'a ponovni uvoz je bezbedan: svaki mesec ima jedan red po zaposlenom i drugi '
+          + 'uvoz ga zamenjuje, a ne dodaje.')
         onImported()
         return
       }
     }
     setSaving(false)
-    setDone(`${written} timesheets imported for ${month}.`)
+    setDone(`Uvezeno: ${countOf(written, 'evidencija', 'evidencije', 'evidencija')} za ${monthLongLabel(month)}.`)
     onImported()
   }
 
@@ -187,20 +189,20 @@ export default function TimesheetImportDialog({
       <div style={s.dialog} onClick={e => e.stopPropagation()}>
         <div style={s.header}>
           <div>
-            <div style={s.title}>Import the hours for {month}</div>
+            <div style={s.title}>Uvoz sati za {monthLongLabel(month)}</div>
             <div style={s.sub}>
-              The five department exports. Nothing is saved until the whole month reads
-              cleanly — what lands is exactly what is listed below.
+              Pet izvoza po odeljenjima. Ništa se ne čuva dok se ceo mesec ne pročita
+              bez greške — upisuje se tačno ono što je navedeno ispod.
             </div>
           </div>
-          <button style={s.close} onClick={onClose}>✕</button>
+          <button style={s.close} onClick={onClose} title="Zatvori" aria-label="Zatvori">✕</button>
         </div>
 
         <div style={s.body}>
           <input type="file" multiple accept=".xlsx,.xls" style={s.file}
             onChange={e => readFiles(e.target.files)} />
 
-          {reading && <div style={s.muted}>Reading…</div>}
+          {reading && <div style={s.muted}>Čitanje…</div>}
           {error && <div style={s.error}>{error}</div>}
           {done && <div style={s.ok}>{done}</div>}
 
@@ -216,23 +218,23 @@ export default function TimesheetImportDialog({
 
           {missing.length > 0 && (
             <div style={s.error}>
-              <b>{missing.length} on the payroll {missing.length === 1 ? 'has' : 'have'} no
-              sheet in these files:</b>{' '}
+              <b>{countOf(missing.length, 'zaposleni', 'zaposlena', 'zaposlenih')} iz obračuna{' '}
+              {plural(missing.length, 'nema', 'nemaju', 'nema')} list u ovim fajlovima:</b>{' '}
               {missing.map(p => p.employee.full_name).join(', ')}.
-              {' '}A payroll missing a person is the error this module exists to catch, so
-              nothing is imported until they are here or taken off the month.
+              {' '}Obračun zarade bez nekog zaposlenog upravo je greška koju ovaj modul treba
+              da uhvati, pa se ništa ne uvozi dok se ne dodaju ili ne uklone iz meseca.
             </div>
           )}
 
           {belowProjects.length > 0 && (
             <div style={s.error}>
-              <b>Sati po projektima:</b> an import does not change the hours on projects, but
-              for {belowProjects.length === 1 ? 'this person' : 'these people'} the imported
-              work is now less than what is on their projects —{' '}
+              <b>Sati po projektima:</b> uvoz ne menja sate na projektima, ali je
+              {belowProjects.length === 1 ? ' za ovog zaposlenog' : ' za ove zaposlene'} uvezeni
+              rad sada manji od sati na projektima —{' '}
               {belowProjects.map(c => `${nameOf(c.employeeId)} (${hours(c.worked)} h rada, `
                 + `${hours(c.onProjects)} h na projektima)`).join(', ')}.
-              {' '}Posting will refuse the month until the project hours are corrected on the
-              timesheet.
+              {' '}Knjiženje će odbiti mesec dok se sati po projektima ne isprave u
+              evidenciji radnog vremena.
             </div>
           )}
 
@@ -240,12 +242,12 @@ export default function TimesheetImportDialog({
             <table style={s.table}>
               <thead>
                 <tr style={s.thead}>
-                  <th style={s.th}>In the file</th>
-                  <th style={s.th}>Matched to</th>
-                  <th style={s.thRight}>Work</th>
-                  <th style={s.thRight}>Leave</th>
-                  <th style={s.thRight}>Sick</th>
-                  <th style={s.thRight}>Total</th>
+                  <th style={s.th}>U fajlu</th>
+                  <th style={s.th}>Povezano sa</th>
+                  <th style={s.thRight}>Rad</th>
+                  <th style={s.thRight}>Godišnji odmor</th>
+                  <th style={s.thRight}>Bolovanje</th>
+                  <th style={s.thRight}>Ukupno</th>
                 </tr>
               </thead>
               <tbody>
@@ -261,13 +263,13 @@ export default function TimesheetImportDialog({
                         <>
                           <div style={{ color: '#00D47E' }}>{r.person?.employee.full_name}</div>
                           <div style={s.small}>
-                            {r.match.how === 'remembered' ? 'linked earlier' : 'by name'}
+                            {r.match.how === 'remembered' ? 'povezano ranije' : 'po imenu'}
                           </div>
                         </>
                       ) : (
                         <select style={s.select} defaultValue=""
                           onChange={e => link(r.match.parsed.name, e.target.value)}>
-                          <option value="">— link to —</option>
+                          <option value="">— poveži sa —</option>
                           {people.map(p => (
                             <option key={p.employee.id} value={p.employee.id}>
                               {p.employee.full_name}
@@ -283,7 +285,7 @@ export default function TimesheetImportDialog({
                       <b style={{ color: r.problems.length ? '#FF8E8D' : '#DCE9F6' }}>
                         {r.sheet ? hours(totalHours(r.sheet)) : hours(r.match.parsed.totalHours)}
                       </b>
-                      <div style={s.small}>of {r.match.parsed.nominalHours}</div>
+                      <div style={s.small}>od {r.match.parsed.nominalHours}</div>
                     </td>
                   </tr>
                 ))}
@@ -294,7 +296,7 @@ export default function TimesheetImportDialog({
           {blocking.length > 0 && (
             <div style={s.problems}>
               <div style={s.problemsTitle}>
-                {blocking.length} {blocking.length === 1 ? 'sheet needs' : 'sheets need'} attention
+                {countOf(blocking.length, 'list traži', 'lista traže', 'listova traži')} proveru
               </div>
               {blocking.map(r => (
                 <div key={r.match.parsed.name} style={s.problemRow}>
@@ -308,15 +310,15 @@ export default function TimesheetImportDialog({
 
         <div style={s.footer}>
           <div style={s.muted}>
-            {rows.length > 0 && `${ready.length} of ${rows.length} ready`}
+            {rows.length > 0 && `Spremno: ${ready.length} od ${rows.length}`}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button style={s.ghost} onClick={onClose}>Close</button>
+            <button style={s.ghost} onClick={onClose}>Zatvori</button>
             <button
               style={blocking.length || missing.length || !rows.length ? s.disabled : s.primary}
               disabled={saving || !!blocking.length || !!missing.length || !rows.length}
               onClick={save}>
-              {saving ? 'Importing…' : `Import ${ready.length} timesheets`}
+              {saving ? 'Uvoz…' : `Uvezi ${countOf(ready.length, 'evidenciju', 'evidencije', 'evidencija')}`}
             </button>
           </div>
         </div>

@@ -35,7 +35,7 @@ describe('correcting a contract', () => {
    */
   it('offers a correction on every contract, not only the current one', () => {
     show()
-    expect(screen.getAllByTitle(/Correct this contract/)).toHaveLength(2)
+    expect(screen.getAllByTitle(/Ispravi ovaj ugovor/)).toHaveLength(2)
   })
 
   /**
@@ -46,31 +46,31 @@ describe('correcting a contract', () => {
    */
   it('names both actions rather than hinting at them with a glyph', () => {
     show()
-    expect(screen.getAllByText(/Correct/)[0]).toBeInTheDocument()
-    expect(screen.getAllByText('Delete')).toHaveLength(2)
+    expect(screen.getAllByText(/Ispravi/)[0]).toBeInTheDocument()
+    expect(screen.getAllByText('Obriši')).toHaveLength(2)
   })
 
   it('opens the contract into a form with its own figures in it', () => {
     show()
-    fireEvent.click(screen.getAllByTitle(/Correct this contract/)[1])
-    expect(screen.getByText(/Correcting the contract from 2026-08-01/)).toBeInTheDocument()
+    fireEvent.click(screen.getAllByTitle(/Ispravi ovaj ugovor/)[1])
+    expect(screen.getByText(/Ispravka ugovora od 01\.08\.2026\./)).toBeInTheDocument()
     expect((screen.getByDisplayValue('1000') as HTMLInputElement)).toBeInTheDocument()
   })
 
   /** Two forms on screen is two places to type the same thing. */
   it('puts the add form away while a correction is open', () => {
     show()
-    expect(screen.getByText(/New contract/)).toBeInTheDocument()
-    fireEvent.click(screen.getAllByTitle(/Correct this contract/)[1])
-    expect(screen.queryByText(/New contract/)).not.toBeInTheDocument()
-    expect(screen.queryByText('Add contract')).not.toBeInTheDocument()
+    expect(screen.getByText(/Novi ugovor/)).toBeInTheDocument()
+    fireEvent.click(screen.getAllByTitle(/Ispravi ovaj ugovor/)[1])
+    expect(screen.queryByText(/Novi ugovor/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Dodaj ugovor')).not.toBeInTheDocument()
   })
 
   it('goes back to the add form on cancel', () => {
     show()
-    fireEvent.click(screen.getAllByTitle(/Correct this contract/)[1])
-    fireEvent.click(screen.getByText('Cancel'))
-    expect(screen.getByText('Add contract')).toBeInTheDocument()
+    fireEvent.click(screen.getAllByTitle(/Ispravi ovaj ugovor/)[1])
+    fireEvent.click(screen.getByText('Otkaži'))
+    expect(screen.getByText('Dodaj ugovor')).toBeInTheDocument()
   })
 
   /**
@@ -79,25 +79,25 @@ describe('correcting a contract', () => {
    */
   it('warns, while typing, that ending the current contract drops the person from payroll', () => {
     show()
-    fireEvent.click(screen.getAllByTitle(/Correct this contract/)[1])
-    expect(screen.queryByText(/drops out of/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByTitle(/Ispravi ovaj ugovor/)[1])
+    expect(screen.queryByText(/ispada iz/)).not.toBeInTheDocument()
 
-    const until = screen.getByLabelText(/In force until/i) as HTMLInputElement
+    const until = screen.getByLabelText(/Važi do/i) as HTMLInputElement
     fireEvent.change(until, { target: { value: '2026-09-01' } })
-    expect(screen.getByText(/drops out of/)).toBeInTheDocument()
+    expect(screen.getByText(/ispada iz/)).toBeInTheDocument()
   })
 
   it('names the days a moved start date would leave uncovered', () => {
     show()
-    fireEvent.click(screen.getAllByTitle(/Correct this contract/)[1])
-    const from = screen.getByLabelText(/In force from/i) as HTMLInputElement
+    fireEvent.click(screen.getAllByTitle(/Ispravi ovaj ugovor/)[1])
+    const from = screen.getByLabelText(/Važi od/i) as HTMLInputElement
     fireEvent.change(from, { target: { value: '2026-10-01' } })
-    expect(screen.getByText(/2026-08-01 up to 2026-10-01/)).toBeInTheDocument()
+    expect(screen.getByText(/od 01\.08\.2026\. do 01\.10\.2026\./)).toBeInTheDocument()
   })
 
   it('says how to do a pay rise instead, where the correction form is', () => {
     show()
-    fireEvent.click(screen.getAllByTitle(/Correct this contract/)[0])
-    expect(screen.getByText(/For a pay rise, cancel and add a new contract/)).toBeInTheDocument()
+    fireEvent.click(screen.getAllByTitle(/Ispravi ovaj ugovor/)[0])
+    expect(screen.getByText(/Za povišicu otkažite i umesto toga dodajte novi ugovor/)).toBeInTheDocument()
   })
 })

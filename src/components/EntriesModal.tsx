@@ -25,11 +25,11 @@ export interface EntryBadge {
 }
 
 export const CF_BADGES: Record<string, EntryBadge> = {
-  recurring: { label: 'Recurring', color: '#00D47E', bg: 'rgba(0,212,126,0.12)' },
-  one_time: { label: 'One-time', color: '#F5A623', bg: 'rgba(245,166,35,0.12)' },
-  accrual: { label: 'Accrual', color: '#4EA8FF', bg: 'rgba(78,168,255,0.12)' },
-  capex: { label: 'CapEx', color: '#7A9BB8', bg: 'rgba(255,255,255,0.05)' },
-  reimbursable: { label: 'Reimb.', color: '#A78BFA', bg: 'rgba(167,139,250,0.12)' },
+  recurring: { label: 'Ponavljajući', color: '#00D47E', bg: 'rgba(0,212,126,0.12)' },
+  one_time: { label: 'Jednokratni', color: '#F5A623', bg: 'rgba(245,166,35,0.12)' },
+  accrual: { label: 'Razgraničenje', color: '#4EA8FF', bg: 'rgba(78,168,255,0.12)' },
+  capex: { label: 'Investicija', color: '#7A9BB8', bg: 'rgba(255,255,255,0.05)' },
+  reimbursable: { label: 'Refund.', color: '#A78BFA', bg: 'rgba(167,139,250,0.12)' },
 }
 
 export const INVOICE_BADGE = (label: string): EntryBadge =>
@@ -148,7 +148,7 @@ export async function buildEntryItems(
       currency: r.currency,
       amount_rsd: r.amount_rsd,
       amount_eur: r.amount_eur,
-      badges: [INVOICE_BADGE(r.invoice_number || 'Invoice')],
+      badges: [INVOICE_BADGE(r.invoice_number || 'Faktura')],
       edit: { table: 'invoices' as const, id: r.id },
     })),
     // Still sorted after mapping, and not redundant with the sort above: the
@@ -181,7 +181,7 @@ export function useEntryEditor(onDone: () => void) {
       const { data, error: err } = await supabase
         .from(target.table).select(select).eq('id', target.id).maybeSingle()
       if (err) throw err
-      if (!data) throw new Error('This entry could not be found — it may have been deleted.')
+      if (!data) throw new Error('Stavka nije pronađena — možda je obrisana.')
       if (target.table === 'invoices') setEditingInvoice(data); else setEditingTx(data)
     } catch (e: any) {
       setError(e.message || String(e))
@@ -223,7 +223,7 @@ export function EntriesModal({
             <div style={em.headerTitle}>{title}</div>
             <div style={em.headerSub}>{subtitle}</div>
           </div>
-          <button style={em.closeBtn} onClick={onClose} aria-label="Close">×</button>
+          <button style={em.closeBtn} onClick={onClose} aria-label="Zatvori">×</button>
         </div>
 
         <div style={em.body}>{children}</div>
@@ -231,7 +231,7 @@ export function EntriesModal({
         <div style={em.footer}>
           {footerLeft && <div style={{ fontSize: '12px', color: '#7A9BB8' }}>{footerLeft}</div>}
           <div style={{ marginLeft: 'auto' }}>
-            <button style={em.closeFooterBtn} onClick={onClose}>Close</button>
+            <button style={em.closeFooterBtn} onClick={onClose}>Zatvori</button>
           </div>
         </div>
       </div>
@@ -283,8 +283,8 @@ export function EntryRow({ item, onEdit, busy }: {
         )}
       </div>
       <button style={em.editBtn} onClick={() => onEdit(item.edit)} disabled={busy}
-        title={item.edit.table === 'invoices' ? 'Edit invoice' : 'Edit transaction'}>
-        {busy ? '…' : 'Edit'}
+        title={item.edit.table === 'invoices' ? 'Izmeni fakturu' : 'Izmeni transakciju'}>
+        {busy ? '…' : 'Izmeni'}
       </button>
     </div>
   )

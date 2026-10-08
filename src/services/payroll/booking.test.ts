@@ -102,7 +102,7 @@ describe('unknownNames', () => {
       pl_subcategory: 'Net Salaries', department: 'Marketing expenses',
       dept_subcategory: 'Salary expenses domestic',
     }))
-    expect(unknownNames(rows, known)).toEqual(['department "Marketing expenses"'])
+    expect(unknownNames(rows, known)).toEqual(['sektor "Marketing expenses"'])
   })
 
   it('does not complain about a field nobody filled in', () => {

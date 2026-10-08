@@ -180,8 +180,8 @@ export interface SearchableSelectProps {
 
 export default function SearchableSelect({
   value, onChange, options, allLabel,
-  searchPlaceholder = 'Type to filter…',
-  emptyMessage = 'No matches',
+  searchPlaceholder = 'Pretraga…',
+  emptyMessage = 'Nema rezultata',
   style, title, disabled = false,
   searchThreshold = DEFAULT_SEARCH_THRESHOLD,
 }: SearchableSelectProps) {

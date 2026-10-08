@@ -9,6 +9,14 @@ import {
 import { DIALOG } from './dialogTheme'
 import { round2 as bookRound2 } from '../services/bookAmounts'
 import { fmtMoney } from '../utils/formatters'
+import { countOf } from '../utils/plural'
+
+/** Display labels for the status and type keys a candidate row carries. */
+const STATUS_LABEL: Record<string, string> = {
+  unpaid: 'neplaćeno', partial: 'delimično', paid: 'plaćeno', overdue: 'u kašnjenju',
+  reconciled: 'upareno', posted: 'proknjiženo', direct: 'direktna',
+  invoice_payment: 'plaćanje fakture', expense: 'ulazna', revenue: 'izlazna',
+}
 
 interface Props {
   // Can be opened from either side
@@ -324,19 +332,19 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
           transaction_id: transactionId,
           ...booked[i],
         }, { onConflict: 'invoice_id,transaction_id' })
-        if (linkErr) throw new PostFailure('the allocation', linkErr.message)
-        completed.push({ label: 'allocations', count: completed.length + 1 })
+        if (linkErr) throw new PostFailure('raspodela', linkErr.message)
+        completed.push({ label: countOf(completed.length + 1, 'raspodela', 'raspodele', 'raspodela') })
 
         // Invoice becomes P&L source, transaction loses P&L impact
         const { error: invErr } = await supabase.from('invoices')
           .update({ pl_impact: true })
           .eq('id', invoiceId)
-        if (invErr) throw new PostFailure('the invoice P&L flag', invErr.message)
+        if (invErr) throw new PostFailure('P&L oznaka fakture', invErr.message)
 
         const { error: txErr } = await supabase.from('transactions')
           .update({ pl_impact: false, status: 'reconciled' })
           .eq('id', transactionId)
-        if (txErr) throw new PostFailure('the transaction P&L flag', txErr.message)
+        if (txErr) throw new PostFailure('P&L oznaka transakcije', txErr.message)
 
         // Refresh invoice status from view
         const { data: invStatus, error: statusErr } = await supabase
@@ -344,13 +352,13 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
           .select('calculated_status')
           .eq('id', invoiceId)
           .single()
-        if (statusErr) throw new PostFailure('the invoice status', statusErr.message)
+        if (statusErr) throw new PostFailure('status fakture', statusErr.message)
 
         if (invStatus) {
           const { error: setErr } = await supabase.from('invoices')
             .update({ status: invStatus.calculated_status })
             .eq('id', invoiceId)
-          if (setErr) throw new PostFailure('the invoice status', setErr.message)
+          if (setErr) throw new PostFailure('status fakture', setErr.message)
         }
       }
 
@@ -366,8 +374,8 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
       // database refusal — three tables were written per link and none of
       // them was checked, while setSuccess(true) ran unconditionally.
       setSaveError(err instanceof PostFailure
-        ? reportPostFailure('The reconciliation', err.step, err.message, completed)
-        : `Error: ${err.message}`)
+        ? reportPostFailure('uparivanje', err.step, err.message, completed)
+        : `Greška: ${err.message}`)
     }
     setSaving(false)
   }
@@ -392,10 +400,10 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
         <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: DIALOG.accentFill, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={DIALOG.accent} strokeWidth="2.2"><path d="M5 13l4 4L19 7" /></svg>
         </div>
-        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>Reconciled!</div>
+        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>Upareno.</div>
         <div style={{ fontSize: '13px', color: DIALOG.dim, textAlign: 'center' }}>
-          {links.length} link(s) created.<br />
-          Invoice is now the P&L source. Transaction marked as reconciled.
+          Napravljeno veza: {links.length}.<br />
+          Faktura je sada izvor za P&L. Transakcija je označena kao uparena.
         </div>
       </div>
     </div>
@@ -409,12 +417,12 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
         <div style={s.header}>
           <div>
             <div style={s.headerTitle}>
-              {sourceType === 'transaction' ? '🔗 Reconcile transaction with invoice' : '🔗 Reconcile invoice with transaction'}
+              {sourceType === 'transaction' ? '🔗 Uparivanje transakcije sa fakturom' : '🔗 Uparivanje fakture sa transakcijom'}
             </div>
             <div style={s.headerSub}>
               {sourceType === 'transaction'
-                ? 'Link this direct transaction to one or more invoices. Invoice will take over P&L.'
-                : 'Link this invoice to one or more existing direct transactions.'}
+                ? 'Povežite ovu direktnu transakciju sa jednom ili više faktura. Faktura preuzima P&L.'
+                : 'Povežite ovu fakturu sa jednom ili više postojećih direktnih transakcija.'}
             </div>
           </div>
           <button style={s.closeBtn} onClick={onClose}>×</button>
@@ -423,13 +431,13 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
         <div style={s.body}>
 
           {loading ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: DIALOG.dim, fontSize: '14px' }}>Loading...</div>
+            <div style={{ padding: '2rem', textAlign: 'center', color: DIALOG.dim, fontSize: '14px' }}>Učitavanje…</div>
           ) : (
             <>
               {/* Source summary */}
               <div style={s.sourceCard}>
                 <div style={s.sourceCardLabel}>
-                  {sourceType === 'transaction' ? 'Direct transaction' : 'Invoice'}
+                  {sourceType === 'transaction' ? 'Direktna transakcija' : 'Faktura'}
                 </div>
                 <div style={s.sourceCardRow}>
                   <div>
@@ -437,7 +445,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                     <div style={s.sourceCardMeta}>
                       {sourceType === 'transaction'
                         ? `${source?.transaction_date} · ${source?.companies?.name} · ${source?.banks?.name}`
-                        : `${source?.invoice_date} · ${source?.invoice_number || 'No invoice number'} · ${source?.companies?.name}`
+                        : `${source?.invoice_date} · ${source?.invoice_number || 'Bez broja fakture'} · ${source?.companies?.name}`
                       }
                     </div>
                     {(source?.pl_category || source?.revenue_stream) && (
@@ -457,7 +465,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                 {/* Already reconciled links */}
                 {existingLinks.length > 0 && (
                   <div style={s.existingLinks}>
-                    <div style={s.existingLinksLabel}>Already linked</div>
+                    <div style={s.existingLinksLabel}>Već povezano</div>
                     {existingLinks.map(el => (
                       <div key={el.id} style={s.existingLinkRow}>
                         <span style={{ fontSize: '12px', color: DIALOG.dim }}>
@@ -467,8 +475,8 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                           }
                         </span>
                         <span style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.accent }}>
-                          {formatMoney(el.allocated_amount || 0,
-                            (sourceType === 'transaction' ? el.invoices?.currency : source?.currency) || 'RSD')} allocated
+                          raspoređeno {formatMoney(el.allocated_amount || 0,
+                            (sourceType === 'transaction' ? el.invoices?.currency : source?.currency) || 'RSD')}
                         </span>
                       </div>
                     ))}
@@ -483,26 +491,26 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                   converting something into nobody's money. */}
               <div style={s.allocBar}>
                 <div style={s.allocBarItem}>
-                  <span style={s.allocBarLabel}>Total</span>
+                  <span style={s.allocBarLabel}>Ukupno</span>
                   <span style={s.allocBarVal}>{formatMoney(sourceTotalShown, barCurrency || 'RSD')}</span>
                 </div>
                 <div style={s.allocBarDivider} />
                 <div style={s.allocBarItem}>
-                  <span style={s.allocBarLabel}>Previously linked</span>
+                  <span style={s.allocBarLabel}>Ranije povezano</span>
                   <span style={{ ...s.allocBarVal, color: DIALOG.dim }}>
                     {formatMoney(previouslyShown, barCurrency || 'RSD')}
                   </span>
                 </div>
                 <div style={s.allocBarDivider} />
                 <div style={s.allocBarItem}>
-                  <span style={s.allocBarLabel}>New allocation</span>
+                  <span style={s.allocBarLabel}>Nova raspodela</span>
                   <span style={{ ...s.allocBarVal, color: DIALOG.accent }}>
                     {formatMoney(allocatedShown, barCurrency || 'RSD')}
                   </span>
                 </div>
                 <div style={s.allocBarDivider} />
                 <div style={s.allocBarItem}>
-                  <span style={s.allocBarLabel}>Remaining</span>
+                  <span style={s.allocBarLabel}>Preostalo</span>
                   <span style={{
                     ...s.allocBarVal,
                     color: Math.abs(unallocated) <= 0.01 ? DIALOG.accent : unallocated < 0 ? DIALOG.red : DIALOG.amber,
@@ -516,8 +524,8 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
               </div>
               {!barCurrency && (
                 <div style={{ fontSize: '10.5px', color: DIALOG.dim, margin: '-6px 0 10px', lineHeight: 1.4 }}>
-                  Shown in RSD (book): this {sourceType === 'transaction' ? 'payment' : 'invoice'} and what it is
-                  linked to are not all in the same currency.
+                  Prikazano u RSD (knjiženo): {sourceType === 'transaction' ? 'ovo plaćanje' : 'ova faktura'} i ono
+                  sa čim je povezano nisu sve u istoj valuti.
                 </div>
               )}
 
@@ -526,11 +534,11 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                 <div style={s.reclassNotice}>
                   <span style={{ fontSize: '15px' }}>📊</span>
                   <div>
-                    <div style={{ fontWeight: '500', fontSize: '12px', marginBottom: '2px' }}>P&L will be reclassified</div>
+                    <div style={{ fontWeight: '500', fontSize: '12px', marginBottom: '2px' }}>P&L će biti preraspoređen</div>
                     <div style={{ fontSize: '11px', opacity: 0.85 }}>
                       {sourceType === 'transaction'
-                        ? 'The transaction will lose P&L impact. The linked invoice(s) will become the P&L source with their own categories.'
-                        : 'The linked transaction(s) will lose P&L impact. This invoice will be the P&L source.'}
+                        ? 'Transakcija više neće uticati na P&L. Povezane fakture postaju izvor za P&L, sa svojim kategorijama.'
+                        : 'Povezane transakcije više neće uticati na P&L. Ova faktura postaje izvor za P&L.'}
                     </div>
                   </div>
                 </div>
@@ -543,8 +551,8 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder={sourceType === 'transaction'
-                    ? 'Search invoices by partner or invoice number...'
-                    : 'Search transactions by partner or statement number...'}
+                    ? 'Pretraga faktura po partneru ili broju fakture…'
+                    : 'Pretraga transakcija po partneru ili broju izvoda…'}
                 />
               </div>
 
@@ -552,7 +560,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
               <div style={s.candidateList}>
                 {filteredCandidates.length === 0 ? (
                   <div style={{ padding: '20px', textAlign: 'center', color: DIALOG.faint, fontSize: '13px' }}>
-                    No {sourceType === 'transaction' ? 'invoices' : 'direct transactions'} found for this company.
+                    {sourceType === 'transaction' ? 'Nema faktura' : 'Nema direktnih transakcija'} za ovu firmu.
                   </div>
                 ) : (
                   filteredCandidates.map(c => {
@@ -575,10 +583,10 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                               </span>
                             )}
                             <span style={{ ...s.statusBadge, ...getStatusStyle(c.calculated_status || c.status || c.type) }}>
-                              {c.calculated_status || c.status || c.type}
+                              {STATUS_LABEL[c.calculated_status || c.status || c.type] || c.calculated_status || c.status || c.type}
                             </span>
                             {alreadyDone && (
-                              <span style={{ fontSize: '10px', color: DIALOG.accent, fontWeight: '500' }}>✓ Linked</span>
+                              <span style={{ fontSize: '10px', color: DIALOG.accent, fontWeight: '500' }}>✓ Povezano</span>
                             )}
                           </div>
                           <div style={s.candidateMeta}>
@@ -593,7 +601,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                               const left = outstandingOwn(c)
                               return (
                                 <span style={{ color: left > 0.01 ? DIALOG.red : DIALOG.accent }}>
-                                  {' · '}Remaining: {formatMoney(left, allocationCurrency(c))}
+                                  {' · '}Preostalo: {formatMoney(left, allocationCurrency(c))}
                                 </span>
                               )
                             })()}
@@ -605,9 +613,9 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                         </div>
                         {!alreadyDone ? (
                           !linked ? (
-                            <button style={s.addBtn} onClick={() => addLink(c)}>+ Link</button>
+                            <button style={s.addBtn} onClick={() => addLink(c)}>+ Poveži</button>
                           ) : (
-                            <button style={s.removeBtn} onClick={() => removeLink(c.id)}>✕ Remove</button>
+                            <button style={s.removeBtn} onClick={() => removeLink(c.id)}>✕ Ukloni</button>
                           )
                         ) : (
                           <div style={{ width: '72px' }} />
@@ -621,7 +629,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
               {/* Allocation inputs for selected links */}
               {links.length > 0 && (
                 <div style={s.allocationSection}>
-                  <div style={s.allocationTitle}>Allocation per link</div>
+                  <div style={s.allocationTitle}>Raspodela po vezi</div>
                   {links.map(link => {
                     const cur = allocationCurrency(invoiceFor(link) || {})
                     // What the bill is still owed AFTER this figure. Saying
@@ -636,17 +644,17 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                           <div style={{ fontSize: '11px', color: DIALOG.dim }}>
                             {link.identifier !== '—' ? link.identifier + ' · ' : ''}
                             {link.date}
-                            {` · Outstanding: ${formatMoney(link.outstanding_own || 0, cur)}`}
+                            {` · Preostali dug: ${formatMoney(link.outstanding_own || 0, cur)}`}
                           </div>
                           {Math.abs(left) <= 0.01 ? (
                             <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '2px' }}>
-                              ✓ Settles this invoice in full
+                              ✓ Zatvara ovu fakturu u celosti
                             </div>
                           ) : (
                             <div style={{ fontSize: '11px', color: left > 0 ? DIALOG.amber : DIALOG.red, marginTop: '2px' }}>
                               {left > 0
-                                ? `Leaves ${formatMoney(left, cur)} still owed`
-                                : `Allocates ${formatMoney(-left, cur)} more than this invoice is owed`}
+                                ? `Ostaje dug od ${formatMoney(left, cur)}`
+                                : `Raspoređuje ${formatMoney(-left, cur)} više od duga po ovoj fakturi`}
                             </div>
                           )}
                         </div>
@@ -662,7 +670,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                           {(link.outstanding_own || 0) > 0.01 && (
                             <button
                               style={s.maxBtn}
-                              title={`Settle ${formatMoney(link.outstanding_own || 0, cur)}, or as much of it as is left`}
+                              title={`Zatvori ${formatMoney(link.outstanding_own || 0, cur)} ili onoliko koliko je preostalo`}
                               onClick={() => updateAllocation(link.id, Math.max(0, Math.min(
                                 link.outstanding_own || 0,
                                 // What is left of the source, plus what this
@@ -672,7 +680,7 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
                                   ? round2(unallocated + link.allocated_own)
                                   : toOwn(round2(unallocated + link.allocated_rsd), invoiceFor(link) || {}))))}
                             >
-                              Max
+                              Maks.
                             </button>
                           )}
                         </div>
@@ -695,17 +703,17 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
         <div style={s.footer}>
           <div style={{ fontSize: '12px', color: DIALOG.dim }}>
             {links.length === 0
-              ? 'Select one or more entries to link'
-              : `${links.length} link(s) ready · ${formatMoney(allocatedShown, barCurrency || 'RSD')} allocated`}
+              ? 'Izaberite jednu ili više stavki za povezivanje'
+              : `Spremno veza: ${links.length} · raspoređeno ${formatMoney(allocatedShown, barCurrency || 'RSD')}`}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button style={s.btnGhost} onClick={onClose}>Cancel</button>
+            <button style={s.btnGhost} onClick={onClose}>Otkaži</button>
             <button
               style={{ ...s.btnPrimary, opacity: links.length === 0 || saving ? 0.5 : 1 }}
               onClick={handleSave}
               disabled={links.length === 0 || saving}
             >
-              {saving ? 'Saving...' : `Save & reconcile (${links.length})`}
+              {saving ? 'Čuvanje…' : `Sačuvaj i upari (${links.length})`}
             </button>
           </div>
         </div>

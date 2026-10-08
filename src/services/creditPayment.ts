@@ -38,8 +38,9 @@ export type CreditCurrency = typeof CREDIT_CURRENCIES[number]
 
 export class UnsupportedCreditCurrencyError extends Error {
   constructor(currency: unknown, creditName?: string) {
-    const who = creditName ? `Credit "${creditName}"` : 'This credit'
-    super(`${who} is in ${currency || 'an unknown currency'}; instalments can only be paid for credits in RSD or EUR`)
+    const who = creditName ? `Kredit „${creditName}“` : 'Ovaj kredit'
+    const inWhat = currency ? `je u valuti ${currency}` : 'je u nepoznatoj valuti'
+    super(`${who} ${inWhat}; rate se mogu plaćati samo za kredite u RSD ili EUR`)
     this.name = 'UnsupportedCreditCurrencyError'
   }
 }

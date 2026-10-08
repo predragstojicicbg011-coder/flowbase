@@ -28,6 +28,13 @@ import {
   type AdvanceDeduction, type AdvanceReceipt,
 } from '../services/revenue'
 import { round2 } from '../services/bookAmounts'
+import { countOf } from '../utils/plural'
+
+/** Display labels for the stored tag keys; the keys stay as they are in the data. */
+const TAG_LABEL: Record<string, string> = {
+  Recurring: 'Ponavljajući', Prepayment: 'Unapred plaćeno', Accrual: 'Razgraničenje',
+  'Capital expenditure': 'Kapitalni izdatak', 'Tax deductible': 'Poreski priznat', Reimbursable: 'Refundacija',
+}
 
 interface Props {
   onClose: () => void
@@ -305,20 +312,20 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
 
   const runValidation = () => {
     const e: ValidationErrors = {}
-    if (!companyId) e.companyId = 'Company is required'
-    if (!currency) e.currency = 'Currency is required'
-    if (!invoiceDate) e.invoiceDate = 'Invoice date is required'
-    if (!partnerId && !(showNewPartner && newPartnerName.trim())) e.partnerId = 'Partner is required'
-    if (!amount || parseFloat(amount) <= 0) e.amount = 'Amount must be greater than 0'
-    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Exchange rate is required'
+    if (!companyId) e.companyId = 'Firma je obavezna'
+    if (!currency) e.currency = 'Valuta je obavezna'
+    if (!invoiceDate) e.invoiceDate = 'Datum fakture je obavezan'
+    if (!partnerId && !(showNewPartner && newPartnerName.trim())) e.partnerId = 'Partner je obavezan'
+    if (!amount || parseFloat(amount) <= 0) e.amount = 'Iznos mora biti veći od 0'
+    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Kurs je obavezan'
     if (invType === 'expense' && plImpact && !linkedTxId) {
       // A split bill is classified by its lines, and the fields below are
       // filled from them. Demanding them again would refuse a bill that is
       // fully classified, which is how a correct entry comes to look wrong.
-      if (!plCatId && !splitActive) e.plCat = 'P&L Category is required'
-      if (!deptId && !splitActive) e.dept = 'Department is required'
+      if (!plCatId && !splitActive) e.plCat = 'P&L kategorija je obavezna'
+      if (!deptId && !splitActive) e.dept = 'Sektor je obavezan'
     }
-    if (invType === 'revenue' && !revStream) e.revStream = 'Revenue stream is required'
+    if (invType === 'revenue' && !revStream) e.revStream = 'Vrsta prihoda je obavezna'
     if (advanceOwn > 0) {
       const why = validateAdvanceDeduction({
         invoice: {
@@ -493,7 +500,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     if (tx.note) setNote(tx.note)
     if (tx.amount) setAmount(tx.amount.toString())
     if (tx.currency) setCurrency(tx.currency)
-    if (tx.exchange_rate) { setExRate(tx.exchange_rate.toString()); setRateSource('From transaction') }
+    if (tx.exchange_rate) { setExRate(tx.exchange_rate.toString()); setRateSource('iz transakcije') }
     if (tx.eur_rate) setEurRate(tx.eur_rate.toString())
     if (tx.is_indexed !== undefined) setIsIndexed(tx.is_indexed)
     if (invoiceNumber) setRefNum(invoiceNumber)
@@ -577,7 +584,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     } catch (err) {
       // RateUnavailableError, in its own words. Nothing is guessed; the
       // person can retry or type the rate.
-      setRateSource(err instanceof Error ? `${err.message} — enter it manually` : 'No official rate — enter it manually')
+      setRateSource(err instanceof Error ? `${err.message} — unesite ga ručno` : 'Nema zvaničnog kursa — unesite ga ručno')
       setRateMissing(true)
     }
     setFetchingRate(false)
@@ -587,22 +594,22 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
 
   const cfLabel = () => {
     if (!cfType) return '—'
-    if (cfType === 'recurring') return `Recurring ${cfFrequency}`
-    if (cfType === 'one_time') return 'One-time'
-    if (cfType === 'accrual') return `Accrual ${cfAccrualFrom ? `${cfAccrualFrom} → ${cfAccrualTo}` : ''}`
-    if (cfType === 'capex') return `CapEx (${cfCapexMonths || '?'} months)`
-    if (cfType === 'reimbursable') return `Reimbursable${cfReimbursableDate ? ` by ${cfReimbursableDate}` : ''}`
+    if (cfType === 'recurring') return `Ponavljajući, ${cfFrequency === 'monthly' ? 'mesečno' : cfFrequency === 'quarterly' ? 'kvartalno' : cfFrequency === 'yearly' ? 'godišnje' : cfFrequency}`
+    if (cfType === 'one_time') return 'Jednokratni'
+    if (cfType === 'accrual') return `Razgraničenje ${cfAccrualFrom ? `${cfAccrualFrom} → ${cfAccrualTo}` : ''}`
+    if (cfType === 'capex') return `Kapitalni izdatak (${cfCapexMonths || '?'} mes.)`
+    if (cfType === 'reimbursable') return `Refundacija${cfReimbursableDate ? ` do ${cfReimbursableDate}` : ''}`
     return '—'
   }
 
-  const stepTitles = ['Basic information', 'Amount & currency', 'Classification & P&L', 'Review & post']
+  const stepTitles = ['Osnovni podaci', 'Iznos i valuta', 'Klasifikacija i P&L', 'Pregled i knjiženje']
 
   const handlePost = async () => {
     setTouched({ companyId: true, currency: true, invoiceDate: true, partnerId: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true, advance: true })
     const e = runValidation()
     if (Object.keys(e).length > 0) { setShowValidationSummary(true); return }
     const booked = book.amounts
-    if (!booked) { setSaveError(book.error || 'Exchange rate is required'); return }
+    if (!booked) { setSaveError(book.error || 'Kurs je obavezan'); return }
     setSaveError('')
     setSaving(true)
     try {
@@ -610,7 +617,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       if (showNewPartner && newPartnerName) {
         const { data: newP, error: partnerErr } = await supabase.from('partners').insert({ name: newPartnerName }).select().single()
         if (partnerErr) throw partnerErr
-        if (!newP?.id) throw new Error('The new partner was saved but the database did not return its id — nothing was posted.')
+        if (!newP?.id) throw new Error('Novi partner je sačuvan, ali baza nije vratila njegov ID — ništa nije proknjiženo.')
         finalPartnerId = newP.id
       }
       const effectivePlImpact = linkedTxId ? false : plImpact
@@ -658,13 +665,13 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         const { data: updated, error: updErr } = await supabase.from('invoices').update(payload).eq('id', invoice.id).select('id')
         if (updErr) throw updErr
         if (!updated || updated.length === 0)
-          throw new Error(`No invoice with id ${invoice.id} was updated — nothing was saved.`)
+          throw new Error(`Faktura ${invoice.id} nije izmenjena — ništa nije sačuvano.`)
         invoiceId = invoice.id
         if (linkedTxId && plCatName) {
           const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, revenue_stream: revStream || null, project_id: ownProjectId }).eq('id', linkedTxId).select('id')
           if (txErr) throw txErr
           if (!tx || tx.length === 0)
-            throw new Error(`The invoice was saved, but no transaction with id ${linkedTxId} was updated — its P&L classification is now out of step with the invoice.`)
+            throw new Error(`Faktura je sačuvana, ali transakcija ${linkedTxId} nije izmenjena — njena P&L klasifikacija se sada ne slaže sa fakturom.`)
         }
       } else {
         const { data: newInv, error: insErr } = await supabase.from('invoices').insert(payload).select().single()
@@ -673,13 +680,13 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         // end up undefined, which then made the link write below operate on
         // `invoice_id=undefined` — deleting nothing, inserting nothing, and
         // reporting success.
-        if (!newInv?.id) throw new Error('The invoice was not saved — the database returned no row.')
+        if (!newInv?.id) throw new Error('Faktura nije sačuvana — baza nije vratila red.')
         invoiceId = newInv.id
         if (linkedTxId && plCatName) {
           const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, project_id: ownProjectId }).eq('id', linkedTxId).select('id')
           if (txErr) throw txErr
           if (!tx || tx.length === 0)
-            throw new Error(`The invoice was saved, but no transaction with id ${linkedTxId} was updated — its P&L classification is now out of step with the invoice.`)
+            throw new Error(`Faktura je sačuvana, ali transakcija ${linkedTxId} nije izmenjena — njena P&L klasifikacija se sada ne slaže sa fakturom.`)
         }
       }
       // ── The split, after the bill itself ────────────────────────────
@@ -714,7 +721,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
           allocatedAmount: parseFloat(amount),
           allocatedAmountRsd: booked.amount_rsd,
           allocatedAmountEur: booked.amount_eur,
-          note: 'Reconciled — P&L already booked via Direct transaction',
+          note: 'Upareno — P&L je već proknjižen kroz direktnu transakciju',
         })
         if (!outcome.ok) throw new Error(outcome.message)
       }
@@ -742,8 +749,8 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: DIALOG.accentFill, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={DIALOG.accent} strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg>
         </div>
-        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>{invoice ? 'Invoice updated!' : 'Invoice posted!'}</div>
-        <div style={{ fontSize: '13px', color: DIALOG.dim }}>{linkedTxId ? 'Reconciled — P&L synced with Direct transaction.' : 'Saved to P&L successfully.'}</div>
+        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>{invoice ? 'Faktura je izmenjena.' : 'Faktura je proknjižena.'}</div>
+        <div style={{ fontSize: '13px', color: DIALOG.dim }}>{linkedTxId ? 'Uparena — P&L je usklađen sa direktnom transakcijom.' : 'Uspešno sačuvano u P&L.'}</div>
       </div>
     </div>
   )
@@ -758,11 +765,11 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   // because then each line carries its own project and this one is null.
   const projectPanel = (
     <div style={s.section}>
-      <div style={s.sectionTitle}>Project</div>
+      <div style={s.sectionTitle}>Projekat</div>
       {splitActive ? (
         <div style={{ fontSize: '11.5px', color: DIALOG.dim, lineHeight: 1.5 }}>
-          This bill is split — each line above carries its own project.
-          Remove the split to put the whole bill on one project.
+          Faktura je podeljena — svaka stavka iznad nosi svoj projekat.
+          Uklonite podelu da biste celu fakturu stavili na jedan projekat.
         </div>
       ) : invoice?.lease_id ? (
         <>
@@ -782,14 +789,14 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   // ── Cash Flow Classification panel ──────────────────
   const cfPanel = (
     <div style={s.section}>
-      <div style={s.sectionTitle}>Cash flow classification</div>
+      <div style={s.sectionTitle}>Klasifikacija novčanog toka</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '8px' }}>
         {[
-          { id: 'recurring', label: '🔁 Recurring', sub: 'Monthly/Qtrly/Yearly' },
-          { id: 'one_time', label: '1️⃣ One-time', sub: 'Non-repeating' },
-          { id: 'accrual', label: '📅 Accrual', sub: 'Period-based' },
-          { id: 'capex', label: '🏗 CapEx', sub: 'Capital expenditure' },
-          { id: 'reimbursable', label: '↩️ Reimbursable', sub: 'Expected return' },
+          { id: 'recurring', label: '🔁 Ponavljajući', sub: 'Mesečno/kvart./god.' },
+          { id: 'one_time', label: '1️⃣ Jednokratni', sub: 'Ne ponavlja se' },
+          { id: 'accrual', label: '📅 Razgraničenje', sub: 'Po periodu' },
+          { id: 'capex', label: '🏗 Kap. izdatak', sub: 'Kapitalni izdatak' },
+          { id: 'reimbursable', label: '↩️ Refundacija', sub: 'Očekuje se povraćaj' },
         ].map(a => (
           <div key={a.id}
             style={{ ...s.allocBtn, ...(cfType === a.id ? { border: '2px solid ' + DIALOG.accent, background: DIALOG.accentFill } : {}) }}
@@ -803,25 +810,25 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       {cfType === 'recurring' && (
         <div style={{ marginTop: '12px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-            {[{ id: 'monthly', label: '📆 Monthly' }, { id: 'quarterly', label: '📊 Quarterly' }, { id: 'yearly', label: '📅 Yearly' }].map(f => (
+            {[{ id: 'monthly', label: '📆 Mesečno' }, { id: 'quarterly', label: '📊 Kvartalno' }, { id: 'yearly', label: '📅 Godišnje' }].map(f => (
               <div key={f.id}
                 style={{ flex: 1, padding: '8px', border: cfFrequency === f.id ? '2px solid ' + DIALOG.accent : '0.5px solid ' + DIALOG.border, borderRadius: '8px', background: cfFrequency === f.id ? DIALOG.accentFill : DIALOG.raised, cursor: 'pointer', textAlign: 'center' as const, fontSize: '12px', fontWeight: cfFrequency === f.id ? '600' : '400', color: cfFrequency === f.id ? DIALOG.accent : DIALOG.dim }}
                 onClick={() => setCfFrequency(f.id)}>{f.label}</div>
             ))}
           </div>
           <div style={s.field}>
-            <label style={s.lbl}>Next month estimate ({currency || '—'})</label>
+            <label style={s.lbl}>Procena za sledeći mesec ({currency || '—'})</label>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <input type="number" style={{ ...s.input, flex: 1 }} value={cfNextMonthEst}
                 onChange={e => setCfNextMonthEst(e.target.value)}
-                placeholder={amount ? `Auto: ${fmtNum(parseFloat(amount))}` : '0.00'} />
+                placeholder={amount ? `Automatski: ${fmtNum(parseFloat(amount))}` : '0.00'} />
               {!cfNextMonthEst && amount && (
-                <button style={s.linkBtn} onClick={() => setCfNextMonthEst(amount)}>Use this amount</button>
+                <button style={s.linkBtn} onClick={() => setCfNextMonthEst(amount)}>Preuzmi ovaj iznos</button>
               )}
             </div>
             {amount && (
               <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '4px' }}>
-                Auto: {fmtNum(cfFrequency === 'monthly' ? parseFloat(amount) : cfFrequency === 'quarterly' ? parseFloat(amount) / 3 : parseFloat(amount) / 12)} {currency}/mo
+                Automatski: {fmtNum(cfFrequency === 'monthly' ? parseFloat(amount) : cfFrequency === 'quarterly' ? parseFloat(amount) / 3 : parseFloat(amount) / 12)} {currency}/mes.
               </div>
             )}
           </div>
@@ -832,17 +839,17 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         <div style={{ marginTop: '12px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={s.row2}>
             <div style={s.field}>
-              <label style={s.lbl}>From</label>
+              <label style={s.lbl}>Od</label>
               <input type="date" style={s.input} value={cfAccrualFrom} onChange={e => setCfAccrualFrom(e.target.value)} />
             </div>
             <div style={s.field}>
-              <label style={s.lbl}>To</label>
+              <label style={s.lbl}>Do</label>
               <input type="date" style={s.input} value={cfAccrualTo} onChange={e => setCfAccrualTo(e.target.value)} />
             </div>
           </div>
           {cfAccrualFrom && cfAccrualTo && amount && (
             <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '4px' }}>
-              {(() => { const m = Math.max(1, Math.round((new Date(cfAccrualTo).getTime() - new Date(cfAccrualFrom).getTime()) / (1000*60*60*24*30))); return `Monthly: ${(parseFloat(amount)/m).toFixed(2)} ${currency} × ${m} months` })()}
+              {(() => { const m = Math.max(1, Math.round((new Date(cfAccrualTo).getTime() - new Date(cfAccrualFrom).getTime()) / (1000*60*60*24*30))); return `Mesečno: ${fmtNum(parseFloat(amount)/m)} ${currency} × ${m} mes.` })()}
             </div>
           )}
         </div>
@@ -851,11 +858,11 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       {cfType === 'capex' && (
         <div style={{ marginTop: '12px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={s.field}>
-            <label style={s.lbl}>Amortization period (months)</label>
-            <input type="number" style={s.input} value={cfCapexMonths} onChange={e => setCfCapexMonths(e.target.value)} placeholder="e.g. 36" min="1" />
+            <label style={s.lbl}>Period amortizacije (meseci)</label>
+            <input type="number" style={s.input} value={cfCapexMonths} onChange={e => setCfCapexMonths(e.target.value)} placeholder="npr. 36" min="1" />
             {cfCapexMonths && amount && (
               <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '4px' }}>
-                Monthly depreciation: {(parseFloat(amount) / parseFloat(cfCapexMonths)).toFixed(2)} {currency}/mo
+                Mesečna amortizacija: {fmtNum(parseFloat(amount) / parseFloat(cfCapexMonths))} {currency}/mes.
               </div>
             )}
           </div>
@@ -865,7 +872,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       {cfType === 'reimbursable' && (
         <div style={{ marginTop: '12px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={s.field}>
-            <label style={s.lbl}>Expected reimbursement date</label>
+            <label style={s.lbl}>Očekivani datum refundacije</label>
             <input type="date" style={s.input} value={cfReimbursableDate} onChange={e => setCfReimbursableDate(e.target.value)} />
           </div>
         </div>
@@ -873,7 +880,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
 
       {cfType === 'one_time' && (
         <div style={{ marginTop: '8px', fontSize: '12px', color: DIALOG.dim, background: DIALOG.raised, borderRadius: '8px', padding: '10px 12px' }}>
-          One-time expense — will not be included in future month estimates.
+          Jednokratni trošak — neće ući u procene za naredne mesece.
         </div>
       )}
     </div>
@@ -884,12 +891,12 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       <div style={s.dialog}>
         <div style={s.header}>
           <div>
-            <div style={s.headerTitle}>{invoice ? 'Edit invoice' : 'New invoice'}</div>
-            <div style={s.headerSub}>Step {step} of 4 — {stepTitles[step - 1]}</div>
+            <div style={s.headerTitle}>{invoice ? 'Izmena fakture' : 'Nova faktura'}</div>
+            <div style={s.headerSub}>Korak {step} od 4 — {stepTitles[step - 1]}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ ...s.invBadge, ...(linkedTxId ? { background: 'rgba(12,68,124,0.2)', color: DIALOG.blue, borderColor: 'rgba(12,68,124,0.3)' } : {}) }}>
-              {linkedTxId ? '🔗 Reconciled' : 'P&L Impact'}
+              {linkedTxId ? '🔗 Uparena' : 'Utiče na P&L'}
             </div>
             <span style={s.logoText}>MCFlow</span>
             <button style={s.closeBtn} onClick={onClose}>×</button>
@@ -917,7 +924,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
           <div style={s.validationBanner}>
             <span>⚠️</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '500', fontSize: '12px' }}>The invoice was not posted</div>
+              <div style={{ fontWeight: '500', fontSize: '12px' }}>Faktura nije proknjižena</div>
               <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.9 }}>{saveError}</div>
             </div>
             <button style={s.bannerClose} onClick={() => setSaveError('')}>×</button>
@@ -928,7 +935,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
           <div style={s.validationBanner}>
             <span>⚠️</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '500', fontSize: '12px' }}>Fix {totalErrors} error{totalErrors > 1 ? 's' : ''} before posting:</div>
+              <div style={{ fontWeight: '500', fontSize: '12px' }}>Ispravite pre knjiženja ({countOf(totalErrors, 'greška', 'greške', 'grešaka')}):</div>
               <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.9 }}>{Object.values(errors).join(' · ')}</div>
             </div>
             <button style={s.bannerClose} onClick={() => setShowValidationSummary(false)}>×</button>
@@ -944,10 +951,10 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                 <div style={{ ...s.reconcileBox, marginBottom: '20px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                     <div>
-                      <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.blue }}>🔗 Link to existing Direct transaction</div>
-                      <div style={{ fontSize: '11px', color: DIALOG.blue, marginTop: '2px' }}>Select a Direct tx to auto-fill all fields. Invoice will be marked paid with no duplicate P&L.</div>
+                      <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.blue }}>🔗 Poveži sa postojećom direktnom transakcijom</div>
+                      <div style={{ fontSize: '11px', color: DIALOG.blue, marginTop: '2px' }}>Izaberite direktnu transakciju da se sva polja popune automatski. Faktura će biti označena kao plaćena, bez dvostrukog P&L.</div>
                     </div>
-                    {linkedTxId && <button style={s.unlinkBtn} onClick={handleUnlink}>✕ Unlink</button>}
+                    {linkedTxId && <button style={s.unlinkBtn} onClick={handleUnlink}>✕ Raskini vezu</button>}
                   </div>
                   {linkedTx ? (
                     <div style={s.linkedTxCard}>
@@ -959,15 +966,15 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                         </div>
                       </div>
                       <div style={{ ...s.infoBox, marginTop: '10px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, fontSize: '11px' }}>
-                        ℹ️ Fields auto-filled from transaction. You can still edit them below. P&L will be synced on post.
+                        ℹ️ Polja su popunjena iz transakcije. I dalje ih možete menjati ispod. P&L se usklađuje pri knjiženju.
                       </div>
                     </div>
                   ) : (
                     <>
                       <input style={{ ...s.input, marginBottom: '8px', width: '100%', boxSizing: 'border-box' as const }}
-                        value={reconcileSearch} onChange={e => setReconcileSearch(e.target.value)} placeholder="Search by partner, category or date..." />
+                        value={reconcileSearch} onChange={e => setReconcileSearch(e.target.value)} placeholder="Pretraga po partneru, kategoriji ili datumu…" />
                       {directTransactions.length === 0 ? (
-                        <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>No Direct transactions for this company yet.</div>
+                        <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>Ova firma još nema direktnih transakcija.</div>
                       ) : (
                         <div style={s.txList}>
                           {filteredDirectTx.slice(0, 8).map(tx => (
@@ -983,7 +990,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                             </div>
                           ))}
                           {filteredDirectTx.length === 0 && reconcileSearch && (
-                            <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>No results for "{reconcileSearch}"</div>
+                            <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>Nema rezultata za „{reconcileSearch}“</div>
                           )}
                         </div>
                       )}
@@ -993,24 +1000,24 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
               )}
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Company & invoice info</div>
+                <div style={s.sectionTitle}>Firma i podaci o fakturi</div>
                 <div style={s.row2}>
                   {showPicker && (
                     <div style={s.field}>
-                      <label style={s.lbl}>Company <span style={s.req}>*</span></label>
+                      <label style={s.lbl}>Firma <span style={s.req}>*</span></label>
                       <select style={{ ...s.select, ...(fieldErr('companyId') ? s.inputError : {}) }} value={companyId}
                         onChange={e => { setCompanyId(e.target.value); setCurrency(''); setLinkedTxId(''); touch('companyId') }} onBlur={() => touch('companyId')}>
-                        <option value="">Select company...</option>
+                        <option value="">Izaberite firmu…</option>
                         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                       {fieldErr('companyId') && <span style={s.errorMsg}>{fieldErr('companyId')}</span>}
                     </div>
                   )}
                   <div style={s.field}>
-                    <label style={s.lbl}>Currency <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Valuta <span style={s.req}>*</span></label>
                     <select style={{ ...s.select, ...(fieldErr('currency') ? s.inputError : {}) }} value={currency}
                       onChange={e => { setCurrency(e.target.value); touch('currency') }} onBlur={() => touch('currency')}>
-                      <option value="">Select...</option>
+                      <option value="">Izaberite…</option>
                       {(companies.find(c => c.id === companyId)?.currencies || DOCUMENT_CURRENCIES).map((cur: string) => (
                         <option key={cur}>{cur}</option>
                       ))}
@@ -1020,24 +1027,24 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                 </div>
                 <div style={s.row3}>
                   <div style={s.field}>
-                    <label style={s.lbl}>Invoice number</label>
-                    <input style={s.input} value={invoiceNumber} onChange={e => { setInvoiceNumber(e.target.value); setRefNum(e.target.value) }} placeholder="e.g. INV-001/2026" />
+                    <label style={s.lbl}>Broj fakture</label>
+                    <input style={s.input} value={invoiceNumber} onChange={e => { setInvoiceNumber(e.target.value); setRefNum(e.target.value) }} placeholder="npr. F-001/2026" />
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Invoice date <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Datum fakture <span style={s.req}>*</span></label>
                     <input type="date" style={{ ...s.input, ...(fieldErr('invoiceDate') ? s.inputError : {}) }} value={invoiceDate}
                       onChange={e => { setInvoiceDate(e.target.value); touch('invoiceDate') }} onBlur={() => touch('invoiceDate')} />
                     {fieldErr('invoiceDate') && <span style={s.errorMsg}>{fieldErr('invoiceDate')}</span>}
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Due date</label>
+                    <label style={s.lbl}>Datum dospeća</label>
                     <input type="date" style={s.input} value={dueDate} onChange={e => setDueDate(e.target.value)} />
                   </div>
                 </div>
               </div>
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Partner & type</div>
+                <div style={s.sectionTitle}>Partner i tip</div>
                 <div style={s.row2}>
                   <div style={s.field}>
                     <label style={s.lbl}>Partner <span style={s.req}>*</span></label>
@@ -1045,7 +1052,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                       <div style={{ flex: 1, position: 'relative' as const }}>
                         <input style={{ ...s.input, ...(fieldErr('partnerId') ? s.inputError : {}) }} value={partnerSearch}
                           onChange={e => { setPartnerSearch(e.target.value); setPartnerId(''); touch('partnerId') }}
-                          onBlur={() => touch('partnerId')} placeholder="Search partner..." />
+                          onBlur={() => touch('partnerId')} placeholder="Pretraga partnera…" />
                         {partnerSearch && !partnerId && (
                           <div style={s.dropdown}>
                             {filteredPartners.slice(0, 8).map(p => (
@@ -1061,21 +1068,21 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                       <button
                         style={{ fontFamily: 'system-ui,sans-serif', fontSize: '20px', width: '36px', height: '36px', border: '0.5px solid ' + DIALOG.border, borderRadius: '8px', background: DIALOG.raised, color: DIALOG.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
                         onClick={() => { setPartnerDialogInitialName(partnerSearch); setPartnerDialogOpen(true) }}
-                        title="Add a new partner (NBS lookup)">+</button>
+                        title="Dodaj novog partnera (pretraga NBS)">+</button>
                     </div>
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Invoice type <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Tip fakture <span style={s.req}>*</span></label>
                     <div style={s.typeRow}>
-                      <div style={{ ...s.typeChip, ...(invType === 'expense' ? s.typeChipExpense : {}) }} onClick={() => { if (!invoice?.lease_id) setInvType('expense') }} title={invoice?.lease_id ? 'Faktura za zakup je uvek izlazna' : undefined}>📤 Expense</div>
-                      <div style={{ ...s.typeChip, ...(invType === 'revenue' ? s.typeChipRevenue : {}) }} onClick={() => setInvType('revenue')}>📥 Revenue</div>
+                      <div style={{ ...s.typeChip, ...(invType === 'expense' ? s.typeChipExpense : {}) }} onClick={() => { if (!invoice?.lease_id) setInvType('expense') }} title={invoice?.lease_id ? 'Faktura za zakup je uvek izlazna' : undefined}>📤 Ulazna</div>
+                      <div style={{ ...s.typeChip, ...(invType === 'revenue' ? s.typeChipRevenue : {}) }} onClick={() => setInvType('revenue')}>📥 Izlazna</div>
                     </div>
                   </div>
                 </div>
-                <div style={s.sectionTitle}>Payment details</div>
+                <div style={s.sectionTitle}>Podaci za plaćanje</div>
                 <div style={s.row3}>
                   <div style={s.field}>
-                    <label style={s.lbl}>Account number (RSD)</label>
+                    <label style={s.lbl}>Broj računa (RSD)</label>
                     {partnerAccounts.length > 1 ? (
                       <>
                         {/* A number that is none of the saved accounts needs a
@@ -1083,24 +1090,24 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                             account instead — a different account from the one
                             that will be paid, shown as though it were chosen. */}
                         <select style={s.select} value={selectedAccountId} onChange={e => handleAccountSelect(e.target.value)}>
-                          {!selectedAccountId && <option value="">Typed in — not a saved account</option>}
+                          {!selectedAccountId && <option value="">Uneto ručno — nije sačuvan račun</option>}
                           {partnerAccounts.map(acc => (
                             <option key={acc.id} value={acc.id}>{acc.account_number}{acc.bank_name ? ` — ${acc.bank_name}` : ''}{acc.is_primary ? ' ★' : ''}</option>
                           ))}
                         </select>
                         {!selectedAccountId && (
                           <input style={{ ...s.input, marginTop: '4px' }} value={accNum}
-                            onChange={e => setAccNum(e.target.value)} placeholder="Partner bank account" />
+                            onChange={e => setAccNum(e.target.value)} placeholder="Tekući račun partnera" />
                         )}
                       </>
                     ) : (
-                      <input style={s.input} value={accNum} onChange={e => setAccNum(e.target.value)} placeholder="Partner bank account" />
+                      <input style={s.input} value={accNum} onChange={e => setAccNum(e.target.value)} placeholder="Tekući račun partnera" />
                     )}
-                    {partnerAccounts.length > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>{partnerAccounts.length} account{partnerAccounts.length > 1 ? 's' : ''} found</div>}
+                    {partnerAccounts.length > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>Pronađeno računa: {partnerAccounts.length}</div>}
                   </div>
                   <div style={s.field}>
                     <label style={s.lbl}>Model</label>
-                    <input style={s.input} value={model} onChange={e => setModel(e.target.value)} placeholder="e.g. 97" />
+                    <input style={s.input} value={model} onChange={e => setModel(e.target.value)} placeholder="npr. 97" />
                   </div>
                   <div style={s.field}>
                     <label style={s.lbl}>Poziv na broj</label>
@@ -1115,9 +1122,9 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
           {/* ── STEP 2 ── */}
           {step === 2 && (
             <div style={s.section}>
-              <div style={s.sectionTitle}>Amount & currency conversion</div>
+              <div style={s.sectionTitle}>Iznos i preračun valute</div>
               <div style={s.toggleRow}>
-                <span style={s.toggleLabel}>Amount indexed in foreign currency?</span>
+                <span style={s.toggleLabel}>Iznos indeksiran u stranoj valuti?</span>
                 <label style={s.toggle}>
                   <input type="checkbox" checked={isIndexed} onChange={e => setIsIndexed(e.target.checked)} style={{ opacity: 0, width: 0, height: 0 }} />
                   <span style={{ ...s.toggleSlider, background: isIndexed ? DIALOG.accent : DIALOG.border }} />
@@ -1125,51 +1132,51 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
               </div>
               {linkedTxId && (
                 <div style={{ ...s.infoBox, marginBottom: '10px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, fontSize: '11px' }}>
-                  🔗 Amount auto-filled from Direct transaction. Edit if invoice amount differs.
+                  🔗 Iznos je preuzet iz direktne transakcije. Izmenite ga ako se iznos fakture razlikuje.
                 </div>
               )}
               <div style={{ ...s.infoBox, margin: '10px 0' }}>
                 {currency === 'RSD'
-                  ? 'Booked in RSD; the NBS EUR rate on the invoice date gives the EUR figure.'
-                  : `NBS middle rate on the invoice date, in RSD per 1 ${currency || 'unit'}.`}
+                  ? 'Knjiži se u RSD; iznos u EUR daje kurs NBS za EUR na datum fakture.'
+                  : `Srednji kurs NBS na datum fakture, u RSD za 1 ${currency || 'jedinicu'}.`}
               </div>
               <div style={s.row2}>
                 <div style={s.field}>
-                  <label style={s.lbl}>Amount ({currency || '—'}) <span style={s.req}>*</span></label>
+                  <label style={s.lbl}>Iznos ({currency || '—'}) <span style={s.req}>*</span></label>
                   <input type="number" style={{ ...s.input, ...(fieldErr('amount') ? s.inputError : {}) }} value={amount}
                     onChange={e => { setAmount(e.target.value); touch('amount') }} onBlur={() => touch('amount')} placeholder="0.00" />
                   {fieldErr('amount') && <span style={s.errorMsg}>{fieldErr('amount')}</span>}
                 </div>
                 <div style={s.field}>
-                  <label style={s.lbl}>{currency && currency !== 'RSD' ? `RSD per 1 ${currency}` : 'RSD per 1 EUR'} <span style={s.req}>*</span></label>
+                  <label style={s.lbl}>{currency && currency !== 'RSD' ? `RSD za 1 ${currency}` : 'RSD za 1 EUR'} <span style={s.req}>*</span></label>
                   <div style={{ display: 'flex', gap: '6px' }}>
                     {currency && currency !== 'RSD' ? (
                       <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={exRate}
                         onChange={e => { setExRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                        placeholder="Click Fetch" />
+                        placeholder="Kliknite Preuzmi" />
                     ) : (
                       <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={eurRate}
                         onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                        placeholder="Click Fetch" />
+                        placeholder="Kliknite Preuzmi" />
                     )}
-                    <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate || !currency}>{fetchingRate ? '...' : 'Fetch'}</button>
+                    <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate || !currency}>{fetchingRate ? '...' : 'Preuzmi'}</button>
                   </div>
                   {currency === 'USD' && (
                     <input type="number" style={{ ...s.input, marginTop: '6px' }} value={eurRate}
                       onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                      placeholder="RSD per 1 EUR" aria-label="RSD per 1 EUR" />
+                      placeholder="RSD za 1 EUR" aria-label="RSD za 1 EUR" />
                   )}
-                  {rateSource && <div style={{ fontSize: '11px', color: rateMissing ? '#FF5B5A' : DIALOG.accent, fontWeight: rateMissing ? 600 : 400, marginTop: '4px' }}>Source: {rateSource}</div>}
+                  {rateSource && <div style={{ fontSize: '11px', color: rateMissing ? '#FF5B5A' : DIALOG.accent, fontWeight: rateMissing ? 600 : 400, marginTop: '4px' }}>Izvor: {rateSource}</div>}
                   {fieldErr('exRate') && <span style={s.errorMsg}>{fieldErr('exRate')}</span>}
                 </div>
               </div>
               <div style={s.convRow}>
-                <div><div style={s.convLabel}>Invoice amount</div><div style={s.convVal}>{amount ? fmtLocal(parseFloat(amount), currency) : '—'}</div></div>
+                <div><div style={s.convLabel}>Iznos fakture</div><div style={s.convVal}>{amount ? fmtLocal(parseFloat(amount), currency) : '—'}</div></div>
                 <div style={{ fontSize: '20px', color: DIALOG.faint, alignSelf: 'flex-end', paddingBottom: '4px' }}>→</div>
-                <div><div style={s.convLabel}>RSD (book)</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
+                <div><div style={s.convLabel}>RSD (knjiženo)</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
                 <div><div style={s.convLabel}>EUR</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountEur, 'EUR') : '—'}</div></div>
               </div>
-              {dueDate && <div style={{ ...s.infoBox, marginTop: '12px', background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber }}>📅 Due date: <strong>{dueDate}</strong></div>}
+              {dueDate && <div style={{ ...s.infoBox, marginTop: '12px', background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber }}>📅 Datum dospeća: <strong>{dueDate}</strong></div>}
             </div>
           )}
 
@@ -1191,11 +1198,11 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                 classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
                 client={supabase}
                 onScriptsChanged={() => { fetchScripts(supabase).then(setQuickFillScripts as any) }}
-                hint="One bill, two or more expenses — a laptop and a year of support, say."
+                hint="Jedna faktura, dva ili više troškova — npr. laptop i godinu dana podrške."
               />}
               {linkedTxId && (
                 <div style={{ ...s.infoBox, marginBottom: '16px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue }}>
-                  🔗 Linked to Direct transaction — P&L fields auto-filled. Changes will sync to the transaction on post.
+                  🔗 Povezano sa direktnom transakcijom — P&L polja su popunjena automatski. Izmene se pri knjiženju prenose na transakciju.
                 </div>
               )}
               {invType === 'expense' && (
@@ -1206,12 +1213,12 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                       ? { opacity: 0.5, pointerEvents: 'none' as const, userSelect: 'none' as const }
                       : {}),
                   }}>
-                    <div style={s.sectionTitle}>P&L classification</div>
+                    <div style={s.sectionTitle}>P&L klasifikacija</div>
                     {splitActive && (
                       <div style={{ ...s.infoBox, marginBottom: '12px', background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber }}>
-                        Taken from the largest line of the split above, and locked while it
-                        stands. The split is what the P&amp;L reads; this is what the ledger
-                        lists the bill under. Remove the split to set it by hand.
+                        Preuzeto iz najveće stavke podele iznad i zaključano dok podela postoji.
+                        P&amp;L čita podelu; ovo je ono pod čim glavna knjiga vodi fakturu.
+                        Uklonite podelu da biste ovo podesili ručno.
                       </div>
                     )}
                     {quickFillScripts.length > 0 && (
@@ -1223,7 +1230,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                             onChange={e => setQfSearch(e.target.value)}
                             onFocus={() => setQfOpen(true)}
                             onBlur={() => setTimeout(() => setQfOpen(false), 150)}
-                            placeholder="⚡ Quick fill — click or search…"
+                            placeholder="⚡ Brza popuna — kliknite ili pretražite…"
                           />
                           <span style={{ position: 'absolute' as const, right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '10px', color: DIALOG.accent, pointerEvents: 'none' as const }}>
                             {qfOpen ? '▲' : '▼'}
@@ -1239,7 +1246,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                                 sc.department.toLowerCase().includes(qfSearch.toLowerCase())
                               )
                               return filtered.length === 0
-                                ? <div style={{ padding: '10px 12px', fontSize: '12px', color: DIALOG.dim }}>No matches for "{qfSearch}"</div>
+                                ? <div style={{ padding: '10px 12px', fontSize: '12px', color: DIALOG.dim }}>Nema rezultata za „{qfSearch}“</div>
                                 : filtered.map(sc => (
                                     <div key={sc.id}
                                       style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: '0.5px solid ' + DIALOG.borderSoft, display: 'flex', flexDirection: 'column' as const, gap: '2px' }}
@@ -1254,31 +1261,31 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                         {savingTemplate ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
                             <input autoFocus style={{ ...s.input, flex: 1, fontSize: '12px', padding: '6px 9px' }}
-                              placeholder="Name this template…"
+                              placeholder="Naziv šablona…"
                               value={templateName}
                               onChange={e => setTemplateName(e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveAsTemplate() } }} />
-                            <button type="button" style={s.qfSaveBtn} onClick={saveAsTemplate}>Save</button>
+                            <button type="button" style={s.qfSaveBtn} onClick={saveAsTemplate}>Sačuvaj</button>
                             <button type="button" style={s.qfCancelBtn}
-                              onClick={() => { setSavingTemplate(false); setTemplateName('') }}>Cancel</button>
+                              onClick={() => { setSavingTemplate(false); setTemplateName('') }}>Otkaži</button>
                           </div>
                         ) : (
                           <button type="button" style={s.qfNewBtn}
-                            title="Save the classification filled in above as a template, shared with everyone"
+                            title="Sačuvaj gornju klasifikaciju kao šablon, zajednički za sve"
                             onClick={() => setSavingTemplate(true)}>
-                            + Save this classification as a template
+                            + Sačuvaj ovu klasifikaciju kao šablon
                           </button>
                         )}
                       </div>
                     )}
                     <div style={s.row2}>
                       <div style={s.field}>
-                        <label style={s.lbl}>P&L Category {!linkedTxId && <span style={s.req}>*</span>}</label>
+                        <label style={s.lbl}>P&L kategorija {!linkedTxId && <span style={s.req}>*</span>}</label>
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                         <SearchableSelect value={plCatId}
                           onChange={v => { const cat = plCategories.find(c => c.id === v); setPlCatId(v); setPlCatName(cat?.name || ''); setPlSubId(''); setPlSubName(''); touch('plCat') }}
                           options={expenseCategories.map(c => ({ value: c.id, label: c.name }))}
-                          allLabel="Select P&L category..." searchPlaceholder="Type to search categories…"
+                          allLabel="Izaberite P&L kategoriju…" searchPlaceholder="Pretraga kategorija…"
                           style={{ ...pickerChrome, flex: 1, ...(fieldErr('plCat') ? pickerError : {}) }} />
                         <InlineCategoryAdd table="pl_categories"
                           currentCount={plCategories.length}
@@ -1287,12 +1294,12 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                         {fieldErr('plCat') && <span style={s.errorMsg}>{fieldErr('plCat')}</span>}
                       </div>
                       <div style={s.field}>
-                        <label style={s.lbl}>P&L Sub-category</label>
+                        <label style={s.lbl}>Potkategorija</label>
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                         <SearchableSelect value={plSubId}
                           onChange={v => { const sub = plSubcategories.find(s => s.id === v); setPlSubId(v); setPlSubName(sub?.name || '') }}
                           options={currentPlSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                          allLabel="Select sub-category..." searchPlaceholder="Type to search sub-categories…"
+                          allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
                           disabled={!plCatId || currentPlSubs.length === 0}
                           style={{ ...pickerChrome, flex: 1 }} />
                         <InlineCategoryAdd table="pl_subcategories" parentId={plCatId} parentField="category_id"
@@ -1303,12 +1310,12 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                     </div>
                     <div style={s.row2}>
                       <div style={s.field}>
-                        <label style={s.lbl}>Department {!linkedTxId && <span style={s.req}>*</span>}</label>
+                        <label style={s.lbl}>Sektor {!linkedTxId && <span style={s.req}>*</span>}</label>
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                         <SearchableSelect value={deptId}
                           onChange={v => { const dept = departments.find(d => d.id === v); setDeptId(v); setDeptName(dept?.name || ''); setDeptSubId(''); setDeptSubName(''); setExpDesc(''); touch('dept') }}
                           options={departments.map(d => ({ value: d.id, label: d.name }))}
-                          allLabel="Select department..." searchPlaceholder="Type to search departments…"
+                          allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                           style={{ ...pickerChrome, flex: 1, ...(fieldErr('dept') ? pickerError : {}) }} />
                         <InlineCategoryAdd table="departments"
                           currentCount={departments.length}
@@ -1317,12 +1324,12 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                         {fieldErr('dept') && <span style={s.errorMsg}>{fieldErr('dept')}</span>}
                       </div>
                       <div style={s.field}>
-                        <label style={s.lbl}>Dept. sub-category</label>
+                        <label style={s.lbl}>Podsektor</label>
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                         <SearchableSelect value={deptSubId}
                           onChange={v => { const sub = deptSubcategories.find(s => s.id === v); setDeptSubId(v); setDeptSubName(sub?.name || ''); setExpDesc('') }}
                           options={currentDeptSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                          allLabel="Select sub-category..." searchPlaceholder="Type to search sub-categories…"
+                          allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
                           disabled={!deptId || currentDeptSubs.length === 0}
                           style={{ ...pickerChrome, flex: 1 }} />
                         <InlineCategoryAdd table="dept_subcategories" parentId={deptId} parentField="department_id"
@@ -1332,15 +1339,15 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                       </div>
                     </div>
                     <div style={s.field}>
-                      <label style={s.lbl}>Expense description</label>
+                      <label style={s.lbl}>Opis troška</label>
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                         {currentExpDescs.length > 0 ? (
                           <SearchableSelect value={expDesc} onChange={setExpDesc}
                             options={currentExpDescs.map(d => ({ value: d.name, label: d.name }))}
-                            allLabel="Select description..." searchPlaceholder="Type to search descriptions…"
+                            allLabel="Izaberite opis…" searchPlaceholder="Pretraga opisa…"
                             style={{ ...pickerChrome, flex: 1 }} />
                         ) : (
-                          <input style={{ ...s.input, flex: 1 }} value={expDesc} onChange={e => setExpDesc(e.target.value)} placeholder="Enter expense description..." />
+                          <input style={{ ...s.input, flex: 1 }} value={expDesc} onChange={e => setExpDesc(e.target.value)} placeholder="Unesite opis troška…" />
                         )}
                         <InlineCategoryAdd table="expense_descriptions" parentId={deptSubId} parentField="dept_subcategory_id"
                           currentCount={currentExpDescs.length} disabled={!deptSubId}
@@ -1359,12 +1366,12 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
 
               {invType === 'revenue' && (
                 <div style={s.section}>
-                  <div style={s.sectionTitle}>Revenue details</div>
+                  <div style={s.sectionTitle}>Podaci o prihodu</div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Revenue stream <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Vrsta prihoda <span style={s.req}>*</span></label>
                     <select style={{ ...s.select, ...(fieldErr('revStream') ? s.inputError : {}) }} value={revStream}
                       onChange={e => { setRevStream(e.target.value); setRevStreamChosen(true); touch('revStream') }} onBlur={() => touch('revStream')}>
-                      <option value="">Select stream...</option>
+                      <option value="">Izaberite vrstu prihoda…</option>
                       {revenueStreams.map(r => <option key={r}>{r}</option>)}
                     </select>
                     {fieldErr('revStream') && <span style={s.errorMsg}>{fieldErr('revStream')}</span>}
@@ -1424,15 +1431,15 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
               )}
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Tags & note</div>
+                <div style={s.sectionTitle}>Oznake i napomena</div>
                 <div style={s.tagRow}>
                   {['Recurring', 'Prepayment', 'Accrual', 'Capital expenditure', 'Tax deductible', 'Reimbursable'].map(t => (
-                    <span key={t} style={{ ...s.tag, ...(tags.includes(t) ? s.tagActive : {}) }} onClick={() => toggleTag(t)}>{t}</span>
+                    <span key={t} style={{ ...s.tag, ...(tags.includes(t) ? s.tagActive : {}) }} onClick={() => toggleTag(t)}>{TAG_LABEL[t] || t}</span>
                   ))}
                 </div>
                 <div style={{ marginTop: '12px' }}>
-                  <label style={s.lbl}>Note</label>
-                  <textarea style={s.textarea} value={note} onChange={e => setNote(e.target.value)} placeholder="Additional notes..." />
+                  <label style={s.lbl}>Napomena</label>
+                  <textarea style={s.textarea} value={note} onChange={e => setNote(e.target.value)} placeholder="Dodatne napomene…" />
                 </div>
               </div>
             </>
@@ -1441,7 +1448,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
           {/* ── STEP 4 ── */}
           {step === 4 && (
             <div style={s.section}>
-              <div style={s.sectionTitle}>Review before posting</div>
+              <div style={s.sectionTitle}>Pregled pre knjiženja</div>
 
               {/* The split belongs in the review for the same reason every
                   other figure does: this is the page somebody checks before
@@ -1451,12 +1458,12 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                   ? { background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber }
                   : {}) }}>
                   <div style={{ fontWeight: 500, marginBottom: '4px' }}>
-                    Split across {splitLines.length} costs
+                    Podela na {countOf(splitLines.length, 'trošak', 'troška', 'troškova')}
                   </div>
                   {splitLines.map((l, i) => (
                     <div key={l.key} style={{ fontSize: '11.5px', opacity: 0.9, lineHeight: 1.7 }}>
                       {i + 1}. {[l.pl_category, l.pl_subcategory, l.department, l.expense_description]
-                        .filter(Boolean).join(' › ') || 'nothing picked'}
+                        .filter(Boolean).join(' › ') || 'ništa nije izabrano'}
                       {' · '}{projectLabelById(projects, l.project_id)}
                       {' — '}
                       <strong>
@@ -1472,45 +1479,45 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                 <div style={{ ...s.infoBox, marginBottom: '16px', display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <span>✅</span>
                   <div>
-                    <div style={{ fontWeight: '500', marginBottom: '2px' }}>All fields valid — ready to post</div>
-                    <div style={{ fontSize: '11px', opacity: 0.85 }}>{linkedTxId ? 'Invoice will be reconciled. P&L fields synced to Direct transaction.' : `Invoice will impact P&L on date ${invoiceDate}.`}</div>
+                    <div style={{ fontWeight: '500', marginBottom: '2px' }}>Sva polja su ispravna — spremno za knjiženje</div>
+                    <div style={{ fontSize: '11px', opacity: 0.85 }}>{linkedTxId ? 'Faktura će biti uparena. P&L polja se usklađuju sa direktnom transakcijom.' : `Faktura utiče na P&L na datum ${invoiceDate}.`}</div>
                   </div>
                 </div>
               ) : (
                 <div style={{ ...s.validationBanner, marginBottom: '16px', position: 'relative' }}>
                   <span>⚠️</span>
                   <div>
-                    <div style={{ fontWeight: '500', fontSize: '12px' }}>{totalErrors} required field{totalErrors > 1 ? 's' : ''} missing</div>
+                    <div style={{ fontWeight: '500', fontSize: '12px' }}>Nedostaju obavezna polja: {totalErrors}</div>
                     <div style={{ fontSize: '11px', marginTop: '2px' }}>{Object.values(errors).join(' · ')}</div>
                   </div>
                 </div>
               )}
               {[
-                { title: 'Invoice info', rows: [
-                  ['Company', companies.find(c => c.id === companyId)?.name || '—'],
+                { title: 'Podaci o fakturi', rows: [
+                  ['Firma', companies.find(c => c.id === companyId)?.name || '—'],
                   ['Partner', showNewPartner ? newPartnerName : (partners.find(p => p.id === partnerId)?.name || partnerSearch || '—')],
-                  ['Invoice number', invoiceNumber || '—'],
-                  ['Invoice date', invoiceDate || '—'],
-                  ['Due date', dueDate || '—'],
-                  ['Type', invType],
-                  ['P&L Impact', linkedTxId ? '❌ None — reconciled with Direct tx' : '✅ Yes'],
+                  ['Broj fakture', invoiceNumber || '—'],
+                  ['Datum fakture', invoiceDate || '—'],
+                  ['Datum dospeća', dueDate || '—'],
+                  ['Tip', invType === 'revenue' ? 'Izlazna' : 'Ulazna'],
+                  ['Uticaj na P&L', linkedTxId ? '❌ Nema — upareno sa direktnom transakcijom' : '✅ Da'],
                 ]},
-                { title: 'Amounts', rows: [
-                  ['Original amount', amount ? fmtLocal(parseFloat(amount), currency) : '—'],
-                  ['Exchange rate', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'Manual'})` : 'N/A'],
-                  ['RSD (book)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
+                { title: 'Iznosi', rows: [
+                  ['Originalni iznos', amount ? fmtLocal(parseFloat(amount), currency) : '—'],
+                  ['Kurs', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'ručno'})` : 'nije dostupno'],
+                  ['RSD (knjiženo)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
                   ['EUR', book.amounts ? fmtMoney(amountEur, 'EUR') : '—'],
                   ...(advanceOwn > 0 ? [
                     ['Odbijeni avans', `${fmtMoney(advanceOwn, currency || 'RSD')}${advanceBook && currency !== 'RSD' ? ` · ${fmtMoney(advanceBook.advance_deducted_rsd, 'RSD')}` : ''}`],
                     ['Za naplatu', `${fmtMoney(amountDue, currency || 'RSD')}${advanceBook && book.amounts ? ` · ${fmtMoney(round2(amountRsd - advanceBook.advance_deducted_rsd), 'RSD')} · ${fmtMoney(round2(amountEur - advanceBook.advance_deducted_eur), 'EUR')}` : ''}`],
                   ] : []),
                 ]},
-                { title: 'P&L & CF classification', rows: [
-                  ['P&L Category', plCatName || '—'],
-                  ['Department', deptName || '—'],
-                  ['Description', expDesc || '—'],
-                  ['Project', splitActive ? 'By split line' : projectLabelById(projects, projectId)],
-                  ['CF Classification', cfLabel()],
+                { title: 'P&L i novčani tok', rows: [
+                  ['P&L kategorija', plCatName || '—'],
+                  ['Sektor', deptName || '—'],
+                  ['Opis', expDesc || '—'],
+                  ['Projekat', splitActive ? 'Po stavkama podele' : projectLabelById(projects, projectId)],
+                  ['Novčani tok', cfLabel()],
                 ]},
               ].map(sec => (
                 <div key={sec.title} style={s.reviewSection}>
@@ -1531,23 +1538,23 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
 
         <div style={s.footer}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: DIALOG.dim }}>Step {step} of 4</span>
+            <span style={{ fontSize: '12px', color: DIALOG.dim }}>Korak {step} od 4</span>
             {totalErrors > 0 && touched.companyId && (
               <span style={{ fontSize: '11px', color: DIALOG.red, background: DIALOG.redFill, padding: '2px 8px', borderRadius: '20px' }}>
-                {totalErrors} field{totalErrors > 1 ? 's' : ''} missing
+                Nedostaje polja: {totalErrors}
               </span>
             )}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {step > 1 && <button style={s.btnGhost} onClick={() => setStep(step - 1)}>Back</button>}
-            {step < 4 && <button style={s.btnPrimary} onClick={() => { touchStep(step); setStep(step + 1) }}>Continue</button>}
+            {step > 1 && <button style={s.btnGhost} onClick={() => setStep(step - 1)}>Nazad</button>}
+            {step < 4 && <button style={s.btnPrimary} onClick={() => { touchStep(step); setStep(step + 1) }}>Dalje</button>}
             {step === 4 && (
               <button
                 style={{ ...s.btnPrimary, opacity: saving || whySplit ? 0.55 : 1 }}
                 onClick={handlePost}
                 disabled={saving || !!whySplit}
                 title={whySplit || undefined}>
-                {saving ? 'Saving...' : invoice ? 'Update invoice' : 'Post invoice'}
+                {saving ? 'Čuvanje…' : invoice ? 'Sačuvaj izmene' : 'Proknjiži fakturu'}
               </button>
             )}
           </div>

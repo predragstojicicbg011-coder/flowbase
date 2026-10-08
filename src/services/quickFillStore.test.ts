@@ -64,7 +64,7 @@ describe('whyNotSavable', () => {
   })
 
   it('refuses one with no name', () => {
-    expect(whyNotSavable(draft({ name: '   ' }), existing)).toMatch(/name/i)
+    expect(whyNotSavable(draft({ name: '   ' }), existing)).toMatch(/naziv/i)
   })
 
   it('refuses a duplicate name, and names the one it clashes with', () => {

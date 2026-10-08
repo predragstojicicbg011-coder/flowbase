@@ -505,8 +505,7 @@ export function otherIncomeLine(input: OtherIncomeInput, rates: PayrollRates): O
  */
 export function unprovenRule(name: string): never {
   throw new Error(
-    `${name} is not implemented: no payroll export has exercised it yet, so there is `
-    + 'nothing to check the rule against. Send a month that contains it and it becomes '
-    + 'a tested case. Guessing here would produce a figure indistinguishable from a '
-    + 'verified one.')
+    `${name}: pravilo još nije podržano jer se nije pojavilo ni u jednom izvozu obračuna, `
+    + 'pa nema s čim da se proveri. Pošaljite mesec u kome se javlja i postaće proveren slučaj. '
+    + 'Nagađanje bi dalo iznos koji se ne razlikuje od proverenog.')
 }

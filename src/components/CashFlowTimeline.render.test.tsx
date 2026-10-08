@@ -59,25 +59,25 @@ describe('the cash line draws', () => {
   it('shows the anchor and the lowest point in the header', () => {
     const { container } = render(<CashFlowTimeline timeline={timeline()} dated={DATED} />)
     capture('cash-1-timeline', container.innerHTML)
-    expect(screen.getByText(/read 2026-09-25/)).toBeInTheDocument()
-    expect(screen.getByText(/lowest/)).toBeInTheDocument()
+    expect(screen.getByText(/na dan 25\.09\.2026\./)).toBeInTheDocument()
+    expect(screen.getByText(/najniže/)).toBeInTheDocument()
   })
 
   it('names the display currency on the anchor, in the app notation', () => {
     const { unmount } = render(<CashFlowTimeline timeline={timeline()} dated={DATED} />)
-    expect(screen.getByText(/anchored on 612\.400 RSD read 2026-09-25/)).toBeInTheDocument()
+    expect(screen.getByText(/polazi od stanja 612\.400 RSD na dan 25\.09\.2026\./)).toBeInTheDocument()
     unmount()
     render(
       <DisplayCurrencyProvider initial="EUR">
         <CashFlowTimeline timeline={timeline()} dated={DATED} />
       </DisplayCurrencyProvider>)
-    expect(screen.getByText(/anchored on 612\.400 EUR/)).toBeInTheDocument()
+    expect(screen.getByText(/polazi od stanja 612\.400 EUR/)).toBeInTheDocument()
   })
 
   it('DRAWS NO BALANCE without a cash position, and says why', () => {
     const { container } = render(<CashFlowTimeline timeline={timeline(null)} dated={DATED} />)
     capture('cash-2-no-position', container.innerHTML)
-    expect(screen.getByText(/No cash position has been entered/i)).toBeInTheDocument()
+    expect(screen.getByText(/Stanje novca nije uneto/i)).toBeInTheDocument()
     // No line, no dots — the flows are still there.
     expect(container.querySelectorAll('polyline')).toHaveLength(0)
     expect(container.querySelectorAll('circle')).toHaveLength(0)
@@ -86,10 +86,10 @@ describe('the cash line draws', () => {
 
   it('carries a legend naming every mark, so none of them is colour alone', () => {
     render(<CashFlowTimeline timeline={timeline()} dated={DATED} />)
-    expect(screen.getByText(/In — above the line/)).toBeInTheDocument()
-    expect(screen.getByText(/Out — below it/)).toBeInTheDocument()
-    expect(screen.getByText(/Balance at month end/)).toBeInTheDocument()
-    expect(screen.getByText(/Hatched — the month in progress/)).toBeInTheDocument()
+    expect(screen.getByText(/Prilivi — iznad linije/)).toBeInTheDocument()
+    expect(screen.getByText(/Odlivi — ispod nje/)).toBeInTheDocument()
+    expect(screen.getByText(/Stanje na kraju meseca/)).toBeInTheDocument()
+    expect(screen.getByText(/Šrafirano — tekući mesec/)).toBeInTheDocument()
   })
 })
 

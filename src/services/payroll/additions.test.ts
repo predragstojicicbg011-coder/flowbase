@@ -72,8 +72,8 @@ describe('the labels', () => {
 
   it('says what each treatment actually does to the money', () => {
     const salary = TREATMENTS.find(t => t.value === 'salary')!
-    expect(salary.detail).toContain('contributions')
-    expect(TREATMENTS.find(t => t.value === 'other_income')!.detail).toContain('no contributions')
+    expect(salary.detail).toContain('doprinosi')
+    expect(TREATMENTS.find(t => t.value === 'other_income')!.detail).toContain('bez doprinosa')
   })
 })
 
@@ -176,8 +176,8 @@ describe('an addition in a currency with no rate', () => {
       additions: [addition({ currency: 'EUR', amount: 500 })],
       currencyRates: {},
     }))
-    expect(r.problems[0].why).toContain('no rate for this month')
-    expect(r.problems[0].why).toContain('more than what is shown')
+    expect(r.problems[0].why).toContain('bez kursa za ovaj mesec')
+    expect(r.problems[0].why).toContain('veće od prikazanog')
     expect(run(r, 'regular').salaries[0].line.additionalNet).toBe(0)
   })
 })

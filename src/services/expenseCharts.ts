@@ -12,8 +12,9 @@
 import { TreeNode, ComparedNode } from './expenseTree'
 import { FIXED_BELOW_VARIATION, MONTHS_TO_JUDGE, type CostBehaviour } from './cfoMetrics'
 import type { BranchNode } from './branchTree'
+import { MONTHS_SHORT_SR } from '../utils/months'
 
-export const OTHER = 'Other'
+export const OTHER = 'Ostalo'
 
 // ── Trend and mix ───────────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ export function bridgeSteps(compared: ComparedNode[], limit = 6): BridgeStep[] {
   const restDelta = moved.slice(limit).reduce((s, n) => s + n.delta, 0)
 
   const steps: BridgeStep[] = [
-    { label: 'Prior', kind: 'start', delta: 0, start: 0, end: priorTotal },
+    { label: 'Prethodno', kind: 'start', delta: 0, start: 0, end: priorTotal },
   ]
 
   let running = priorTotal
@@ -122,7 +123,7 @@ export function bridgeSteps(compared: ComparedNode[], limit = 6): BridgeStep[] {
     running = next
   }
 
-  steps.push({ label: 'Current', kind: 'end', delta: 0, start: 0, end: currentTotal })
+  steps.push({ label: 'Tekuće', kind: 'end', delta: 0, start: 0, end: currentTotal })
   return steps
 }
 
@@ -254,8 +255,7 @@ export function shortMoney(n: number, currency?: string): string {
 /** 'YYYY-MM' → 'Aug' / 'Aug ’25' when the series crosses a year boundary. */
 export function monthLabel(month: string, withYear = false): string {
   const [y, m] = month.split('-').map(Number)
-  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  const name = names[(m || 1) - 1] || month
+  const name = MONTHS_SHORT_SR[(m || 1) - 1] || month
   return withYear ? `${name} ’${String(y).slice(-2)}` : name
 }
 

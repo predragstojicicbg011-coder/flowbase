@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { settingsStyles as s } from '../pages/Settings'
+import { MONTHS_SHORT_SR, capitalize, srDate } from '../utils/months'
 
 // ── Accounting period locking ───────────────────────────────────────────────
 // A locked month is rejected by the database (trigger enforce_period_lock).
@@ -28,7 +29,7 @@ const yearBtn: React.CSSProperties = {
   padding: '2px 9px',
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTHS = MONTHS_SHORT_SR.map(capitalize)
 
 export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
   const { companies, defaultCompany, showPicker } = useCompanies()
@@ -74,16 +75,16 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
     if (!canEdit) return
     const next = !lockEnabled
     if (next === false && !window.confirm(
-      'Disable period locking for the ENTIRE database?\n\n' +
-      'While disabled, locked months can be edited as if they were open. ' +
-      'The lock records themselves are kept and take effect again when you re-enable.'
+      'Isključiti zaključavanje perioda za CELU bazu?\n\n' +
+      'Dok je isključeno, zaključani meseci mogu da se menjaju kao da su otvoreni. ' +
+      'Zapisi o zaključavanju ostaju i ponovo važe kada ga uključite.'
     )) return
     setTogglingFlag(true); setError('')
     const { error: err } = await supabase
       .from('feature_flags')
       .update({ enabled: next, updated_at: new Date().toISOString() })
       .eq('name', 'period_lock')
-    if (err) setError(`Could not change the switch: ${err.message}`)
+    if (err) setError(`Prekidač nije promenjen: ${err.message}`)
     else setLockEnabled(next)
     setTogglingFlag(false)
   }
@@ -101,12 +102,12 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
 
     if (existing) {
       const { error: err } = await supabase.from('closed_periods').delete().eq('id', existing.id)
-      if (err) setError(`Unlock failed: ${err.message}`)
+      if (err) setError(`Otključavanje nije uspelo: ${err.message}`)
     } else {
       const { error: err } = await supabase.from('closed_periods').insert({
         company_id: companyId, period: key, note: null,
       })
-      if (err) setError(`Lock failed: ${err.message}`)
+      if (err) setError(`Zaključavanje nije uspelo: ${err.message}`)
     }
     setBusy(null)
     load()
@@ -116,7 +117,7 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
     if (!canEdit) return
     setBusy(id); setError('')
     const { error: err } = await supabase.from('closed_periods').delete().eq('id', id)
-    if (err) setError(`Unlock failed: ${err.message}`)
+    if (err) setError(`Otključavanje nije uspelo: ${err.message}`)
     setBusy(null)
     load()
   }
@@ -125,7 +126,7 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <>
-      {!canEdit && <div style={s.readOnlyBanner}>👁 Read only — only administrators can lock or unlock periods.</div>}
+      {!canEdit && <div style={s.readOnlyBanner}>👁 Samo pregled — periode mogu da zaključaju ili otključaju samo administratori.</div>}
 
       <div style={{
         ...s.readOnlyBanner,
@@ -135,11 +136,11 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
         display: 'flex', alignItems: 'center', gap: '14px',
       }}>
         <div style={{ flex: 1 }}>
-          <strong>{lockEnabled ? '🔒 Period locking is ON' : '⚠ Period locking is OFF'}</strong>
+          <strong>{lockEnabled ? '🔒 Zaključavanje perioda je UKLJUČENO' : '⚠ Zaključavanje perioda je ISKLJUČENO'}</strong>
           <div style={{ color: '#7A9BB8', marginTop: '3px' }}>
             {lockEnabled
-              ? 'The database rejects any change dated inside a locked month.'
-              : 'Locked months can currently be edited. Lock records below are kept and apply again once re-enabled.'}
+              ? 'Baza odbija svaku izmenu sa datumom u zaključanom mesecu.'
+              : 'Zaključani meseci trenutno mogu da se menjaju. Zapisi o zaključavanju ispod ostaju i ponovo važe kada se uključi.'}
           </div>
         </div>
         {canEdit && (
@@ -152,7 +153,7 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
               padding: '5px 14px', fontSize: '12px',
               opacity: togglingFlag ? 0.5 : 1,
             }}>
-            {togglingFlag ? '…' : lockEnabled ? 'Disable' : 'Enable'}
+            {togglingFlag ? '…' : lockEnabled ? 'Isključi' : 'Uključi'}
           </button>
         )}
       </div>
@@ -166,11 +167,11 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
       <div style={s.twoCol}>
         <div style={s.colPanel}>
           <div style={s.colHeader}>
-            <div style={s.colTitle}>Lock months</div>
+            <div style={s.colTitle}>Zaključaj mesece</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <button style={yearBtn} onClick={() => setYear(y => y - 1)} title="Previous year">‹</button>
+              <button style={yearBtn} onClick={() => setYear(y => y - 1)} title="Prethodna godina">‹</button>
               <span style={{ ...s.colTitle, minWidth: '40px', textAlign: 'center' }}>{year}</span>
-              <button style={yearBtn} onClick={() => setYear(y => y + 1)} title="Next year">›</button>
+              <button style={yearBtn} onClick={() => setYear(y => y + 1)} title="Sledeća godina">›</button>
             </div>
           </div>
 
@@ -183,14 +184,14 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
             </div>
           )}
 
-          {loading ? <div style={s.loading}>Loading…</div> : (
+          {loading ? <div style={s.loading}>Učitavanje…</div> : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', padding: '12px' }}>
               {MONTHS.map((label, i) => {
                 const lock = isClosed(i)
                 const key = `${year}-${String(i + 1).padStart(2, '0')}-01`
                 return (
                   <button key={label} disabled={!canEdit || busy === key} onClick={() => toggle(i)}
-                    title={lock ? `Locked on ${new Date(lock.closed_at).toLocaleDateString('en-GB')}` : 'Open'}
+                    title={lock ? `Zaključano ${srDate(lock.closed_at)}` : 'Otvoreno'}
                     style={{
                       display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px',
                       padding: '9px 11px', borderRadius: '8px',
@@ -204,7 +205,7 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
                     }}>
                     <span style={{ fontSize: '13px', fontWeight: 500 }}>{label}</span>
                     <span style={{ fontSize: '10px', color: lock ? '#FF5B5A' : 'rgba(255,255,255,0.30)' }}>
-                      {lock ? '🔒 locked' : 'open'}
+                      {lock ? '🔒 zaključano' : 'otvoreno'}
                     </span>
                   </button>
                 )
@@ -215,11 +216,11 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
 
         <div style={s.colPanel}>
           <div style={s.colHeader}>
-            <div style={s.colTitle}>{companyName ? `Locked periods — ${companyName}` : 'Locked periods'}</div>
+            <div style={s.colTitle}>{companyName ? `Zaključani periodi — ${companyName}` : 'Zaključani periodi'}</div>
             <span style={s.colCount}>{closed.length}</span>
           </div>
           {closed.length === 0 ? (
-            <div style={s.emptyHint}>No locked periods for this company yet.</div>
+            <div style={s.emptyHint}>Ova firma još nema zaključanih perioda.</div>
           ) : (
             <div style={s.itemList}>
               {closed.map(c => (
@@ -227,14 +228,14 @@ export default function ClosedPeriodsTab({ canEdit }: { canEdit: boolean }) {
                   <div>
                     <div style={s.itemName}>{c.period.slice(0, 7)}</div>
                     <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.30)' }}>
-                      locked on {new Date(c.closed_at).toLocaleDateString('en-GB')}
+                      zaključano {srDate(c.closed_at)}
                     </div>
                   </div>
                   {canEdit && (
                     <button style={{ ...s.deleteBtn, opacity: busy === c.id ? 0.5 : 1 }}
                       disabled={busy === c.id}
                       onClick={() => unlockById(c.id)}>
-                      Unlock
+                      Otključaj
                     </button>
                   )}
                 </div>

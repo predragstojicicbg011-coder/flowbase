@@ -99,20 +99,20 @@ export function assignedHours(rows: readonly { hours: number }[]): number {
 export function checkProjectHours(
   rows: readonly { project_id: string | null; hours: number }[],
   worked: number,
-  who = 'This employee',
+  who = 'Ovaj zaposleni',
 ): string | null {
   if (rows.some(r => num(r.hours) < 0)) {
-    return `${who}: hours on a project cannot be negative.`
+    return `${who}: sati na projektu ne mogu biti negativni.`
   }
   if (rows.some(r => !r.project_id && num(r.hours) > 0)) {
-    return `${who}: hours are entered on a row with no project. Hours on no project are `
-      + 'overhead already — choose a project or remove the row.'
+    return `${who}: sati su uneti u red bez projekta. Sati bez projekta već idu u `
+      + 'opšte troškove — izaberite projekat ili uklonite red.'
   }
   const assigned = assignedHours(mergeProjectHours(rows))
   if (assigned > num(worked) + EPS) {
-    return `${who}: ${fmt(assigned)} hours are put on projects but only ${fmt(num(worked))} `
-      + `were worked this month — ${fmt(assigned - num(worked))} too many. Correct the hours `
-      + 'on the timesheet or on the projects; nothing is scaled down to fit.'
+    return `${who}: ${fmt(assigned)} sati je raspoređeno na projekte, a ovog meseca je radeno samo ${fmt(num(worked))} `
+      + `— ${fmt(assigned - num(worked))} previše. Ispravite sate u evidenciji radnog vremena `
+      + 'ili na projektima; ništa se ne umanjuje automatski.'
   }
   return null
 }
@@ -127,7 +127,7 @@ export function checkProjectHours(
 export function projectShares(
   rows: readonly { project_id: string | null; hours: number }[],
   basis: HoursBasis | null,
-  who = 'This employee',
+  who = 'Ovaj zaposleni',
 ): SharesResult {
   const merged = mergeProjectHours(rows)
   const worked = basis ? num(basis.worked) : 0
@@ -139,8 +139,8 @@ export function projectShares(
     if (merged.length > 0) {
       return {
         shares: [],
-        error: `${who}: hours are put on projects but the month has no paid hours to `
-          + 'share the cost over.',
+        error: `${who}: sati su raspoređeni na projekte, ali mesec nema plaćenih sati `
+          + 'po kojima bi se trošak podelio.',
       }
     }
     return { shares: [{ project_id: null, hours: 0, share: 1 }], error: null }
@@ -152,8 +152,8 @@ export function projectShares(
     // there is; still more hours on projects than the salary pays for.
     return {
       shares: [],
-      error: `${who}: ${fmt(assigned)} hours on projects against ${fmt(paid)} paid hours. `
-        + 'The project hours cannot be more than the month pays for.',
+      error: `${who}: ${fmt(assigned)} sati na projektima prema ${fmt(paid)} plaćenih sati. `
+        + 'Sati na projektima ne mogu biti veći od plaćenih sati u mesecu.',
     }
   }
 
@@ -220,7 +220,7 @@ export function unassignedWorkedHours(
   return round2(num(worked) - assignedHours(mergeProjectHours(rows)))
 }
 
-const fmt = (n: number): string => (Math.round(n * 100) / 100).toString()
+const fmt = (n: number): string => (Math.round(n * 100) / 100).toString().replace('.', ',')
 
 // ─── Reading and writing ────────────────────────────────────────────────────
 

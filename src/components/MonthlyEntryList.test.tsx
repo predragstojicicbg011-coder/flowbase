@@ -73,7 +73,7 @@ const monthHeader = (label: string) =>
 const monthOrder = () =>
   screen.getAllByRole('button')
     .map(b => b.textContent || '')
-    .filter(t => /(entry|entries)/.test(t))
+    .filter(t => /(stavka|stavke|stavki)/.test(t))
 
 /**
  * Lets the per-month reads that a render kicks off finish.
@@ -88,12 +88,12 @@ describe('a drill-down grouped by month', () => {
     const { rows, byId } = fixture()
     renderList(rows, byId)
 
-    expect(monthHeader('September 2026')).toHaveTextContent('3 entries')
-    expect(monthHeader('September 2026')).toHaveTextContent('1.500 RSD')
-    expect(monthHeader('August 2026')).toHaveTextContent('2 entries')
-    expect(monthHeader('August 2026')).toHaveTextContent('1.300 RSD')
-    expect(monthHeader('July 2026')).toHaveTextContent('1 entry')
-    expect(monthHeader('July 2026')).toHaveTextContent('75 RSD')
+    expect(monthHeader('Septembar 2026')).toHaveTextContent('3 stavke')
+    expect(monthHeader('Septembar 2026')).toHaveTextContent('1.500 RSD')
+    expect(monthHeader('Avgust 2026')).toHaveTextContent('2 stavke')
+    expect(monthHeader('Avgust 2026')).toHaveTextContent('1.300 RSD')
+    expect(monthHeader('Jul 2026')).toHaveTextContent('1 stavka')
+    expect(monthHeader('Jul 2026')).toHaveTextContent('75 RSD')
 
     await waitFor(() => expect(screen.getAllByText('Slack Technologies')).toHaveLength(2))
   })
@@ -109,9 +109,9 @@ describe('a drill-down grouped by month', () => {
           rows={eurRows} client={stubClient(byId, [])}
           onEdit={() => {}} busyId={null} money={n => fmtMoney(n, 'EUR', 0)} />
       </DisplayCurrencyProvider>)
-    expect(monthHeader('September 2026')).toHaveTextContent('15 EUR')
-    expect(monthHeader('August 2026')).toHaveTextContent('13 EUR')
-    expect(monthHeader('July 2026')).toHaveTextContent('0 EUR')
+    expect(monthHeader('Septembar 2026')).toHaveTextContent('15 EUR')
+    expect(monthHeader('Avgust 2026')).toHaveTextContent('13 EUR')
+    expect(monthHeader('Jul 2026')).toHaveTextContent('0 EUR')
     await settle()
   })
 
@@ -123,8 +123,8 @@ describe('a drill-down grouped by month', () => {
     const { rows, byId } = fixture()
     const { calls } = renderList(rows, byId)
     expect(calls.flatMap(c => c.ids)).not.toContain('a1')
-    expect(monthHeader('August 2026')).toHaveTextContent('2 entries')
-    expect(monthHeader('August 2026')).toHaveTextContent('1.300 RSD')
+    expect(monthHeader('Avgust 2026')).toHaveTextContent('2 stavke')
+    expect(monthHeader('Avgust 2026')).toHaveTextContent('1.300 RSD')
     await settle()
   })
 
@@ -132,9 +132,9 @@ describe('a drill-down grouped by month', () => {
     const { rows, byId } = fixture()
     renderList(rows, byId)
     const labels = monthOrder()
-    expect(labels[0]).toContain('September 2026')
-    expect(labels[1]).toContain('August 2026')
-    expect(labels[2]).toContain('July 2026')
+    expect(labels[0]).toContain('Septembar 2026')
+    expect(labels[1]).toContain('Avgust 2026')
+    expect(labels[2]).toContain('Jul 2026')
     await settle()
   })
 
@@ -153,7 +153,7 @@ describe('a drill-down grouped by month', () => {
     const { calls } = renderList(rows, byId)
     await waitFor(() => expect(screen.getByText('Amazon Web Services')).toBeInTheDocument())
 
-    fireEvent.click(monthHeader('August 2026'))
+    fireEvent.click(monthHeader('Avgust 2026'))
     await waitFor(() => expect(screen.getByText('Notion Labs')).toBeInTheDocument())
 
     expect(calls).toHaveLength(2)
@@ -169,9 +169,9 @@ describe('a drill-down grouped by month', () => {
     const { calls } = renderList(rows, byId)
     await waitFor(() => expect(screen.getAllByText('Slack Technologies')).toHaveLength(2))
 
-    fireEvent.click(monthHeader('September 2026'))
+    fireEvent.click(monthHeader('Septembar 2026'))
     expect(screen.queryAllByText('Slack Technologies')).toHaveLength(0)
-    fireEvent.click(monthHeader('September 2026'))
+    fireEvent.click(monthHeader('Septembar 2026'))
     await waitFor(() => expect(screen.getAllByText('Slack Technologies')).toHaveLength(2))
     expect(calls).toHaveLength(1)
   })
@@ -179,7 +179,7 @@ describe('a drill-down grouped by month', () => {
 
 describe('filtering a drill-down', () => {
   const type = (value: string) =>
-    fireEvent.change(screen.getByLabelText('Filter these transactions'), { target: { value } })
+    fireEvent.change(screen.getByLabelText('Filtriraj ove transakcije'), { target: { value } })
 
   it('narrows the month counts and totals by amount without fetching anything', async () => {
     const { rows, byId } = fixture()
@@ -189,23 +189,23 @@ describe('filtering a drill-down', () => {
 
     type('1200')
 
-    await waitFor(() => expect(monthHeader('September 2026')).toHaveTextContent('1 entry'))
-    expect(monthHeader('September 2026')).toHaveTextContent('1.200 RSD')
-    expect(monthHeader('August 2026')).toHaveTextContent('1 entry')
-    expect(monthHeader('August 2026')).toHaveTextContent('1.200 RSD')
-    expect(monthHeader('July 2026')).toHaveTextContent('0 entries')
+    await waitFor(() => expect(monthHeader('Septembar 2026')).toHaveTextContent('1 stavka'))
+    expect(monthHeader('Septembar 2026')).toHaveTextContent('1.200 RSD')
+    expect(monthHeader('Avgust 2026')).toHaveTextContent('1 stavka')
+    expect(monthHeader('Avgust 2026')).toHaveTextContent('1.200 RSD')
+    expect(monthHeader('Jul 2026')).toHaveTextContent('0 stavki')
     // An amount lives on the rows the page already holds, so the answer needs
     // no round trip: August's figures moved without August ever being read.
     expect(calls).toHaveLength(before)
-    expect(screen.getByText(/2 of 6 transactions/)).toBeInTheDocument()
+    expect(screen.getByText(/2 od 6 transakcija/)).toBeInTheDocument()
   })
 
   it('honours a comparison', async () => {
     const { rows, byId } = fixture()
     renderList(rows, byId)
     type('>=1000')
-    await waitFor(() => expect(screen.getByText(/2 of 6 transactions/)).toBeInTheDocument())
-    expect(monthHeader('July 2026')).toHaveTextContent('0 entries')
+    await waitFor(() => expect(screen.getByText(/2 od 6 transakcija/)).toBeInTheDocument())
+    expect(monthHeader('Jul 2026')).toHaveTextContent('0 stavki')
   })
 
   it('finds a vendor in a month that was never opened', async () => {
@@ -219,9 +219,9 @@ describe('filtering a drill-down', () => {
     type('Zoom')
 
     await waitFor(() => expect(screen.getByText('Zoom Video')).toBeInTheDocument(), { timeout: 3000 })
-    expect(screen.getByText(/1 of 6 transactions/)).toBeInTheDocument()
-    expect(monthHeader('July 2026')).toHaveTextContent('1 entry')
-    expect(monthHeader('September 2026')).toHaveTextContent('0 entries')
+    expect(screen.getByText(/1 od 6 transakcija/)).toBeInTheDocument()
+    expect(monthHeader('Jul 2026')).toHaveTextContent('1 stavka')
+    expect(monthHeader('Septembar 2026')).toHaveTextContent('0 stavki')
     // Every month was read, and still one query per month.
     expect(calls).toHaveLength(3)
     expect(calls.every(c => c.ids.length <= 3)).toBe(true)
@@ -231,7 +231,7 @@ describe('filtering a drill-down', () => {
     const { rows, byId } = fixture()
     renderList(rows, byId)
     type('hosting')
-    await waitFor(() => expect(screen.getByText(/2 of 6 transactions/)).toBeInTheDocument(),
+    await waitFor(() => expect(screen.getByText(/2 od 6 transakcija/)).toBeInTheDocument(),
       { timeout: 3000 })
   })
 
@@ -239,7 +239,7 @@ describe('filtering a drill-down', () => {
     const { rows, byId } = fixture()
     renderList(rows, byId)
     type('Figma')
-    await waitFor(() => expect(screen.getByText(/Nothing matches/)).toBeInTheDocument(),
+    await waitFor(() => expect(screen.getByText(/Ništa ne odgovara/)).toBeInTheDocument(),
       { timeout: 3000 })
   })
 
@@ -255,7 +255,7 @@ describe('filtering a drill-down', () => {
     await waitFor(() => expect(screen.queryByText('Zoom Video')).not.toBeInTheDocument(),
       { timeout: 3000 })
     expect(screen.getAllByText('Slack Technologies')).toHaveLength(2)
-    expect(monthHeader('July 2026')).toHaveTextContent('1 entry')
+    expect(monthHeader('Jul 2026')).toHaveTextContent('1 stavka')
   })
 })
 
@@ -282,12 +282,12 @@ describe('a drill-down with a month bigger than the fetch cap', () => {
     const { calls } = renderList(rows, byId)
 
     // The header is the whole month whatever the fetch managed to bring back.
-    expect(monthHeader('September 2026')).toHaveTextContent('400 entries')
-    expect(monthHeader('September 2026')).toHaveTextContent('4.000 RSD')
+    expect(monthHeader('Septembar 2026')).toHaveTextContent('400 stavki')
+    expect(monthHeader('Septembar 2026')).toHaveTextContent('4.000 RSD')
 
     await waitFor(() =>
-      expect(screen.getByText(/only the 300 most recent could be/)).toBeInTheDocument())
-    expect(screen.getByText(/the September 2026 total above counts/)).toBeInTheDocument()
+      expect(screen.getByText(/prikazano je samo 300 najnovijih/)).toBeInTheDocument())
+    expect(screen.getByText(/ukupan iznos iznad obuhvata/)).toBeInTheDocument()
     expect(calls).toHaveLength(1)
     expect(calls[0].ids).toHaveLength(300)
   })
@@ -295,9 +295,9 @@ describe('a drill-down with a month bigger than the fetch cap', () => {
   it('warns that a text search could not see every row', async () => {
     const { rows, byId } = bigMonth()
     renderList(rows, byId)
-    fireEvent.change(screen.getByLabelText('Filter these transactions'), { target: { value: 'Vendor 7' } })
+    fireEvent.change(screen.getByLabelText('Filtriraj ove transakcije'), { target: { value: 'Vendor 7' } })
     await waitFor(() =>
-      expect(screen.getByText(/could not all be\s+read back/)).toBeInTheDocument(), { timeout: 3000 })
+      expect(screen.getByText(/nisu mogli da se učitaju svi nazivi/)).toBeInTheDocument(), { timeout: 3000 })
   })
 })
 
@@ -314,13 +314,13 @@ describe('a drill-down whose rows change', () => {
       <MonthlyEntryList rows={rows.slice(3)} client={client} onEdit={() => {}} busyId={null} money={money} />)
 
     expect(screen.queryAllByText('Slack Technologies')).toHaveLength(0)
-    expect(screen.queryByText('September 2026')).not.toBeInTheDocument()
+    expect(screen.queryByText('Septembar 2026')).not.toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('Notion Labs')).toBeInTheDocument())
   })
 
   it('renders nothing but a note when the line has no rows at all', () => {
     renderList([], {})
-    expect(screen.getByText('No entries found for this line.')).toBeInTheDocument()
+    expect(screen.getByText('Za ovu liniju nema stavki.')).toBeInTheDocument()
   })
 })
 
@@ -334,7 +334,7 @@ describe('the edit path', () => {
         onEdit={t => seen.push(t)} busyId={null} money={money} />)
 
     await waitFor(() => expect(screen.getAllByText('Slack Technologies')).toHaveLength(2))
-    const edits = screen.getAllByRole('button', { name: 'Edit' })
+    const edits = screen.getAllByRole('button', { name: 'Izmeni' })
     expect(edits).toHaveLength(3)
     fireEvent.click(edits[0])
     expect(seen).toEqual([{ table: 'transactions', id: 's1' }])
@@ -349,7 +349,7 @@ describe('the edit path', () => {
 
     await waitFor(() => expect(screen.getAllByText('Slack Technologies')).toHaveLength(2))
     expect(screen.getAllByRole('button', { name: '…' })).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Izmeni' })).toHaveLength(2)
   })
 })
 
@@ -358,10 +358,10 @@ describe('what a month row shows', () => {
     const { rows, byId } = fixture()
     renderList(rows, byId)
     await waitFor(() => expect(screen.getAllByText('Slack Technologies')).toHaveLength(2))
-    fireEvent.click(monthHeader('July 2026'))
+    fireEvent.click(monthHeader('Jul 2026'))
     await waitFor(() => expect(screen.getByText('Zoom Video')).toBeInTheDocument())
 
-    const july = monthHeader('July 2026').parentElement as HTMLElement
+    const july = monthHeader('Jul 2026').parentElement as HTMLElement
     expect(within(july).getByText('Zoom Video')).toBeInTheDocument()
     expect(within(july).queryAllByText('Slack Technologies')).toHaveLength(0)
   })

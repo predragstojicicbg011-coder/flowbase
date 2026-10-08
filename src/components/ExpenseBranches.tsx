@@ -6,6 +6,7 @@ import {
 import type { CostBehaviour } from '../services/cfoMetrics'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
+import { countOf } from '../utils/plural'
 
 // ── The expense branches ────────────────────────────────────────────────────
 //
@@ -38,16 +39,16 @@ import { fmtMoney } from '../utils/formatters'
 
 const BEHAVIOUR: Record<CostBehaviour, { fill: string; label: string; says: string }> = {
   fixed: {
-    fill: '#3987E5', label: 'Fixed',
-    says: 'Barely moves month to month — owed whatever happens.',
+    fill: '#3987E5', label: 'Fiksni',
+    says: 'Gotovo se ne menja iz meseca u mesec — duguje se šta god da se desi.',
   },
   variable: {
-    fill: '#C98500', label: 'Moves with the month',
-    says: 'Swings month to month, so it is the part that can be acted on.',
+    fill: '#C98500', label: 'Menja se iz meseca u mesec',
+    says: 'Varira iz meseca u mesec, pa je to deo na koji se može uticati.',
   },
   unknown: {
-    fill: '#5A7691', label: 'Too little history',
-    says: 'Fewer than three months on the ledger — nothing can be said about it yet.',
+    fill: '#5A7691', label: 'Premalo istorije',
+    says: 'Manje od tri meseca u knjizi — o tome se još ništa ne može reći.',
   },
 }
 
@@ -59,7 +60,7 @@ export interface ExpenseBranchNode extends BranchNode {
 // A branch carries a magnitude, in the viewer's display currency — the roots
 // handed in were summed in it; this only names it.
 const moneyIn = (currency: string, dp: number) => (n: number) => fmtMoney(Math.abs(n), currency, dp)
-const pct = (n: number) => `${(n * 100).toFixed(1)}%`
+const pct = (n: number) => `${(n * 100).toFixed(1).replace('.', ',')}%`
 
 const ROW = 34
 /** The room a branch needs between one column's boxes and the next. */
@@ -107,7 +108,7 @@ function fit(label: string, boxWidth: number): string {
 
 export default function ExpenseBranches({
   monthLabel, roots, onOpenLedger,
-  start = 'twoLevels', bare = false, amountLabel = 'This month', emptyText,
+  start = 'twoLevels', bare = false, amountLabel = 'Ovaj mesec', emptyText,
 }: {
   monthLabel: string
   roots: ExpenseBranchNode[]
@@ -180,13 +181,13 @@ export default function ExpenseBranches({
             branch still opens as deep as it goes by clicking it, because that
             is asked for one branch at a time and deliberately. */}
         <div style={deck.tabs}>
-          <button style={deck.tab} onClick={() => setOpen(new Set())}>Fold all</button>
+          <button style={deck.tab} onClick={() => setOpen(new Set())}>Sklopi sve</button>
           <button style={deck.tab}
-            onClick={() => setOpen(keysToDepth(roots, TWO_LEVELS))}>Two levels</button>
+            onClick={() => setOpen(keysToDepth(roots, TWO_LEVELS))}>Dva nivoa</button>
         </div>
         <span style={deck.hint}>
           {monthLabel} · {money(total)}
-          {layout.hidden > 0 && ` · ${layout.hidden} line${layout.hidden === 1 ? '' : 's'} folded away`}
+          {layout.hidden > 0 && ` · ${countOf(layout.hidden, 'stavka sklopljena', 'stavke sklopljene', 'stavki sklopljeno')}`}
         </span>
       </div>
 
@@ -195,7 +196,7 @@ export default function ExpenseBranches({
       <div style={{ position: 'relative', overflowX: 'auto' }}
         onMouseLeave={() => setTip(null)}>
         <svg width={w} height={H} viewBox={`0 0 ${w} ${H}`} role="img"
-          aria-label={`Expenses as a branching tree, ${monthLabel}`}>
+          aria-label={`Troškovi kao razgranato stablo, ${monthLabel}`}>
           {/* The branches first, so a node's box sits over the line into it
               rather than under it. */}
           {layout.links.map(l => {
@@ -215,7 +216,7 @@ export default function ExpenseBranches({
               <g key={n.key}
                 role="button" tabIndex={0}
                 aria-label={`${n.label}, ${money(n.amount)}, ${pct(n.share)} — ${tone.label}${
-                  n.hasChildren ? `, ${under} lines, ${n.open ? 'open' : 'folded'}` : ''}`}
+                  n.hasChildren ? `, ${countOf(under, 'stavka', 'stavke', 'stavki')}, ${n.open ? 'otvoreno' : 'sklopljeno'}` : ''}`}
                 style={{ cursor: n.hasChildren || onOpenLedger ? 'pointer' : 'default' }}
                 onClick={() => n.hasChildren ? toggle(n.key) : onOpenLedger?.(n.key, n.label)}
                 onKeyDown={e => {
@@ -227,15 +228,15 @@ export default function ExpenseBranches({
                   <>
                     <div style={tipS.head}>{n.label}</div>
                     <div style={tipS.row}><span>{amountLabel}</span><b>{money2(n.amount)}</b></div>
-                    <div style={tipS.row}><span>Of the total</span><b>{pct(n.share)}</b></div>
+                    <div style={tipS.row}><span>Od ukupnog</span><b>{pct(n.share)}</b></div>
                     <div style={{ ...tipS.row, color: tone.fill }}>
-                      <span>Behaviour</span><b>{tone.label}</b>
+                      <span>Ponašanje</span><b>{tone.label}</b>
                     </div>
                     <div style={tipS.note}>{tone.says}</div>
                     <div style={tipS.note}>
                       {n.hasChildren
-                        ? `${n.open ? 'Click to fold' : 'Click to open'} its ${under} lines.`
-                        : onOpenLedger ? 'Click for the entries behind it.' : ''}
+                        ? `${n.open ? 'Kliknite da sklopite' : 'Kliknite da otvorite'} (${countOf(under, 'stavka', 'stavke', 'stavki')}).`
+                        : onOpenLedger ? 'Kliknite za stavke iza ovog iznosa.' : ''}
                     </div>
                   </>
                 ))}
@@ -265,7 +266,7 @@ export default function ExpenseBranches({
 
           {layout.nodes.length === 0 && (
             <text x={w / 2} y={H / 2} textAnchor="middle" fontSize={12.5} fill={C.dim}>
-              {emptyText || 'Nothing is budgeted this month.'}
+              {emptyText || 'Za ovaj mesec ništa nije budžetirano.'}
             </text>
           )}
         </svg>
@@ -282,14 +283,12 @@ export default function ExpenseBranches({
       </div>
       {!bare && (
         <div style={note}>
-          A branch is drawn as thick as the money it carries, scaled against the largest
-          line anywhere rather than against each parent — so thickness means money and
-          not "share of whichever category this happens to sit under". Colour says the one
-          thing the thickness cannot: whether the cost moves. Click a node to open or fold
-          it — a branch opens as deep as it goes that way. The button above stops at two
-          levels on purpose: the third is one row per line on the payroll, and all of them
-          at once is a wall rather than an answer. A node with nothing under it opens the
-          entries behind it.
+          Grana je debela koliko novca nosi, u razmeri prema najvećoj stavci bilo gde, a ne
+          prema roditelju — pa debljina znači novac, a ne „udeo u kategoriji kojoj slučajno
+          pripada“. Boja kaže ono što debljina ne može: da li se trošak menja. Kliknite čvor
+          da ga otvorite ili sklopite — grana se tako otvara do kraja. Dugme iznad namerno
+          staje na dva nivoa: treći je jedan red po zaposlenom na zaradama, a sve odjednom je
+          zid, a ne odgovor. Čvor bez ičega ispod otvara stavke iza sebe.
         </div>
       )}
     </div>

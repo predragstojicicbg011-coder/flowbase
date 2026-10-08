@@ -33,16 +33,18 @@
 // The decisions are here, as plain input-output functions, so they can be
 // tested without a database — the dialog only carries them out.
 
+import { countOf, plural } from '../utils/plural'
+
 export type TxTable = 'transactions' | 'passthrough'
 
 export type TxType = 'direct' | 'invoice_payment' | 'passthrough' | 'credit_payment'
 
 /** What each type is called where a refusal has to name it. */
 export const TYPE_LABELS: Record<TxType, string> = {
-  direct: 'Direct transaction',
-  invoice_payment: 'Invoice payment',
-  passthrough: 'Pass-through',
-  credit_payment: 'Credit payment',
+  direct: 'Direktna transakcija',
+  invoice_payment: 'Plaćanje fakture',
+  passthrough: 'Prolazna stavka',
+  credit_payment: 'Otplata kredita',
 }
 
 /**
@@ -81,7 +83,6 @@ export function isCrossTableMove(ctx: SaveContext): boolean {
   return ctx.sourceTable !== tableForType(ctx.nextType)
 }
 
-const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
 
 /**
  * Why this row may not leave the table it is in, or null if it may.
@@ -95,23 +96,23 @@ export function moveRefusal(ctx: SaveContext): string | null {
   const destination = TYPE_LABELS[ctx.nextType]
 
   if (ctx.currentType === 'credit_payment') {
-    return `This is a credit payment and cannot be changed to ${destination}. `
-      + 'It settled instalments in Bank Credits and posted separate principal and interest rows, '
-      + 'and this dialog cannot unwind them. Reverse it from Bank Credits and post it again.'
+    return `Ovo je otplata kredita i ne može se promeniti u tip „${destination}“. `
+      + 'Zatvorila je rate u Kreditima i proknjižila posebne stavke glavnice i kamate, '
+      + 'a ovaj dijalog to ne može da poništi. Stornirajte je u Kreditima i proknjižite ponovo.'
   }
 
   const links = ctx.invoiceLinkCount ?? 0
   if (links > 0) {
-    return `This transaction pays ${links} ${plural(links, 'invoice', 'invoices')} and cannot be changed to ${destination}. `
-      + `Moving it would leave ${plural(links, 'that invoice', 'those invoices')} part-paid by a transaction that no longer exists. `
-      + 'Remove the invoice allocation first.'
+    return `Ova transakcija plaća ${countOf(links, 'fakturu', 'fakture', 'faktura')} i ne može se promeniti u tip „${destination}“. `
+      + `Premeštanjem bi ${plural(links, 'faktura ostala delimično plaćena', 'fakture ostale delimično plaćene', 'fakture ostale delimično plaćene')} transakcijom koja više ne postoji. `
+      + 'Prvo uklonite raspodelu na fakturu.'
   }
 
   const instalments = ctx.settledInstallmentCount ?? 0
   if (instalments > 0) {
-    return `This transaction settled ${instalments} credit ${plural(instalments, 'instalment', 'instalments')} and cannot be changed to ${destination}. `
-      + 'Their paid amount and status would be left pointing at a transaction that no longer exists, '
-      + 'and this dialog does not unwind them.'
+    return `Ova transakcija je zatvorila ${countOf(instalments, 'ratu kredita', 'rate kredita', 'rata kredita')} i ne može se promeniti u tip „${destination}“. `
+      + 'Plaćeni iznos i status rata ostali bi vezani za transakciju koja više ne postoji, '
+      + 'a ovaj dijalog to ne poništava.'
   }
 
   return null
@@ -149,9 +150,9 @@ export function planSave(ctx: SaveContext): SavePlan {
   if (ctx.nextType === 'credit_payment') {
     return {
       kind: 'refuse',
-      reason: 'A credit payment cannot be posted from an existing row. It settles instalments and '
-        + 'writes separate principal and interest rows, and this row would be left behind under its old '
-        + 'type while those were posted. Post the credit payment as a new transaction instead.',
+      reason: 'Otplata kredita ne može da se proknjiži iz postojeće stavke. Ona zatvara rate i '
+        + 'upisuje posebne stavke glavnice i kamate, a ova stavka bi ostala pod starim tipom. '
+        + 'Proknjižite otplatu kredita kao novu transakciju.',
     }
   }
 

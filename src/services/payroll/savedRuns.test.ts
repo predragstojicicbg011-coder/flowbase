@@ -94,7 +94,7 @@ describe('what a line keeps', () => {
       }],
     }), context())
     expect(t.line_kind).toBe('other')
-    expect(t.label).toBe('Other income')
+    expect(t.label).toBe('Ostala primanja')
     expect(t.hours).toBe(0)
     expect(t.pension_employee).toBe(0)
     expect(t.net).toBe(20000)
@@ -173,7 +173,7 @@ describe('saveRun', () => {
     // is not what somebody pressing Recalculate needs to read.
     const c = client({ existing: { id: 'r1', status: 'posted' } })
     await expect(saveRun(c, runOf('regular'), context()))
-      .rejects.toThrow(/has been posted, so it cannot be recalculated/)
+      .rejects.toThrow(/je proknjižen, pa ne može ponovo da se obračuna/)
     expect(c.calls.updated).toEqual([])
     expect(c.calls.cleared).toBe(0)
   })
@@ -191,7 +191,7 @@ describe('saveRun', () => {
   it('says the old calculation survived when the clear failed', async () => {
     const c = client({ existing: { id: 'r1', status: 'draft' }, clearError: { message: 'nope' } })
     await expect(saveRun(c, runOf('regular'), context()))
-      .rejects.toThrow(/still the earlier calculation/)
+      .rejects.toThrow(/sačuvan je i dalje raniji obračun/)
   })
 
   it('refuses to call a half-written run saved', async () => {
@@ -199,7 +199,7 @@ describe('saveRun', () => {
     // short, and the difference is invisible until the ledger disagrees.
     const c = client({ lineCount: 0 })
     await expect(saveRun(c, runOf('regular'), context()))
-      .rejects.toThrow(/lines were written/)
+      .rejects.toThrow(/Upisano je \d+ od \d+ stavk[ei]\. Sačuvani obračun je nepotpun/)
   })
 })
 
@@ -244,7 +244,7 @@ describe('byMonth', () => {
 describe('alreadyPostedMessage', () => {
   it('says why it matters, not just that it is locked', () => {
     const m = alreadyPostedMessage('Salaries', '2026-09')
-    expect(m).toContain('invoices in the ledger were written from')
-    expect(m).toContain('Delete the posting')
+    expect(m).toContain('napisane fakture u glavnoj knjizi')
+    expect(m).toContain('obrišite knjiženje')
   })
 })

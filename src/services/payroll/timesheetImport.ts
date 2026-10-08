@@ -181,12 +181,12 @@ export function parseSheet(rows: SheetRows): ParsedEmployee | null {
 
   if (!sawDifference) {
     parsed.problems.push(
-      'The sheet has no Difference row, so it cannot say whether its own hours add up.')
+      'List nema red Difference, pa ne može da potvrdi da se njegovi sati slažu. Izvezite ga ponovo.')
   } else if (Math.abs(difference) > 0.005) {
     parsed.problems.push(
-      `The file reports a difference of ${round2(difference)} hours against its nominal `
-      + 'fund. It has been edited or is incomplete; the hours behind a payroll are not '
-      + 'the place to find that out later.')
+      `Fajl prijavljuje razliku od ${round2(difference)} sati u odnosu na svoj fond (Nominal hours). `
+      + 'Fajl je ručno menjan ili je nepotpun; sati za obračun zarade nisu mesto '
+      + 'gde to treba otkriti kasnije. Izvezite ga ponovo.')
   }
 
   const summed = round2(parsed.workedHours + parsed.annualLeaveHours + parsed.sickLeaveHours
@@ -194,15 +194,15 @@ export function parseSheet(rows: SheetRows): ParsedEmployee | null {
     + parsed.unmapped.reduce((s, u) => s + u.hours, 0))
   if (parsed.totalHours > 0 && Math.abs(summed - parsed.totalHours) > 0.005) {
     parsed.problems.push(
-      `The categories come to ${summed} hours and the file's own total says `
-      + `${parsed.totalHours}. Something in the block was not read.`)
+      `Kategorije daju ${summed} sati, a ukupno u samom fajlu je `
+      + `${parsed.totalHours}. Nešto u bloku nije pročitano.`)
   }
 
   for (const u of parsed.unmapped) {
     parsed.problems.push(
-      `${u.hours} hours of ${u.label}, which has no column here and is paid its own way. `
-      + 'Folding it into annual leave would pay it at the wrong rate on a line that looks '
-      + 'ordinary, so it has to be entered by hand.')
+      `${u.hours} sati „${u.label}“, za šta ovde nema kolone, a plaća se na svoj način. `
+      + 'Da se doda godišnjem odmoru, bilo bi plaćeno po pogrešnoj stopi u redu koji izgleda '
+      + 'sasvim obično, pa mora da se unese ručno.')
   }
 
   return parsed

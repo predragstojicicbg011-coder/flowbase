@@ -206,7 +206,7 @@ export const CLASS_LEVELS: Level[] = [
 ]
 
 /** The tree's stand-in for a level a row carries no value for. */
-export const UNASSIGNED = 'Unassigned'
+export const UNASSIGNED = 'Nedodeljeno'
 
 /** The five classification columns as an array, in `CLASS_LEVELS` order. */
 export function classPartsOf(r: ClassifiedRow): string[] {

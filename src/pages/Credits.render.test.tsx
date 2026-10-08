@@ -120,7 +120,7 @@ describe('correcting a credit', () => {
     const rate = screen.getByPlaceholderText('5.5') as HTMLInputElement
     expect(rate.value).toBe('')
     fireEvent.change(rate, { target: { value: '6.25' } })
-    fireEvent.click(screen.getByText('Save changes'))
+    fireEvent.click(screen.getByText('Sačuvaj izmene'))
     await waitFor(() => expect(written()).toHaveLength(1))
     expect(written()[0].payload.interest_rate).toBe(6.25)
   })
@@ -133,7 +133,7 @@ describe('correcting a credit', () => {
   it('updates the row it was given rather than writing a second credit', async () => {
     edit()
     fireEvent.change(nameBox(), { target: { value: 'Intesa 100k — corrected' } })
-    fireEvent.click(screen.getByText('Save changes'))
+    fireEvent.click(screen.getByText('Sačuvaj izmene'))
     await waitFor(() => expect(written()).toHaveLength(1))
     const call = written()[0]
     expect(call.op).toBe('update')
@@ -149,7 +149,7 @@ describe('correcting a credit', () => {
    */
   it('leaves status and company alone', async () => {
     edit({ status: 'closed' })
-    fireEvent.click(screen.getByText('Save changes'))
+    fireEvent.click(screen.getByText('Sačuvaj izmene'))
     await waitFor(() => expect(written()).toHaveLength(1))
     expect(written()[0].payload).not.toHaveProperty('status')
     expect(written()[0].payload).not.toHaveProperty('company_id')
@@ -163,7 +163,7 @@ describe('correcting a credit', () => {
     fireEvent.change(nameBox(), { target: { value: 'Unicredit 50k' } })
     fireEvent.change(screen.getByPlaceholderText(/Intesa Banka/), { target: { value: 'Unicredit' } })
     fireEvent.change(screen.getByPlaceholderText('100000'), { target: { value: '50000' } })
-    fireEvent.click(screen.getByText('Save credit'))
+    fireEvent.click(screen.getByText('Sačuvaj kredit'))
     await waitFor(() => expect(written()).toHaveLength(1))
     expect(written()[0].op).toBe('insert')
     expect(written()[0].payload.status).toBe('active')
@@ -180,7 +180,7 @@ describe('correcting a credit', () => {
   it('refuses to change the kind once instalments exist', () => {
     edit({}, true)
     expect((screen.getByText('Revolving').closest('button') as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByText(/kind is fixed while a schedule exists/i)).toBeTruthy()
+    expect(screen.getByText(/vrsta je zaključana dok postoji plan otplate/i)).toBeTruthy()
   })
 
   /** With no schedule behind it, a credit filed under the wrong kind is just
@@ -190,13 +190,13 @@ describe('correcting a credit', () => {
     const revolving = screen.getByText('Revolving').closest('button') as HTMLButtonElement
     expect(revolving.disabled).toBe(false)
     fireEvent.click(revolving)
-    expect(screen.getByText('Matures *')).toBeTruthy()
+    expect(screen.getByText('Dospeće *')).toBeTruthy()
   })
 
   /** It has to be obvious which credit is open, since the page has eleven. */
   it('says which credit is being corrected', () => {
     edit()
-    expect(screen.getByText('Edit Credit')).toBeTruthy()
+    expect(screen.getByText('Izmena kredita')).toBeTruthy()
     expect(screen.getByText('Intesa 100k — Sep 2025')).toBeTruthy()
   })
 })
@@ -212,17 +212,17 @@ describe('reaching the credit from its row', () => {
   const row = (onEdit = () => {}) => render(
     <CreditRow credit={loan()} installments={[]} onRefresh={() => {}} onEdit={onEdit} />)
 
-  it('offers Edit credit once the row is opened', () => {
+  it('offers Izmeni kredit once the row is opened', () => {
     row()
     fireEvent.click(screen.getByText('Intesa 100k — Sep 2025'))
-    expect(screen.getByText('Edit credit')).toBeTruthy()
+    expect(screen.getByText('Izmeni kredit')).toBeTruthy()
   })
 
   it('opens the credit, not an instalment', () => {
     const asked = jest.fn()
     row(asked)
     fireEvent.click(screen.getByText('Intesa 100k — Sep 2025'))
-    fireEvent.click(screen.getByText('Edit credit'))
+    fireEvent.click(screen.getByText('Izmeni kredit'))
     expect(asked).toHaveBeenCalledTimes(1)
   })
 
@@ -234,6 +234,6 @@ describe('reaching the credit from its row', () => {
   it('says which edit is which', () => {
     row()
     fireEvent.click(screen.getByText('Intesa 100k — Sep 2025'))
-    expect(screen.getByText(/on a row adjusts one instalment/)).toBeTruthy()
+    expect(screen.getByText(/u redu menja samo jednu ratu/)).toBeTruthy()
   })
 })

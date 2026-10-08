@@ -3,6 +3,7 @@ import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { useAuth, UserRole } from '../contexts/AuthContext'
 import { DIALOG } from './dialogTheme'
+import { countOf } from '../utils/plural'
 
 interface UserProfile {
   id: string
@@ -22,16 +23,16 @@ const roleColors: Record<UserRole, { bg: string; color: string }> = {
 
 const roleLabels: Record<UserRole, string> = {
   administrator: 'Administrator',
-  owner: 'Owner',
-  manager: 'Manager',
-  administrative_assistant: 'Admin Assistant',
+  owner: 'Vlasnik',
+  manager: 'Menadžer',
+  administrative_assistant: 'Administrativni asistent',
 }
 
 const rolePermissions: Record<UserRole, { dataEntry: string; reports: string; settings: string; admin: string }> = {
-  administrator: { dataEntry: 'Full', reports: 'Full', settings: 'Full', admin: 'Full' },
-  owner: { dataEntry: 'Full', reports: 'Full', settings: 'Limited', admin: '—' },
-  manager: { dataEntry: '—', reports: 'Assigned only', settings: '—', admin: '—' },
-  administrative_assistant: { dataEntry: 'Full', reports: 'Limited', settings: '—', admin: '—' },
+  administrator: { dataEntry: 'Pun', reports: 'Pun', settings: 'Pun', admin: 'Pun' },
+  owner: { dataEntry: 'Pun', reports: 'Pun', settings: 'Ograničen', admin: '—' },
+  manager: { dataEntry: '—', reports: 'Samo dodeljeni', settings: '—', admin: '—' },
+  administrative_assistant: { dataEntry: 'Pun', reports: 'Ograničen', settings: '—', admin: '—' },
 }
 
 export default function UserManagement() {
@@ -68,8 +69,8 @@ export default function UserManagement() {
     return (
       <div style={s.noAccess}>
         <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔒</div>
-        <div style={{ fontSize: '15px', fontWeight: '500', color: DIALOG.text, marginBottom: '6px' }}>Access restricted</div>
-        <div style={{ fontSize: '13px', color: DIALOG.dim }}>Only administrators can manage users.</div>
+        <div style={{ fontSize: '15px', fontWeight: '500', color: DIALOG.text, marginBottom: '6px' }}>Pristup je ograničen</div>
+        <div style={{ fontSize: '13px', color: DIALOG.dim }}>Korisnike mogu da uređuju samo administratori.</div>
       </div>
     )
   }
@@ -79,25 +80,25 @@ export default function UserManagement() {
       {/* Header */}
       <div style={s.tabHeader}>
         <div>
-          <div style={s.tabTitle}>User management</div>
-          <div style={s.tabSub}>{users.length} users · Role-based access control</div>
+          <div style={s.tabTitle}>Upravljanje korisnicima</div>
+          <div style={s.tabSub}>{countOf(users.length, 'korisnik', 'korisnika', 'korisnika')} · Pristup prema ulogama</div>
         </div>
         <button style={s.inviteBtn} onClick={() => setShowInviteDialog(true)}>
-          + Invite user
+          + Pozovi korisnika
         </button>
       </div>
 
       {/* Role permissions reference */}
       <div style={s.permCard}>
-        <div style={s.permTitle}>Role permissions overview</div>
+        <div style={s.permTitle}>Pregled ovlašćenja po ulogama</div>
         <table style={s.permTable}>
           <thead>
             <tr>
-              <th style={s.permTh}>Role</th>
-              <th style={s.permTh}>Data Entry</th>
-              <th style={s.permTh}>Reports</th>
-              <th style={s.permTh}>Settings</th>
-              <th style={s.permTh}>Admin</th>
+              <th style={s.permTh}>Uloga</th>
+              <th style={s.permTh}>Unos podataka</th>
+              <th style={s.permTh}>Izveštaji</th>
+              <th style={s.permTh}>Podešavanja</th>
+              <th style={s.permTh}>Administracija</th>
             </tr>
           </thead>
           <tbody>
@@ -125,14 +126,14 @@ export default function UserManagement() {
       {/* Search */}
       <div style={{ marginBottom: '12px' }}>
         <input style={s.searchInput} value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search by name or email..." />
+          placeholder="Pretraga po imenu ili emailu…" />
       </div>
 
       {/* Users list */}
       {loading ? (
-        <div style={s.emptyState}>Loading users...</div>
+        <div style={s.emptyState}>Učitavanje korisnika…</div>
       ) : filtered.length === 0 ? (
-        <div style={s.emptyState}>No users found.</div>
+        <div style={s.emptyState}>Nema pronađenih korisnika.</div>
       ) : (
         <div style={s.userList}>
           {filtered.map(u => (
@@ -144,7 +145,7 @@ export default function UserManagement() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
                   <span style={s.userName}>{u.full_name || '—'}</span>
                   {u.id === currentProfile?.id && (
-                    <span style={s.youBadge}>You</span>
+                    <span style={s.youBadge}>Vi</span>
                   )}
                   <span style={{ ...s.roleBadge, background: roleColors[u.role]?.bg, color: roleColors[u.role]?.color }}>
                     {roleLabels[u.role]}
@@ -153,9 +154,9 @@ export default function UserManagement() {
                 <div style={s.userEmail}>{u.email || '—'}</div>
                 <div style={s.userCompanies}>
                   {u.role === 'administrator' || u.role === 'owner'
-                    ? <span style={{ color: DIALOG.accent, fontSize: '11px' }}>✓ All companies</span>
+                    ? <span style={{ color: DIALOG.accent, fontSize: '11px' }}>✓ Sve firme</span>
                     : u.company_access.length === 0
-                      ? <span style={{ color: DIALOG.faint, fontSize: '11px' }}>No company assigned</span>
+                      ? <span style={{ color: DIALOG.faint, fontSize: '11px' }}>Nije dodeljena nijedna firma</span>
                       : u.company_access.map(cId => {
                           const c = companies.find(c => c.id === cId)
                           return c ? (
@@ -167,7 +168,7 @@ export default function UserManagement() {
               </div>
               {u.id !== currentProfile?.id && (
                 <button style={s.editBtn} onClick={() => { setEditUser(u); setShowEditDialog(true) }}>
-                  Edit
+                  Izmeni
                 </button>
               )}
             </div>
@@ -234,7 +235,7 @@ function EditUserDialog({ user, companies, onClose, onSaved }: {
         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: DIALOG.accentFill, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={DIALOG.accent} strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg>
         </div>
-        <div style={{ fontFamily: 'Georgia,serif', fontSize: '18px', color: DIALOG.text }}>User updated!</div>
+        <div style={{ fontFamily: 'Georgia,serif', fontSize: '18px', color: DIALOG.text }}>Korisnik je sačuvan.</div>
       </div>
     </div>
   )
@@ -243,7 +244,7 @@ function EditUserDialog({ user, companies, onClose, onSaved }: {
     <div style={ds.overlay}>
       <div style={ds.dialog}>
         <div style={ds.header}>
-          <div style={ds.headerTitle}>Edit user — {user.full_name || user.email}</div>
+          <div style={ds.headerTitle}>Izmena korisnika — {user.full_name || user.email}</div>
           <button style={ds.closeBtn} onClick={onClose}>×</button>
         </div>
 
@@ -259,7 +260,7 @@ function EditUserDialog({ user, companies, onClose, onSaved }: {
 
           {/* Role selector */}
           <div style={ds.section}>
-            <div style={ds.sectionTitle}>Role</div>
+            <div style={ds.sectionTitle}>Uloga</div>
             <div style={ds.roleGrid}>
               {(Object.entries(roleLabels) as [UserRole, string][]).map(([r, label]) => (
                 <div key={r}
@@ -269,8 +270,8 @@ function EditUserDialog({ user, companies, onClose, onSaved }: {
                     {label}
                   </div>
                   <div style={ds.rolePerms}>
-                    <span>Entry: {rolePermissions[r].dataEntry}</span>
-                    <span>Reports: {rolePermissions[r].reports}</span>
+                    <span>Unos: {rolePermissions[r].dataEntry}</span>
+                    <span>Izveštaji: {rolePermissions[r].reports}</span>
                   </div>
                 </div>
               ))}
@@ -280,9 +281,9 @@ function EditUserDialog({ user, companies, onClose, onSaved }: {
           {/* Company access */}
           {needsCompanySelection && (
             <div style={ds.section}>
-              <div style={ds.sectionTitle}>Company access</div>
+              <div style={ds.sectionTitle}>Pristup firmama</div>
               <div style={{ fontSize: '12px', color: DIALOG.dim, marginBottom: '10px' }}>
-                Select which companies this user can access.
+                Izaberite firme kojima ovaj korisnik ima pristup.
               </div>
               <div style={ds.companyList}>
                 {companies.map(c => (
@@ -298,7 +299,7 @@ function EditUserDialog({ user, companies, onClose, onSaved }: {
               </div>
               {companyAccess.length === 0 && (
                 <div style={{ fontSize: '11px', color: DIALOG.red, marginTop: '6px' }}>
-                  ⚠️ No company selected — user won't see any data.
+                  ⚠️ Nije izabrana nijedna firma — korisnik neće videti nikakve podatke.
                 </div>
               )}
             </div>
@@ -306,15 +307,15 @@ function EditUserDialog({ user, companies, onClose, onSaved }: {
 
           {!needsCompanySelection && (
             <div style={{ ...ds.infoBox }}>
-              ✓ {roleLabels[role]}s have access to all companies automatically.
+              ✓ Uloga „{roleLabels[role]}“ automatski ima pristup svim firmama.
             </div>
           )}
         </div>
 
         <div style={ds.footer}>
-          <button style={ds.btnGhost} onClick={onClose}>Cancel</button>
+          <button style={ds.btnGhost} onClick={onClose}>Otkaži</button>
           <button style={ds.btnPrimary} onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving...' : 'Save changes'}
+            {saving ? 'Čuvanje…' : 'Sačuvaj izmene'}
           </button>
         </div>
       </div>
@@ -331,7 +332,7 @@ function InviteUserDialog({ onClose, onSaved }: { onClose: () => void; onSaved: 
   const [error, setError] = useState('')
 
   const handleInvite = async () => {
-    if (!email.trim()) { setError('Email is required'); return }
+    if (!email.trim()) { setError('Unesite email adresu.'); return }
     setSending(true)
     setError('')
     try {
@@ -343,7 +344,7 @@ function InviteUserDialog({ onClose, onSaved }: { onClose: () => void; onSaved: 
       setSent(true)
       setTimeout(() => { setSent(false); onSaved() }, 2000)
     } catch (err: any) {
-      setError(err.message || 'Failed to send invite. Make sure you have admin access.')
+      setError(err.message || 'Poziv nije poslat. Proverite da li imate administratorski pristup.')
     }
     setSending(false)
   }
@@ -354,8 +355,8 @@ function InviteUserDialog({ onClose, onSaved }: { onClose: () => void; onSaved: 
         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: DIALOG.accentFill, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={DIALOG.accent} strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg>
         </div>
-        <div style={{ fontFamily: 'Georgia,serif', fontSize: '18px', color: DIALOG.text }}>Invite sent!</div>
-        <div style={{ fontSize: '13px', color: DIALOG.dim }}>User will receive an email to set their password.</div>
+        <div style={{ fontFamily: 'Georgia,serif', fontSize: '18px', color: DIALOG.text }}>Poziv je poslat.</div>
+        <div style={{ fontSize: '13px', color: DIALOG.dim }}>Korisnik će dobiti email da postavi lozinku.</div>
       </div>
     </div>
   )
@@ -364,32 +365,32 @@ function InviteUserDialog({ onClose, onSaved }: { onClose: () => void; onSaved: 
     <div style={ds.overlay}>
       <div style={{ ...ds.dialog, maxWidth: '480px' }}>
         <div style={ds.header}>
-          <div style={ds.headerTitle}>Invite new user</div>
+          <div style={ds.headerTitle}>Poziv novom korisniku</div>
           <button style={ds.closeBtn} onClick={onClose}>×</button>
         </div>
         <div style={ds.body}>
           <div style={ds.section}>
-            <div style={ds.sectionTitle}>User details</div>
+            <div style={ds.sectionTitle}>Podaci o korisniku</div>
             <div style={ds.field}>
-              <label style={ds.lbl}>Full name</label>
-              <input style={ds.input} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="e.g. Marko Marković" />
+              <label style={ds.lbl}>Ime i prezime</label>
+              <input style={ds.input} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="npr. Marko Marković" />
             </div>
             <div style={{ ...ds.field, marginTop: '10px' }}>
               <label style={ds.lbl}>Email <span style={{ color: DIALOG.red }}>*</span></label>
               <input style={{ ...ds.input, ...(error ? { border: '1.5px solid ' + DIALOG.red } : {}) }}
                 type="email" value={email} onChange={e => { setEmail(e.target.value); setError('') }}
-                placeholder="email@example.com" />
+                placeholder="email@primer.rs" />
               {error && <span style={{ fontSize: '11px', color: DIALOG.red, marginTop: '4px' }}>{error}</span>}
             </div>
           </div>
           <div style={ds.infoBox}>
-            📧 An invitation email will be sent. The user will set their own password. You can assign their role after they accept.
+            📧 Biće poslat email sa pozivom. Korisnik sam postavlja lozinku. Ulogu možete da dodelite kada prihvati poziv.
           </div>
         </div>
         <div style={ds.footer}>
-          <button style={ds.btnGhost} onClick={onClose}>Cancel</button>
+          <button style={ds.btnGhost} onClick={onClose}>Otkaži</button>
           <button style={ds.btnPrimary} onClick={handleInvite} disabled={sending}>
-            {sending ? 'Sending...' : 'Send invite'}
+            {sending ? 'Slanje…' : 'Pošalji poziv'}
           </button>
         </div>
       </div>

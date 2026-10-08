@@ -167,7 +167,7 @@ describe('SearchableSelect', () => {
     render(<Host />)
     fireEvent.click(control())
     fireEvent.change(box(), { target: { value: 'zzzz' } })
-    expect(screen.getByText('No matches')).toBeInTheDocument()
+    expect(screen.getByText('Nema rezultata')).toBeInTheDocument()
     expect(optionLabels()).toEqual(['All partners'])
   })
 
@@ -175,7 +175,7 @@ describe('SearchableSelect', () => {
     render(<Host initial="p3" />)
     fireEvent.click(control())
     fireEvent.change(box(), { target: { value: 'all partners' } })
-    expect(screen.getByText('No matches')).toBeInTheDocument()
+    expect(screen.getByText('Nema rezultata')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('option', { name: 'All partners' }))
     expect(value()).toBe('(none)')
   })
@@ -275,7 +275,7 @@ describe('SearchableSelect', () => {
   it('stays open for a press on the search box, which is in the panel too', () => {
     render(<Host />)
     fireEvent.click(control())
-    fireEvent.mouseDown(screen.getByPlaceholderText(/type to filter/i))
+    fireEvent.mouseDown(screen.getByPlaceholderText(/pretraga/i))
     expect(screen.getByRole('listbox')).toBeInTheDocument()
   })
 

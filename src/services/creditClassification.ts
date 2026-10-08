@@ -76,10 +76,10 @@ export function creditNote(
    */
   currency: string = 'EUR',
 ): string {
-  const label = leg === 'principal' ? 'Principal' : 'Interest'
+  const label = leg === 'principal' ? 'Glavnica' : 'Kamata'
   const detail = `${label} — ${creditName} #${installmentNo} (${fmtMoney(amount, currency)})`
   const typed = (userNote || '').trim()
-  return typed ? `${detail} | bank line: ${typed}` : detail
+  return typed ? `${detail} | stavka izvoda: ${typed}` : detail
 }
 
 // ── Allocating a payment to an installment ──────────────────────────────────

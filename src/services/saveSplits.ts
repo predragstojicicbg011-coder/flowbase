@@ -1,3 +1,4 @@
+import { countOf, plural } from '../utils/plural'
 import { rowsFor, whySplitNotSavable, type SplitLine, type SplitParent } from './expenseSplit'
 
 // ─── Writing a split, the same way from every dialog ────────────────────────
@@ -68,13 +69,13 @@ export async function saveSplits(
     return {
       ok: false,
       lines: 0,
-      message: `The payment was saved, but its existing split could not be replaced `
-        + `(${delErr.message}). It still carries the split it had.`,
+      message: `Plaćanje je sačuvano, ali postojeća podela nije mogla da se zameni `
+        + `(${delErr.message}). Ostala je podela koju je imalo.`,
     }
   }
 
   if (lines.length === 0) {
-    return { ok: true, lines: 0, message: 'Saved as a single expense.' }
+    return { ok: true, lines: 0, message: 'Sačuvano kao jedan trošak.' }
   }
 
   const payload = rows.map(r => ({ ...r, source, source_id: sourceId }))
@@ -84,24 +85,24 @@ export async function saveSplits(
     return {
       ok: false,
       lines: 0,
-      message: `The payment was saved, but the split was not (${insErr.message}). `
-        + 'It is currently booked as one expense — reopen it and split it again.',
+      message: `Plaćanje je sačuvano, ali podela nije (${insErr.message}). `
+        + 'Trenutno je knjiženo kao jedan trošak — otvorite ga ponovo i podelite.',
     }
   }
   if (!data || data.length !== rows.length) {
     return {
       ok: false,
       lines: data?.length ?? 0,
-      message: `The split was written as ${data?.length ?? 0} of ${rows.length} lines and `
-        + 'the database reported no error, which usually means the write was refused. '
-        + 'The payment is booked as one expense.',
+      message: `Podela je upisana sa ${data?.length ?? 0} od ${rows.length} ${plural(rows.length, 'stavke', 'stavke', 'stavki')}, `
+        + 'a baza nije prijavila grešku, što obično znači da je upis odbijen. '
+        + 'Plaćanje je knjiženo kao jedan trošak.',
     }
   }
 
   return {
     ok: true,
     lines: rows.length,
-    message: `Split across ${rows.length} costs.`,
+    message: `Podeljeno na ${countOf(rows.length, 'trošak', 'troška', 'troškova')}.`,
   }
 }
 

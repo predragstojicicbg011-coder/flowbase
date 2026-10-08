@@ -13,6 +13,7 @@ import { MoversChart, HeatChart, HeatLegend } from './SpendPanels'
 import ExpenseBranches, { type ExpenseBranchNode } from './ExpenseBranches'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
+import { countOf } from '../utils/plural'
 
 // ── Expense visuals ─────────────────────────────────────────────────────────
 //
@@ -71,38 +72,38 @@ export function KeyFigures(p: KeyFigureProps) {
       {/* Headline. The number, its movement, and the shape of the months that
           produced it — a total alone says nothing about whether it is stable. */}
       <div style={{ ...kf.card, gridColumn: 'span 2' }}>
-        <div style={kf.label}>Total expenses · {p.periodLabel}</div>
+        <div style={kf.label}>Ukupni troškovi · {p.periodLabel}</div>
         <div style={kf.hero}>{money(p.total)}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
           <span style={{ ...kf.chip, background: change > 0 ? 'rgba(255,91,90,0.13)' : 'rgba(0,212,126,0.13)', color: change > 0 ? C.up : C.down }}>
             {change > 0 ? '▲' : change < 0 ? '▼' : '■'} {money(Math.abs(change))}
-            {changePct !== null && ` · ${Math.abs(changePct).toFixed(1)}%`}
+            {changePct !== null && ` · ${Math.abs(changePct).toFixed(1).replace('.', ',')}%`}
           </span>
-          <span style={{ fontSize: '11px', color: C.dim }}>vs {p.priorLabel}</span>
+          <span style={{ fontSize: '11px', color: C.dim }}>u odnosu na {p.priorLabel}</span>
         </div>
         {p.excluded > 0 && (
           <div style={{ fontSize: '11px', color: '#F5A623', marginTop: '7px' }}>
-            {money(p.excluded)} excluded · adjusted <strong style={{ color: C.text }}>{money(p.adjusted)}</strong>
+            {money(p.excluded)} isključeno · korigovano <strong style={{ color: C.text }}>{money(p.adjusted)}</strong>
           </div>
         )}
         <Sparkline values={p.monthlyTotals} months={p.months} />
       </div>
 
       <div style={kf.card}>
-        <div style={kf.label}>Run rate</div>
+        <div style={kf.label}>Mesečni prosek</div>
         <div style={kf.value}>{money(runRate)}</div>
-        <div style={kf.sub}>average of {active.length} active month{active.length === 1 ? '' : 's'}</div>
+        <div style={kf.sub}>prosek {countOf(active.length, 'aktivnog meseca', 'aktivna meseca', 'aktivnih meseci')}</div>
         {active.length > 1 && (
           <div style={kf.sub}>
-            range {money(Math.min(...active))} – {money(Math.max(...active))}
+            raspon {money(Math.min(...active))} – {money(Math.max(...active))}
           </div>
         )}
       </div>
 
       <div style={kf.card}>
-        <div style={kf.label}>Concentration</div>
-        <div style={kf.value}>{p.paretoCutoff}<span style={{ fontSize: '13px', color: C.dim, fontWeight: 400 }}> of {p.leafCount}</span></div>
-        <div style={kf.sub}>lines make {p.paretoShare.toFixed(0)}% of spend</div>
+        <div style={kf.label}>Koncentracija</div>
+        <div style={kf.value}>{p.paretoCutoff}<span style={{ fontSize: '13px', color: C.dim, fontWeight: 400 }}> od {p.leafCount}</span></div>
+        <div style={kf.sub}>stavki čini {p.paretoShare.toFixed(0)}% troškova</div>
         <div style={{ marginTop: '8px', height: '5px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
           <div style={{
             width: `${p.leafCount > 0 ? Math.max((p.paretoCutoff / p.leafCount) * 100, 1.5) : 0}%`,
@@ -114,16 +115,16 @@ export function KeyFigures(p: KeyFigureProps) {
       {/* Not decoration: this is the share of spend that cannot be put in front
           of an owner, which is the one number that blocks accountability. */}
       <div style={kf.card}>
-        <div style={kf.label}>Unclassified</div>
+        <div style={kf.label}>Neklasifikovano</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '2px' }}>
           <Ring pct={unassignedPct} />
           <div style={{ minWidth: 0 }}>
             <div style={{ ...kf.value, fontSize: '19px' }}>{money(p.unassigned)}</div>
-            <div style={kf.sub}>no department</div>
+            <div style={kf.sub}>bez sektora</div>
           </div>
         </div>
         <div style={{ ...kf.sub, marginTop: '7px', color: p.reconciled ? C.down : C.up }}>
-          {p.reconciled ? '✓ both branches reconcile' : '⚠ branches disagree — check'}
+          {p.reconciled ? '✓ obe grane se slažu' : '⚠ grane se ne slažu — proverite'}
         </div>
       </div>
     </div>
@@ -199,16 +200,16 @@ function tabsFor(branch: Branch): { key: ChartTab; label: string; hint: string }
   return [
     {
       key: 'trend',
-      label: 'Trend & mix',
+      label: 'Trend i struktura',
       hint: branch === 'project'
-        ? 'Month by month — which projects carry the cost, and whether overhead is growing'
-        : 'Monthly composition — is the shape changing, or only the size',
+        ? 'Mesec po mesec — koji projekti nose trošak i da li opšti troškovi rastu'
+        : 'Mesečna struktura — da li se menja oblik ili samo veličina',
     },
-    { key: 'movers', label: 'What moved', hint: 'The lines behind the change, biggest movement first' },
-    { key: 'heatmap', label: 'Every line', hint: 'All of them, month by month — spikes, seasons and lines that stopped' },
-    { key: 'bridge', label: 'Bridge', hint: 'What turned the prior total into this one' },
-    { key: 'composition', label: 'Composition', hint: 'The period branching into categories, into lines — each branch as thick as the money it carries' },
-    { key: 'concentration', label: 'Concentration', hint: 'How few lines carry most of the spend' },
+    { key: 'movers', label: 'Šta se promenilo', hint: 'Stavke iza promene, najveća promena prva' },
+    { key: 'heatmap', label: 'Sve stavke', hint: 'Sve stavke, mesec po mesec — skokovi, sezone i stavke koje su prestale' },
+    { key: 'bridge', label: 'Most', hint: 'Šta je prethodni ukupan iznos pretvorilo u ovaj' },
+    { key: 'composition', label: 'Sastav', hint: 'Period se grana u kategorije, pa u stavke — svaka grana je debela koliko novca nosi' },
+    { key: 'concentration', label: 'Koncentracija', hint: 'Koliko malo stavki nosi najveći deo troškova' },
   ]
 }
 
@@ -222,9 +223,9 @@ function tabsFor(branch: Branch): { key: ChartTab; label: string; hint: string }
  */
 function levelNames(branch: Branch): string[] {
   switch (branch) {
-    case 'pl': return ['Category', 'Sub-category']
-    case 'department': return ['Department', 'Sub-category', 'Description']
-    default: return ['Project', 'Category', 'Sub-category']
+    case 'pl': return ['Kategorija', 'Potkategorija']
+    case 'department': return ['Sektor', 'Podsektor', 'Opis']
+    default: return ['Projekat', 'Kategorija', 'Potkategorija']
   }
 }
 
@@ -310,7 +311,7 @@ export function ChartDeck(p: DeckProps) {
             <label style={deck.switch}>
               <input type="checkbox" checked={normalized} onChange={ev => setNormalized(ev.target.checked)}
                 style={{ accentColor: C.accent, cursor: 'pointer' }} />
-              Show as % of month
+              Prikaži kao % meseca
             </label>
           )}
           {(tab_ === 'movers' || tab_ === 'heatmap') && depthPicker}
@@ -318,7 +319,7 @@ export function ChartDeck(p: DeckProps) {
             <label style={deck.switch}>
               <input type="checkbox" checked={byRow} onChange={ev => setByRow(ev.target.checked)}
                 style={{ accentColor: C.accent, cursor: 'pointer' }} />
-              Scale each line to itself
+              Svaka stavka u sopstvenoj razmeri
             </label>
           )}
           <span style={deck.hint}>{active.hint}</span>
@@ -335,7 +336,7 @@ export function ChartDeck(p: DeckProps) {
             bare start="folded"
             monthLabel={p.periodLabel}
             amountLabel={p.periodLabel}
-            emptyText="No spend in this period."
+            emptyText="Nema troškova u ovom periodu."
             roots={branches}
             onOpenLedger={key => p.onSelect(key)} />
         )}
@@ -368,7 +369,7 @@ export function ChartDeck(p: DeckProps) {
                 onMouseEnter={() => setMuted(k)}
                 onMouseLeave={() => setMuted(null)}
                 onClick={() => node && p.onSelect(node.key)}
-                title={node ? `Open the transactions behind ${k}` : k}>
+                title={node ? `Otvori transakcije za: ${k}` : k}>
                 <i style={{ ...deck.swatch, background: colorFor(k, i) }} />{k}
               </button>
             )
@@ -402,7 +403,7 @@ function TrendChart({ series, w, h, normalized, onTip, onSelect, tree, muted }: 
   const iw = Math.max(w - PAD.l - PAD.r, 10)
   const ih = Math.max(h - PAD.t - PAD.b, 10)
   const n = series.points.length
-  if (n === 0 || series.max <= 0) return <Empty h={h} text="No spend in this period." />
+  if (n === 0 || series.max <= 0) return <Empty h={h} text="Nema troškova u ovom periodu." />
 
   const top = normalized ? 100 : niceMax(series.max)
   const ticks = normalized ? [0, 25, 50, 75, 100] : axisTicks(series.max, 4)
@@ -450,7 +451,7 @@ function TrendChart({ series, w, h, normalized, onTip, onSelect, tree, muted }: 
                       <>
                         <TipHead>{k}</TipHead>
                         <TipRow label={monthLabel(pt.month, true)} value={money(pt.values[k] || 0)} />
-                        <TipRow label="share of month" value={`${pt.total > 0 ? ((pt.values[k] || 0) / pt.total * 100).toFixed(1) : '0'}%`} dim />
+                        <TipRow label="udeo u mesecu" value={`${pt.total > 0 ? ((pt.values[k] || 0) / pt.total * 100).toFixed(1).replace('.', ',') : '0'}%`} dim />
                       </>
                     ),
                   })} />
@@ -492,7 +493,7 @@ function BridgeChart({ steps, w, h, onTip, onSelect, priorLabel, periodLabel }: 
   const iw = Math.max(w - PAD.l - PAD.r, 10)
   const ih = Math.max(h - PAD.t - PAD.b, 10)
   const n = steps.length
-  if (n < 2) return <Empty h={h} text="Nothing to bridge — no prior period to compare with." />
+  if (n < 2) return <Empty h={h} text="Nema mosta — nema prethodnog perioda za poređenje." />
 
   // Anchors sit on the axis floor; only the walk itself has to be in range.
   const walk = steps.filter(st => st.kind !== 'start' && st.kind !== 'end')
@@ -547,15 +548,15 @@ function BridgeChart({ steps, w, h, onTip, onSelect, priorLabel, periodLabel }: 
                 x: ev.nativeEvent.offsetX, y: ev.nativeEvent.offsetY,
                 body: anchor ? (
                   <>
-                    <TipHead>{st.label === 'Prior' ? priorLabel : periodLabel}</TipHead>
-                    <TipRow label="total" value={money(st.end)} />
+                    <TipHead>{st.kind === 'start' ? priorLabel : periodLabel}</TipHead>
+                    <TipRow label="ukupno" value={money(st.end)} />
                   </>
                 ) : (
                   <>
                     <TipHead>{st.label}</TipHead>
-                    <TipRow label={st.delta > 0 ? 'increase' : 'decrease'} value={money(st.delta)} />
-                    <TipRow label="running total" value={money(after)} dim />
-                    {st.key && <TipRow label="" value="click to drill in" dim />}
+                    <TipRow label={st.delta > 0 ? 'povećanje' : 'smanjenje'} value={money(st.delta)} />
+                    <TipRow label="kumulativno" value={money(after)} dim />
+                    {st.key && <TipRow label="" value="kliknite za detalje" dim />}
                   </>
                 ),
               })} />
@@ -574,7 +575,7 @@ function BridgeChart({ steps, w, h, onTip, onSelect, priorLabel, periodLabel }: 
             <text x={cx(i)} y={h - 26} textAnchor="middle" fontSize="10" fill={C.dim}>{label}</text>
             {anchor && (
               <text x={cx(i)} y={h - 13} textAnchor="middle" fontSize="9" fill={C.faint}>
-                {st.label === 'Prior' ? priorLabel : periodLabel}
+                {st.kind === 'start' ? priorLabel : periodLabel}
               </text>
             )}
           </g>
@@ -602,7 +603,7 @@ function ParetoChart({ points, w, h, onTip, onSelect }: {
   const iw = Math.max(w - PAD.l - PAD.r, 10)
   const ih = Math.max(h - PAD.t - PAD.b, 10)
   const n = points.length
-  if (n === 0) return <Empty h={h} text="No spend in this period." />
+  if (n === 0) return <Empty h={h} text="Nema troškova u ovom periodu." />
 
   const peak = points[0].amount
   const top = niceMax(peak)
@@ -635,7 +636,7 @@ function ParetoChart({ points, w, h, onTip, onSelect }: {
           the curve crosses it is the shortlist worth a meeting. */}
       <line x1={PAD.l} x2={w - PAD.r} y1={yPct(80)} y2={yPct(80)}
         stroke="#F5A623" strokeWidth="1" strokeDasharray="5 4" opacity="0.6" />
-      <text x={PAD.l + 4} y={yPct(80) - 5} fontSize="9.5" fill="#F5A623" opacity="0.85">80% of spend</text>
+      <text x={PAD.l + 4} y={yPct(80) - 5} fontSize="9.5" fill="#F5A623" opacity="0.85">80% troškova</text>
 
       {points.map((p, i) => (
         <g key={p.key} style={{ cursor: 'pointer' }}
@@ -645,9 +646,9 @@ function ParetoChart({ points, w, h, onTip, onSelect }: {
             body: (
               <>
                 <TipHead>{p.label}</TipHead>
-                <TipRow label="amount" value={money(p.amount)} />
-                <TipRow label="running share" value={`${p.cumulativePct.toFixed(1)}%`} dim />
-                <TipRow label="rank" value={`#${i + 1}`} dim />
+                <TipRow label="iznos" value={money(p.amount)} />
+                <TipRow label="kumulativni udeo" value={`${p.cumulativePct.toFixed(1).replace('.', ',')}%`} dim />
+                <TipRow label="rang" value={`#${i + 1}`} dim />
               </>
             ),
           })}>

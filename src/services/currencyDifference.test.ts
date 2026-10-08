@@ -43,7 +43,7 @@ describe('the payment was short of the invoice', () => {
 
   it('names the amount and the currency in the explanation', () => {
     expect(d.note).toContain('6.074,04 RSD')
-    expect(d.note).toContain('closes the invoice')
+    expect(d.note).toContain('zatvara fakturu')
   })
 })
 
@@ -62,7 +62,7 @@ describe('the payment was larger than the invoice', () => {
   })
 
   it('says it is splitting one bank line rather than adding a movement', () => {
-    expect(d.note).toContain('same bank line')
+    expect(d.note).toContain('iste stavke izvoda')
   })
 })
 
@@ -81,7 +81,7 @@ describe('an allocation that has not been finished', () => {
   it('says what is left on each side, so the fix is in the sentence', () => {
     expect(d.note).toContain('3.000,00 RSD')
     expect(d.note).toContain('5.000,00 RSD')
-    expect(d.note).toContain('Allocate what is left')
+    expect(d.note).toContain('Rasporedite ostatak')
   })
 })
 
@@ -106,16 +106,16 @@ describe('the two directions are never both offered', () => {
 describe('entryNote', () => {
   it('names the invoice, so the entry explains itself later', () => {
     expect(entryNote('R23/59-2026', at(100, 0)))
-      .toBe('Currency difference on R23/59-2026 — paid less than invoiced')
+      .toBe('Kursna razlika po fakturi R23/59-2026 — plaćeno manje nego što je fakturisano')
   })
 
   it('says which way it went for a surplus', () => {
     expect(entryNote('R23/59-2026', at(0, 100)))
-      .toBe('Currency difference on R23/59-2026 — paid more than invoiced')
+      .toBe('Kursna razlika po fakturi R23/59-2026 — plaćeno više nego što je fakturisano')
   })
 
   it('still says something when the invoice has no number', () => {
-    expect(entryNote(null, at(100, 0))).toBe('Currency difference — paid less than invoiced')
+    expect(entryNote(null, at(100, 0))).toBe('Kursna razlika — plaćeno manje nego što je fakturisano')
   })
 })
 
@@ -137,7 +137,7 @@ describe('a revenue invoice turns the economics round, not the shape', () => {
     expect(d.direction).toBe('expense')
     expect(d.linksToInvoice).toBe(true)
     expect(d.amount).toBeCloseTo(6074.04, 2)
-    expect(d.note).toContain('received')
+    expect(d.note).toContain('Naplaćeno')
     expect(isBookable(d)).toBe(true)
   })
 
@@ -159,7 +159,7 @@ describe('a revenue invoice turns the economics round, not the shape', () => {
   })
 
   it('the entry note speaks of receiving', () => {
-    expect(entryNote('IF-1', rev(100, 0))).toBe('Currency difference on IF-1 — received less than invoiced')
-    expect(entryNote('IF-1', rev(0, 100))).toBe('Currency difference on IF-1 — received more than invoiced')
+    expect(entryNote('IF-1', rev(100, 0))).toBe('Kursna razlika po fakturi IF-1 — naplaćeno manje nego što je fakturisano')
+    expect(entryNote('IF-1', rev(0, 100))).toBe('Kursna razlika po fakturi IF-1 — naplaćeno više nego što je fakturisano')
   })
 })

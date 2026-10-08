@@ -113,7 +113,7 @@ describe('claiming the month', () => {
   it('refuses a second posting and writes NOTHING', async () => {
     const c = client({ claimError: { code: '23505', message: 'duplicate key value' } })
     await expect(postPlan(c, plan(), CONTEXT, 'Salaries'))
-      .rejects.toThrow(/already been posted/)
+      .rejects.toThrow(/je već proknjižen/)
     expect(c.calls.invoices).toHaveLength(0)
     expect(c.calls.transactions).toHaveLength(0)
   })
@@ -123,7 +123,7 @@ describe('claiming the month', () => {
     // ordinary failure would tell somebody to retry into a duplicate.
     const c = client({ claimError: { message: 'violates unique constraint "payroll_postings_once_idx"' } })
     await expect(postPlan(c, plan(), CONTEXT, 'Salaries'))
-      .rejects.toThrow(/already been posted/)
+      .rejects.toThrow(/je već proknjižen/)
   })
 
   it('names an ordinary failure as the step it happened at', async () => {
@@ -198,7 +198,7 @@ describe('what each invoice carries', () => {
   it('stamps the posting id into the note, so an entry can be traced back', async () => {
     const c = client()
     await postPlan(c, plan(), CONTEXT, 'Salaries')
-    expect(c.calls.invoices.every((i: any) => i.note.includes('post-1'))).toBe(true)
+    expect(c.calls.invoices.every((i: any) => i.note.endsWith(' [knjiženje post-1]'))).toBe(true)
   })
 })
 
@@ -232,14 +232,14 @@ describe('when a write is refused partway', () => {
   it('names the step, so a retry does not land on top of what is there', async () => {
     const c = client({ invoiceError: { message: 'permission denied' } })
     await expect(postPlan(c, plan(), CONTEXT, 'Salaries'))
-      .rejects.toThrow(/tax and contributions invoice/)
+      .rejects.toThrow(/faktura za porez i doprinose/)
   })
 
   it('says the entries are fine when only the record of them failed', async () => {
     // The right way round to fail: recoverable, and never a second payroll.
     const c = client({ linkError: { message: 'nope' } })
     await expect(postPlan(c, plan(), CONTEXT, 'Salaries'))
-      .rejects.toThrow(/posted correctly/)
+      .rejects.toThrow(/Sve je ispravno proknjiženo/)
   })
 })
 
@@ -249,7 +249,7 @@ describe('refusing to post a plan that does not add up', () => {
     // is posting something that does not add up.
     const c = client()
     await expect(postPlan(c, plan({ expectedTotalCost: 9999 }), CONTEXT, 'Salaries'))
-      .rejects.toThrow(/does not add up|come to/)
+      .rejects.toThrow(/se ne slaže|Stavke iznose/)
     expect(c.calls.postings).toHaveLength(0)
   })
 })
@@ -296,7 +296,7 @@ describe('undoPosting', () => {
     // sitting in the ledger against nothing — reconciled yesterday,
     // unexplained today, and the bank statement gives no clue why.
     const c = undoClient({ links: [{ invoice_id: 'i1', transaction_id: 'tx1', allocated_amount: 500 }] })
-    await expect(undoPosting(c, posting)).rejects.toThrow(/matched to a bank payment/)
+    await expect(undoPosting(c, posting)).rejects.toThrow(/uparen[ae] sa plaćanjem iz izvoda/)
     expect(c.order).toEqual([])
   })
 
@@ -306,8 +306,8 @@ describe('undoPosting', () => {
       { invoice_id: 'i1', transaction_id: 'tx2', allocated_amount: 200 },
     ] })
     // Two links on one invoice is one invoice, not two.
-    await expect(undoPosting(c, posting)).rejects.toThrow(/^1 of these invoices is matched/)
-    await expect(undoPosting(c, posting)).rejects.toThrow(/Detach them on the transaction/)
+    await expect(undoPosting(c, posting)).rejects.toThrow(/^1 faktura je uparena sa plaćanjem/)
+    await expect(undoPosting(c, posting)).rejects.toThrow(/raskinite uparivanje na transakciji/)
   })
 
   it('removes the entries before freeing the month, and thaws the run last', async () => {
@@ -321,7 +321,7 @@ describe('undoPosting', () => {
 
   it('keeps the month claimed when the invoices could not be removed', async () => {
     const c = undoClient({ deleteError: { message: 'locked period' } })
-    await expect(undoPosting(c, posting)).rejects.toThrow(/still marked as posted/)
+    await expect(undoPosting(c, posting)).rejects.toThrow(/i dalje označen kao proknjižen/)
   })
 
   it('says the entries are gone when only the unlock failed', async () => {
@@ -329,7 +329,7 @@ describe('undoPosting', () => {
     // with no entries behind it refuses to recalculate, which is annoying and
     // recoverable. Every other order loses something.
     const c = undoClient({ thawError: { message: 'nope' } })
-    await expect(undoPosting(c, posting)).rejects.toThrow(/still locked/)
+    await expect(undoPosting(c, posting)).rejects.toThrow(/i dalje zaključan/)
     expect(c.order).toEqual(['pl_splits', 'invoices', 'transactions', 'payroll_postings'])
   })
 
@@ -348,7 +348,7 @@ describe('linkedInvoices', () => {
       from: () => ({ select: () => ({ in: async () =>
         ({ data: null, error: { message: 'permission denied' } }) }) }),
     }
-    await expect(linkedInvoices(c, ['i1'])).rejects.toThrow(/Nothing was deleted/)
+    await expect(linkedInvoices(c, ['i1'])).rejects.toThrow(/Ništa nije obrisano/)
   })
 
   it('asks nothing when there are no invoices to ask about', async () => {
@@ -360,8 +360,8 @@ describe('linkedInvoices', () => {
 describe('alreadyPostedMessage', () => {
   it('says what a duplicate actually costs, not just that it is a duplicate', () => {
     const m = alreadyPostedMessage('2026-08', 'Salaries')
-    expect(m).toContain('Nothing was written')
-    expect(m).toContain('reconciles against nothing')
+    expect(m).toContain('Ništa nije upisano')
+    expect(m).toContain('ni sa čim ne uparuje')
   })
 })
 

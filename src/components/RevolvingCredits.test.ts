@@ -147,17 +147,17 @@ describe('what stops a reset being recorded', () => {
   })
 
   it('names the figure it is actually asking for', () => {
-    expect(whyNotPriceable(NaN, 'benchmark', 2.95, '2026-10-01')).toMatch(/benchmark rate/)
-    expect(whyNotPriceable(NaN, 'allin', 2.95, '2026-10-01')).toMatch(/all-in rate/)
+    expect(whyNotPriceable(NaN, 'benchmark', 2.95, '2026-10-01')).toMatch(/referentnu stopu/)
+    expect(whyNotPriceable(NaN, 'allin', 2.95, '2026-10-01')).toMatch(/ukupnu kamatnu stopu/)
   })
 
   /** And says what to do about it, rather than only that it cannot. */
   it('sends you to the margin when an all-in rate cannot be split', () => {
-    expect(whyNotPriceable(5.35, 'allin', null, '2026-10-01')).toMatch(/Edit credit/)
+    expect(whyNotPriceable(5.35, 'allin', null, '2026-10-01')).toMatch(/Izmeni kredit/)
   })
 
   /** A reset with no start date prices nothing. */
   it('insists on a date', () => {
-    expect(whyNotPriceable(2.4, 'benchmark', 2.95, '')).toMatch(/starts applying/)
+    expect(whyNotPriceable(2.4, 'benchmark', 2.95, '')).toMatch(/od kog stopa važi/)
   })
 })

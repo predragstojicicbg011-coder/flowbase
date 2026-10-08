@@ -68,9 +68,9 @@ export function whyNotSavable(
   existing: { id: string; name: string }[],
 ): string | null {
   const name = (draft.name || '').trim()
-  if (!name) return 'Give the template a name — it is how you will find it, and how the currency-difference control finds its own.'
+  if (!name) return 'Dajte šablonu naziv — po njemu ćete ga pronaći, a po nazivu i kontrola za kursnu razliku pronalazi svoj šablon.'
   const clash = existing.find(e => nameKey(e.name) === nameKey(name) && e.id !== draft.id)
-  if (clash) return `Another template is already called "${clash.name}". Two with the same name cannot be told apart.`
+  if (clash) return `Već postoji šablon pod nazivom „${clash.name}“. Dva šablona sa istim nazivom ne mogu da se razlikuju.`
   return null
 }
 
@@ -121,15 +121,15 @@ export async function saveScript(
 ): Promise<{ ok: boolean; message: string }> {
   const row = toRow(draft)
   return draft.id
-    ? runWrite('Save the template', client.from('quick_fill_scripts')
+    ? runWrite('Čuvanje šablona', client.from('quick_fill_scripts')
         .update({ ...row, updated_at: new Date().toISOString() }).eq('id', draft.id).select('id'))
-    : runWrite('Add the template', client.from('quick_fill_scripts').insert(row).select('id'))
+    : runWrite('Dodavanje šablona', client.from('quick_fill_scripts').insert(row).select('id'))
 }
 
 export async function removeScript(
   client: any,
   id: string,
 ): Promise<{ ok: boolean; message: string }> {
-  return runWrite('Delete the template',
+  return runWrite('Brisanje šablona',
     client.from('quick_fill_scripts').delete().eq('id', id).select('id'))
 }

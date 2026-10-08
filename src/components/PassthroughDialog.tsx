@@ -6,6 +6,7 @@ import { DIALOG } from './dialogTheme'
 import { fetchAllPartners } from '../services/allPartners'
 import { DOCUMENT_CURRENCIES, bookAmountsAtRate, getBookRates, rateFor, type BookAmounts } from '../services/bookAmounts'
 import { fmtMoney, fmtNum } from '../utils/formatters'
+import { countOf } from '../utils/plural'
 
 interface Props {
   onClose: () => void
@@ -83,13 +84,13 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
   // ── Validation ─────────────────────────────────────────
   const runValidation = () => {
     const e: ValidationErrors = {}
-    if (!companyId) e.companyId = 'Company is required'
-    if (!bankId) e.bankId = 'Bank is required'
-    if (!currency) e.currency = 'Currency is required'
-    if (!txDate) e.txDate = 'Transaction date is required'
-    if (!periodMonth) e.periodMonth = 'Period month is required'
-    if (!amount || parseFloat(amount) <= 0) e.amount = 'Amount must be greater than 0'
-    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Exchange rate is required'
+    if (!companyId) e.companyId = 'Firma je obavezna'
+    if (!bankId) e.bankId = 'Banka je obavezna'
+    if (!currency) e.currency = 'Valuta je obavezna'
+    if (!txDate) e.txDate = 'Datum transakcije je obavezan'
+    if (!periodMonth) e.periodMonth = 'Obračunski mesec je obavezan'
+    if (!amount || parseFloat(amount) <= 0) e.amount = 'Iznos mora biti veći od 0'
+    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Kurs je obavezan'
     return e
   }
 
@@ -184,13 +185,13 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
     } catch (err) {
       // RateUnavailableError: say so in its own words and let the person type
       // the rate. Nothing is guessed.
-      setRateSource(err instanceof Error ? `${err.message} — enter it manually` : 'No official rate — enter it manually')
+      setRateSource(err instanceof Error ? `${err.message} — unesite ga ručno` : 'Nema zvaničnog kursa — unesite ga ručno')
       setRateMissing(true)
     }
     setFetchingRate(false)
   }
 
-  const stepTitles = ['Basic information', 'Direction & pairing', 'Amount & review']
+  const stepTitles = ['Osnovni podaci', 'Smer i uparivanje', 'Iznos i pregled']
 
   const selectedPair = unpaired.find(p => p.id === pairId)
   // Balanced is decided in the book currency: both sides in RSD.
@@ -202,7 +203,7 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
     const e = runValidation()
     if (Object.keys(e).length > 0) { setShowValidationSummary(true); return }
     const booked = book.amounts
-    if (!booked) { setSaveError(book.error || 'Exchange rate is required'); return }
+    if (!booked) { setSaveError(book.error || 'Kurs je obavezan'); return }
 
     setSaving(true); setSaveError('')
 
@@ -214,7 +215,7 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
       let finalPartnerId = partnerId
       if (showNewPartner && newPartnerName) {
         const { data: newP, error: partErr } = await supabase.from('partners').insert({ name: newPartnerName }).select().single()
-        if (partErr) throw new PostFailure('a new partner', partErr.message)
+        if (partErr) throw new PostFailure('novi partner', partErr.message)
         if (newP) finalPartnerId = newP.id
       }
 
@@ -233,32 +234,32 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
       if (passthrough?.id) {
         const { data: updated, error: upErr } = await supabase.from('passthrough')
           .update(payload).eq('id', passthrough.id).select('id')
-        if (upErr) throw new PostFailure('the pass-through entry', upErr.message)
+        if (upErr) throw new PostFailure('prolazna stavka', upErr.message)
         // A zero-row update is a failure, not a save. It means the row is gone,
         // or RLS refused it — either way nothing was written.
         if (!updated || updated.length === 0)
-          throw new PostFailure('the pass-through entry', `no row with id ${passthrough.id} was updated`)
-        completed.push({ label: 'the pass-through entry' })
+          throw new PostFailure('prolazna stavka', `nijedan red sa ID ${passthrough.id} nije izmenjen`)
+        completed.push({ label: 'prolazna stavka' })
         ptId = passthrough.id
       } else {
         const { data: newPt, error: insErr } = await supabase.from('passthrough').insert(payload).select().single()
-        if (insErr) throw new PostFailure('the pass-through entry', insErr.message)
-        if (!newPt?.id) throw new PostFailure('the pass-through entry', 'it returned no id')
-        completed.push({ label: 'the pass-through entry' })
+        if (insErr) throw new PostFailure('prolazna stavka', insErr.message)
+        if (!newPt?.id) throw new PostFailure('prolazna stavka', 'nije vraćen ID')
+        completed.push({ label: 'prolazna stavka' })
         ptId = newPt?.id
       }
 
       if (pairId && ptId) {
         const { error: pairErr } = await supabase.from('passthrough')
           .update({ pair_id: ptId, status: 'paired' }).eq('id', pairId)
-        if (pairErr) throw new PostFailure('the pairing', pairErr.message)
+        if (pairErr) throw new PostFailure('uparivanje', pairErr.message)
         const { data: pairData, error: readErr } = await supabase.from('passthrough').select('amount_rsd').eq('id', pairId).single()
-        if (readErr) throw new PostFailure('the pairing', readErr.message)
+        if (readErr) throw new PostFailure('uparivanje', readErr.message)
         if (pairData && Math.abs((pairData.amount_rsd || 0) - booked.amount_rsd) < 0.01) {
           const { error: balA } = await supabase.from('passthrough').update({ status: 'balanced' }).eq('id', pairId)
-          if (balA) throw new PostFailure('the balanced status', balA.message)
+          if (balA) throw new PostFailure('status usklađenosti', balA.message)
           const { error: balB } = await supabase.from('passthrough').update({ status: 'balanced' }).eq('id', ptId)
-          if (balB) throw new PostFailure('the balanced status', balB.message)
+          if (balB) throw new PostFailure('status usklađenosti', balB.message)
         }
       }
 
@@ -268,8 +269,8 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
       // supabase-js does not throw, so this catch was dead code for every
       // database refusal and the success screen showed regardless.
       setSaveError(err instanceof PostFailure
-        ? reportPostFailure('The pass-through', err.step, err.message, completed)
-        : `Error: ${err.message}`)
+        ? reportPostFailure('prolazna stavka', err.step, err.message, completed)
+        : `Greška: ${err.message}`)
     }
     setSaving(false)
   }
@@ -280,9 +281,9 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: DIALOG.blueFill, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={DIALOG.blue} strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg>
         </div>
-        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>Pass-through posted!</div>
+        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>Prolazna stavka je proknjižena.</div>
         <div style={{ fontSize: '13px', color: DIALOG.dim }}>
-          {pairId ? (isBalanced ? 'Paired and balanced ✓' : 'Paired — amounts differ, check balance.') : 'Unpaired — waiting for matching entry.'}
+          {pairId ? (isBalanced ? 'Uparena i usklađena ✓' : 'Uparena — iznosi se razlikuju, proverite stanje.') : 'Neuparena — čeka odgovarajuću stavku.'}
         </div>
       </div>
     </div>
@@ -293,11 +294,11 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
       <div style={s.dialog}>
         <div style={s.header}>
           <div>
-            <div style={s.headerTitle}>{passthrough ? 'Edit pass-through' : 'New pass-through'}</div>
-            <div style={s.headerSub}>Step {step} of 3 — {stepTitles[step - 1]}</div>
+            <div style={s.headerTitle}>{passthrough ? 'Izmena prolazne stavke' : 'Nova prolazna stavka'}</div>
+            <div style={s.headerSub}>Korak {step} od 3 — {stepTitles[step - 1]}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={s.ptBadge}>Cash Flow Only</div>
+            <div style={s.ptBadge}>Samo novčani tok</div>
             <span style={s.logoText}>MCFlow</span>
             <button style={s.closeBtn} onClick={onClose}>×</button>
           </div>
@@ -326,7 +327,7 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
           <div style={s.validationBanner}>
             <span>⚠️</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '500', fontSize: '12px' }}>Fix {totalErrors} error{totalErrors > 1 ? 's' : ''} before posting:</div>
+              <div style={{ fontWeight: '500', fontSize: '12px' }}>Ispravite pre knjiženja ({countOf(totalErrors, 'greška', 'greške', 'grešaka')}):</div>
               <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.9 }}>{Object.values(errors).join(' · ')}</div>
             </div>
             <button style={s.bannerClose} onClick={() => setShowValidationSummary(false)}>×</button>
@@ -339,29 +340,29 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
           {step === 1 && (
             <>
               <div style={{ ...s.infoBox, marginBottom: '16px' }}>
-                Pass-through entries affect <strong>cash flow only</strong> — never P&L. IN and OUT must balance to zero. They may span across months.
+                Prolazne stavke utiču <strong>samo na novčani tok</strong> — nikad na P&L. UPLATA i ISPLATA moraju zajedno dati nulu. Mogu da obuhvate više meseci.
               </div>
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Company & bank</div>
+                <div style={s.sectionTitle}>Firma i banka</div>
                 <div style={s.row2}>
                   {showPicker && (
                     <div style={s.field}>
-                      <label style={s.lbl}>Company <span style={s.req}>*</span></label>
+                      <label style={s.lbl}>Firma <span style={s.req}>*</span></label>
                       <select style={{ ...s.select, ...(fieldErr('companyId') ? s.inputError : {}) }} value={companyId}
                         onChange={e => { setCompanyId(e.target.value); touch('companyId') }}
                         onBlur={() => touch('companyId')}>
-                        <option value="">Select company...</option>
+                        <option value="">Izaberite firmu…</option>
                         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                       {fieldErr('companyId') && <span style={s.errorMsg}>{fieldErr('companyId')}</span>}
                     </div>
                   )}
                   <div style={s.field}>
-                    <label style={s.lbl}>Bank / Account <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Banka / račun <span style={s.req}>*</span></label>
                     <select style={{ ...s.select, ...(fieldErr('bankId') ? s.inputError : {}) }} value={bankId}
                       onChange={e => { setBankId(e.target.value); touch('bankId') }} onBlur={() => touch('bankId')}>
-                      <option value="">Select bank...</option>
+                      <option value="">Izaberite banku…</option>
                       {banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                     {fieldErr('bankId') && <span style={s.errorMsg}>{fieldErr('bankId')}</span>}
@@ -369,10 +370,10 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                 </div>
                 <div style={s.row2}>
                   <div style={s.field}>
-                    <label style={s.lbl}>Currency <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Valuta <span style={s.req}>*</span></label>
                     <select style={{ ...s.select, ...(fieldErr('currency') ? s.inputError : {}) }} value={currency}
                       onChange={e => { setCurrency(e.target.value); touch('currency') }} onBlur={() => touch('currency')}>
-                      <option value="">Select...</option>
+                      <option value="">Izaberite…</option>
 {(companies.find(c => c.id === companyId)?.currencies || DOCUMENT_CURRENCIES).map((cur: string) => (
   <option key={cur}>{cur}</option>
 ))}
@@ -380,23 +381,23 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                     {fieldErr('currency') && <span style={s.errorMsg}>{fieldErr('currency')}</span>}
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Statement number</label>
-                    <input style={s.input} value={statement} onChange={e => setStatement(e.target.value)} placeholder="e.g. 2026-001" />
+                    <label style={s.lbl}>Broj izvoda</label>
+                    <input style={s.input} value={statement} onChange={e => setStatement(e.target.value)} placeholder="npr. 2026-001" />
                   </div>
                 </div>
               </div>
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Date & partner</div>
+                <div style={s.sectionTitle}>Datum i partner</div>
                 <div style={s.row2}>
                   <div style={s.field}>
-                    <label style={s.lbl}>Transaction date <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Datum transakcije <span style={s.req}>*</span></label>
                     <input type="date" style={{ ...s.input, ...(fieldErr('txDate') ? s.inputError : {}) }} value={txDate}
                       onChange={e => { setTxDate(e.target.value); touch('txDate') }} onBlur={() => touch('txDate')} />
                     {fieldErr('txDate') && <span style={s.errorMsg}>{fieldErr('txDate')}</span>}
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Period month <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Obračunski mesec <span style={s.req}>*</span></label>
                     <input type="month" style={{ ...s.input, ...(fieldErr('periodMonth') ? s.inputError : {}) }} value={periodMonth}
                       onChange={e => { setPeriodMonth(e.target.value); touch('periodMonth') }} onBlur={() => touch('periodMonth')} />
                     {fieldErr('periodMonth') && <span style={s.errorMsg}>{fieldErr('periodMonth')}</span>}
@@ -407,20 +408,20 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                   {!showNewPartner ? (
                     <>
                       <input style={s.input} value={partnerSearch}
-                        onChange={e => { setPartnerSearch(e.target.value); setPartnerId('') }} placeholder="Search partner..." />
+                        onChange={e => { setPartnerSearch(e.target.value); setPartnerId('') }} placeholder="Pretraga partnera…" />
                       {partnerSearch && !partnerId && (
                         <div style={s.dropdown}>
                           {filteredPartners.slice(0, 6).map(p => (
                             <div key={p.id} style={s.dropdownItem} onClick={() => { setPartnerId(p.id); setPartnerSearch(p.name) }}>{p.name}</div>
                           ))}
-                          <div style={{ ...s.dropdownItem, color: DIALOG.accent }} onClick={() => { setShowNewPartner(true); setPartnerSearch('') }}>+ Add new partner</div>
+                          <div style={{ ...s.dropdownItem, color: DIALOG.accent }} onClick={() => { setShowNewPartner(true); setPartnerSearch('') }}>+ Dodaj novog partnera</div>
                         </div>
                       )}
                     </>
                   ) : (
                     <>
-                      <input style={s.input} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="New partner name..." />
-                      <button style={s.linkBtn} onClick={() => setShowNewPartner(false)}>← Back to search</button>
+                      <input style={s.input} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="Naziv novog partnera…" />
+                      <button style={s.linkBtn} onClick={() => setShowNewPartner(false)}>← Nazad na pretragu</button>
                     </>
                   )}
                 </div>
@@ -432,37 +433,37 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
           {step === 2 && (
             <>
               <div style={s.section}>
-                <div style={s.sectionTitle}>Direction <span style={s.req}>*</span></div>
+                <div style={s.sectionTitle}>Smer <span style={s.req}>*</span></div>
                 <div style={s.dirGrid}>
                   <div style={{ ...s.dirCard, ...(direction === 'in' ? s.dirCardIn : {}) }} onClick={() => { setDirection('in'); setPairId('') }}>
                     <div style={{ fontSize: '28px', marginBottom: '8px' }}>📥</div>
-                    <div style={s.dirTitle}>Pass-through IN</div>
-                    <div style={s.dirSub}>Money received on behalf of a third party. Will need a matching OUT.</div>
+                    <div style={s.dirTitle}>Prolazna stavka — UPLATA</div>
+                    <div style={s.dirSub}>Novac primljen u ime trećeg lica. Potrebna je odgovarajuća ISPLATA.</div>
                   </div>
                   <div style={{ ...s.dirCard, ...(direction === 'out' ? s.dirCardOut : {}) }} onClick={() => { setDirection('out'); setPairId('') }}>
                     <div style={{ fontSize: '28px', marginBottom: '8px' }}>📤</div>
-                    <div style={s.dirTitle}>Pass-through OUT</div>
-                    <div style={s.dirSub}>Money paid out on behalf of a third party. Will need a matching IN.</div>
+                    <div style={s.dirTitle}>Prolazna stavka — ISPLATA</div>
+                    <div style={s.dirSub}>Novac isplaćen u ime trećeg lica. Potrebna je odgovarajuća UPLATA.</div>
                   </div>
                 </div>
               </div>
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Pair with existing entry</div>
+                <div style={s.sectionTitle}>Upari sa postojećom stavkom</div>
                 <div style={{ fontSize: '12px', color: DIALOG.dim, marginBottom: '12px' }}>
-                  Optionally link to an existing unpaired {direction === 'in' ? 'OUT' : 'IN'} entry. Can be done later.
+                  Po želji povežite sa postojećom neuparenom stavkom ({direction === 'in' ? 'ISPLATA' : 'UPLATA'}). Može i kasnije.
                 </div>
 
                 {unpaired.length === 0 ? (
-                  <div style={s.emptyState}>No unpaired {direction === 'in' ? 'OUT' : 'IN'} entries found for this company. You can pair later.</div>
+                  <div style={s.emptyState}>Za ovu firmu nema neuparenih stavki ({direction === 'in' ? 'ISPLATA' : 'UPLATA'}). Možete upariti kasnije.</div>
                 ) : (
                   <div style={s.pairList}>
                     {/* No pair option */}
                     <div style={{ ...s.pairRow, ...(!pairId ? s.pairRowSelected : {}) }} onClick={() => setPairId('')}>
                       <div style={s.pairRadio}><div style={{ ...s.pairRadioInner, ...(!pairId ? s.pairRadioActive : {}) }} /></div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.dim }}>No pair — post as unpaired</div>
-                        <div style={{ fontSize: '11px', color: DIALOG.faint }}>Match later when the other side arrives.</div>
+                        <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.dim }}>Bez para — proknjiži kao neuparenu</div>
+                        <div style={{ fontSize: '11px', color: DIALOG.faint }}>Uparite kasnije, kada stigne druga strana.</div>
                       </div>
                     </div>
                     {unpaired.map(p => (
@@ -471,7 +472,7 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                         <div style={{ flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.text }}>{p.partners?.name || '—'}</span>
-                            <span style={s.dirBadge}>{direction === 'in' ? 'OUT' : 'IN'}</span>
+                            <span style={s.dirBadge}>{direction === 'in' ? 'ISPLATA' : 'UPLATA'}</span>
                           </div>
                           <div style={{ fontSize: '11px', color: DIALOG.dim, marginTop: '2px' }}>{p.transaction_date} · Period: {p.period_month} · {p.banks?.name}</div>
                         </div>
@@ -487,16 +488,16 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                 {pairId && amountRsd > 0 && (
                   <div style={{ ...s.balanceBox, marginTop: '12px', ...(isBalanced ? s.balanceBoxOk : s.balanceBoxWarn) }}>
                     {isBalanced
-                      ? <>✅ Amounts match — pair will be marked as <strong>balanced</strong>.</>
-                      : <>⚠️ Difference of <strong>{fmtMoney(balanceDiff ?? 0, 'RSD')}</strong>. Pair will be <strong>paired but not balanced</strong>.</>
+                      ? <>✅ Iznosi se slažu — par će biti označen kao <strong>usklađen</strong>.</>
+                      : <>⚠️ Razlika od <strong>{fmtMoney(balanceDiff ?? 0, 'RSD')}</strong>. Par će biti <strong>uparen, ali neusklađen</strong>.</>
                     }
                   </div>
                 )}
               </div>
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Note</div>
-                <textarea style={s.textarea} value={note} onChange={e => setNote(e.target.value)} placeholder="Description of this pass-through entry..." />
+                <div style={s.sectionTitle}>Napomena</div>
+                <textarea style={s.textarea} value={note} onChange={e => setNote(e.target.value)} placeholder="Opis ove prolazne stavke…" />
               </div>
             </>
           )}
@@ -505,46 +506,46 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
           {step === 3 && (
             <>
               <div style={s.section}>
-                <div style={s.sectionTitle}>Amount & currency conversion</div>
+                <div style={s.sectionTitle}>Iznos i preračun valute</div>
                 <div style={{ ...s.infoBox, marginBottom: '12px' }}>
                   {currency === 'RSD'
-                    ? `Booked in RSD; the EUR rate on the transaction date (${txDate}) gives the EUR figure.`
-                    : `NBS middle rate on the transaction date (${txDate}), in RSD per 1 ${currency || 'unit'}.`}
+                    ? `Knjiži se u RSD; iznos u EUR daje kurs EUR na datum transakcije (${txDate}).`
+                    : `Srednji kurs NBS na datum transakcije (${txDate}), u RSD za 1 ${currency || 'jedinicu'}.`}
                 </div>
                 <div style={s.row2}>
                   <div style={s.field}>
-                    <label style={s.lbl}>Amount ({currency || '—'}) <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Iznos ({currency || '—'}) <span style={s.req}>*</span></label>
                     <input type="number" style={{ ...s.input, ...(fieldErr('amount') ? s.inputError : {}) }} value={amount}
                       onChange={e => { setAmount(e.target.value); touch('amount') }} onBlur={() => touch('amount')} placeholder="0.00" />
                     {fieldErr('amount') && <span style={s.errorMsg}>{fieldErr('amount')}</span>}
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>{currency && currency !== 'RSD' ? `RSD per 1 ${currency}` : 'RSD per 1 EUR'} <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>{currency && currency !== 'RSD' ? `RSD za 1 ${currency}` : 'RSD za 1 EUR'} <span style={s.req}>*</span></label>
                     <div style={{ display: 'flex', gap: '6px' }}>
                       {currency && currency !== 'RSD' ? (
                         <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={exRate}
                           onChange={e => { setExRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                          placeholder="Click Fetch" />
+                          placeholder="Kliknite Preuzmi" />
                       ) : (
                         <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={eurRate}
                           onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                          placeholder="Click Fetch" />
+                          placeholder="Kliknite Preuzmi" />
                       )}
-                      <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate || !currency}>{fetchingRate ? '...' : 'Fetch'}</button>
+                      <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate || !currency}>{fetchingRate ? '...' : 'Preuzmi'}</button>
                     </div>
                     {currency === 'USD' && (
                       <input type="number" style={{ ...s.input, marginTop: '6px' }} value={eurRate}
                         onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                        placeholder="RSD per 1 EUR" aria-label="RSD per 1 EUR" />
+                        placeholder="RSD za 1 EUR" aria-label="RSD za 1 EUR" />
                     )}
-                    {rateSource && <div style={{ fontSize: '11px', color: rateMissing ? '#FF5B5A' : DIALOG.blue, fontWeight: rateMissing ? 600 : 400, marginTop: '4px' }}>Source: {rateSource}</div>}
+                    {rateSource && <div style={{ fontSize: '11px', color: rateMissing ? '#FF5B5A' : DIALOG.blue, fontWeight: rateMissing ? 600 : 400, marginTop: '4px' }}>Izvor: {rateSource}</div>}
                     {fieldErr('exRate') && <span style={s.errorMsg}>{fieldErr('exRate')}</span>}
                   </div>
                 </div>
                 <div style={s.convRow}>
-                  <div><div style={s.convLabel}>Original amount</div><div style={s.convVal}>{amount ? fmtMoney(parseFloat(amount), currency) : '—'}</div></div>
+                  <div><div style={s.convLabel}>Originalni iznos</div><div style={s.convVal}>{amount ? fmtMoney(parseFloat(amount), currency) : '—'}</div></div>
                   <div style={{ fontSize: '20px', color: DIALOG.faint, alignSelf: 'flex-end', paddingBottom: '4px' }}>→</div>
-                  <div><div style={s.convLabel}>RSD (book)</div><div style={{ ...s.convVal, color: DIALOG.blue }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
+                  <div><div style={s.convLabel}>RSD (knjiženo)</div><div style={{ ...s.convVal, color: DIALOG.blue }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
                   <div><div style={s.convLabel}>EUR</div><div style={{ ...s.convVal, color: DIALOG.blue }}>{book.amounts ? fmtMoney(amountEur, 'EUR') : '—'}</div></div>
                 </div>
 
@@ -552,8 +553,8 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                 {pairId && amountRsd > 0 && selectedPair && (
                   <div style={{ ...s.balanceBox, marginTop: '12px', ...(isBalanced ? s.balanceBoxOk : s.balanceBoxWarn) }}>
                     {isBalanced
-                      ? <>✅ Amounts match — pair will be marked as <strong>balanced</strong>.</>
-                      : <>⚠️ Difference of <strong>{fmtMoney(balanceDiff ?? 0, 'RSD')}</strong> with paired entry ({fmtMoney(selectedPair.amount_rsd || 0, 'RSD')}). Will be <strong>paired but not balanced</strong>.</>
+                      ? <>✅ Iznosi se slažu — par će biti označen kao <strong>usklađen</strong>.</>
+                      : <>⚠️ Razlika od <strong>{fmtMoney(balanceDiff ?? 0, 'RSD')}</strong> u odnosu na uparenu stavku ({fmtMoney(selectedPair.amount_rsd || 0, 'RSD')}). Biće <strong>uparena, ali neusklađena</strong>.</>
                     }
                   </div>
                 )}
@@ -561,43 +562,43 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
 
               {/* Review */}
               <div style={s.section}>
-                <div style={s.sectionTitle}>Review</div>
+                <div style={s.sectionTitle}>Pregled</div>
                 {isValid ? (
                   <div style={{ ...s.infoBox, marginBottom: '14px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <span>✅</span>
                     <div>
-                      <div style={{ fontWeight: '500', marginBottom: '2px' }}>All fields valid — ready to post</div>
-                      <div style={{ fontSize: '11px', opacity: 0.85 }}>No P&L impact. Cash flow only.</div>
+                      <div style={{ fontWeight: '500', marginBottom: '2px' }}>Sva polja su ispravna — spremno za knjiženje</div>
+                      <div style={{ fontSize: '11px', opacity: 0.85 }}>Bez uticaja na P&L. Samo novčani tok.</div>
                     </div>
                   </div>
                 ) : (
                   <div style={{ ...s.validationBanner, marginBottom: '14px', position: 'relative' }}>
                     <span>⚠️</span>
                     <div>
-                      <div style={{ fontWeight: '500', fontSize: '12px' }}>{totalErrors} required field{totalErrors > 1 ? 's' : ''} missing</div>
+                      <div style={{ fontWeight: '500', fontSize: '12px' }}>Nedostaju obavezna polja: {totalErrors}</div>
                       <div style={{ fontSize: '11px', marginTop: '2px' }}>{Object.values(errors).join(' · ')}</div>
                     </div>
                   </div>
                 )}
 
                 {[
-                  { title: 'Entry info', rows: [
-                    ['Company', companies.find(c => c.id === companyId)?.name || '—'],
-                    ['Bank', banks.find(b => b.id === bankId)?.name || '—'],
+                  { title: 'Podaci o stavci', rows: [
+                    ['Firma', companies.find(c => c.id === companyId)?.name || '—'],
+                    ['Banka', banks.find(b => b.id === bankId)?.name || '—'],
                     ['Partner', showNewPartner ? newPartnerName : (partners.find(p => p.id === partnerId)?.name || partnerSearch || '—')],
-                    ['Date', txDate],
-                    ['Period month', periodMonth],
-                    ['Direction', direction === 'in' ? '📥 Pass-through IN' : '📤 Pass-through OUT'],
+                    ['Datum', txDate],
+                    ['Obračunski mesec', periodMonth],
+                    ['Smer', direction === 'in' ? '📥 Prolazna stavka — UPLATA' : '📤 Prolazna stavka — ISPLATA'],
                   ]},
-                  { title: 'Pairing & status', rows: [
-                    ['Pair', pairId ? (selectedPair ? `${selectedPair.partners?.name || '—'} · ${selectedPair.transaction_date}` : 'Selected') : 'None — will be unpaired'],
-                    ['Expected status', pairId ? (isBalanced ? 'Balanced ✅' : 'Paired (amounts differ) ⚠️') : 'Unpaired'],
-                    ['P&L impact', 'None — cash flow only'],
+                  { title: 'Uparivanje i status', rows: [
+                    ['Par', pairId ? (selectedPair ? `${selectedPair.partners?.name || '—'} · ${selectedPair.transaction_date}` : 'Izabrano') : 'Nema — biće neuparena'],
+                    ['Očekivani status', pairId ? (isBalanced ? 'Usklađeno ✅' : 'Upareno (iznosi se razlikuju) ⚠️') : 'Neupareno'],
+                    ['Uticaj na P&L', 'Nema — samo novčani tok'],
                   ]},
-                  { title: 'Amounts', rows: [
-                    ['Original amount', amount ? fmtMoney(parseFloat(amount), currency) : '—'],
-                    ['Exchange rate', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'Manual'})` : 'N/A'],
-                    ['RSD (book)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
+                  { title: 'Iznosi', rows: [
+                    ['Originalni iznos', amount ? fmtMoney(parseFloat(amount), currency) : '—'],
+                    ['Kurs', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'ručno'})` : 'nije dostupno'],
+                    ['RSD (knjiženo)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
                     ['EUR', book.amounts ? fmtMoney(amountEur, 'EUR') : '—'],
                   ]},
                 ].map(sec => (
@@ -626,17 +627,17 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
 
         <div style={s.footer}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: DIALOG.dim }}>Step {step} of 3</span>
+            <span style={{ fontSize: '12px', color: DIALOG.dim }}>Korak {step} od 3</span>
             {totalErrors > 0 && Object.keys(touched).length > 0 && (
               <span style={{ fontSize: '11px', color: DIALOG.red, background: DIALOG.redFill, padding: '2px 8px', borderRadius: '20px' }}>
-                {totalErrors} field{totalErrors > 1 ? 's' : ''} missing
+                Nedostaje polja: {totalErrors}
               </span>
             )}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {step > 1 && <button style={s.btnGhost} onClick={() => setStep(step - 1)}>Back</button>}
-            {step < 3 && <button style={s.btnPrimary} onClick={() => { touchStep(step); setStep(step + 1) }}>Continue</button>}
-            {step === 3 && <button style={{ ...s.btnPrimary, background: DIALOG.blue, opacity: saving ? 0.7 : 1 }} onClick={handlePost} disabled={saving}>{saving ? 'Saving...' : passthrough ? 'Update entry' : 'Post entry'}</button>}
+            {step > 1 && <button style={s.btnGhost} onClick={() => setStep(step - 1)}>Nazad</button>}
+            {step < 3 && <button style={s.btnPrimary} onClick={() => { touchStep(step); setStep(step + 1) }}>Dalje</button>}
+            {step === 3 && <button style={{ ...s.btnPrimary, background: DIALOG.blue, opacity: saving ? 0.7 : 1 }} onClick={handlePost} disabled={saving}>{saving ? 'Čuvanje…' : passthrough ? 'Sačuvaj izmene' : 'Proknjiži stavku'}</button>}
           </div>
         </div>
       </div>

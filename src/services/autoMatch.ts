@@ -103,35 +103,35 @@ export function scorePair(inRow: PassthroughRow, outRow: PassthroughRow): PairPr
   if (base === 0) return null
   const rel = diff / base
 
-  if (diff <= 0.01) { score += 50; reasons.push('exact amount') }
-  else if (rel <= 0.01) { score += 38; reasons.push(`amount differs ${(rel * 100).toFixed(1)}%`) }
-  else if (rel <= MATCH_LIMITS.maxRelAmountDiff) { score += 22; reasons.push(`amount differs ${(rel * 100).toFixed(1)}% (possible fee)`) }
+  if (diff <= 0.01) { score += 50; reasons.push('isti iznos') }
+  else if (rel <= 0.01) { score += 38; reasons.push(`iznos se razlikuje ${(rel * 100).toFixed(1).replace('.', ',')}%`) }
+  else if (rel <= MATCH_LIMITS.maxRelAmountDiff) { score += 22; reasons.push(`iznos se razlikuje ${(rel * 100).toFixed(1).replace('.', ',')}% (moguća provizija)`) }
   else return null
 
   // ── Partner ──
   if (inRow.partner_id && outRow.partner_id) {
-    if (inRow.partner_id === outRow.partner_id) { score += 30; reasons.push('same partner') }
+    if (inRow.partner_id === outRow.partner_id) { score += 30; reasons.push('isti partner') }
     else return null   // razliciti poznati partneri — sigurno nije par
   } else {
     const n1 = normalizeName(inRow.partner_name)
     const n2 = normalizeName(outRow.partner_name)
-    if (n1 && n2 && n1 === n2) { score += 26; reasons.push('same partner name') }
-    else if (n1 && n2 && (n1.includes(n2) || n2.includes(n1))) { score += 16; reasons.push('partner name partially matches') }
-    else reasons.push('partner unconfirmed')
+    if (n1 && n2 && n1 === n2) { score += 26; reasons.push('isti naziv partnera') }
+    else if (n1 && n2 && (n1.includes(n2) || n2.includes(n1))) { score += 16; reasons.push('naziv partnera se delimično poklapa') }
+    else reasons.push('partner nije potvrđen')
   }
 
   // ── Datum ──
   const gap = daysBetween(inRow.transaction_date, outRow.transaction_date)
   if (gap > MATCH_LIMITS.maxDayGap) return null
-  if (gap <= 2) { score += 20; reasons.push(gap === 0 ? 'same day' : `${gap}d apart`) }
-  else if (gap <= 7) { score += 14; reasons.push(`${gap}d apart`) }
-  else if (gap <= 30) { score += 7; reasons.push(`${gap}d apart`) }
-  else { reasons.push(`${gap}d apart — wide`) }
+  if (gap <= 2) { score += 20; reasons.push(gap === 0 ? 'isti dan' : `razmak ${gap} d`) }
+  else if (gap <= 7) { score += 14; reasons.push(`razmak ${gap} d`) }
+  else if (gap <= 30) { score += 7; reasons.push(`razmak ${gap} d`) }
+  else { reasons.push(`razmak ${gap} d — veliki`) }
 
   // ── Referenca ──
   const r1 = (inRow.reference_number || '').trim()
   const r2 = (outRow.reference_number || '').trim()
-  if (r1 && r2 && r1 === r2) { score += 10; reasons.push('same reference') }
+  if (r1 && r2 && r1 === r2) { score += 10; reasons.push('isti poziv na broj') }
 
   if (score < MATCH_LIMITS.minScore) return null
 

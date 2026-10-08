@@ -29,10 +29,21 @@ import {
   type Tab, type FilterState, type DatePreset, type Predicate,
 } from '../services/ledgerFilters'
 import { deleteTransactionSafely } from '../services/writeOrder'
+import { countOf, plural } from '../utils/plural'
 
 // Which table each tab reads, and with which embeds. The filter itself is not
 // here — it comes from `buildPredicates`, which is under test — so this stays
 // the only place that knows a tab's shape.
+/** How stored status and type values read on screen; the values stay English. */
+const VALUE_LABEL: Record<string, string> = {
+  unpaid: 'neplaćeno', partial: 'delimično', paid: 'plaćeno', overpaid: 'preplaćeno', reconciled: 'usaglašeno',
+  unpaired: 'neupareno', paired: 'upareno', balanced: 'usklađeno',
+  expense: 'ulazna', revenue: 'izlazna',
+  direct: 'direktna', invoice_payment: 'plać. fakture', credit_payment: 'otplata kredita',
+  transfer: 'prenos', intercompany: 'između firmi', passthrough: 'prolazna',
+}
+const valueLabel = (v: string | null | undefined): string => (v && VALUE_LABEL[v]) || v || '—'
+
 const TAB_QUERY: Record<Tab, { table: string; select: string }> = {
   invoices: { table: 'v_invoice_status', select: '*' },
   transactions: {
@@ -317,7 +328,7 @@ export default function Transactions() {
   }
 
   const deleteInvoice = async (id: string) => {
-    if (!window.confirm('Delete this invoice? This may affect P&L.')) return
+    if (!window.confirm('Obrisati ovu fakturu? To može da utiče na P&L.')) return
     if (!await softDelete('invoices', id)) return
     invalidate('invoices')
     refresh(); setShowMenu(null)
@@ -331,7 +342,7 @@ export default function Transactions() {
   // kreditni raspored. Redosljed i atomicnost su sada u `writeOrder`, zajedno
   // sa tacnom porukom za svaki korak koji moze da padne.
   const deleteTransaction = async (id: string) => {
-    if (!window.confirm('Delete this transaction?')) return
+    if (!window.confirm('Obrisati ovu transakciju?')) return
     const outcome = await deleteTransactionSafely(supabase, { transactionId: id, deletedBy: user?.id ?? null })
     if (!outcome.ok) { window.alert(outcome.message); return }
     // Signal other pages to refetch
@@ -342,7 +353,7 @@ export default function Transactions() {
   }
 
   const deletePassthrough = async (id: string) => {
-    if (!window.confirm('Delete this pass-through entry?')) return
+    if (!window.confirm('Obrisati ovu prolaznu stavku?')) return
     if (!await softDelete('passthrough', id)) return
     refresh(); setShowMenu(null)
   }
@@ -504,29 +515,30 @@ export default function Transactions() {
 
   const classificationPickers = (
     <>
-      {searchPicker(f.projectId, v => ({ projectId: v }), 'All projects',
+      {searchPicker(f.projectId, v => ({ projectId: v }), 'Svi projekti',
         projectSelOpts, { maxWidth: '210px' })}
-      {searchPicker(f.expenseDescription, v => ({ expenseDescription: v }), 'All expense descriptions',
+      {searchPicker(f.expenseDescription, v => ({ expenseDescription: v }), 'Svi opisi troškova',
         expDescSelOpts, { maxWidth: '210px' })}
-      {searchPicker(f.department, v => ({ department: v, deptSubcategory: '' }), 'All departments',
+      {searchPicker(f.department, v => ({ department: v, deptSubcategory: '' }), 'Svi sektori',
         departmentOpts)}
       {searchPicker(f.deptSubcategory, v => ({ deptSubcategory: v }),
-        deptId ? 'All dept. sub-categories' : 'Dept. sub-category',
+        deptId ? 'Svi podsektori' : 'Podsektor',
         deptSubSelOpts,
         !deptId || deptSubOpts.length === 0 ? { opacity: 0.45 } : undefined)}
       {searchPicker(f.plCategory, v => ({ plCategory: v, plSubcategory: '' }),
-        plCategoryColumn(activeTab, f) === 'revenue_stream' ? 'All revenue streams' : 'All P&L categories',
+        plCategoryColumn(activeTab, f) === 'revenue_stream' ? 'Sve vrste prihoda' : 'Sve P&L kategorije',
         plCatSelOpts)}
       {plCategoryColumn(activeTab, f) === 'pl_category' &&
         searchPicker(f.plSubcategory, v => ({ plSubcategory: v }),
-          plCatId ? 'All P&L sub-categories' : 'P&L sub-category',
+          plCatId ? 'Sve P&L potkategorije' : 'P&L potkategorija',
           plSubSelOpts,
           !plCatId || plSubOpts.length === 0 ? { opacity: 0.45 } : undefined)}
     </>
   )
 
-  const countNoun = activeTab === 'invoices' ? 'invoice' : activeTab === 'transactions' ? 'transaction' : 'entry'
-  const countPlural = activeTab === 'passthrough' ? 'entries' : `${countNoun}s`
+  const countWord = (n: number) => activeTab === 'invoices' ? plural(n, 'faktura', 'fakture', 'faktura')
+    : activeTab === 'transactions' ? plural(n, 'transakcija', 'transakcije', 'transakcija')
+      : plural(n, 'stavka', 'stavke', 'stavki')
   const matched = counts[activeTab]
   // The sum pages through every matching row; the count is a server-side
   // count of the same predicate. If the sum saw fewer rows than the count, it
@@ -548,44 +560,44 @@ export default function Transactions() {
       <div style={s.body}>
         <div style={s.pageHeader}>
           <div>
-            <div style={s.pageTitle}>General Ledger</div>
-            <div style={s.pageSub}>Invoices, transactions and pass-throughs across all entities</div>
+            <div style={s.pageTitle}>Glavna knjiga</div>
+            <div style={s.pageSub}>Fakture, transakcije i prolazne stavke svih firmi</div>
           </div>
           <div style={s.btnGroup}>
-            <button style={s.btnInvoice} onClick={() => { setEditInvoice(null); setShowInvoiceDialog(true) }}>📄 New invoice</button>
-            <button style={s.btnTransaction} onClick={() => { setEditTransaction(null); setShowTransactionDialog(true) }}>💳 New transaction</button>
-            <button style={s.btnStatement} onClick={() => setShowBankStatement(true)}>🏦 Bank statement</button>
-            <button style={s.btnBulk} onClick={() => setShowBulkImport(true)}>📥 Bulk import</button>
-            <button style={s.btnPayroll} onClick={() => setShowPayrollDialog(true)}>💼 Payroll</button>
-            <button style={s.btnPayrollImport} onClick={() => setShowPayrollImport(true)}>📊 Payroll import</button>
+            <button style={s.btnInvoice} onClick={() => { setEditInvoice(null); setShowInvoiceDialog(true) }}>📄 Nova faktura</button>
+            <button style={s.btnTransaction} onClick={() => { setEditTransaction(null); setShowTransactionDialog(true) }}>💳 Nova transakcija</button>
+            <button style={s.btnStatement} onClick={() => setShowBankStatement(true)}>🏦 Izvod</button>
+            <button style={s.btnBulk} onClick={() => setShowBulkImport(true)}>📥 Grupni uvoz</button>
+            <button style={s.btnPayroll} onClick={() => setShowPayrollDialog(true)}>💼 Zarade</button>
+            <button style={s.btnPayrollImport} onClick={() => setShowPayrollImport(true)}>📊 Uvoz zarada</button>
           </div>
         </div>
 
         <div style={s.summaryRow} className="mf-stagger">
           <div style={s.summaryCard}>
-            <div style={s.summaryLabel}>Outstanding invoices</div>
+            <div style={s.summaryLabel}>Otvorene fakture</div>
             <div style={s.summaryVal}>{format(unpaidTotal, 0)}</div>
-            <div style={s.summarySub}>{summaryStats.unpaidCount} invoices unpaid</div>
+            <div style={s.summarySub}>{countOf(summaryStats.unpaidCount, 'neplaćena faktura', 'neplaćene fakture', 'neplaćenih faktura')}</div>
           </div>
           <div style={{ ...s.summaryCard, ...(overdueCount > 0 ? s.summaryCardAlert : {}) }}>
-            <div style={s.summaryLabel}>Overdue</div>
+            <div style={s.summaryLabel}>U kašnjenju</div>
             <div style={{ ...s.summaryVal, ...(overdueCount > 0 ? { color: '#FF5B5A' } : {}) }}>{overdueCount}</div>
-            <div style={s.summarySub}>{overdueCount > 0 ? 'Invoices past due date' : 'All invoices on time'}</div>
+            <div style={s.summarySub}>{overdueCount > 0 ? 'Fakture posle datuma dospeća' : 'Sve fakture su na vreme'}</div>
           </div>
           <div style={{ ...s.summaryCard, ...(directWithPL > 0 ? s.summaryCardWarn : {}) }}>
-            <div style={s.summaryLabel}>Pending reconcile</div>
+            <div style={s.summaryLabel}>Čeka uparivanje</div>
             <div style={{ ...s.summaryVal, ...(directWithPL > 0 ? { color: '#F5A623' } : {}) }}>{directWithPL}</div>
-            <div style={s.summarySub}>{directWithPL > 0 ? 'Direct tx awaiting invoice' : 'All direct tx reconciled'}</div>
+            <div style={s.summarySub}>{directWithPL > 0 ? 'Direktne transakcije bez fakture' : 'Sve direktne transakcije su uparene'}</div>
           </div>
           <div style={{ ...s.summaryCard, ...(unpairedPt > 0 ? s.summaryCardWarn : {}) }}>
-            <div style={s.summaryLabel}>Unpaired pass-throughs</div>
+            <div style={s.summaryLabel}>Neuparene prolazne stavke</div>
             <div style={{ ...s.summaryVal, ...(unpairedPt > 0 ? { color: '#F5A623' } : {}) }}>{unpairedPt}</div>
             {unpairedPt > 0 ? (
               <button style={s.autoMatchBtn} onClick={() => setShowAutoMatch(true)}>
                 ⚡ Auto-upari →
               </button>
             ) : (
-              <div style={s.summarySub}>All pass-throughs paired</div>
+              <div style={s.summarySub}>Sve prolazne stavke su uparene</div>
             )}
           </div>
         </div>
@@ -593,16 +605,16 @@ export default function Transactions() {
         <div style={s.tabBar}>
           <div style={{ display: 'flex', gap: 0 }}>
             {([
-              { id: 'invoices', label: '📄 Invoices', count: counts.invoices },
-              { id: 'transactions', label: '💳 Transactions', count: counts.transactions },
-              { id: 'passthrough', label: '⚡ Pass-through', count: counts.passthrough },
+              { id: 'invoices', label: '📄 Fakture', count: counts.invoices },
+              { id: 'transactions', label: '💳 Transakcije', count: counts.transactions },
+              { id: 'passthrough', label: '⚡ Prolazne stavke', count: counts.passthrough },
             ] as { id: Tab; label: string; count: number }[]).map(tab => (
               <button key={tab.id}
                 style={{ ...s.tab, ...(activeTab === tab.id ? s.tabActive : {}) }}
                 onClick={() => handleTabChange(tab.id)}>
                 {tab.label}
                 <span style={{ ...s.tabCount, ...(activeTab === tab.id ? s.tabCountActive : {}) }}>
-                  {activeTab === tab.id && totals.status === 'loading' ? '…' : tab.count.toLocaleString()}
+                  {activeTab === tab.id && totals.status === 'loading' ? '…' : tab.count.toLocaleString('sr-RS')}
                 </span>
               </button>
             ))}
@@ -619,21 +631,21 @@ export default function Transactions() {
                 fresh list is the same lie in miniature: a number on screen
                 that no longer describes what is under it. */}
             {totals.status === 'loading'
-              ? <span style={s.resultMuted}>counting…</span>
+              ? <span style={s.resultMuted}>brojanje…</span>
               : <>
-                <span style={s.resultCount}>{matched.toLocaleString()} {matched === 1 ? countNoun : countPlural}</span>
+                <span style={s.resultCount}>{matched.toLocaleString('sr-RS')} {countWord(matched)}</span>
                 <span style={s.resultDot}>·</span>
               </>}
             {totals.status === 'loading' ? null
-              : totals.status === 'error' ? <span style={{ ...s.resultMuted, color: '#FF5B5A' }}>count unavailable</span>
+              : totals.status === 'error' ? <span style={{ ...s.resultMuted, color: '#FF5B5A' }}>broj nije dostupan</span>
                 : <span style={s.resultSum} title={sumShort
-                  ? `Summed ${totals.rows.toLocaleString()} of ${matched.toLocaleString()} matching rows — the total is at least this.`
-                  : `Every one of the ${totals.rows.toLocaleString()} matching rows, not the page below.`}>
+                  ? `Sabrano ${totals.rows.toLocaleString('sr-RS')} od ${matched.toLocaleString('sr-RS')} odgovarajućih redova — ukupno je najmanje ovoliko.`
+                  : `Svih ${totals.rows.toLocaleString('sr-RS')} odgovarajućih redova, ne samo strana ispod.`}>
                   {sumShort ? '≥ ' : ''}{format(totals.sum, 0)}
                 </span>}
             {sumShort && (
               <span style={s.resultWarn}>
-                summed {totals.rows.toLocaleString()} of {matched.toLocaleString()}
+                sabrano {totals.rows.toLocaleString('sr-RS')} od {matched.toLocaleString('sr-RS')}
               </span>
             )}
             {/* Position now lives in the pager under the table — saying it
@@ -644,20 +656,20 @@ export default function Transactions() {
             {chips.map(chip => (
               <span key={chip.id} style={s.chip}>
                 {chip.label}
-                <button style={s.chipX} title="Remove this filter"
+                <button style={s.chipX} title="Ukloni ovaj filter"
                   onClick={() => patchTab(activeTab, clearFields(filters[activeTab], chip.clears))}>
                   ✕
                 </button>
               </span>
             ))}
             {chips.length > 0 && (
-              <button style={s.clearAll} onClick={clearAll}>✕ Clear all</button>
+              <button style={s.clearAll} onClick={clearAll}>✕ Poništi filtere</button>
             )}
           </div>
         </div>
 
         {fetchError && (
-          <div style={s.errorBar}>Could not load this tab: {fetchError}</div>
+          <div style={s.errorBar}>Kartica nije učitana: {fetchError}</div>
         )}
 
         <div style={s.filterBar}>
@@ -665,13 +677,13 @@ export default function Transactions() {
             {/* Shared by all three tabs */}
             <input type="text"
               placeholder={activeTab === 'invoices'
-                ? 'Partner, invoice no., note, description, reference, account…'
-                : 'Partner, note, description, reference, account…'}
+                ? 'Partner, broj fakture, napomena, opis, poziv na broj, račun…'
+                : 'Partner, napomena, opis, poziv na broj, račun…'}
               value={draft.tab === activeTab ? draft.value : f.search}
               onChange={e => setDraft({ tab: activeTab, value: e.target.value })}
               style={{ ...s.searchInput, flex: 1, minWidth: '220px' }} />
 
-            {showPicker && picker(f.companyId, v => ({ companyId: v, bankId: '' }), 'All companies',
+            {showPicker && picker(f.companyId, v => ({ companyId: v, bankId: '' }), 'Sve firme',
               companies.map(c => opt(c.id, c.name)))}
 
             <select style={s.filterSelect} value={f.datePreset}
@@ -683,69 +695,69 @@ export default function Transactions() {
               }}>
               {(Object.keys(PRESET_LABELS) as DatePreset[]).map(p => opt(p, PRESET_LABELS[p]))}
             </select>
-            <input type="date" title={activeTab === 'invoices' ? 'Invoice date from' : 'Date from'}
+            <input type="date" title={activeTab === 'invoices' ? 'Datum fakture od' : 'Datum od'}
               style={{ ...s.filterSelect, color: f.dateFrom ? '#DCE9F6' : '#7A9BB8' }}
               value={f.dateFrom} onChange={e => setFilter({ dateFrom: e.target.value, datePreset: 'custom' })} />
-            <input type="date" title={activeTab === 'invoices' ? 'Invoice date to' : 'Date to'}
+            <input type="date" title={activeTab === 'invoices' ? 'Datum fakture do' : 'Datum do'}
               style={{ ...s.filterSelect, color: f.dateTo ? '#DCE9F6' : '#7A9BB8' }}
               value={f.dateTo} onChange={e => setFilter({ dateTo: e.target.value, datePreset: 'custom' })} />
 
-            <input type="text" inputMode="decimal" placeholder={`Min ${currency}`} title={`Minimum amount in ${currency}`}
+            <input type="text" inputMode="decimal" placeholder={`Min ${currency}`} title={`Najmanji iznos u ${currency}`}
               style={{ ...s.filterSelect, width: '92px' }}
               value={f.amountFrom} onChange={e => setFilter({ amountFrom: e.target.value })} />
-            <input type="text" inputMode="decimal" placeholder={`Max ${currency}`} title={`Maximum amount in ${currency}`}
+            <input type="text" inputMode="decimal" placeholder={`Max ${currency}`} title={`Najveći iznos u ${currency}`}
               style={{ ...s.filterSelect, width: '92px' }}
               value={f.amountTo} onChange={e => setFilter({ amountTo: e.target.value })} />
 
-            {picker(f.currency, v => ({ currency: v }), 'All currencies', CURRENCIES.map(c => opt(c)))}
+            {picker(f.currency, v => ({ currency: v }), 'Sve valute', CURRENCIES.map(c => opt(c)))}
 
             {/* ── Transactions ─────────────────────────────────────────── */}
             {activeTab === 'transactions' && <>
-              {picker(f.direction, v => ({ direction: v, plCategory: '', plSubcategory: '' }), 'Expense & revenue',
-                [opt('expense', 'Expense'), opt('revenue', 'Revenue')])}
-              {picker(f.txType, v => ({ txType: v }), 'All types',
-                [opt('direct', 'Direct'), opt('invoice_payment', 'Invoice payment'), opt('credit_payment', 'Credit payment')])}
+              {picker(f.direction, v => ({ direction: v, plCategory: '', plSubcategory: '' }), 'Troškovi i prihodi',
+                [opt('expense', 'Trošak'), opt('revenue', 'Prihod')])}
+              {picker(f.txType, v => ({ txType: v }), 'Svi tipovi',
+                [opt('direct', 'Direktna'), opt('invoice_payment', 'Plaćanje fakture'), opt('credit_payment', 'Otplata kredita')])}
               {classificationPickers}
-              {toggle(f.unclassified, 'Unclassified', { unclassified: !f.unclassified }, '#F5A623')}
+              {toggle(f.unclassified, 'Neklasifikovano', { unclassified: !f.unclassified }, '#F5A623')}
             </>}
 
             {/* ── Invoices ─────────────────────────────────────────────── */}
             {activeTab === 'invoices' && <>
-              {picker(f.direction, v => ({ direction: v }), 'Expense & revenue',
-                [opt('expense', 'Expense'), opt('revenue', 'Revenue')])}
+              {picker(f.direction, v => ({ direction: v }), 'Troškovi i prihodi',
+                [opt('expense', 'Trošak'), opt('revenue', 'Prihod')])}
               {/* Three, because three is what `v_invoice_status` can answer.
                   This filtered on `calculated_status`, and the view produces
                   only unpaid, partial and paid — so `Overpaid` and
                   `Reconciled` were choices that always came back empty. */}
-              {picker(f.invoiceStatus, v => ({ invoiceStatus: v }), 'All statuses',
-                [opt('unpaid', 'Unpaid'), opt('partial', 'Partial'), opt('paid', 'Paid')])}
-              {toggle(f.overdue, 'Overdue', { overdue: !f.overdue }, '#FF5B5A')}
-              <input type="date" title="Due date from"
+              {picker(f.invoiceStatus, v => ({ invoiceStatus: v }), 'Svi statusi',
+                [opt('unpaid', 'Neplaćeno'), opt('partial', 'Delimično'), opt('paid', 'Plaćeno')])}
+              {toggle(f.overdue, 'U kašnjenju', { overdue: !f.overdue }, '#FF5B5A')}
+              <input type="date" title="Datum dospeća od"
                 style={{ ...s.filterSelect, color: f.dueFrom ? '#DCE9F6' : '#7A9BB8' }}
                 value={f.dueFrom} onChange={e => setFilter({ dueFrom: e.target.value })} />
-              <input type="date" title="Due date to"
+              <input type="date" title="Datum dospeća do"
                 style={{ ...s.filterSelect, color: f.dueTo ? '#DCE9F6' : '#7A9BB8' }}
                 value={f.dueTo} onChange={e => setFilter({ dueTo: e.target.value })} />
-              {searchPicker(f.partnerId, v => ({ partnerId: v }), 'All partners',
+              {searchPicker(f.partnerId, v => ({ partnerId: v }), 'Svi partneri',
                 partnerOpts, { maxWidth: '190px' })}
               {classificationPickers}
             </>}
 
             {/* ── Pass-through ─────────────────────────────────────────── */}
             {activeTab === 'passthrough' && <>
-              {picker(f.ptStatus, v => ({ ptStatus: v }), 'All statuses',
-                [opt('unpaired', 'Unpaired'), opt('paired', 'Paired'), opt('balanced', 'Balanced')])}
-              {picker(f.ptDirection, v => ({ ptDirection: v }), 'In & out',
-                [opt('in', 'In'), opt('out', 'Out')])}
-              <input type="month" title="Period from"
+              {picker(f.ptStatus, v => ({ ptStatus: v }), 'Svi statusi',
+                [opt('unpaired', 'Neupareno'), opt('paired', 'Upareno'), opt('balanced', 'Usklađeno')])}
+              {picker(f.ptDirection, v => ({ ptDirection: v }), 'Uplate i isplate',
+                [opt('in', 'Uplata'), opt('out', 'Isplata')])}
+              <input type="month" title="Period od"
                 style={{ ...s.filterSelect, color: f.periodFrom ? '#DCE9F6' : '#7A9BB8' }}
                 value={f.periodFrom} onChange={e => setFilter({ periodFrom: e.target.value })} />
-              <input type="month" title="Period to"
+              <input type="month" title="Period do"
                 style={{ ...s.filterSelect, color: f.periodTo ? '#DCE9F6' : '#7A9BB8' }}
                 value={f.periodTo} onChange={e => setFilter({ periodTo: e.target.value })} />
-              {searchPicker(f.partnerId, v => ({ partnerId: v }), 'All partners',
+              {searchPicker(f.partnerId, v => ({ partnerId: v }), 'Svi partneri',
                 partnerOpts, { maxWidth: '190px' })}
-              {picker(f.bankId, v => ({ bankId: v }), 'All banks', bankOpts.map(b => opt(b.id, b.name)))}
+              {picker(f.bankId, v => ({ bankId: v }), 'Sve banke', bankOpts.map(b => opt(b.id, b.name)))}
             </>}
           </div>
         </div>
@@ -759,18 +771,18 @@ export default function Transactions() {
             filteredInvoices.length === 0 ? (
               <div style={s.emptyState}>
                 <div style={{ fontSize: '32px', marginBottom: '12px' }}>📄</div>
-                <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>No invoices yet</div>
-                <div style={{ fontSize: '13px', color: '#7A9BB8', marginBottom: '20px' }}>Click "New invoice" to add your first P&L entry.</div>
-                <button style={s.btnInvoice} onClick={() => setShowInvoiceDialog(true)}>📄 New invoice</button>
+                <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>Još nema faktura</div>
+                <div style={{ fontSize: '13px', color: '#7A9BB8', marginBottom: '20px' }}>Kliknite „Nova faktura“ da dodate prvu P&L stavku.</div>
+                <button style={s.btnInvoice} onClick={() => setShowInvoiceDialog(true)}>📄 Nova faktura</button>
               </div>
             ) : (
               <table style={s.table}>
                 <thead>
                   <tr style={s.thead}>
-                    <th style={s.th}>Invoice date</th><th style={s.th}>Due date</th><th style={s.th}>Partner</th>
-                    <th style={s.th}>Invoice #</th><th style={s.th}>Type</th><th style={s.th}>P&L Category</th>
-                    <th style={s.th}>Project</th><th style={s.th}>Company</th><th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
-                    <th style={{ ...s.th, textAlign: 'right' as const }}>Remaining</th><th style={s.th}>Status</th><th style={s.th}></th>
+                    <th style={s.th}>Datum fakture</th><th style={s.th}>Datum dospeća</th><th style={s.th}>Partner</th>
+                    <th style={s.th}>Broj fakture</th><th style={s.th}>Tip</th><th style={s.th}>P&L kategorija</th>
+                    <th style={s.th}>Projekat</th><th style={s.th}>Firma</th><th style={{ ...s.th, textAlign: 'right' as const }}>Iznos</th>
+                    <th style={{ ...s.th, textAlign: 'right' as const }}>Preostalo</th><th style={s.th}>Status</th><th style={s.th}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -782,21 +794,21 @@ export default function Transactions() {
                         <td style={s.td}><span style={{ ...s.dateCell, color: isOverdue ? '#FF5B5A' : '#7A9BB8', fontWeight: isOverdue ? '600' : '400' }}>{inv.due_date || '—'}{isOverdue && ' ⚠️'}</span></td>
                         <td style={s.td}><span style={s.partnerCell}>{inv.partner_name || '—'}</span></td>
                         <td style={s.td}><span style={s.invNumCell}>{inv.invoice_number || '—'}</span></td>
-                        <td style={s.td}><span style={{ ...s.badge, background: inv.type === 'expense' ? '#FCEBEB' : '#E1F5EE', color: inv.type === 'expense' ? '#A32D2D' : '#085041' }}>{inv.type}</span></td>
+                        <td style={s.td}><span style={{ ...s.badge, background: inv.type === 'expense' ? '#FCEBEB' : '#E1F5EE', color: inv.type === 'expense' ? '#A32D2D' : '#085041' }}>{valueLabel(inv.type)}</span></td>
                         <td style={s.td}><span style={s.catCell}>{inv.pl_category || inv.revenue_stream || '—'}</span></td>
                         <td style={s.td}><span style={s.compCell}>{projectLabelById(projects, inv.project_id, inv.project_name)}</span></td>
                         <td style={s.td}><span style={s.compCell}>{inv.company_name || '—'}</span></td>
                         <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{fmtMoney(inv.amount || 0, inv.currency)}</span></td>
                         <td style={{ ...s.td, textAlign: 'right' as const }}><span style={{ ...s.amtCell, color: (pick(inv, 'remaining') ?? 0) > 0.01 ? '#FF5B5A' : '#00D47E' }}>{format(pick(inv, 'remaining'))}</span></td>
-                        <td style={s.td}><span style={{ ...s.badge, background: invoiceStatusColors[inv.calculated_status]?.bg, color: invoiceStatusColors[inv.calculated_status]?.color }}>{inv.calculated_status}</span></td>
+                        <td style={s.td}><span style={{ ...s.badge, background: invoiceStatusColors[inv.calculated_status]?.bg, color: invoiceStatusColors[inv.calculated_status]?.color }}>{valueLabel(inv.calculated_status)}</span></td>
                         <td style={s.td} onClick={e => e.stopPropagation()}>
                           <div style={{ position: 'relative' }}>
                             <button style={s.editBtn} onClick={() => setShowMenu(showMenu === inv.id ? null : inv.id)}>···</button>
                             {showMenu === inv.id && (
                               <div style={s.contextMenu}>
-                                <div style={s.contextItem} onClick={() => handleEditInvoice(inv)}>✏️ Edit</div>
-                                <div style={s.contextItem} onClick={() => { setReconcileSource({ type: 'invoice', id: inv.id }); setShowMenu(null) }}>🔗 Reconcile</div>
-                                <div style={{ ...s.contextItem, color: '#FF5B5A' }} onClick={() => deleteInvoice(inv.id)}>🗑 Delete</div>
+                                <div style={s.contextItem} onClick={() => handleEditInvoice(inv)}>✏️ Izmeni</div>
+                                <div style={s.contextItem} onClick={() => { setReconcileSource({ type: 'invoice', id: inv.id }); setShowMenu(null) }}>🔗 Upari</div>
+                                <div style={{ ...s.contextItem, color: '#FF5B5A' }} onClick={() => deleteInvoice(inv.id)}>🗑 Obriši</div>
                               </div>
                             )}
                           </div>
@@ -813,23 +825,23 @@ export default function Transactions() {
             filteredTransactions.length === 0 ? (
               <div style={s.emptyState}>
                 <div style={{ fontSize: '32px', marginBottom: '12px' }}>💳</div>
-                <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>No transactions yet</div>
-                <div style={{ fontSize: '13px', color: '#7A9BB8', marginBottom: '20px' }}>Click "New transaction" or use Bulk import.</div>
+                <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>Još nema transakcija</div>
+                <div style={{ fontSize: '13px', color: '#7A9BB8', marginBottom: '20px' }}>Kliknite „Nova transakcija“ ili koristite grupni uvoz.</div>
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-                  <button style={s.btnTransaction} onClick={() => setShowTransactionDialog(true)}>💳 New transaction</button>
-                  <button style={s.btnStatement} onClick={() => setShowBankStatement(true)}>🏦 Bank statement</button>
-                  <button style={s.btnBulk} onClick={() => setShowBulkImport(true)}>📥 Bulk import</button>
-            <button style={s.btnPayroll} onClick={() => setShowPayrollDialog(true)}>💼 Payroll</button>
-            <button style={s.btnPayrollImport} onClick={() => setShowPayrollImport(true)}>📊 Payroll import</button>
+                  <button style={s.btnTransaction} onClick={() => setShowTransactionDialog(true)}>💳 Nova transakcija</button>
+                  <button style={s.btnStatement} onClick={() => setShowBankStatement(true)}>🏦 Izvod</button>
+                  <button style={s.btnBulk} onClick={() => setShowBulkImport(true)}>📥 Grupni uvoz</button>
+            <button style={s.btnPayroll} onClick={() => setShowPayrollDialog(true)}>💼 Zarade</button>
+            <button style={s.btnPayrollImport} onClick={() => setShowPayrollImport(true)}>📊 Uvoz zarada</button>
                 </div>
               </div>
             ) : (
               <table style={s.table}>
                 <thead>
                   <tr style={s.thead}>
-                    <th style={s.th}>Date</th><th style={s.th}>Partner</th><th style={s.th}>Type</th>
-                    <th style={s.th}>P&L / Invoice</th><th style={s.th}>Project</th><th style={s.th}>Note</th><th style={s.th}>Company</th>
-                    <th style={s.th}>Bank</th><th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
+                    <th style={s.th}>Datum</th><th style={s.th}>Partner</th><th style={s.th}>Tip</th>
+                    <th style={s.th}>P&L / faktura</th><th style={s.th}>Projekat</th><th style={s.th}>Napomena</th><th style={s.th}>Firma</th>
+                    <th style={s.th}>Banka</th><th style={{ ...s.th, textAlign: 'right' as const }}>Iznos</th>
                     <th style={{ ...s.th, textAlign: 'right' as const }}>{currency}</th><th style={s.th}>P&L</th><th style={s.th}></th>
                   </tr>
                 </thead>
@@ -838,23 +850,23 @@ export default function Transactions() {
                     <tr key={t.id} style={{ ...s.tr, background: i % 2 === 0 ? '#0D1B2C' : '#111F30' }}>
                       <td style={s.td}><span style={s.dateCell}>{t.transaction_date}</span></td>
                       <td style={s.td}><span style={s.partnerCell}>{t.partners?.name || '—'}</span></td>
-                      <td style={s.td}><span style={{ ...s.badge, background: txTypeColors[t.type]?.bg, color: txTypeColors[t.type]?.color }}>{t.type === 'invoice_payment' ? 'Inv. payment' : t.type}</span></td>
-                      <td style={s.td}><span style={s.catCell}>{t.pl_impact ? (t.pl_category || t.revenue_stream || '—') : <span style={{ color: 'rgba(255,255,255,0.30)', fontSize: '11px' }}>via invoice</span>}</span></td>
+                      <td style={s.td}><span style={{ ...s.badge, background: txTypeColors[t.type]?.bg, color: txTypeColors[t.type]?.color }}>{valueLabel(t.type)}</span></td>
+                      <td style={s.td}><span style={s.catCell}>{t.pl_impact ? (t.pl_category || t.revenue_stream || '—') : <span style={{ color: 'rgba(255,255,255,0.30)', fontSize: '11px' }}>preko fakture</span>}</span></td>
                       <td style={s.td}><span style={s.compCell}>{projectLabelById(projects, t.project_id)}</span></td>
                       <td style={s.td}><span style={s.descCell}>{t.note || '—'}</span></td>
                       <td style={s.td}><span style={s.compCell}>{t.companies?.name || '—'}</span></td>
                       <td style={s.td}><span style={s.compCell}>{t.banks?.name || '—'}</span></td>
                       <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{fmtMoney(t.amount || 0, t.currency)}</span></td>
                       <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.bookCell}>{format(pick(t))}</span></td>
-                      <td style={s.td}>{t.pl_impact ? <span style={{ ...s.badge, background: '#E1F5EE', color: '#085041' }}>✓ P&L</span> : <span style={{ ...s.badge, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.30)' }}>Cash only</span>}</td>
+                      <td style={s.td}>{t.pl_impact ? <span style={{ ...s.badge, background: '#E1F5EE', color: '#085041' }}>✓ P&L</span> : <span style={{ ...s.badge, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.30)' }}>Samo novac</span>}</td>
                       <td style={s.td} onClick={e => e.stopPropagation()}>
                         <div style={{ position: 'relative' }}>
                           <button style={s.editBtn} onClick={() => setShowMenu(showMenu === t.id ? null : t.id)}>···</button>
                           {showMenu === t.id && (
                             <div style={s.contextMenu}>
-                              <div style={s.contextItem} onClick={() => handleEditTransaction(t)}>✏️ Edit</div>
-                              {t.type === 'direct' && <div style={s.contextItem} onClick={() => { setReconcileSource({ type: 'transaction', id: t.id }); setShowMenu(null) }}>🔗 Reconcile</div>}
-                              <div style={{ ...s.contextItem, color: '#FF5B5A' }} onClick={() => deleteTransaction(t.id)}>🗑 Delete</div>
+                              <div style={s.contextItem} onClick={() => handleEditTransaction(t)}>✏️ Izmeni</div>
+                              {t.type === 'direct' && <div style={s.contextItem} onClick={() => { setReconcileSource({ type: 'transaction', id: t.id }); setShowMenu(null) }}>🔗 Upari</div>}
+                              <div style={{ ...s.contextItem, color: '#FF5B5A' }} onClick={() => deleteTransaction(t.id)}>🗑 Obriši</div>
                             </div>
                           )}
                         </div>
@@ -870,16 +882,16 @@ export default function Transactions() {
             filteredPassthroughs.length === 0 ? (
               <div style={s.emptyState}>
                 <div style={{ fontSize: '32px', marginBottom: '12px' }}>⚡</div>
-                <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>No pass-through entries</div>
-                <div style={{ fontSize: '13px', color: '#7A9BB8', marginBottom: '20px' }}>Use "New transaction" and select Pass-through type.</div>
+                <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>Nema prolaznih stavki</div>
+                <div style={{ fontSize: '13px', color: '#7A9BB8', marginBottom: '20px' }}>Koristite „Nova transakcija“ i izaberite tip Prolazna stavka.</div>
               </div>
             ) : (
               <table style={s.table}>
                 <thead>
                   <tr style={s.thead}>
-                    <th style={s.th}>Date</th><th style={s.th}>Period</th><th style={s.th}>Partner</th>
-                    <th style={s.th}>Direction</th><th style={s.th}>Company</th><th style={s.th}>Bank</th>
-                    <th style={s.th}>Note</th><th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
+                    <th style={s.th}>Datum</th><th style={s.th}>Period</th><th style={s.th}>Partner</th>
+                    <th style={s.th}>Smer</th><th style={s.th}>Firma</th><th style={s.th}>Banka</th>
+                    <th style={s.th}>Napomena</th><th style={{ ...s.th, textAlign: 'right' as const }}>Iznos</th>
                     <th style={{ ...s.th, textAlign: 'right' as const }}>{currency}</th><th style={s.th}>Status</th><th style={s.th}></th>
                   </tr>
                 </thead>
@@ -889,20 +901,20 @@ export default function Transactions() {
                       <td style={s.td}><span style={s.dateCell}>{p.transaction_date}</span></td>
                       <td style={s.td}><span style={s.dateCell}>{p.period_month}</span></td>
                       <td style={s.td}><span style={s.partnerCell}>{p.partners?.name || '—'}</span></td>
-                      <td style={s.td}><span style={{ ...s.badge, background: p.direction === 'in' ? '#E1F5EE' : '#FCEBEB', color: p.direction === 'in' ? '#085041' : '#A32D2D' }}>{p.direction === 'in' ? '📥 IN' : '📤 OUT'}</span></td>
+                      <td style={s.td}><span style={{ ...s.badge, background: p.direction === 'in' ? '#E1F5EE' : '#FCEBEB', color: p.direction === 'in' ? '#085041' : '#A32D2D' }}>{p.direction === 'in' ? '📥 UPLATA' : '📤 ISPLATA'}</span></td>
                       <td style={s.td}><span style={s.compCell}>{p.companies?.name || '—'}</span></td>
                       <td style={s.td}><span style={s.compCell}>{p.banks?.name || '—'}</span></td>
                       <td style={s.td}><span style={s.descCell}>{p.note || '—'}</span></td>
                       <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{fmtMoney(p.amount || 0, p.currency)}</span></td>
                       <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.bookCell}>{format(pick(p))}</span></td>
-                      <td style={s.td}><span style={{ ...s.badge, background: ptStatusColors[p.status]?.bg, color: ptStatusColors[p.status]?.color }}>{p.status}</span></td>
+                      <td style={s.td}><span style={{ ...s.badge, background: ptStatusColors[p.status]?.bg, color: ptStatusColors[p.status]?.color }}>{valueLabel(p.status)}</span></td>
                       <td style={s.td} onClick={e => e.stopPropagation()}>
                         <div style={{ position: 'relative' }}>
                           <button style={s.editBtn} onClick={() => setShowMenu(showMenu === p.id ? null : p.id)}>···</button>
                           {showMenu === p.id && (
                             <div style={s.contextMenu}>
-                              <div style={s.contextItem} onClick={() => handleEditPassthrough(p)}>✏️ Edit</div>
-                              <div style={{ ...s.contextItem, color: '#FF5B5A' }} onClick={() => deletePassthrough(p.id)}>🗑 Delete</div>
+                              <div style={s.contextItem} onClick={() => handleEditPassthrough(p)}>✏️ Izmeni</div>
+                              <div style={{ ...s.contextItem, color: '#FF5B5A' }} onClick={() => deletePassthrough(p.id)}>🗑 Obriši</div>
                             </div>
                           )}
                         </div>
@@ -917,21 +929,21 @@ export default function Transactions() {
           {showPager && (
             <div style={s.pagination}>
               <button style={{ ...s.pageBtn, ...(canGoPrev ? {} : s.pageBtnDisabled) }}
-                disabled={!canGoPrev} onClick={() => goToPage(activeTab, 0)} title="First page">
-                ⏮ First
+                disabled={!canGoPrev} onClick={() => goToPage(activeTab, 0)} title="Prva strana">
+                ⏮ Prva
               </button>
               <button style={{ ...s.pageBtn, ...(canGoPrev ? {} : s.pageBtnDisabled) }}
                 disabled={!canGoPrev} onClick={() => goToPage(activeTab, page - 1)}>
-                ← Previous
+                ← Prethodna
               </button>
               <span style={s.pageInfo}>{pageLabel(page, PAGE_SIZE, matched)}</span>
               <button style={{ ...s.pageBtn, ...(canGoNext ? {} : s.pageBtnDisabled) }}
                 disabled={!canGoNext} onClick={() => goToPage(activeTab, page + 1)}>
-                Next →
+                Sledeća →
               </button>
               <button style={{ ...s.pageBtn, ...(canGoNext ? {} : s.pageBtnDisabled) }}
-                disabled={!canGoNext} onClick={() => goToPage(activeTab, lastPage)} title="Last page">
-                Last ⏭
+                disabled={!canGoNext} onClick={() => goToPage(activeTab, lastPage)} title="Poslednja strana">
+                Poslednja ⏭
               </button>
             </div>
           )}

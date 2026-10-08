@@ -51,8 +51,8 @@ describe('moveRefusal', () => {
       rowId: 'tx-1', sourceTable: 'transactions', currentType: 'invoice_payment', nextType: 'passthrough',
       invoiceLinkCount: 2,
     })
-    expect(reason).toContain('2 invoices')
-    expect(reason).toContain('Pass-through')
+    expect(reason).toContain('2 fakture')
+    expect(reason).toContain('Prolazna stavka')
   })
 
   it('refuses a row that settled credit instalments', () => {
@@ -60,15 +60,15 @@ describe('moveRefusal', () => {
       rowId: 'tx-1', sourceTable: 'transactions', currentType: 'direct', nextType: 'passthrough',
       settledInstallmentCount: 1,
     })
-    expect(reason).toContain('1 credit instalment')
+    expect(reason).toContain('1 ratu kredita')
   })
 
   it('refuses a credit payment outright', () => {
     const reason = moveRefusal({
       rowId: 'tx-1', sourceTable: 'transactions', currentType: 'credit_payment', nextType: 'passthrough',
     })
-    expect(reason).toContain('credit payment')
-    expect(reason).toContain('Bank Credits')
+    expect(reason).toContain('otplata kredita')
+    expect(reason).toContain('Kreditima')
   })
 
   it('counts missing from the context are treated as none, not as unknown', () => {
@@ -122,7 +122,7 @@ describe('planSave', () => {
       invoiceLinkCount: 1,
     })
     expect(plan.kind).toBe('refuse')
-    if (plan.kind === 'refuse') expect(plan.reason).toContain('1 invoice')
+    if (plan.kind === 'refuse') expect(plan.reason).toContain('1 fakturu')
   })
 
   it('a row with invoice links may still be updated inside its own table', () => {
@@ -138,7 +138,7 @@ describe('planSave', () => {
       settledInstallmentCount: 3,
     })
     expect(plan.kind).toBe('refuse')
-    if (plan.kind === 'refuse') expect(plan.reason).toContain('3 credit instalments')
+    if (plan.kind === 'refuse') expect(plan.reason).toContain('3 rate kredita')
   })
 
   it('a credit payment may not move', () => {
@@ -146,7 +146,7 @@ describe('planSave', () => {
       rowId: 'tx-1', sourceTable: 'transactions', currentType: 'credit_payment', nextType: 'passthrough',
     })
     expect(plan.kind).toBe('refuse')
-    if (plan.kind === 'refuse') expect(plan.reason).toContain('credit payment')
+    if (plan.kind === 'refuse') expect(plan.reason).toContain('otplata kredita')
   })
 
   it('a credit payment may not be turned into a direct transaction either', () => {
@@ -161,7 +161,7 @@ describe('planSave', () => {
       rowId: 'tx-1', sourceTable: 'transactions', currentType: 'direct', nextType: 'credit_payment',
     })
     expect(plan.kind).toBe('refuse')
-    if (plan.kind === 'refuse') expect(plan.reason).toContain('new transaction')
+    if (plan.kind === 'refuse') expect(plan.reason).toContain('novu transakciju')
   })
 
   it('a saved credit payment is not re-posted by saving it again', () => {

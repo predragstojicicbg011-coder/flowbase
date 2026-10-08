@@ -14,6 +14,8 @@
 // screen mentions it at the moment of saving, so it is exactly the write that
 // gets left out. `toRefresh` carries both sides so the caller cannot.
 
+import { countOf, plural } from '../utils/plural'
+
 export interface Allocation {
   invoiceId: string
   /**
@@ -99,10 +101,11 @@ export function isNoChange(plan: LinkPlan, before: string[]): boolean {
 export function describeChanges(plan: LinkPlan): string {
   const parts: string[] = []
   if (plan.toWrite.length > 0) {
-    parts.push(`${plan.toWrite.length} invoice${plan.toWrite.length === 1 ? '' : 's'} closed`)
+    const n = plan.toWrite.length
+    parts.push(`${plural(n, 'Zatvorena', 'Zatvorene', 'Zatvoreno')} ${countOf(n, 'faktura', 'fakture', 'faktura')}`)
   }
   if (plan.toRemove.length > 0) {
-    parts.push(`${plan.toRemove.length} released back to unpaid`)
+    parts.push(`${countOf(plan.toRemove.length, 'vraćena', 'vraćene', 'vraćeno')} u neplaćene`)
   }
-  return parts.length > 0 ? parts.join(', ') + '.' : 'No invoices are linked to this payment.'
+  return parts.length > 0 ? parts.join(', ') + '.' : 'Nijedna faktura nije povezana sa ovim plaćanjem.'
 }

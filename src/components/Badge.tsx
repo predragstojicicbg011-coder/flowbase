@@ -8,10 +8,10 @@ type AlertLevel = 'ok' | 'warn' | 'info'
 // ── Status Badge ──────────────────────────────────────────
 export function StatusBadge({ status }: { status: StatusType }) {
   const map: Record<StatusType, { bg: string; color: string; label: string }> = {
-    paid:    { bg: '#E1F5EE', color: '#085041', label: 'paid' },
-    unpaid:  { bg: '#F0F0EE', color: '#666666', label: 'unpaid' },
-    partial: { bg: 'rgba(186,117,23,0.12)', color: '#633806', label: 'partial' },
-    overdue: { bg: '#FCEBEB', color: '#A32D2D', label: 'overdue' },
+    paid:    { bg: '#E1F5EE', color: '#085041', label: 'plaćeno' },
+    unpaid:  { bg: '#F0F0EE', color: '#666666', label: 'neplaćeno' },
+    partial: { bg: 'rgba(186,117,23,0.12)', color: '#633806', label: 'delimično' },
+    overdue: { bg: '#FCEBEB', color: '#A32D2D', label: 'u kašnjenju' },
   }
   const v = map[status] ?? map.unpaid
   return <Pill bg={v.bg} color={v.color}>{v.label}</Pill>
@@ -20,9 +20,9 @@ export function StatusBadge({ status }: { status: StatusType }) {
 // ── Transaction Type Badge ────────────────────────────────
 export function TxBadge({ type }: { type: TxType }) {
   const map: Record<TxType, { bg: string; color: string; label: string }> = {
-    direct:          { bg: '#E1F5EE', color: '#085041', label: 'direct' },
-    invoice_payment: { bg: '#E6F1FB', color: '#0C447C', label: 'inv. pay' },
-    passthrough:     { bg: 'rgba(124,58,237,0.10)', color: '#5B21B6', label: 'pass-through' },
+    direct:          { bg: '#E1F5EE', color: '#085041', label: 'direktna' },
+    invoice_payment: { bg: '#E6F1FB', color: '#0C447C', label: 'plać. fakture' },
+    passthrough:     { bg: 'rgba(124,58,237,0.10)', color: '#5B21B6', label: 'prolazna' },
   }
   const v = map[type] ?? map.direct
   return <Pill bg={v.bg} color={v.color}>{v.label}</Pill>

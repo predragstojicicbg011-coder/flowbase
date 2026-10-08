@@ -9,6 +9,8 @@ import CashFlowTimeline from '../components/CashFlowTimeline'
 import CashPositionDialog from '../components/CashPositionDialog'
 import { loadCashTimeline, type LoadedCashTimeline } from '../services/loadCashTimeline'
 import { cashDirection, previousMonth } from '../services/cashTimeline'
+import { monthLongLabel, capitalize } from '../utils/months'
+import { countOf } from '../utils/plural'
 
 export default function CashFlow() {
 
@@ -172,19 +174,19 @@ export default function CashFlow() {
 
   const months = Array.from({ length: 12 }, (_, i) => {
     const m = String(i + 1).padStart(2, '0')
-    return { value: `${currentYear}-${m}`, label: new Date(currentYear, i, 1).toLocaleString('en', { month: 'long', year: 'numeric' }) }
+    return { value: `${currentYear}-${m}`, label: capitalize(monthLongLabel(`${currentYear}-${m}`)) }
   })
-  const quarters = [1, 2, 3, 4].map(q => ({ value: `${currentYear}-Q${q}`, label: `Q${q} ${currentYear}` }))
+  const quarters = [1, 2, 3, 4].map(q => ({ value: `${currentYear}-Q${q}`, label: `${q}. kvartal ${currentYear}.` }))
   const years = [currentYear - 1, currentYear].map(y => ({ value: String(y), label: String(y) }))
 
   const cashFlowSections = [
     {
-      section: 'Operating Activities', color: '#00D47E', bg: 'rgba(0,212,126,0.12)',
+      section: 'Poslovne aktivnosti', color: '#00D47E', bg: 'rgba(0,212,126,0.12)',
       items: [
-        { name: 'Revenue received from customers', amount: operatingIn },
-        { name: 'Payments to suppliers (invoices + direct)', amount: -operatingOut },
-        { name: 'Banking fees & finance charges', amount: -bankingOut },
-        { name: 'Taxes paid', amount: -taxOut },
+        { name: 'Naplaćeno od kupaca', amount: operatingIn },
+        { name: 'Plaćeno dobavljačima (fakture i direktno)', amount: -operatingOut },
+        { name: 'Bankarske provizije i troškovi finansiranja', amount: -bankingOut },
+        { name: 'Plaćeni porezi', amount: -taxOut },
       ]
     },
   ]
@@ -208,15 +210,15 @@ export default function CashFlow() {
       <div style={s.body}>
         <div style={s.pageHeader}>
           <div>
-            <div style={s.pageTitle}>Cash Flow</div>
+            <div style={s.pageTitle}>Novčani tok</div>
             <div style={s.pageSub}>
-              {loading ? 'Loading...' : `${transactions.length} transactions · ${currency}`}
+              {loading ? 'Učitavanje…' : `${countOf(transactions.length, 'transakcija', 'transakcije', 'transakcija')} · ${currency}`}
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' as const }}>
             {showPicker && (
               <select style={s.filterSelect} value={companyId} onChange={e => setCompanyId(e.target.value)}>
-                <option value="all">All companies</option>
+                <option value="all">Sve firme</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
@@ -226,9 +228,9 @@ export default function CashFlow() {
                 setPeriodType(t)
                 setPeriodValue(t === 'month' ? new Date().toISOString().slice(0, 7) : t === 'quarter' ? `${currentYear}-Q1` : String(currentYear))
               }}>
-              <option value="month">Monthly</option>
-              <option value="quarter">Quarterly</option>
-              <option value="year">Annual</option>
+              <option value="month">Mesečno</option>
+              <option value="quarter">Kvartalno</option>
+              <option value="year">Godišnje</option>
             </select>
             <select style={s.filterSelect} value={periodValue} onChange={e => setPeriodValue(e.target.value)}>
               {periodType === 'month' && months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
@@ -242,7 +244,7 @@ export default function CashFlow() {
             Twelve months whatever period is selected below. The question it
             answers crosses today, and a period picker cannot ask it. */}
         {lineError && <div style={{ ...s.summaryCard, color: '#FF5B5A', marginBottom: '14px' }}>
-          The cash line could not be loaded: {lineError}
+          Linija novčanog toka nije učitana: {lineError}
         </div>}
         {line && (
           <CashFlowTimeline timeline={line.timeline} dated={line.dated} datedIn={line.datedIn} />
@@ -250,7 +252,7 @@ export default function CashFlow() {
         {line && !line.timeline.position && (
           <div style={{ marginBottom: '14px' }}>
             <button style={s.enterCash} onClick={() => setEnteringCash(true)}>
-              Enter the cash position
+              Unesi stanje novca
             </button>
           </div>
         )}
@@ -267,36 +269,36 @@ export default function CashFlow() {
         {/* Summary cards */}
         <div style={s.summaryGrid} className="mf-stagger">
           <div style={s.summaryCard}>
-            <div style={s.summaryLabel}>Total inflows</div>
+            <div style={s.summaryLabel}>Ukupni prilivi</div>
             <div style={{ ...s.summaryValue, color: '#00D47E' }}>{loading ? '...' : format(totalInflows, 0)}</div>
-            <div style={s.summarySub}>Revenue received. Transfers between our own accounts are not counted.</div>
+            <div style={s.summarySub}>Naplaćeni prihodi. Prenosi između sopstvenih računa se ne računaju.</div>
           </div>
           <div style={s.summaryCard}>
-            <div style={s.summaryLabel}>Total outflows</div>
+            <div style={s.summaryLabel}>Ukupni odlivi</div>
             <div style={{ ...s.summaryValue, color: '#FF5B5A' }}>{loading ? '...' : format(totalOutflows, 0)}</div>
-            <div style={s.summarySub}>Expenses, invoices, banking and tax. Not transfers.</div>
+            <div style={s.summarySub}>Troškovi, fakture, bankarske provizije i porezi. Bez prenosa.</div>
           </div>
           <div style={s.summaryCard}>
-            <div style={s.summaryLabel}>Net cash flow</div>
+            <div style={s.summaryLabel}>Neto novčani tok</div>
             <div style={{ ...s.summaryValue, color: netCashFlow >= 0 ? '#0F6E56' : '#A32D2D' }}>
               {loading ? '...' : format(netCashFlow, 0)}
             </div>
-            <div style={s.summarySub}>For selected period</div>
+            <div style={s.summarySub}>Za izabrani period</div>
           </div>
         </div>
 
         {!loading && transactions.length === 0 && (
           <div style={s.emptyState}>
             <div style={{ fontSize: '32px', marginBottom: '12px' }}>💸</div>
-            <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>No cash flow data for this period</div>
-            <div style={{ fontSize: '13px', color: '#7A9BB8' }}>Post transactions to see real cash flow data here.</div>
+            <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>Nema podataka o novčanom toku za ovaj period</div>
+            <div style={{ fontSize: '13px', color: '#7A9BB8' }}>Proknjižite transakcije da biste ovde videli stvarni novčani tok.</div>
           </div>
         )}
 
         {(transactions.length > 0 || loading) && (
           <div style={s.contentGrid}>
             <div>
-              <div style={s.sectionLabel}>Cash flow statement</div>
+              <div style={s.sectionLabel}>Izveštaj o novčanim tokovima</div>
               <div style={s.tableWrap}>
                 {loading ? (
                   <div style={{ padding: '18px 16px' }}>
@@ -307,8 +309,8 @@ export default function CashFlow() {
                   <table style={s.table}>
                     <thead>
                       <tr style={s.theadRow}>
-                        <th style={{ ...s.th, width: '60%' }}>Item</th>
-                        <th style={{ ...s.th, textAlign: 'right' as const }}>Amount ({currency})</th>
+                        <th style={{ ...s.th, width: '60%' }}>Stavka</th>
+                        <th style={{ ...s.th, textAlign: 'right' as const }}>Iznos ({currency})</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -336,7 +338,7 @@ export default function CashFlow() {
                         </React.Fragment>
                       ))}
                       <tr style={s.netRow}>
-                        <td style={s.netCell}>NET CHANGE IN CASH</td>
+                        <td style={s.netCell}>NETO PROMENA NOVCA</td>
                         <td style={{ ...s.netCell, textAlign: 'right' as const, color: netCashFlow >= 0 ? '#5DCAA5' : '#F09595' }}>
                           {fmtAmt(netCashFlow)}
                         </td>
@@ -348,16 +350,16 @@ export default function CashFlow() {
 
               {!loading && transactions.length > 0 && (
                 <div style={{ marginTop: '16px' }}>
-                  <div style={s.sectionLabel}>Recent transactions</div>
+                  <div style={s.sectionLabel}>Poslednje transakcije</div>
                   <div style={s.tableWrap}>
                     <table style={s.table}>
                       <thead>
                         <tr style={s.theadRow}>
-                          <th style={s.th}>Date</th>
+                          <th style={s.th}>Datum</th>
                           <th style={s.th}>Partner</th>
-                          <th style={s.th}>Bank</th>
-                          <th style={s.th}>Type</th>
-                          <th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
+                          <th style={s.th}>Banka</th>
+                          <th style={s.th}>Tip</th>
+                          <th style={{ ...s.th, textAlign: 'right' as const }}>Iznos</th>
                           <th style={{ ...s.th, textAlign: 'right' as const }}>{currency}</th>
                         </tr>
                       </thead>
@@ -371,7 +373,7 @@ export default function CashFlow() {
                               <td style={s.td}>{tx.banks?.name || '—'}</td>
                               <td style={s.td}>
                                 <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '20px', background: tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? 'rgba(0,212,126,0.12)' : 'rgba(255,91,90,0.13)') : 'rgba(78,168,255,0.13)', color: tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? '#085041' : '#A32D2D') : '#0C447C' }}>
-                                  {tx.is_advance ? 'Avans' : tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? '📥 Direct IN' : '📤 Direct OUT') : (isIn ? '💳 Naplata fakture' : '💳 Invoice payment')}
+                                  {tx.is_advance ? 'Avans' : tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? '📥 Direktna uplata' : '📤 Direktna isplata') : (isIn ? '💳 Naplata fakture' : '💳 Plaćanje fakture')}
                                 </span>
                               </td>
                               <td style={{ ...s.td, textAlign: 'right' as const, color: isIn ? '#0F6E56' : '#A32D2D', fontWeight: '500' }}>
@@ -386,7 +388,7 @@ export default function CashFlow() {
                         {transactions.length > 15 && (
                           <tr style={s.dataRow}>
                             <td colSpan={6} style={{ ...s.td, textAlign: 'center' as const, color: 'rgba(255,255,255,0.30)', fontStyle: 'italic' }}>
-                              +{transactions.length - 15} more — go to Transactions tab to see all
+                              + još {transactions.length - 15} — sve su u Glavnoj knjizi
                             </td>
                           </tr>
                         )}
@@ -399,11 +401,11 @@ export default function CashFlow() {
 
             {/* Bank accounts */}
             <div>
-              <div style={s.sectionLabel}>Bank accounts</div>
+              <div style={s.sectionLabel}>Tekući računi</div>
               <div style={s.accountsWrap}>
                 {filteredBanks.length === 0 ? (
                   <div style={{ padding: '20px', textAlign: 'center' as const, color: 'rgba(255,255,255,0.30)', fontSize: '13px', background: '#0D1B2C', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.075)' }}>
-                    No bank accounts found.
+                    Nema tekućih računa.
                   </div>
                 ) : filteredBanks.map(bank => {
                   const flow = getBankFlow(bank.id)
@@ -420,12 +422,12 @@ export default function CashFlow() {
                       </div>
                       <div style={s.accountBalances}>
                         <div>
-                          <div style={s.balLabel}>Inflows</div>
+                          <div style={s.balLabel}>Prilivi</div>
                           <div style={{ ...s.balValue, color: '#00D47E' }}>{format(flow.income, 0)}</div>
                         </div>
                         <div style={{ fontSize: '14px', color: 'rgba(255,255,255,0.30)', alignSelf: 'flex-end', paddingBottom: '2px' }}>→</div>
                         <div>
-                          <div style={s.balLabel}>Outflows</div>
+                          <div style={s.balLabel}>Odlivi</div>
                           <div style={{ ...s.balValue, color: '#FF5B5A' }}>{format(flow.expense, 0)}</div>
                         </div>
                         <div style={{ ...s.diffBadge, background: flow.net >= 0 ? 'rgba(0,212,126,0.12)' : 'rgba(255,91,90,0.13)', color: flow.net >= 0 ? '#085041' : '#A32D2D' }}>
@@ -433,7 +435,7 @@ export default function CashFlow() {
                         </div>
                       </div>
                       <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.30)', marginTop: '6px' }}>
-                        {flow.txCount} transaction{flow.txCount !== 1 ? 's' : ''} in period
+                        {countOf(flow.txCount, 'transakcija', 'transakcije', 'transakcija')} u periodu
                       </div>
                     </div>
                   )

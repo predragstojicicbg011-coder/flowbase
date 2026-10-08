@@ -19,6 +19,7 @@
 
 import { fetchAllPages } from '../../utils/fetchAllPages'
 import { firstOfMonth } from './timesheets'
+import { plural } from '../../utils/plural'
 import type { PayrollRun } from './runs'
 import type { EmployeeForMonth } from './employees'
 
@@ -151,7 +152,7 @@ export function linesOf(run: PayrollRun, context: SaveContext): SavedRunLine[] {
       employee_code: o.code,
       employee_name: o.name,
       line_kind: 'other',
-      label: 'Other income',
+      label: 'Ostala primanja',
       hours: 0,
       month_hours: 0,
       gross: o.line.gross,
@@ -204,10 +205,10 @@ export function headerOf(run: PayrollRun, context: SaveContext) {
 }
 
 export function alreadyPostedMessage(label: string, month: string): string {
-  return `${label} for ${month} has been posted, so it cannot be recalculated. `
-    + 'Its figures are what the invoices in the ledger were written from, and changing '
-    + 'them would leave the two disagreeing with nothing to say which is the payroll. '
-    + 'Delete the posting on this page first — that puts the run back to draft.'
+  return `Obračun „${label}“ za ${month} je proknjižen, pa ne može ponovo da se obračuna. `
+    + 'Iz tih iznosa su napisane fakture u glavnoj knjizi, a izmena bi ostavila obračun '
+    + 'i knjiženje u neslaganju. Prvo obrišite knjiženje na ovoj strani — tako se '
+    + 'obračun vraća u nacrt.'
 }
 
 /**
@@ -233,7 +234,7 @@ export async function saveRun(
     .eq('period_month', month)
     .eq('run_key', run.key)
     .maybeSingle()
-  if (readErr) throw new Error(`The saved run could not be read: ${readErr.message}`)
+  if (readErr) throw new Error(`Sačuvani obračun nije učitan: ${readErr.message}`)
 
   if (existing?.status === 'posted') {
     throw new Error(alreadyPostedMessage(run.label, context.month.slice(0, 7)))
@@ -244,7 +245,7 @@ export async function saveRun(
     const { data, error } = await client
       .from('payroll_runs').update(headerOf(run, context))
       .eq('id', existing.id).select('*').single()
-    if (error) throw new Error(`The run could not be saved: ${error.message}`)
+    if (error) throw new Error(`Obračun nije sačuvan: ${error.message}`)
     saved = data
 
     // The old lines go only once the header is safely updated. A failure
@@ -253,24 +254,25 @@ export async function saveRun(
     const { error: clearErr } = await client
       .from('payroll_run_lines').delete().eq('run_id', existing.id)
     if (clearErr) {
-      throw new Error(`The previous lines could not be cleared (${clearErr.message}). `
-        + 'Nothing was replaced; what is stored is still the earlier calculation.')
+      throw new Error(`Prethodne stavke nisu obrisane (${clearErr.message}). `
+        + 'Ništa nije zamenjeno; sačuvan je i dalje raniji obračun. Pokušajte ponovo.')
     }
   } else {
     const { data, error } = await client
       .from('payroll_runs').insert({ ...headerOf(run, context), status: 'draft' })
       .select('*').single()
-    if (error) throw new Error(`The run could not be saved: ${error.message}`)
+    if (error) throw new Error(`Obračun nije sačuvan: ${error.message}`)
     saved = data
   }
 
   const lines = linesOf(run, context).map(l => ({ ...l, run_id: saved.id }))
   if (lines.length > 0) {
     const { data, error } = await client.from('payroll_run_lines').insert(lines).select('id')
-    if (error) throw new Error(`The lines could not be saved: ${error.message}`)
+    if (error) throw new Error(`Stavke nisu sačuvane: ${error.message}`)
     if (!data || data.length !== lines.length) {
-      throw new Error(`${data?.length ?? 0} of ${lines.length} lines were written. `
-        + 'The saved run is incomplete; recalculate before relying on it.')
+      throw new Error(`Upisano je ${data?.length ?? 0} od ${lines.length} `
+        + `${plural(lines.length, 'stavke', 'stavke', 'stavki')}. `
+        + 'Sačuvani obračun je nepotpun; ponovo obračunajte pre nego što ga koristite.')
     }
   }
 
@@ -286,14 +288,14 @@ export async function fetchRuns(
       .order('period_month', { ascending: false }).order('run_key').range(from, to)
     if (month) q = q.eq('period_month', firstOfMonth(month))
     return q
-  }).catch((e: any) => { throw new Error(`The saved runs could not be read: ${e.message || e}`) })
+  }).catch((e: any) => { throw new Error(`Sačuvani obračuni nisu učitani: ${e.message || e}`) })
 }
 
 export async function fetchRunLines(client: any, runId: string): Promise<SavedRunLine[]> {
   return fetchAllPages<SavedRunLine>((from, to) =>
     client.from('payroll_run_lines').select('*')
       .eq('run_id', runId).order('employee_name').order('id').range(from, to),
-  ).catch((e: any) => { throw new Error(`The run lines could not be read: ${e.message || e}`) })
+  ).catch((e: any) => { throw new Error(`Stavke obračuna nisu učitane: ${e.message || e}`) })
 }
 
 /** A month, grouped, for a list of everything that has been calculated. */

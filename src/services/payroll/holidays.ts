@@ -21,6 +21,8 @@
 
 import { fetchAllPages } from '../../utils/fetchAllPages'
 import { firstOfMonth, workingDaysIn } from './timesheets'
+import { countOf, plural } from '../../utils/plural'
+import { monthLongLabel } from '../../utils/months'
 
 export interface HolidayRow {
   id?: string
@@ -118,19 +120,76 @@ export function fundIsProvenFor(fund: MonthFund): boolean {
 /** A plain sentence about where a month's fund came from. */
 export function explainFund(month: string, fund: MonthFund): string {
   if (fund.source === 'settings') {
-    return `${fund.monthHours} hours, from the payroll settings for ${month.slice(0, 7)}.`
+    return `${fund.monthHours} ${plural(fund.monthHours, 'sat', 'sata', 'sati')}, iz podešavanja zarada za ${monthLongLabel(month)}.`
   }
   const days = fund.monthHours / HOURS_PER_DAY
+  const daysWord = countOf(days, 'radni dan', 'radna dana', 'radnih dana')
   if (fund.holidays.length === 0) {
-    return `${fund.monthHours} hours — ${days} weekdays, and no public holidays. `
-      + 'Worked out rather than entered; the same arithmetic gives August and '
-      + 'September 2026 the figures their payrolls actually used.'
+    return `${fund.monthHours} ${plural(fund.monthHours, 'sat', 'sata', 'sati')} — ${daysWord}, bez državnih praznika. `
+      + 'Izračunato, a ne uneto; isti račun daje avgustu i septembru 2026. '
+      + 'iste fondove koje su ti obračuni zaista koristili.'
   }
-  return `${fund.monthHours} hours — ${days} weekdays, of which `
-    + `${fund.holidays.length} ${fund.holidays.length === 1 ? 'is a holiday' : 'are holidays'} `
-    + `(${fund.holidays.map(h => h.name).join(', ')}), leaving ${fund.workableHours} to work. `
-    + 'Worked out rather than entered, and no export has yet shown a month with a '
-    + 'holiday in it — so check this one against MPP before relying on it.'
+  const n = fund.holidays.length
+  return `${fund.monthHours} ${plural(fund.monthHours, 'sat', 'sata', 'sati')} — ${daysWord}, od kojih `
+    + `${n === 1 ? 'je' : 'su'} ${countOf(n, 'državni praznik', 'državna praznika', 'državnih praznika')} `
+    + `(${fund.holidays.map(holidayName).join(', ')}), pa za rad ostaje ${fund.workableHours} `
+    + `${plural(fund.workableHours, 'sat', 'sata', 'sati')}. `
+    + 'Izračunato, a ne uneto, a nijedan izvoz još nije pokazao mesec sa praznikom — '
+    + 'proverite ovaj mesec u MPP pre nego što se oslonite na njega.'
+}
+
+// ─── Holiday names, as the page shows them ──────────────────────────────────
+//
+// The public_holidays rows were seeded in Cyrillic and are stored that way;
+// the interface is Latin. The official names (Zakon o državnim i drugim
+// praznicima) are mapped here, and anything unknown is transliterated so a
+// holiday somebody adds later still reads in the right script.
+
+const OFFICIAL_HOLIDAY_NAMES: Record<string, string> = {
+  'нова година': 'Nova godina',
+  'божић': 'Božić',
+  'дан државности': 'Sretenje — Dan državnosti Srbije',
+  'сретење': 'Sretenje — Dan državnosti Srbije',
+  'празник рада': 'Praznik rada',
+  'велики петак': 'Veliki petak',
+  'велика субота': 'Velika subota',
+  'васкрс': 'Uskrs',
+  'ускрс': 'Uskrs',
+  'васкршњи понедељак': 'Uskrsni ponedeljak',
+  'ускршњи понедељак': 'Uskrsni ponedeljak',
+  'дан примирја': 'Dan primirja u Prvom svetskom ratu',
+}
+
+const HOLIDAY_SUFFIXES: Record<string, string> = {
+  'други дан': 'drugi dan',
+  'замена': 'prenet neradni dan',
+}
+
+const CYR_TO_LAT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', ђ: 'đ', е: 'e', ж: 'ž', з: 'z', и: 'i',
+  ј: 'j', к: 'k', л: 'l', љ: 'lj', м: 'm', н: 'n', њ: 'nj', о: 'o', п: 'p', р: 'r',
+  с: 's', т: 't', ћ: 'ć', у: 'u', ф: 'f', х: 'h', ц: 'c', ч: 'č', џ: 'dž', ш: 'š',
+}
+
+/** Serbian Cyrillic → Latin, letter by letter. */
+export function toLatin(text: string): string {
+  let out = ''
+  for (const ch of text) {
+    const lower = ch.toLowerCase()
+    const lat = CYR_TO_LAT[lower]
+    if (lat === undefined) { out += ch; continue }
+    out += ch === lower ? lat : lat.charAt(0).toUpperCase() + lat.slice(1)
+  }
+  return out
+}
+
+/** The name a page shows for a holiday: official, in Latin script. */
+export function holidayName(h: Pick<HolidayRow, 'name'>): string {
+  const [base, ...rest] = h.name.split(',').map(p => p.trim())
+  const official = OFFICIAL_HOLIDAY_NAMES[base.toLowerCase()] ?? toLatin(base)
+  const suffix = rest.map(r => HOLIDAY_SUFFIXES[r.toLowerCase()] ?? toLatin(r))
+  if (suffix.length === 0) return official
+  return `${official} (${suffix.join(', ')})`
 }
 
 /**
@@ -212,7 +271,7 @@ export async function fetchHolidays(client: any, year?: number): Promise<Holiday
       q = q.gte('holiday_on', `${year}-01-01`).lt('holiday_on', `${year + 1}-01-01`)
     }
     return q
-  }).catch((e: any) => { throw new Error(`The public holidays could not be read: ${e.message || e}`) })
+  }).catch((e: any) => { throw new Error(`Državni praznici nisu učitani: ${e.message || e}. Osvežite stranu.`) })
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100

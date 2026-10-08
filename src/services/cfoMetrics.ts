@@ -139,18 +139,18 @@ export function burnAndRunway(points: MonthPoint[], cashOnHand: number | null): 
     : 0
 
   if (complete.length === 0) {
-    return { burn: 0, months: null, unknown: 'No complete month to measure a burn from.', monthsUsed: 0 }
+    return { burn: 0, months: null, unknown: 'Nema nijednog završenog meseca iz kog bi se izmerila potrošnja novca.', monthsUsed: 0 }
   }
   if (burn === 0) {
     return {
       burn: 0, months: null, monthsUsed: complete.length,
-      unknown: `No complete month in the last ${complete.length} lost money, so there is no burn to divide cash by.`,
+      unknown: `Nijedan završen mesec (poslednjih: ${complete.length}) nije bio u gubitku, pa nema potrošnje kojom bi se podelio novac.`,
     }
   }
   if (cashOnHand === null || !Number.isFinite(cashOnHand)) {
     return {
       burn, months: null, monthsUsed: losing.length,
-      unknown: 'No cash position has been entered, and there is none anywhere in the ledger to read.',
+      unknown: 'Stanje novca nije uneto, a nema ga ni u glavnoj knjizi.',
     }
   }
   return {
@@ -418,11 +418,11 @@ export interface OpenInvoice {
 }
 
 export const AGEING_BUCKETS: { label: string; from: number }[] = [
-  { label: 'Not yet due', from: -Infinity },
-  { label: '1–30 days', from: 1 },
-  { label: '31–60 days', from: 31 },
-  { label: '61–90 days', from: 61 },
-  { label: 'Over 90 days', from: 91 },
+  { label: 'Nije dospelo', from: -Infinity },
+  { label: '1–30 dana', from: 1 },
+  { label: '31–60 dana', from: 31 },
+  { label: '61–90 dana', from: 61 },
+  { label: 'Preko 90 dana', from: 91 },
 ]
 
 const daysBetween = (a: string, b: string): number =>

@@ -97,7 +97,7 @@ export default function SplitScriptBuilder({
    * did something.
    */
   const why = whyNotSavable(draft, scripts)
-    || (!draft.pl_category ? 'Pick a P&L category — a template that classifies nothing files a line under Unassigned.' : null)
+    || (!draft.pl_category ? 'Izaberite P&L kategoriju — šablon koji ništa ne razvrstava stavlja stavku u „Nedodeljeno“.' : null)
 
   const save = async () => {
     if (why) { setError(why); return }
@@ -118,40 +118,40 @@ export default function SplitScriptBuilder({
   return (
     <div style={s.wrap}>
       <div style={s.head}>
-        <span style={s.title}>New template</span>
-        <button type="button" style={s.ghost} onClick={onClose}>Cancel</button>
+        <span style={s.title}>Novi šablon</span>
+        <button type="button" style={s.ghost} onClick={onClose}>Otkaži</button>
       </div>
 
       {error && <div style={s.problem}>{error}</div>}
 
       <div style={s.row}>
-        {field('Name', (
+        {field('Naziv', (
           <input style={s.input} value={name} autoFocus
-            placeholder="e.g. Lease — garage spaces"
+            placeholder="npr. Zakup — garažna mesta"
             onChange={e => setName(e.target.value)} />
         ))}
-        {field('Icon', (
+        {field('Ikonica', (
           <input style={{ ...s.input, width: '70px' }} value={icon} maxLength={2}
             onChange={e => setIcon(e.target.value)} />
         ))}
       </div>
 
       <div style={s.row}>
-        {field('P&L category *', (
+        {field('P&L kategorija *', (
           <div style={s.withAdd}>
             <div style={s.grow}><SearchableSelect value={plCat}
               onChange={v => { setPlCat(v); setPlSub('') }}
               options={cats.filter(c => c.type !== 'revenue').map(c => ({ value: c.id, label: c.name }))}
-              allLabel="Select…" style={s.input} /></div>
+              allLabel="Izaberite…" style={s.input} /></div>
             <InlineCategoryAdd table="pl_categories" currentCount={cats.length}
               onAdded={item => { setCats(p => [...p, { ...item, type: 'expense' }]); setPlCat(item.id) }} />
           </div>
         ))}
-        {field('P&L sub-category', (
+        {field('Potkategorija', (
           <div style={s.withAdd}>
             <div style={s.grow}><SearchableSelect value={plSub} onChange={setPlSub}
               options={subsHere.map(c => ({ value: c.id, label: c.name }))}
-              allLabel="Select…" disabled={!plCat} style={s.input} /></div>
+              allLabel="Izaberite…" disabled={!plCat} style={s.input} /></div>
             <InlineCategoryAdd table="pl_subcategories" parentId={plCat} parentField="category_id"
               currentCount={subsHere.length} disabled={!plCat}
               onAdded={item => { setSubs(p => [...p, { ...item, category_id: plCat }]); setPlSub(item.id) }} />
@@ -160,22 +160,22 @@ export default function SplitScriptBuilder({
       </div>
 
       <div style={s.row}>
-        {field('Department', (
+        {field('Sektor', (
           <div style={s.withAdd}>
             <div style={s.grow}><SearchableSelect value={dept}
               onChange={v => { setDept(v); setDeptSub(''); setExpDesc('') }}
               options={depts.map(c => ({ value: c.id, label: c.name }))}
-              allLabel="Select…" style={s.input} /></div>
+              allLabel="Izaberite…" style={s.input} /></div>
             <InlineCategoryAdd table="departments" currentCount={depts.length}
               onAdded={item => { setDepts(p => [...p, item]); setDept(item.id) }} />
           </div>
         ))}
-        {field('Dept. sub-category', (
+        {field('Podsektor', (
           <div style={s.withAdd}>
             <div style={s.grow}><SearchableSelect value={deptSub}
               onChange={v => { setDeptSub(v); setExpDesc('') }}
               options={deptSubsHere.map(c => ({ value: c.id, label: c.name }))}
-              allLabel="Select…" disabled={!dept} style={s.input} /></div>
+              allLabel="Izaberite…" disabled={!dept} style={s.input} /></div>
             <InlineCategoryAdd table="dept_subcategories" parentId={dept} parentField="department_id"
               currentCount={deptSubsHere.length} disabled={!dept}
               onAdded={item => { setDeptSubs(p => [...p, { ...item, department_id: dept }]); setDeptSub(item.id) }} />
@@ -184,21 +184,21 @@ export default function SplitScriptBuilder({
       </div>
 
       <div style={s.row}>
-        {field('Expense description', (
+        {field('Opis troška', (
           <div style={s.withAdd}>
             <div style={s.grow}><SearchableSelect value={expDesc} onChange={setExpDesc}
               options={descsHere.map(c => ({ value: c.id, label: c.name }))}
-              allLabel="Select…" disabled={!deptSub} style={s.input} /></div>
+              allLabel="Izaberite…" disabled={!deptSub} style={s.input} /></div>
             <InlineCategoryAdd table="expense_descriptions" parentId={deptSub}
               parentField="dept_subcategory_id" currentCount={descsHere.length} disabled={!deptSub}
               onAdded={item => { setDescs(p => [...p, { ...item, dept_subcategory_id: deptSub }]); setExpDesc(item.id) }} />
           </div>
         ))}
-        {field('Cash flow', (
+        {field('Novčani tok', (
           <select style={s.input} value={cfType} onChange={e => setCfType(e.target.value)}>
-            <option value="recurring">Recurring</option>
-            <option value="one_off">One-off</option>
-            <option value="seasonal">Seasonal</option>
+            <option value="recurring">Ponavljajući</option>
+            <option value="one_off">Jednokratni</option>
+            <option value="seasonal">Sezonski</option>
           </select>
         ))}
       </div>
@@ -206,10 +206,10 @@ export default function SplitScriptBuilder({
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
         <button type="button" style={{ ...s.save, opacity: busy || why ? 0.55 : 1 }}
           onClick={save} disabled={busy || !!why} title={why || undefined}>
-          {busy ? 'Saving…' : 'Save and use it'}
+          {busy ? 'Čuvanje…' : 'Sačuvaj i primeni'}
         </button>
         <span style={s.hint}>
-          Saved for everyone, and available in every dialog from now on.
+          Čuva se za sve i od sada je dostupan u svakom dijalogu.
         </span>
       </div>
     </div>

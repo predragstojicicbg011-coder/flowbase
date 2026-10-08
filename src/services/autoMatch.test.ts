@@ -104,7 +104,7 @@ describe('scorePair', () => {
       row({ id: 'B', direction: 'out', partner_name: 'PRIMER DOO BEOGRAD' }),
     )
     expect(p).not.toBeNull()
-    expect(p!.reasons).toContain('same partner name')
+    expect(p!.reasons).toContain('isti naziv partnera')
   })
 })
 
@@ -147,7 +147,7 @@ describe('proposePairs - 1:1 assignment', () => {
       row({ id: 'A', direction: 'in', partner_id: 'P1', amount_rsd: 117200, amount_eur: 1000 }),
       row({ id: 'B', direction: 'out', partner_id: 'P1', amount_rsd: 117200, amount_eur: 999.9 }),
     )
-    expect(p!.reasons).toContain('exact amount')
+    expect(p!.reasons).toContain('isti iznos')
     expect(p!.amountDiffRsd).toBe(0)
   })
 

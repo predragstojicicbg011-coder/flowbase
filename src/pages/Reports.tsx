@@ -10,6 +10,7 @@ import { toRsd, toEur } from '../services/allocationDisplay'
 import { fmtMoney, fmtNum } from '../utils/formatters'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { findAccountByNumber, defaultAccount } from '../services/partnerAccountChoice'
+import { countOf } from '../utils/plural'
 
 // ── Halcom TKDIS format generator ────────────────────────
 const HALCOM_SIFRE = [
@@ -75,12 +76,12 @@ const payable = (inv: any): number =>
 
 function exportHalcom(invoices: any[], companyBankAccount: any, companyProfile: any, companyName: string, halcomSifra: string = '221') {
   if (!companyBankAccount) {
-    alert('No company bank account found. Add one under Settings → Company profiles → Bank accounts.')
+    alert('Firma nema tekući račun. Dodajte ga u Podešavanja → Profili firmi → Tekući računi.')
     return
   }
   const missing = invoices.filter(i => !i.selected_account_number)
   if (missing.length > 0) {
-    alert(`${missing.length} invoice(s) have no payee account. Choose an account for each one.`)
+    alert(`${countOf(missing.length, 'faktura nema', 'fakture nemaju', 'faktura nema')} račun primaoca. Izaberite račun za svaku.`)
     return
   }
   const racunPlatilac = cleanAccount(companyBankAccount.account_number)
@@ -234,7 +235,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                 accMap[inv.id] = {
                   account_number: inv.account_number,
                   model: inv.model || chosen?.model || '97',
-                  bank_name: chosen?.bank_name || 'From the invoice',
+                  bank_name: chosen?.bank_name || 'Sa fakture',
                 }
                 return
               }
@@ -316,15 +317,15 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
         <div style={ps.header}>
           <div>
             <div style={{ fontSize: '10px', fontWeight: '700', color: '#F5A623', letterSpacing: '0.12em', textTransform: 'uppercase' as const, marginBottom: '5px' }}>
-              Unpaid invoices
+              Neplaćene fakture
             </div>
-            <div style={ps.headerTitle}>{defaultCompany?.name || 'No company set up'}</div>
+            <div style={ps.headerTitle}>{defaultCompany?.name || 'Firma nije podešena'}</div>
             <div style={ps.headerSub}>
-              {loading ? 'Loading...' : (
+              {loading ? 'Učitavanje…' : (
                 <span>
                   <span style={{ fontFamily: "'DM Mono', monospace", color: '#F5A623', fontWeight: '600' }}>{fmt(totalUnpaid)}</span>
-                  <span style={{ marginLeft: '10px', color: 'rgba(255,255,255,0.30)' }}>· {filtered.length} faktura</span>
-                  {overdueCount > 0 && <span style={{ marginLeft: '8px', color: '#FF5B5A', fontWeight: '600' }}>· {overdueCount} overdue</span>}
+                  <span style={{ marginLeft: '10px', color: 'rgba(255,255,255,0.30)' }}>· {countOf(filtered.length, 'faktura', 'fakture', 'faktura')}</span>
+                  {overdueCount > 0 && <span style={{ marginLeft: '8px', color: '#FF5B5A', fontWeight: '600' }}>· {overdueCount} u kašnjenju</span>}
                 </span>
               )}
             </div>
@@ -334,16 +335,16 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
 
         {/* ── Toolbar ── */}
         <div style={ps.toolbar}>
-          <input style={ps.searchInput} placeholder="Search partner or invoice #..." value={search} onChange={e => setSearch(e.target.value)} />
+          <input style={ps.searchInput} placeholder="Pretraga po partneru ili broju fakture…" value={search} onChange={e => setSearch(e.target.value)} />
           <select style={ps.sel} value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}>
-            <option value="all">All unpaid</option>
-            <option value="overdue">Overdue only</option>
-            <option value="upcoming">Upcoming</option>
+            <option value="all">Sve neplaćene</option>
+            <option value="overdue">Samo u kašnjenju</option>
+            <option value="upcoming">Predstojeće</option>
           </select>
           <select style={ps.sel} value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
-            <option value="due_date">Sort: Due date</option>
-            <option value="amount">Sort: Amount</option>
-            <option value="partner">Sort: Partner</option>
+            <option value="due_date">Sortiraj: datum dospeća</option>
+            <option value="amount">Sortiraj: iznos</option>
+            <option value="partner">Sortiraj: partner</option>
           </select>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: '10px' }}>
             <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.35)', whiteSpace: 'nowrap' as const }}>Stanje na dan:</span>
@@ -369,14 +370,14 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
             </div>
             <div style={{ display: 'flex', gap: '20px', flex: 1 }}>
               <div>
-                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginBottom: '2px' }}>Total RSD</div>
+                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginBottom: '2px' }}>Ukupno RSD</div>
                 <div style={{ fontFamily: "'DM Mono',monospace", fontSize: '15px', fontWeight: '600', color: '#E8F1FB' }}>
                   {fmtNum(selectedTotalRsd)} RSD
                 </div>
               </div>
               {currency !== 'RSD' && (
                 <div>
-                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginBottom: '2px' }}>Total {currency}</div>
+                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginBottom: '2px' }}>Ukupno {currency}</div>
                   <div style={{ fontFamily: "'DM Mono',monospace", fontSize: '15px', fontWeight: '600', color: '#00D47E' }}>
                     {fmt(selectedTotalBook)}
                   </div>
@@ -385,7 +386,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <button
                   style={{ fontFamily: "'Inter',sans-serif", fontSize: '11px', padding: '5px 12px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', background: 'transparent', color: '#7A9BB8', cursor: 'pointer' }}
-                  onClick={() => setSelected(new Set())}>Clear selection</button>
+                  onClick={() => setSelected(new Set())}>Poništi izbor</button>
               </div>
             </div>
           </div>
@@ -399,11 +400,11 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
               {selected.size > 0 && <span style={{ marginLeft: '8px', color: '#7A9BB8', fontWeight: '400' }}>({selected.size} selektovano)</span>}
             </div>
             {bankAccounts.length === 0 ? (
-              <div style={{ fontSize: '11px', color: '#FF5B5A' }}>⚠ No RSD company account found</div>
+              <div style={{ fontSize: '11px', color: '#FF5B5A' }}>⚠ Firma nema tekući račun u RSD</div>
             ) : (
               <div style={{ fontSize: '11px', color: '#7A6030' }}>
                 Platilac: {selectedBank?.bank_name} · {selectedBank?.account_number}
-                {missingAccountCount > 0 && <span style={{ marginLeft: '8px', color: '#FF5B5A', fontWeight: '600' }}>⚠ {missingAccountCount} without an account</span>}
+                {missingAccountCount > 0 && <span style={{ marginLeft: '8px', color: '#FF5B5A', fontWeight: '600' }}>⚠ {missingAccountCount} bez računa</span>}
               </div>
             )}
           </div>
@@ -417,7 +418,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
               {HALCOM_SIFRE.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
             <button style={{ ...ps.exportBtn, opacity: bankAccounts.length === 0 ? 0.5 : 1 }} onClick={handleExport} disabled={bankAccounts.length === 0}>
-              ↓ Export {selected.size > 0 ? `${selected.size}` : 'all'} naloga
+              ↓ Izvezi {selected.size > 0 ? `${selected.size}` : 'sve'} naloge
             </button>
           </div>
         </div>
@@ -432,8 +433,8 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
           ) : filtered.length === 0 ? (
             <div style={{ padding: '80px', textAlign: 'center' as const }}>
               <div style={{ fontSize: '32px', marginBottom: '12px' }}>✓</div>
-              <div style={{ fontSize: '15px', fontWeight: '500', color: '#E8F1FB', marginBottom: '4px' }}>No unpaid invoices.</div>
-              <div style={{ fontSize: '12px', color: '#7A9BB8' }}>Every invoice is settled</div>
+              <div style={{ fontSize: '15px', fontWeight: '500', color: '#E8F1FB', marginBottom: '4px' }}>Nema neplaćenih faktura.</div>
+              <div style={{ fontSize: '12px', color: '#7A9BB8' }}>Sve fakture su izmirene</div>
             </div>
           ) : (
             <table style={ps.table}>
@@ -442,14 +443,14 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   <th style={ps.th}>
                     <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleAll} style={{ cursor: 'pointer', accentColor: '#00D47E' }} />
                   </th>
-                  <th style={ps.th}>Due date</th>
+                  <th style={ps.th}>Datum dospeća</th>
                   <th style={ps.th}>Partner</th>
-                  <th style={ps.th}>Invoice no.</th>
-                  <th style={ps.th}>Type</th>
-                  <th style={{ ...ps.th, textAlign: 'right' as const }}>Amount</th>
+                  <th style={ps.th}>Broj fakture</th>
+                  <th style={ps.th}>Tip</th>
+                  <th style={{ ...ps.th, textAlign: 'right' as const }}>Iznos</th>
                   <th style={{ ...ps.th, textAlign: 'right' as const }}>{currency}</th>
-                  <th style={ps.th}>Payee account</th>
-                  <th style={ps.th}>Remaining</th>
+                  <th style={ps.th}>Račun primaoca</th>
+                  <th style={ps.th}>Preostalo</th>
                 </tr>
               </thead>
               <tbody>
@@ -488,14 +489,14 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                           </span>
                           {inv.calculated_status === 'partial' && (
                             <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '20px', background: 'rgba(245,166,35,0.15)', color: '#F5A623', border: '0.5px solid rgba(245,166,35,0.3)', whiteSpace: 'nowrap' as const }}>
-                              PARTIAL
+                              DELIMIČNO
                             </span>
                           )}
                         </div>
                       </td>
                       <td style={ps.td}>
                         <span style={{ fontSize: '10px', fontWeight: '600', padding: '2px 8px', borderRadius: '20px', background: inv.type === 'expense' ? 'rgba(255,91,90,0.12)' : 'rgba(0,212,126,0.12)', color: inv.type === 'expense' ? '#FF5B5A' : '#00D47E', letterSpacing: '0.02em' }}>
-                          {inv.type}
+                          {inv.type === 'expense' ? 'ulazna' : inv.type === 'revenue' ? 'izlazna' : inv.type}
                         </span>
                       </td>
                       <td style={{ ...ps.td, textAlign: 'right' as const }}>
@@ -505,7 +506,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                           </span>
                           {inv.calculated_status === 'partial' && (
                             <div style={{ fontSize: '10px', color: '#F5A623', marginTop: '2px', whiteSpace: 'nowrap' as const }}>
-                              Remaining: {fmtMoney(inv.outstanding_own || 0, inv.currency)}
+                              Preostalo: {fmtMoney(inv.outstanding_own || 0, inv.currency)}
                             </div>
                           )}
                         </div>
@@ -517,7 +518,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                           </span>
                           {inv.calculated_status === 'partial' && (
                             <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.30)', marginTop: '2px' }}>
-                              of {fmt(pick(inv))}
+                              od {fmt(pick(inv))}
                             </div>
                           )}
                         </div>
@@ -529,7 +530,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                             value={partnerAccounts.find(a => a.account_number === selectedAcc?.account_number)?.id || ''}
                             onChange={e => handleAccountSelect(inv.id, e.target.value, partnerId)}
                           >
-                            <option value="">Select an account...</option>
+                            <option value="">Izaberite račun…</option>
                             {partnerAccounts.map(pa => (
                               <option key={pa.id} value={pa.id}>{pa.account_number}{pa.is_primary ? ' ★' : ''}{pa.bank_name ? ` — ${pa.bank_name.substring(0, 20)}` : ''}</option>
                             ))}
@@ -542,20 +543,20 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                                 {selectedAcc?.bank_name && <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.25)', marginTop: '1px' }}>{selectedAcc.bank_name.substring(0, 30)}</div>}
                               </div>
                             ) : (
-                              <span style={{ fontSize: '11px', color: '#FF5B5A', fontWeight: '500' }}>⚠ No account</span>
+                              <span style={{ fontSize: '11px', color: '#FF5B5A', fontWeight: '500' }}>⚠ Nema računa</span>
                             )}
                           </div>
                         )}
                       </td>
                       <td style={ps.td}>
                         {days === null ? (
-                          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)' }}>No due date</span>
+                          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)' }}>Bez datuma dospeća</span>
                         ) : days < 0 ? (
-                          <span style={{ fontSize: '11px', fontWeight: '700', color: '#FF5B5A', background: 'rgba(255,91,90,0.12)', padding: '2px 8px', borderRadius: '20px' }}>{Math.abs(days)}d late</span>
+                          <span style={{ fontSize: '11px', fontWeight: '700', color: '#FF5B5A', background: 'rgba(255,91,90,0.12)', padding: '2px 8px', borderRadius: '20px' }}>kasni {Math.abs(days)} d</span>
                         ) : days === 0 ? (
                           <span style={{ fontSize: '11px', fontWeight: '700', color: '#F5A623', background: 'rgba(245,166,35,0.12)', padding: '2px 8px', borderRadius: '20px' }}>Danas!</span>
                         ) : (
-                          <span style={{ fontSize: '11px', color: days <= 7 ? '#F5A623' : 'rgba(255,255,255,0.35)' }}>{days}d preostalo</span>
+                          <span style={{ fontSize: '11px', color: days <= 7 ? '#F5A623' : 'rgba(255,255,255,0.35)' }}>još {days} d</span>
                         )}
                       </td>
                     </tr>
@@ -565,14 +566,14 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
               <tfoot>
                 <tr style={{ background: '#060E1A', borderTop: '2px solid rgba(0,212,126,0.25)' }}>
                   <td colSpan={5} style={{ padding: '12px 16px', fontSize: '10px', fontWeight: '700', color: 'rgba(255,255,255,0.30)', letterSpacing: '0.1em', textTransform: 'uppercase' as const }}>
-                    Total ({filtered.length} invoice{filtered.length === 1 ? '' : 's'})
+                    Ukupno ({countOf(filtered.length, 'faktura', 'fakture', 'faktura')})
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'right' as const }}></td>
                   <td style={{ padding: '12px 16px', textAlign: 'right' as const, fontFamily: "'DM Mono', monospace", fontSize: '15px', fontWeight: '700', color: '#00D47E' }}>
                     {fmt(totalUnpaid)}
                   </td>
                   <td colSpan={2} style={{ padding: '12px 16px', fontSize: '11px', color: overdueCount > 0 ? '#FF5B5A' : 'rgba(255,255,255,0.25)', fontWeight: overdueCount > 0 ? '600' : '400' }}>
-                    {overdueCount > 0 ? `${overdueCount} invoice${overdueCount === 1 ? '' : 's'} overdue` : 'All on time ✓'}
+                    {overdueCount > 0 ? `${countOf(overdueCount, 'faktura', 'fakture', 'faktura')} u kašnjenju` : 'Sve na vreme ✓'}
                   </td>
                 </tr>
               </tfoot>
@@ -648,30 +649,30 @@ export default function Reports() {
   useEffect(() => { fetchKpis() }, [fetchKpis])
 
   const kpiCards = [
-    { label: 'Net Profit (YTD)',    value: loading ? '...' : fmt(kpis.netProfit),                                     sub: `${currentYear} year to date`,  up: kpis.netProfit >= 0,      trend: loading ? '' : kpis.netProfit >= 0 ? 'Profitable' : 'Loss',    accent: kpis.netProfit >= 0 ? '#00D47E' : '#FF5B5A' },
-    { label: 'Total Revenue (YTD)', value: loading ? '...' : fmt(kpis.totalRevenue),                                    sub: `${currentYear} year to date`,  up: true,                     trend: loading ? '' : `${fmt(kpis.totalExpenses)} expenses`,           accent: '#00D47E' },
-    { label: 'Expense Ratio',       value: loading ? '...' : `${kpis.expenseRatio.toFixed(1)}%`,                        sub: 'Expenses / Revenue YTD',       up: kpis.expenseRatio < 90,   trend: loading ? '' : kpis.expenseRatio < 80 ? 'Healthy' : kpis.expenseRatio < 90 ? 'Watch' : 'High', accent: kpis.expenseRatio < 80 ? '#00D47E' : kpis.expenseRatio < 90 ? '#F5A623' : '#FF5B5A' },
-    { label: 'Open Receivables',    value: loading ? '...' : kpis.openInvoicesCount > 0 ? `${kpis.openInvoicesCount} · ${fmt(kpis.openInvoicesAmount)}` : 'None', sub: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} overdue` : 'All on time', up: kpis.overdueCount === 0, trend: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} overdue` : 'On time', accent: kpis.overdueCount > 0 ? '#FF5B5A' : '#4EA8FF' },
+    { label: 'Neto dobit (od početka godine)', value: loading ? '…' : fmt(kpis.netProfit),                         sub: `${currentYear}, od početka godine`, up: kpis.netProfit >= 0,      trend: loading ? '' : kpis.netProfit >= 0 ? 'Dobit' : 'Gubitak',    accent: kpis.netProfit >= 0 ? '#00D47E' : '#FF5B5A' },
+    { label: 'Ukupni prihodi (od početka godine)', value: loading ? '…' : fmt(kpis.totalRevenue),                  sub: `${currentYear}, od početka godine`, up: true,                     trend: loading ? '' : `troškovi ${fmt(kpis.totalExpenses)}`,           accent: '#00D47E' },
+    { label: 'Udeo troškova',       value: loading ? '…' : `${kpis.expenseRatio.toFixed(1).replace('.', ',')}%`,   sub: 'Troškovi / prihodi od početka godine', up: kpis.expenseRatio < 90,   trend: loading ? '' : kpis.expenseRatio < 80 ? 'Zdravo' : kpis.expenseRatio < 90 ? 'Pratiti' : 'Visoko', accent: kpis.expenseRatio < 80 ? '#00D47E' : kpis.expenseRatio < 90 ? '#F5A623' : '#FF5B5A' },
+    { label: 'Otvorena potraživanja', value: loading ? '…' : kpis.openInvoicesCount > 0 ? `${kpis.openInvoicesCount} · ${fmt(kpis.openInvoicesAmount)}` : 'Nema', sub: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} u kašnjenju` : 'Sve na vreme', up: kpis.overdueCount === 0, trend: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} u kašnjenju` : 'Na vreme', accent: kpis.overdueCount > 0 ? '#FF5B5A' : '#4EA8FF' },
   ]
 
   const reports = [
-    { id: 'project-profit',   title: 'Project Profitability', desc: 'Revenue, direct cost and margin per site, with overhead on its own line', category: 'P&L', icon: '🏗', color: '#0F6E56', bg: '#E1F5EE', page: 'projects' as Page,     action: null },
-    { id: 'pl-by-project',    title: 'Cost by Project',      desc: 'Every cost by project and category; Opšti troškovi for overhead',   category: 'P&L',        icon: '🧭', color: '#0F6E56', bg: '#E1F5EE', page: 'expenses' as Page,     action: null },
-    { id: 'pl-by-dept',       title: 'P&L by Department',    desc: 'Expense breakdown per organizational unit',                       category: 'P&L',        icon: '👥', color: '#0F6E56', bg: '#E1F5EE', page: 'expenses' as Page,     action: null },
-    { id: 'cashflow-monthly', title: 'Monthly Cash Flow',    desc: 'Operating and financing activities by period',                    category: 'Cash Flow',  icon: '💰', color: '#0C447C', bg: '#E6F1FB', page: 'cashflow' as Page,     action: null },
-    { id: 'bank-rec',         title: 'Bank Reconciliation',  desc: 'Statement vs. recorded transactions per account',                 category: 'Cash Flow',  icon: '🏦', color: '#0C447C', bg: '#E6F1FB', page: 'cashflow' as Page,     action: null },
-    { id: 'passthrough',      title: 'Pass-through Balance', desc: 'Pass-through IN vs. OUT monthly balance',                         category: 'Compliance', icon: '⚖️', color: '#633806', bg: '#FAEEDA', page: 'cashflow' as Page,     action: null },
-    { id: 'unmatched',        title: 'Unmatched Invoices',   desc: 'Unpaid invoices · Hal E-Bank TKDIS export', category: 'Compliance', icon: '⚠️', color: '#854F0B', bg: '#FAEEDA', page: 'reports' as Page,      action: 'unpaid' },
-    { id: 'exchange-rates',   title: 'Exchange Rate Log',    desc: 'Rates used per period and transaction',                           category: 'Reference',  icon: '💱', color: '#444',    bg: '#f0f0ee', page: 'reports' as Page,      action: null },
-    { id: 'partner-summary',  title: 'Partner Summary',      desc: 'Total transactions per partner across all entities',               category: 'Reference',  icon: '🤝', color: '#444',    bg: '#f0f0ee', page: 'partners' as Page,     action: null },
+    { id: 'project-profit',   title: 'Profitabilnost projekata', desc: 'Prihodi, direktni troškovi i marža po gradilištu, sa opštim troškovima u posebnom redu', category: 'P&L', icon: '🏗', color: '#0F6E56', bg: '#E1F5EE', page: 'projects' as Page,     action: null },
+    { id: 'pl-by-project',    title: 'Troškovi po projektima', desc: 'Svi troškovi po projektu i kategoriji; Opšti troškovi posebno',   category: 'P&L',        icon: '🧭', color: '#0F6E56', bg: '#E1F5EE', page: 'expenses' as Page,     action: null },
+    { id: 'pl-by-dept',       title: 'P&L po sektorima',     desc: 'Struktura troškova po organizacionoj jedinici',                       category: 'P&L',        icon: '👥', color: '#0F6E56', bg: '#E1F5EE', page: 'expenses' as Page,     action: null },
+    { id: 'cashflow-monthly', title: 'Mesečni novčani tok',  desc: 'Poslovne i finansijske aktivnosti po periodima',                  category: 'Novčani tok',  icon: '💰', color: '#0C447C', bg: '#E6F1FB', page: 'cashflow' as Page,     action: null },
+    { id: 'bank-rec',         title: 'Usaglašavanje sa bankom', desc: 'Izvod naspram proknjiženih transakcija po računu',              category: 'Novčani tok',  icon: '🏦', color: '#0C447C', bg: '#E6F1FB', page: 'cashflow' as Page,     action: null },
+    { id: 'passthrough',      title: 'Stanje prolaznih stavki', desc: 'Mesečno stanje prolaznih uplata i isplata',                   category: 'Usklađenost', icon: '⚖️', color: '#633806', bg: '#FAEEDA', page: 'cashflow' as Page,     action: null },
+    { id: 'unmatched',        title: 'Neuparene fakture',    desc: 'Neplaćene fakture · izvoz za Hal E-Bank (TKDIS)', category: 'Usklađenost', icon: '⚠️', color: '#854F0B', bg: '#FAEEDA', page: 'reports' as Page,      action: 'unpaid' },
+    { id: 'exchange-rates',   title: 'Evidencija kurseva',   desc: 'Kursevi korišćeni po periodu i transakciji',                       category: 'Referentno',  icon: '💱', color: '#444',    bg: '#f0f0ee', page: 'reports' as Page,      action: null },
+    { id: 'partner-summary',  title: 'Pregled partnera',     desc: 'Ukupne transakcije po partneru u svim firmama',                     category: 'Referentno',  icon: '🤝', color: '#444',    bg: '#f0f0ee', page: 'partners' as Page,     action: null },
   ]
 
-  const categories = ['P&L', 'Cash Flow', 'Compliance', 'Reference']
+  const categories = ['P&L', 'Novčani tok', 'Usklađenost', 'Referentno']
   const categoryColors: Record<string, { color: string; bg: string; accent: string }> = {
     'P&L':        { color: '#0F6E56', bg: '#E1F5EE', accent: '#00D47E' },
-    'Cash Flow':  { color: '#0C447C', bg: '#E6F1FB', accent: '#4EA8FF' },
-    'Compliance': { color: '#633806', bg: '#FAEEDA', accent: '#F5A623' },
-    'Reference':  { color: '#555',    bg: '#f0f0ee', accent: '#7A9BB8' },
+    'Novčani tok': { color: '#0C447C', bg: '#E6F1FB', accent: '#4EA8FF' },
+    'Usklađenost': { color: '#633806', bg: '#FAEEDA', accent: '#F5A623' },
+    'Referentno':  { color: '#555',    bg: '#f0f0ee', accent: '#7A9BB8' },
   }
 
   return (
@@ -681,23 +682,23 @@ export default function Reports() {
         {/* ── Page header ── */}
         <div style={s.pageHeader}>
           <div>
-            <div style={s.pageTitle}>Reports</div>
-            <div style={s.pageSub}>Financial reports and analytics · YTD {currentYear}</div>
+            <div style={s.pageTitle}>Izveštaji</div>
+            <div style={s.pageSub}>Finansijski izveštaji i analize · {currentYear}, od početka godine</div>
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             {showPicker && (
               <select style={s.filterSelect} value={companyId} onChange={e => setCompanyId(e.target.value)}>
-                <option value="all">All companies</option>
+                <option value="all">Sve firme</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
-            <button onClick={fetchKpis} style={{ fontFamily: "'Inter', sans-serif", fontSize: '12px', padding: '8px 14px', border: '1px solid rgba(0,212,126,0.3)', borderRadius: '9px', background: 'rgba(0,212,126,0.06)', color: '#00D47E', cursor: 'pointer', fontWeight: '500' }}>↻ Refresh</button>
+            <button onClick={fetchKpis} style={{ fontFamily: "'Inter', sans-serif", fontSize: '12px', padding: '8px 14px', border: '1px solid rgba(0,212,126,0.3)', borderRadius: '9px', background: 'rgba(0,212,126,0.06)', color: '#00D47E', cursor: 'pointer', fontWeight: '500' }}>↻ Osveži</button>
           </div>
         </div>
 
         {/* ── KPI section label ── */}
         <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.22)', letterSpacing: '0.12em', textTransform: 'uppercase' as const, marginBottom: '10px' }}>
-          Key metrics · {currentYear} year to date
+          Ključni pokazatelji · {currentYear}, od početka godine
         </div>
 
         {/* ── KPI grid ── */}
@@ -719,14 +720,14 @@ export default function Reports() {
         {/* ── Alert banner ── */}
         {!loading && (kpis.overdueCount > 0 || kpis.unmatchedPassthrough > 0) && (
           <div style={s.alertBox}>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#F5A623', marginBottom: '8px', letterSpacing: '0.04em', textTransform: 'uppercase' as const }}>Attention required</div>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: '#F5A623', marginBottom: '8px', letterSpacing: '0.04em', textTransform: 'uppercase' as const }}>Potrebna pažnja</div>
             {kpis.overdueCount > 0 && (
               <div style={s.alertRow}>
                 <span style={s.alertDot} />
                 <span style={{ fontSize: '12px', color: '#DCE9F6' }}>
-                  {kpis.overdueCount} invoice{kpis.overdueCount > 1 ? 's' : ''} past due date —{' '}
+                  {countOf(kpis.overdueCount, 'faktura je', 'fakture su', 'faktura je')} posle datuma dospeća —{' '}
                   <span style={{ color: '#F5A623', cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'rgba(245,166,35,0.4)' }} onClick={() => setShowUnpaidPanel(true)}>
-                    open Unmatched Invoices
+                    otvori Neuparene fakture
                   </span>.
                 </span>
               </div>
@@ -734,7 +735,7 @@ export default function Reports() {
             {kpis.unmatchedPassthrough > 0 && (
               <div style={s.alertRow}>
                 <span style={s.alertDot} />
-                <span style={{ fontSize: '12px', color: '#DCE9F6' }}>{kpis.unmatchedPassthrough} pass-through entr{kpis.unmatchedPassthrough === 1 ? 'y' : 'ies'} unpaired — review Cash Flow tab.</span>
+                <span style={{ fontSize: '12px', color: '#DCE9F6' }}>{countOf(kpis.unmatchedPassthrough, 'prolazna stavka nije uparena', 'prolazne stavke nisu uparene', 'prolaznih stavki nije upareno')} — proverite Novčani tok.</span>
               </div>
             )}
           </div>
@@ -746,7 +747,7 @@ export default function Reports() {
             <div style={s.categoryHeader}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: categoryColors[cat].accent, flexShrink: 0 }} />
               <span style={{ ...s.categoryBadge, color: categoryColors[cat].color, background: categoryColors[cat].bg }}>{cat}</span>
-              <span style={s.categoryCount}>{reports.filter(r => r.category === cat).length} reports</span>
+              <span style={s.categoryCount}>{countOf(reports.filter(r => r.category === cat).length, 'izveštaj', 'izveštaja', 'izveštaja')}</span>
               <div style={{ flex: 1, height: '0.5px', background: 'rgba(255,255,255,0.06)' }} />
             </div>
             <div style={s.reportsGrid}>
@@ -798,7 +799,7 @@ function ReportCard({ report, active, onClick, onView }: { report: any; active: 
         <button
           style={{ ...s.reportBtn, color: report.color, borderColor: report.color + '40', background: active ? `${report.color}18` : report.bg }}
           onClick={e => { e.stopPropagation(); onView() }}>
-          View →
+          Otvori →
         </button>
       </div>
     </div>

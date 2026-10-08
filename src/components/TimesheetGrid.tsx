@@ -16,6 +16,7 @@ import {
   assignedHours, mergeProjectHours, unassignedWorkedHours,
 } from '../services/payroll/projectHours'
 import { OVERHEAD_LABEL } from '../services/projects'
+import { countOf } from '../utils/plural'
 
 /** One editable row of "Sati po projektima"; hours kept as typed. */
 interface ProjectHoursDraft { key: string; project_id: string | null; hours: string }
@@ -133,10 +134,10 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
     const without = people.filter(p => !rows[p.employee.id])
     if (without.length === 0) return
     if (!window.confirm(
-      `Give ${without.length} ${without.length === 1 ? 'person' : 'people'} a full month — `
-      + `${fund.workableHours} ordinary hours`
-      + (fund.holidayHours > 0 ? ` and ${fund.holidayHours} of public holiday` : '')
-      + '? Anybody who already has hours is left alone.')) return
+      `Upisati pun mesec za ${countOf(without.length, 'zaposlenog', 'zaposlena', 'zaposlenih')} — `
+      + `${fund.workableHours} sati redovnog rada`
+      + (fund.holidayHours > 0 ? ` i ${fund.holidayHours} sati državnog praznika` : '')
+      + '? Zaposleni koji već imaju upisane sate ostaju nepromenjeni.')) return
 
     setError(null)
     const added: Record<string, TimesheetRow> = {}
@@ -149,7 +150,7 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
         await saveTimesheet(supabase, t)
         added[p.employee.id] = t
       } catch (e: any) {
-        setError(`${p.employee.full_name}: ${e.message} — the ones before them were saved.`)
+        setError(`${p.employee.full_name}: ${e.message} — sati za zaposlene pre njega su sačuvani.`)
         break
       }
     }
@@ -189,7 +190,7 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
     ...ABSENCES.filter(a => a.common || showRare || usedRare.has(a.field)).map(a => a.field),
   ] as HourField[]
 
-  if (loading) return <div style={s.empty}>Loading the hours…</div>
+  if (loading) return <div style={s.empty}>Učitavanje sati…</div>
 
   return (
     <div>
@@ -198,38 +199,38 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
       <div style={fundIsProvenFor(fund) ? s.note : s.warn}>
         {explainFund(month, fund)}
         <div style={{ marginTop: '6px', opacity: 0.85 }}>
-          Each kind of absence is paid at its own coefficient from the settings — sick
-          leave at the employer&rsquo;s expense at 65%, the full-fund kind at 100%, a work
-          stoppage at 60%. The source files cannot tell them apart, so which sick leave
-          it was has to be entered here.
+          Svaka vrsta odsustva plaća se po svom koeficijentu iz podešavanja — bolovanje do
+          30 dana na teret poslodavca 65%, bolovanje sa punim iznosom 100%, prekid rada
+          60%. Izvorni fajlovi ih ne razlikuju, pa se ovde mora uneti o kom bolovanju
+          je reč.
         </div>
         {fund.holidays.length > 0 && (
           <div style={{ marginTop: '6px', opacity: 0.85 }}>
-            Put those {fund.holidayHours} hours in the <b>Public holiday</b> column, not in
-            the worked ones — they are paid without being worked, and a run that could not
-            tell them apart would have to guess.
+            Tih {fund.holidayHours} sati upišite u kolonu <b>Državni praznik</b>, ne u
+            sate rada — plaćaju se iako se ne radi, a obračun koji ih ne bi razlikovao
+            morao bi da pogađa.
           </div>
         )}
       </div>
 
       <div style={s.bar}>
         <div style={s.barStat}>
-          <b>{summary.withHours}</b> of {people.length} have hours
-          {summary.missing > 0 && <span style={{ color: '#FF8E8D' }}> · {summary.missing} missing</span>}
-          {summary.failing > 0 && <span style={{ color: '#FF8E8D' }}> · {summary.failing} do not add up</span>}
+          <b>{summary.withHours}</b> od {people.length} ima upisane sate
+          {summary.missing > 0 && <span style={{ color: '#FF8E8D' }}> · {summary.missing} bez sati</span>}
+          {summary.failing > 0 && <span style={{ color: '#FF8E8D' }}> · {summary.failing} se ne slaže sa fondom</span>}
         </div>
         <div style={s.barStat}>
-          <b>{round(summary.worked)}</b> hours worked
+          <b>{round(summary.worked)}</b> sati rada
         </div>
         <button style={s.ghost} onClick={() => setImporting(true)}>
-          Import from the department exports
+          Uvezi iz izvoza po odeljenjima
         </button>
         <button style={{ ...s.ghost, marginLeft: 0 }} onClick={() => setShowRare(v => !v)}>
-          {showRare ? 'Hide the rare absences' : `Show all ${ABSENCES.length} absences`}
+          {showRare ? 'Sakrij retka odsustva' : `Prikaži svih ${ABSENCES.length} vrsta odsustva`}
         </button>
         <button style={{ ...s.ghost, marginLeft: 0 }} onClick={fillTheMonth}
           disabled={summary.missing === 0}>
-          Fill the {summary.missing} missing with a full month
+          Upiši pun mesec za {countOf(summary.missing, 'zaposlenog', 'zaposlena', 'zaposlenih')} bez sati
         </button>
       </div>
 
@@ -255,15 +256,15 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
         <table style={s.table}>
           <thead>
             <tr style={s.thead}>
-              <th style={s.th}>Employee</th>
+              <th style={s.th}>Zaposleni</th>
               {columns.map(f => (
                 <th key={f} style={s.thRight}>
                   {label(f)}
                 </th>
               ))}
-              <th style={s.thRight}>Total</th>
+              <th style={s.thRight}>Ukupno</th>
               <th style={s.th}>Projekti</th>
-              <th style={s.th}>Against the month</th>
+              <th style={s.th}>Prema fondu</th>
             </tr>
           </thead>
           <tbody>
@@ -307,8 +308,8 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
                   <td style={s.tdRight}>
                     <b style={{ color: bad ? '#FF8E8D' : '#DCE9F6' }}>{round(totalHours(t))}</b>
                     {rowFund !== monthHours && (
-                      <div style={s.smallCell} title="Part of the month — they joined or left in it">
-                        of {round(rowFund)}
+                      <div style={s.smallCell} title="Deo meseca — zaposleni je počeo ili prestao da radi u toku meseca">
+                        od {round(rowFund)}
                       </div>
                     )}
                   </td>
@@ -321,11 +322,11 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
                     </button>
                   </td>
                   <td style={s.td}>
-                    {savingId === p.employee.id ? <span style={s.smallCell}>Saving…</span>
-                      : savedId === p.employee.id ? <span style={s.ok}>Saved</span>
-                      : dirty[p.employee.id] ? <span style={s.smallCell}>Unsaved</span>
-                      : !has ? <span style={s.missing}>No hours entered</span>
-                      : problems.length === 0 ? <span style={s.ok}>Adds up</span>
+                    {savingId === p.employee.id ? <span style={s.smallCell}>Čuvanje…</span>
+                      : savedId === p.employee.id ? <span style={s.ok}>Sačuvano</span>
+                      : dirty[p.employee.id] ? <span style={s.smallCell}>Nije sačuvano</span>
+                      : !has ? <span style={s.missing}>Sati nisu upisani</span>
+                      : problems.length === 0 ? <span style={s.ok}>Slaže se</span>
                       : <span style={problems[0].level === 'error' ? s.badText : s.warnText}
                           title={problems.map(x => x.message).join('\n\n')}>
                           {problems[0].message}

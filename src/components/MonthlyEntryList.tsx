@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { DIALOG } from './dialogTheme'
+import { countOf, plural } from '../utils/plural'
 import {
   EntryRow, em, buildEntryItems, DRILL_CAP,
   type EntryItem, type EditTarget,
@@ -261,7 +262,7 @@ export function MonthlyEntryList({
    */
   const searchIncomplete = filter.kind === 'text' && Object.keys(capped).length > 0
 
-  if (groups.length === 0) return <div style={em.empty}>No entries found for this line.</div>
+  if (groups.length === 0) return <div style={em.empty}>Za ovu liniju nema stavki.</div>
 
   return (
     <>
@@ -272,30 +273,30 @@ export function MonthlyEntryList({
           style={ml.search}
           value={query}
           onChange={e => setQuery(e.target.value)}
-          aria-label="Filter these transactions"
-          placeholder="Filter by name — or by amount: 500, 500.00, >1000, <=50"
+          aria-label="Filtriraj ove transakcije"
+          placeholder="Filtriraj po nazivu — ili po iznosu: 500, 500,00, >1000, <=50"
         />
         {query !== '' && (
-          <button style={ml.clear} onClick={() => setQuery('')} title="Clear the filter">clear</button>
+          <button style={ml.clear} onClick={() => setQuery('')} title="Poništi filter">poništi</button>
         )}
       </div>
 
       {filter.kind !== 'none' && (
         <div style={ml.note}>
           {scan
-            ? `Reading every month so the search is complete — ${scan.done} of ${scan.total}…`
+            ? `Čitaju se svi meseci da bi pretraga bila potpuna — ${scan.done} od ${scan.total}…`
             : tally.count === 0
-              ? `Nothing matches “${applied.trim()}”.`
-              : `${tally.count.toLocaleString()} of ${rows.length.toLocaleString()} transactions`
-                + ` · ${tally.months} of ${groups.length} month${groups.length !== 1 ? 's' : ''}`
+              ? `Ništa ne odgovara pretrazi „${applied.trim()}“.`
+              : `${tally.count.toLocaleString('sr-RS')} od ${rows.length.toLocaleString('sr-RS')} ${plural(rows.length, 'transakcije', 'transakcije', 'transakcija')}`
+                + ` · ${tally.months} od ${groups.length} ${plural(groups.length, 'meseca', 'meseca', 'meseci')}`
                 + ` · ${money(tally.total)}`}
         </div>
       )}
 
       {searchIncomplete && !scan && (
         <div style={ml.warn}>
-          ⚠ One or more months hold more than {DRILL_CAP} entries, so their vendor names could not all be
-          read back. Those rows were searched by expense description only — export the line for a complete search.
+          ⚠ Bar jedan mesec ima više od {DRILL_CAP} stavki, pa nisu mogli da se učitaju svi nazivi dobavljača.
+          U tim redovima pretraga je išla samo po opisu troška — izvezite liniju za potpunu pretragu.
         </div>
       )}
 
@@ -320,9 +321,9 @@ export function MonthlyEntryList({
                 <span style={ml.caret}>{dead ? '·' : isOpen ? '▾' : '▸'}</span>
                 <span style={ml.monthLabel}>{g.label}</span>
                 <span style={ml.monthCount}>
-                  {count.toLocaleString()} {count === 1 ? 'entry' : 'entries'}
+                  {count.toLocaleString('sr-RS')} {plural(count, 'stavka', 'stavke', 'stavki')}
                   {matched && count > 0 && g.count !== count && (
-                    <span style={ml.ofAll}> of {g.count.toLocaleString()}</span>
+                    <span style={ml.ofAll}> od {g.count.toLocaleString('sr-RS')}</span>
                   )}
                 </span>
                 <span style={ml.monthTotal}>{money(total)}</span>
@@ -331,12 +332,12 @@ export function MonthlyEntryList({
               {isOpen && (
                 <div style={ml.monthBody}>
                   {busyMonths.includes(g.key) || !items ? (
-                    <div style={ml.loading}>Loading {g.label}…</div>
+                    <div style={ml.loading}>Učitavanje: {g.label}…</div>
                   ) : shown.length === 0 ? (
                     <div style={ml.loading}>
                       {items.length === 0
-                        ? 'The entries behind this month could not be read.'
-                        : 'No matching entry in this month has been read back yet.'}
+                        ? 'Stavke ovog meseca nisu mogle da se učitaju.'
+                        : 'Nijedna odgovarajuća stavka ovog meseca još nije učitana.'}
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -347,9 +348,9 @@ export function MonthlyEntryList({
                   )}
                   {capped[g.key] && items && items.length > 0 && (
                     <div style={ml.capNote}>
-                      {g.label} holds {g.count.toLocaleString()} entries and the {g.label} total above counts
-                      every one of them — but only the {items.length.toLocaleString()} most recent could be
-                      listed. Export the line for the rest.
+                      {g.label}: {countOf(g.count, 'stavka', 'stavke', 'stavki')}, i ukupan iznos iznad obuhvata
+                      svaku od njih — ali prikazano je samo {items.length.toLocaleString('sr-RS')} najnovijih.
+                      Izvezite liniju za ostale.
                     </div>
                   )}
                 </div>

@@ -100,7 +100,7 @@ describe('ratesFor', () => {
     // Not a fallback to the oldest or newest. A complete, plausible payroll
     // run for a month whose real rates nobody knows is the worst thing this
     // module could produce — it would look exactly like a verified one.
-    expect(() => ratesFor(SEED_2026, '2025-06-01')).toThrow(/No payroll settings cover 2025-06-01/)
+    expect(() => ratesFor(SEED_2026, '2025-06-01')).toThrow(/Podešavanja zarada ne pokrivaju 2025-06-01/)
   })
 
   it('names every missing setting, not just the first', () => {
@@ -171,8 +171,8 @@ describe('whyNotSavable', () => {
     const why = whyNotSavable(
       { setting_key: 'tax_free_amount', valid_from: '2026-06-01', valid_to: null }, existing)
     expect(why).toContain('2026-01-01')
-    expect(why).toContain('still in force')
-    expect(why).toContain('two answers')
+    expect(why).toContain('i dalje važi')
+    expect(why).toContain('dva odgovora')
   })
 
   it('lets a row be edited without clashing with itself', () => {
@@ -183,11 +183,11 @@ describe('whyNotSavable', () => {
 
   it('refuses a range that ends before it starts', () => {
     expect(whyNotSavable(
-      { setting_key: 'x', valid_from: '2026-06-01', valid_to: '2026-01-01' }, [])).toMatch(/after the start/)
+      { setting_key: 'x', valid_from: '2026-06-01', valid_to: '2026-01-01' }, [])).toMatch(/posle datuma početka/)
   })
 
   it('refuses a value with no start date', () => {
-    expect(whyNotSavable({ setting_key: 'x', valid_from: '', valid_to: null }, [])).toMatch(/takes effect/)
+    expect(whyNotSavable({ setting_key: 'x', valid_from: '', valid_to: null }, [])).toMatch(/od kog vrednost važi/)
   })
 
   it('does not care about a different setting covering the same period', () => {

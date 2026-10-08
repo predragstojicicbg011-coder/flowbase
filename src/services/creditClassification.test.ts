@@ -76,30 +76,30 @@ describe('credit classification', () => {
 describe('creditNote', () => {
   it('records which installment the leg paid', () => {
     expect(creditNote('principal', 'Investicioni kredit', 7, 1840.22))
-      .toBe('Principal — Investicioni kredit #7 (1.840,22 EUR)')
+      .toBe('Glavnica — Investicioni kredit #7 (1.840,22 EUR)')
   })
 
   it('labels the interest leg', () => {
     expect(creditNote('interest', 'Investicioni kredit', 7, 126.75))
-      .toBe('Interest — Investicioni kredit #7 (126,75 EUR)')
+      .toBe('Kamata — Investicioni kredit #7 (126,75 EUR)')
   })
 
   it('names the credit\'s own currency rather than assuming euros', () => {
     // A loan may be taken in dinars; its instalment is then a dinar figure.
     expect(creditNote('principal', 'Kredit za mehanizaciju', 4, 215640.5, null, 'RSD'))
-      .toBe('Principal — Kredit za mehanizaciju #4 (215.640,50 RSD)')
+      .toBe('Glavnica — Kredit za mehanizaciju #4 (215.640,50 RSD)')
   })
 
   it('leads with the leg, so a truncated note still says what the row is', () => {
     expect(creditNote('principal', 'Kredit', 3, 500, 'Paid early'))
-      .toBe('Principal — Kredit #3 (500,00 EUR) | bank line: Paid early')
+      .toBe('Glavnica — Kredit #3 (500,00 EUR) | stavka izvoda: Paid early')
   })
 
   it('does not let the bank wording contradict the leg at a glance', () => {
     // A principal row funded by a line the bank calls interest is legitimate;
     // reading "Naplata redovne kamate" first is what makes it look wrong.
     expect(creditNote('principal', 'Intesa 100k', 14, 5513.61, 'Naplata redovne kamate'))
-      .toMatch(/^Principal — /)
+      .toMatch(/^Glavnica — /)
   })
 
   it('does not leave a separator when there is no typed note', () => {

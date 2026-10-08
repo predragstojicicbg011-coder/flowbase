@@ -40,19 +40,19 @@ const ICONS: Record<string, React.ReactNode> = {
  * did.
  */
 const NAV_ITEMS: { key: Page; label: string }[] = [
-  { key: 'dashboard',    label: 'Dashboard' },
-  { key: 'transactions', label: 'General Ledger' },
-  { key: 'expenses',     label: 'P&L Analysis' },
+  { key: 'dashboard',    label: 'Kontrolna tabla' },
+  { key: 'transactions', label: 'Glavna knjiga' },
+  { key: 'expenses',     label: 'P&L analiza' },
   { key: 'projects',     label: 'Projekti' },
-  { key: 'revenue',      label: 'Revenue' },
-  { key: 'cashflow',     label: 'Cash Flow' },
-  { key: 'budgeting',    label: 'Budgeting & Forecasting' },
-  { key: 'reports',      label: 'Reports' },
-  { key: 'credits',      label: 'Bank Credits' },
-  { key: 'hr',           label: 'HR Administration' },
-  { key: 'payroll',      label: 'Payroll' },
-  { key: 'partners',     label: 'Partners' },
-  { key: 'settings',     label: 'Settings' },
+  { key: 'revenue',      label: 'Prihodi' },
+  { key: 'cashflow',     label: 'Novčani tok' },
+  { key: 'budgeting',    label: 'Budžet i prognoza' },
+  { key: 'reports',      label: 'Izveštaji' },
+  { key: 'credits',      label: 'Krediti' },
+  { key: 'hr',           label: 'Kadrovska evidencija' },
+  { key: 'payroll',      label: 'Zarade' },
+  { key: 'partners',     label: 'Partneri' },
+  { key: 'settings',     label: 'Podešavanja' },
 ]
 
 export function LogoMark({ size = 26 }: { size?: number }) {
@@ -131,7 +131,7 @@ export default function Sidebar() {
           <div style={s.userEmail}>{user?.email}</div>
           <div style={s.userRole}>Administrator</div>
         </div>
-        <button style={s.signoutBtn} onClick={signOut} title="Sign out">
+        <button style={s.signoutBtn} onClick={signOut} title="Odjava" aria-label="Odjava">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1.5" strokeLinecap="round">
             <path d="M6 8h8M11 5l3 3-3 3M10 3H3a1 1 0 00-1 1v8a1 1 0 001 1h7"/>
           </svg>

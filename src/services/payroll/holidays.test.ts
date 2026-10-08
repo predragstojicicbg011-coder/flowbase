@@ -2,7 +2,7 @@ import {
   holidaysInMonth, isWeekday, paidHolidaysIn, fundFor, fundIsProvenFor,
   explainFund, HOURS_PER_DAY, fundForEmployee, workingDaysBetween, workingDaysFor,
   type HolidayRow,
-  lastWorkingDayOf,
+  lastWorkingDayOf, holidayName, toLatin,
 } from './holidays'
 
 /** 2026, as seeded — the days this company does not work. */
@@ -110,19 +110,42 @@ describe('fundIsProvenFor', () => {
 describe('explainFund', () => {
   it('says a clean month was worked out and from what', () => {
     const text = explainFund('2026-08', fundFor('2026-08', H2026, null, null))
-    expect(text).toContain('168 hours')
-    expect(text).toContain('21 weekdays')
+    expect(text).toContain('168 sati')
+    expect(text).toContain('21 radni dan')
   })
 
   it('warns, and names the days, when a month has holidays in it', () => {
     const text = explainFund('2026-01', fundFor('2026-01', H2026, null, null))
-    expect(text).toContain('Божић')
-    expect(text).toContain('check this one against MPP')
+    expect(text).toContain('Božić')
+    expect(text).toContain('Nova godina (drugi dan)')
+    expect(text).toContain('od kojih su 3 državna praznika')
+    expect(text).toContain('proverite ovaj mesec u MPP')
   })
 
   it('says plainly when the figure was entered rather than derived', () => {
     expect(explainFund('2026-01', fundFor('2026-01', H2026, 160, 16)))
-      .toContain('from the payroll settings')
+      .toContain('iz podešavanja zarada za januar 2026')
+  })
+})
+
+describe('holidayName', () => {
+  it('shows the seeded Cyrillic rows under their official Latin names', () => {
+    const byDate = Object.fromEntries(H2026.map(h => [h.holiday_on, holidayName(h)]))
+    expect(byDate['2026-01-01']).toBe('Nova godina')
+    expect(byDate['2026-01-07']).toBe('Božić')
+    expect(byDate['2026-02-15']).toBe('Sretenje — Dan državnosti Srbije')
+    expect(byDate['2026-02-17']).toBe('Sretenje — Dan državnosti Srbije (prenet neradni dan)')
+    expect(byDate['2026-04-10']).toBe('Veliki petak')
+    expect(byDate['2026-04-12']).toBe('Uskrs')
+    expect(byDate['2026-04-13']).toBe('Uskrsni ponedeljak')
+    expect(byDate['2026-05-02']).toBe('Praznik rada (drugi dan)')
+    expect(byDate['2026-11-11']).toBe('Dan primirja u Prvom svetskom ratu')
+  })
+
+  it('transliterates a name it does not know, and leaves Latin alone', () => {
+    expect(holidayName({ name: 'Видовдан' })).toBe('Vidovdan')
+    expect(holidayName({ name: 'Đurđevdan' })).toBe('Đurđevdan')
+    expect(toLatin('Љубав и Џак')).toBe('Ljubav i Džak')
   })
 })
 

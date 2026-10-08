@@ -192,7 +192,7 @@ export function statementSpan(rows: { date?: string }[]): StatementSpan {
 /** What an import_logs entry is called, given the statement number typed for it. */
 export function statementLabel(statementNumber: string): string {
   const n = (statementNumber || '').trim()
-  return n ? `Statement #${n}` : 'Manual entry'
+  return n ? `Izvod #${n}` : 'Ručni unos'
 }
 
 /**

@@ -112,7 +112,7 @@ describe('делови зараде/накнаде', () => {
 
   it('lists the four parts the sheet lists', () => {
     expect(p.parts.map(x => x.label))
-      .toEqual(['Regular work', 'Meal allowance', 'Holiday allowance', 'Seniority'])
+      .toEqual(['Redovan rad', 'Topli obrok', 'Regres', 'Minuli rad'])
   })
 
   it('grosses each one the way the sheet does', () => {
@@ -120,13 +120,13 @@ describe('делови зараде/накнаде', () => {
     // 2 топли оброк 168,00 |     100,00 |     142,65
     // 3 регрес              |     100,00 |     142,65
     // 4 минули рад          |   7.278,05 |  10.382,38
-    expect(part('Regular work').net).toBeCloseTo(227439.15, 1)
-    expect(part('Regular work').gross).toBeCloseTo(319567.83, 0)
-    expect(part('Meal allowance').net).toBeCloseTo(100, 2)
-    expect(part('Meal allowance').gross).toBeCloseTo(142.65, 1)
-    expect(part('Holiday allowance').gross).toBeCloseTo(142.65, 1)
-    expect(part('Seniority').net).toBeCloseTo(7278.05, 1)
-    expect(part('Seniority').gross).toBeCloseTo(10382.38, 1)
+    expect(part('Redovan rad').net).toBeCloseTo(227439.15, 1)
+    expect(part('Redovan rad').gross).toBeCloseTo(319567.83, 0)
+    expect(part('Topli obrok').net).toBeCloseTo(100, 2)
+    expect(part('Topli obrok').gross).toBeCloseTo(142.65, 1)
+    expect(part('Regres').gross).toBeCloseTo(142.65, 1)
+    expect(part('Minuli rad').net).toBeCloseTo(7278.05, 1)
+    expect(part('Minuli rad').gross).toBeCloseTo(10382.38, 1)
   })
 
   it('adds the parts to the gross EXACTLY', () => {
@@ -137,9 +137,9 @@ describe('делови зараде/накнаде', () => {
   })
 
   it('gives only the worked parts their hours', () => {
-    expect(part('Regular work').hours).toBe(168)
-    expect(part('Holiday allowance').hours).toBeNull()
-    expect(part('Seniority').hours).toBeNull()
+    expect(part('Redovan rad').hours).toBe(168)
+    expect(part('Regres').hours).toBeNull()
+    expect(part('Minuli rad').hours).toBeNull()
   })
 })
 
@@ -164,14 +164,14 @@ describe('зарада, порез и доприноси', () => {
   })
 
   it('names each charge with the rate the sheet prints', () => {
-    expect(charge('Income tax').percent).toBe(10)
-    expect(charge('Income tax').amount).toBeCloseTo(29601.45, 0)
-    expect(charge('Pension').percent).toBe(14)
-    expect(charge('Pension').amount).toBeCloseTo(46232.97, 0)
-    expect(charge('Health').percent).toBe(5.15)
-    expect(charge('Health').amount).toBeCloseTo(17007.13, 0)
-    expect(charge('Unemployment').percent).toBe(0.75)
-    expect(charge('Unemployment').amount).toBeCloseTo(2476.77, 0)
+    expect(charge('Porez na zarade').percent).toBe(10)
+    expect(charge('Porez na zarade').amount).toBeCloseTo(29601.45, 0)
+    expect(charge('Doprinos za PIO').percent).toBe(14)
+    expect(charge('Doprinos za PIO').amount).toBeCloseTo(46232.97, 0)
+    expect(charge('Doprinos za zdravstveno').percent).toBe(5.15)
+    expect(charge('Doprinos za zdravstveno').amount).toBeCloseTo(17007.13, 0)
+    expect(charge('Doprinos za slučaj nezaposlenosti').percent).toBe(0.75)
+    expect(charge('Doprinos za slučaj nezaposlenosti').amount).toBeCloseTo(2476.77, 0)
   })
 
   it('reaches the same net the sheet reaches', () => {
@@ -206,8 +206,8 @@ describe('доприноси на терет послодавца', () => {
 
   it('matches the employer block line for line', () => {
     // ПИО 10,00 33.023,55 · здравствено 5,15 17.007,13 · незапосленост 0 · total 50.030,68
-    const pension = p.employerCharges.find(c => c.label.startsWith('Pension'))!
-    const health = p.employerCharges.find(c => c.label.startsWith('Health'))!
+    const pension = p.employerCharges.find(c => c.label.startsWith('Doprinos za PIO'))!
+    const health = p.employerCharges.find(c => c.label.startsWith('Doprinos za zdravstveno'))!
     expect(pension.percent).toBe(10)
     expect(pension.amount).toBeCloseTo(33023.55, 0)
     expect(health.amount).toBeCloseTo(17007.13, 0)
@@ -229,7 +229,7 @@ describe('a part month', () => {
       const line = r.runs.find(x => x.key === 'regular')!.salaries[0]
       return payslipFor(line, person(), RATES_2026, COEF, { EUR: RATE })
     })()
-    const seniority = p.parts.find(x => x.label === 'Seniority')!
+    const seniority = p.parts.find(x => x.label === 'Minuli rad')!
     expect(seniority.net).toBeCloseTo(7278.05 / 2, 0)
     expect(p.hours).toBe(84)
     expect(p.monthHours).toBe(168)

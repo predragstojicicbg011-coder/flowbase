@@ -9,6 +9,8 @@ import { PostFailure, reportPostFailure, type CompletedWrite } from '../services
 import { fetchAllPartners } from '../services/allPartners'
 import { BOOK_CURRENCY, bookAmountsAtRate, getBookRates, type BookAmounts } from '../services/bookAmounts'
 import { fmtNum, fmtEUR } from '../utils/formatters'
+import { countOf } from '../utils/plural'
+import { srDate } from '../utils/months'
 
 interface Props {
   onClose: () => void
@@ -314,7 +316,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
   const doParseFile = useCallback(async (wb: XLSX.WorkBook, mode: TaxMode) => {
     try {
       const { header: h, employees: emps } = parsePayrollXlsx(wb, mode)
-      if (emps.length === 0) { setParseError('No employees found.'); return }
+      if (emps.length === 0) { setParseError('U fajlu nije pronađen nijedan zaposleni. Proverite da li je izvoz iz MPP-a.'); return }
       const part = await fetchAllPartners(supabase, 'id,name,is_individual')
       const partList = part || []
       setPartners(partList)
@@ -335,7 +337,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
       setHeader(h); setEmployees(matched); setTaxFilingRef(h.tax_filing_ref)
       if (h.invoice_date) setDueDate(lastWorkDay(parseSerDate(h.invoice_date)))
       setStep('review')
-    } catch (err: any) { setParseError(`Parse error: ${err.message}`) }
+    } catch (err: any) { setParseError(`Fajl nije moguće obraditi: ${err.message}`) }
   }, [])
 
   const handleFile = async (file: File) => {
@@ -345,7 +347,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
       const wb = XLSX.read(buf, { type: 'array' })
       setRawWorkbook(wb)
       await doParseFile(wb, taxMode)
-    } catch (err: any) { setParseError(`Read error: ${err.message}`) }
+    } catch (err: any) { setParseError(`Fajl nije moguće pročitati: ${err.message}`) }
   }
 
   const handleTaxModeChange = async (mode: TaxMode) => {
@@ -384,7 +386,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
       setEurRate(String(r.eurRate)); setRateWarning('')
     } catch (err: any) {
       setEurRate('')
-      setRateWarning(`⚠ ${err?.message || 'No official rate'} — enter it manually`)
+      setRateWarning(`⚠ ${err?.message || 'Nema zvaničnog kursa'} — unesite kurs ručno`)
     }
     setFetchingRate(false)
   }
@@ -412,20 +414,20 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
   const totalTaxObl = totalEE + totalER + (parseFloat(taxRounding) || 0)
 
   const handlePost = async () => {
-    if (!companyId) { alert('Please select a company.'); return }
-    if (!hasEurRate) { alert('Enter the NBS EUR rate for the payment date first — every entry carries its EUR figure.'); return }
+    if (!companyId) { alert('Izaberite firmu.'); return }
+    if (!hasEurRate) { alert('Prvo unesite kurs NBS za EUR na datum isplate — svaka stavka nosi i iznos u EUR.'); return }
 
     const noDept = employeesMissingDepartment(employees.filter(e => e.accepted))
     if (noDept.length > 0) {
       alert(
-        `${noDept.length} employee${noDept.length === 1 ? '' : 's'} ha${noDept.length === 1 ? 's' : 've'} no department:
+        `Zaposleni bez sektora (${noDept.length}):
 
 ` +
         `${noDept.join(', ')}
 
 ` +
-        `Their salary and their share of the tax filing would land under Unassigned. ` +
-        `Set a department for each before posting.`)
+        `Njihova zarada i deo poreske prijave završili bi u „Nedodeljeno“. ` +
+        `Izaberite sektor za svakog pre knjiženja.`)
       return
     }
 
@@ -442,10 +444,10 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
     if (existingImport && existingImport.length > 0) {
       const existing = existingImport[0]
       const confirm = window.confirm(
-        `⚠️ Payroll for ${periodMonth} has already been imported.\n\n` +
-        `Datum: ${new Date(existing.created_at).toLocaleDateString('sr-RS')}\n` +
-        `Info: ${existing.note || '—'}\n\n` +
-        `Continue anyway? This will create a duplicate.`
+        `⚠️ Zarade za ${periodMonth} su već uvezene.\n\n` +
+        `Datum: ${srDate(existing.created_at)}\n` +
+        `Napomena: ${existing.note || '—'}\n\n` +
+        `Ipak nastaviti? Biće napravljen duplikat.`
       )
       if (!confirm) return
     }
@@ -464,12 +466,12 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
         payment_date: payDate, due_date: dueDate || null,
         tax_filing_ref: taxFilingRef || null, currency,
         ...book(totalGross),
-        note: `${header?.period_label || ''} — ${taxMode === 'incentive' ? 'With Tax Incentives' : 'Standard'}`,
+        note: `${header?.period_label || ''} — ${taxMode === 'incentive' ? 'Sa poreskim olakšicama' : 'Standardno'}`,
         status: 'posted',
       }).select().single()
-      if (recErr) throw new PostFailure('the payroll record', recErr.message)
-      if (!record?.id) throw new PostFailure('the payroll record', 'it returned no id')
-      completed.push({ label: 'the payroll record' })
+      if (recErr) throw new PostFailure('zapis obračuna zarada', recErr.message)
+      if (!record?.id) throw new PostFailure('zapis obračuna zarada', 'nije vraćen ID')
+      completed.push({ label: 'zapis obračuna zarada' })
 
       let done = 0
       for (const emp of accepted) {
@@ -479,7 +481,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           if (ex) { partnerId = ex.id }
           else {
             const { data: newP, error: partErr } = await supabase.from('partners').insert({ name: emp.employee_name }).select().single()
-            if (partErr) throw new PostFailure('a new partner', partErr.message)
+            if (partErr) throw new PostFailure('novi partner', partErr.message)
             if (newP) { partnerId = newP.id; localPartners.push(newP) }
           }
         }
@@ -495,7 +497,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             deductions_retained: emp.deductions.filter(d => d.type !== 'third_party').map(d => ({ type: d.type, amount: d.amount })),
             cf_type: emp.cf_type,
           })
-          if (lineErr) throw new PostFailure('the payroll lines', lineErr.message)
+          if (lineErr) throw new PostFailure('stavke obračuna', lineErr.message)
         }
         if (emp.net_salary > 0) {
           const { error: invErr } = await supabase.from('invoices').insert({
@@ -508,9 +510,9 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             cf_type: emp.cf_type, cf_frequency: 'monthly', cf_next_month_est: emp.net_salary,
             currency, amount: emp.net_salary, ...book(emp.net_salary),
             pl_impact: true, status: 'unpaid',
-            note: `Payroll ${invDate.slice(0, 7)} — Net salary — ${emp.employee_name}`,
+            note: `Zarade ${invDate.slice(0, 7)} — Neto zarada — ${emp.employee_name}`,
           })
-          if (invErr) throw new PostFailure('the salary and deduction invoices', invErr.message)
+          if (invErr) throw new PostFailure('fakture za zarade i obustave', invErr.message)
         }
         for (const ded of emp.deductions.filter(d => d.type === 'third_party')) {
           let dPartnerId = ded.partner_id || null
@@ -528,9 +530,9 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             cf_type: emp.cf_type, cf_frequency: 'monthly', cf_next_month_est: ded.amount,
             currency, amount: ded.amount, ...book(ded.amount),
             pl_impact: true, status: 'unpaid',
-            note: `Payroll ${invDate.slice(0, 7)} — Deduction: ${ded.name} — ${emp.employee_name}`,
+            note: `Zarade ${invDate.slice(0, 7)} — Obustava: ${ded.name} — ${emp.employee_name}`,
           })
-          if (invErr) throw new PostFailure('the salary and deduction invoices', invErr.message)
+          if (invErr) throw new PostFailure('fakture za zarade i obustave', invErr.message)
         }
         for (const ded of emp.deductions.filter(d => d.type !== 'third_party')) {
           const isFit = ded.type === 'fitpass'
@@ -544,9 +546,9 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             department: 'General Business Expenses',
             dept_subcategory: isFit ? 'Labour related expenses' : 'General expenses',
             expense_description: isFit ? 'FitPass expenses' : 'Penalty, fines and other forced fees',
-            note: `Payroll ${invDate.slice(0, 7)} — Storno: ${ded.name} — ${emp.employee_name}`, status: 'posted',
+            note: `Zarade ${invDate.slice(0, 7)} — Storno: ${ded.name} — ${emp.employee_name}`, status: 'posted',
           })
-          if (txErr) throw new PostFailure('the retained-deduction entries', txErr.message)
+          if (txErr) throw new PostFailure('stavke zadržanih obustava', txErr.message)
         }
         done++; setProgress(Math.round((done / accepted.length) * 85))
       }
@@ -558,18 +560,18 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           company_id: companyId, partner_id: taxPartnerId || null,
           invoice_date: invDate, due_date: dueDate || null,
           type: 'expense', pl_category: PL_CATEGORY, pl_subcategory: 'Tax on salary',
-          expense_description: `Objedinjena naplata — ${taxFilingRef || invDate.slice(0, 7)} (${taxMode === 'incentive' ? 'Tax Incentives' : 'Standard'})`,
+          expense_description: `Objedinjena naplata — ${taxFilingRef || invDate.slice(0, 7)} (${taxMode === 'incentive' ? 'poreske olakšice' : 'standardno'})`,
           cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: totalTaxObl,
           currency, amount: totalTaxObl, ...book(totalTaxObl),
           pl_impact: false, status: 'unpaid',
-          note: `Payroll ${invDate.slice(0, 7)} — Poreska uprava objedinjena naplata${(parseFloat(taxRounding) || 0) !== 0 ? ' | rounding: ' + taxRounding : ''}`,
+          note: `Zarade ${invDate.slice(0, 7)} — Poreska uprava objedinjena naplata${(parseFloat(taxRounding) || 0) !== 0 ? ' | zaokruživanje: ' + taxRounding : ''}`,
         }).select('id').single()
         // A refused parent used to be ignored, leaving parentId undefined and
         // every child written with parent_invoice_id: null - orphan rows in a
         // filing that looked posted.
-        if (parentErr) throw new PostFailure('the tax and contributions invoice', parentErr.message)
+        if (parentErr) throw new PostFailure('faktura za porez i doprinose', parentErr.message)
         const parentId = parentInv?.id
-        if (!parentId) throw new PostFailure('the tax and contributions invoice', 'it returned no id')
+        if (!parentId) throw new PostFailure('faktura za porez i doprinose', 'nije vraćen ID')
 
         // ── P&L children, one per employee per component ──────────────────
         // The parent above is the payable and carries no P&L. These carry the
@@ -593,8 +595,8 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
         const rowsTotal = obligationTotal(rows)
         if (Math.abs(rowsTotal - totalTaxObl) > 0.02) {
           throw new Error(
-            `Payroll obligation split does not add up: children ${rowsTotal.toFixed(2)} ` +
-            `vs payable ${totalTaxObl.toFixed(2)}. Nothing further was posted.`)
+            `Raspodela obaveze za zarade se ne slaže: stavke ${rowsTotal.toFixed(2)}, ` +
+            `obaveza ${totalTaxObl.toFixed(2)}. Dalje ništa nije proknjiženo.`)
         }
 
         const monthRef = taxFilingRef || invDate.slice(0, 7)
@@ -610,11 +612,11 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: r.amount,
             currency, amount: r.amount, ...book(r.amount),
             pl_impact: true, status: 'unpaid', parent_invoice_id: parentId || null,
-            note: `Payroll ${invDate.slice(0, 7)} — ${r.pl_subcategory} — ${r.employee_name}`
-                + `${r.carriesRounding ? ` | includes filing rounding ${taxRounding}` : ''}`
+            note: `Zarade ${invDate.slice(0, 7)} — ${r.pl_subcategory} — ${r.employee_name}`
+                + `${r.carriesRounding ? ` | uključuje zaokruživanje prijave ${taxRounding}` : ''}`
                 + ` | ${monthRef}`,
           })
-          if (invErr) throw new PostFailure('the salary and deduction invoices', invErr.message)
+          if (invErr) throw new PostFailure('fakture za zarade i obustave', invErr.message)
         }
       }
       // Log this import
@@ -625,9 +627,9 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
         period_month: invDate.slice(0, 7),
         filing_ref: taxFilingRef || null,
         row_count: accepted.length,
-        note: `${accepted.length} employees · ${taxMode === 'incentive' ? 'Tax Incentives' : 'Standard'}`,
+        note: `Zaposleni: ${accepted.length} · ${taxMode === 'incentive' ? 'Poreske olakšice' : 'Standardno'}`,
       })
-      if (logErr) throw new PostFailure('the import log', logErr.message)
+      if (logErr) throw new PostFailure('zapis o uvozu', logErr.message)
       setProgress(100)
       setTimeout(() => { onPosted(); onClose() }, 800)
     } catch (err: any) {
@@ -635,8 +637,8 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
       // their errors this catch was dead code for every database refusal and
       // the import reported success regardless.
       alert(err instanceof PostFailure
-        ? reportPostFailure('The payroll import', err.step, err.message, completed)
-        : `Error: ${err.message}`)
+        ? reportPostFailure('uvoz zarada', err.step, err.message, completed)
+        : `Greška: ${err.message}`)
       setStep('review')
     }
   }
@@ -644,7 +646,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
   if (step === 'posting') return (
     <div style={s.overlay}>
       <div style={{ ...s.dialog, alignItems: 'center', justifyContent: 'center', gap: '20px', minHeight: '260px' }}>
-        <div style={{ fontSize: '14px', color: '#7A9BB8' }}>Posting payroll... {progress}%</div>
+        <div style={{ fontSize: '14px', color: '#7A9BB8' }}>Knjiženje zarada… {progress}%</div>
         <div style={{ width: '320px', height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
           <div style={{ width: `${progress}%`, height: '100%', background: '#00D47E', transition: 'width 0.4s' }} />
         </div>
@@ -659,24 +661,24 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={s.headerIcon}>📊</div>
             <div>
-              <div style={s.headerTitle}>Payroll import — Excel</div>
-              <div style={s.headerSub}>{step === 'upload' ? 'Upload payslips (MMP format)' : `${employees.length} employees · ${accepted.length} accepted`}</div>
+              <div style={s.headerTitle}>Uvoz zarada — Excel</div>
+              <div style={s.headerSub}>{step === 'upload' ? 'Otpremite platne listiće (MPP format)' : `Zaposleni: ${employees.length} · prihvaćeno: ${accepted.length}`}</div>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={s.logoBadge}>MCFlow</span>
-            <button style={s.closeBtn} onClick={onClose}>×</button>
+            <button style={s.closeBtn} onClick={onClose} aria-label="Zatvori" title="Zatvori">×</button>
           </div>
         </div>
 
         <div style={s.body}>
           {step === 'upload' && (
             <div style={s.section}>
-              <div style={s.sectionTitle}>Tax filing type</div>
+              <div style={s.sectionTitle}>Vrsta poreske prijave</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
                 {([
-                  { id: 'standard' as TaxMode, icon: '📋', title: 'Standard', desc: 'Full tax & contributions as filed. All values from Excel as-is.' },
-                  { id: 'incentive' as TaxMode, icon: '🎯', title: 'With Tax Incentives', desc: 'Tax = 30% of filed. PIO employee & employer = 0.' },
+                  { id: 'standard' as TaxMode, icon: '📋', title: 'Standardno', desc: 'Pun porez i doprinosi kako su prijavljeni. Sve vrednosti iz Excela bez izmena.' },
+                  { id: 'incentive' as TaxMode, icon: '🎯', title: 'Sa poreskim olakšicama', desc: 'Porez = 30% prijavljenog. Doprinos za PIO zaposlenog i poslodavca = 0.' },
                 ] as { id: TaxMode; icon: string; title: string; desc: string }[]).map(m => (
                   <div key={m.id}
                     style={{ border: taxMode === m.id ? `2px solid ${m.id === 'incentive' ? '#F5A623' : '#00D47E'}` : '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', padding: '16px', cursor: 'pointer', background: taxMode === m.id ? (m.id === 'incentive' ? 'rgba(245,166,35,0.08)' : 'rgba(0,212,126,0.08)') : 'rgba(255,255,255,0.02)' }}
@@ -686,27 +688,27 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                   </div>
                 ))}
               </div>
-              <div style={s.sectionTitle}>Upload Excel file</div>
+              <div style={s.sectionTitle}>Otpremite Excel fajl</div>
               <div style={s.dropZone} onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }} onDragOver={e => e.preventDefault()} onClick={() => fileRef.current?.click()}>
                 <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }} />
                 <div style={{ fontSize: '32px', marginBottom: '12px' }}>📂</div>
-                <div style={{ fontSize: '14px', fontWeight: '600', color: '#DCE9F6', marginBottom: '6px' }}>{fileName || 'Drop Excel or click to browse'}</div>
-                <div style={{ fontSize: '12px', color: '#7A9BB8' }}>Obracun zarada — MMP format (.xlsx)</div>
+                <div style={{ fontSize: '14px', fontWeight: '600', color: '#DCE9F6', marginBottom: '6px' }}>{fileName || 'Prevucite Excel fajl ili kliknite da ga izaberete'}</div>
+                <div style={{ fontSize: '12px', color: '#7A9BB8' }}>Obračun zarada — MPP format (.xlsx)</div>
               </div>
               {parseError && <div style={s.errorBox}>⚠️ {parseError}</div>}
               <div style={{ marginTop: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', paddingBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '10px' }}
                   onClick={() => setHistoryExpanded(prev => !prev)}>
                   <div style={{ fontSize: '10px', fontWeight: '600', color: '#7A9BB8', textTransform: 'uppercase' as const, letterSpacing: '0.1em' }}>
-                    🕐 Previous payroll imports
+                    🕐 Prethodni uvozi zarada
                     {importHistory.length > 0 && <span style={{ marginLeft: '8px', background: 'rgba(0,212,126,0.15)', color: '#00D47E', padding: '1px 7px', borderRadius: '20px', fontSize: '10px' }}>{importHistory.length}</span>}
                   </div>
-                  <span style={{ fontSize: '10px', color: '#7A9BB8' }}>{historyExpanded ? '▲ Hide' : '▼ Show'}</span>
+                  <span style={{ fontSize: '10px', color: '#7A9BB8' }}>{historyExpanded ? '▲ Sakrij' : '▼ Prikaži'}</span>
                 </div>
                 {historyExpanded && (
                   importHistory.length === 0 ? (
                     <div style={{ fontSize: '12px', color: '#7A9BB8', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                      No previous payroll imports.
+                      Nema prethodnih uvoza zarada.
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '6px', maxHeight: '240px', overflowY: 'auto' as const }}>
@@ -714,15 +716,15 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                         <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6' }}>
-                              {log.period_month || log.file_name || 'Unknown'}
+                              {log.period_month || log.file_name || 'Nepoznato'}
                               {log.filing_ref && <span style={{ fontSize: '11px', color: '#7A9BB8', marginLeft: '8px' }}>· {log.filing_ref}</span>}
                             </div>
                             <div style={{ fontSize: '11px', color: '#7A9BB8', marginTop: '2px' }}>{log.note}</div>
                           </div>
                           <div style={{ fontSize: '11px', color: '#7A9BB8', whiteSpace: 'nowrap' as const }}>
-                            {new Date(log.created_at).toLocaleDateString('en-GB')}
+                            {srDate(log.created_at)}
                           </div>
-                          <div style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: 'rgba(0,212,126,0.10)', color: '#00D47E' }}>✓ Posted</div>
+                          <div style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: 'rgba(0,212,126,0.10)', color: '#00D47E' }}>✓ Proknjiženo</div>
                         </div>
                       ))}
                     </div>
@@ -735,35 +737,35 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           {step === 'review' && header && (
             <>
               <div style={s.section}>
-                <div style={s.sectionTitle}>Settings</div>
+                <div style={s.sectionTitle}>Podešavanja</div>
                 <div style={{ display: 'grid', gridTemplateColumns: showPicker ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr', gap: '10px', marginBottom: '12px' }}>
                   {showPicker && (
                     <div style={s.field}>
-                      <label style={s.lbl}>Company</label>
+                      <label style={s.lbl}>Firma</label>
                       <select style={s.select} value={companyId} onChange={e => setCompanyId(e.target.value)}>
-                        <option value="">Select...</option>
+                        <option value="">Izaberite…</option>
                         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     </div>
                   )}
                   <div style={s.field}>
-                    <label style={s.lbl}>Invoice due date</label>
+                    <label style={s.lbl}>Datum dospeća fakture</label>
                     <input type="date" style={s.input} value={dueDate} onChange={e => setDueDate(e.target.value)} />
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Tax filing ref</label>
-                    <input style={s.input} value={taxFilingRef} onChange={e => setTaxFilingRef(e.target.value)} placeholder="e.g. PPP-PD 2026-01" />
+                    <label style={s.lbl}>Oznaka poreske prijave</label>
+                    <input style={s.input} value={taxFilingRef} onChange={e => setTaxFilingRef(e.target.value)} placeholder="npr. PPP-PD 2026-01" />
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>EUR rate (posted in {currency})</label>
+                    <label style={s.lbl}>Kurs EUR (knjiži se u {currency})</label>
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <input type="number" style={{ ...s.input, flex: 1 }} value={eurRate}
-                        onChange={e => setEurRate(e.target.value)} placeholder="RSD per 1 EUR" />
-                      <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate}>{fetchingRate ? '...' : 'Fetch'}</button>
+                        onChange={e => setEurRate(e.target.value)} placeholder="RSD za 1 EUR" />
+                      <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate}>{fetchingRate ? '…' : 'Preuzmi'}</button>
                     </div>
                     {hasEurRate && (
                       <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px' }}>
-                        1 EUR = {fmtNum(eurRateNum, 4)} RSD — every entry carries its EUR figure at this rate
+                        1 EUR = {fmtNum(eurRateNum, 4)} RSD — svaka stavka nosi iznos u EUR po ovom kursu
                       </div>
                     )}
                     {rateWarning && <div style={{ fontSize: '11px', color: '#FF5B5A', fontWeight: 600, marginTop: '2px' }}>{rateWarning}</div>}
@@ -771,13 +773,13 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <div style={s.field}>
-                    <label style={s.lbl}>Tax authority partner</label>
+                    <label style={s.lbl}>Poreska uprava (partner)</label>
                     <div style={{ position: 'relative' }}>
                       <input style={{ ...s.input, border: taxPartnerId ? '1.5px solid #00D47E' : undefined }}
                         value={taxPartnerSearch}
                         onChange={e => { setTaxPartnerSearch(e.target.value); setTaxPartnerId(''); setTaxDropdown(true) }}
                         onFocus={() => setTaxDropdown(true)} onBlur={() => setTimeout(() => setTaxDropdown(false), 150)}
-                        placeholder="Poreska uprava..." />
+                        placeholder="Poreska uprava…" />
                       {taxPartnerId && <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: '#00D47E', fontSize: '12px' }}>✓</span>}
                       {taxDropdown && taxPartnerSearch && (
                         <div style={s.dropdown}>
@@ -789,12 +791,12 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                     </div>
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Tax mode</label>
+                    <label style={s.lbl}>Način oporezivanja</label>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       {(['standard', 'incentive'] as TaxMode[]).map(m => (
                         <div key={m} style={{ flex: 1, padding: '8px', border: taxMode === m ? `2px solid ${m === 'incentive' ? '#F5A623' : '#00D47E'}` : '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', textAlign: 'center' as const, fontSize: '12px', fontWeight: '500', color: taxMode === m ? (m === 'incentive' ? '#F5A623' : '#00D47E') : '#7A9BB8', background: taxMode === m ? (m === 'incentive' ? 'rgba(245,166,35,0.08)' : 'rgba(0,212,126,0.08)') : 'transparent' }}
                           onClick={() => handleTaxModeChange(m)}>
-                          {m === 'standard' ? '📋 Standard' : '🎯 Incentives'}
+                          {m === 'standard' ? '📋 Standardno' : '🎯 Olakšice'}
                         </div>
                       ))}
                     </div>
@@ -803,15 +805,15 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
               </div>
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Summary — {accepted.length} of {employees.length} accepted</div>
+                <div style={s.sectionTitle}>Pregled — prihvaćeno {accepted.length} od {employees.length}</div>
                 <div style={s.summaryGrid}>
                   {[
-                    { label: 'Net salaries', val: totalNet, color: '#00D47E', tag: 'invoices' },
-                    { label: 'Third-party deductions', val: totalThird, color: '#4EA8FF', tag: 'invoices' },
-                    { label: 'Retained storno', val: totalRetained, color: '#FF5B5A', tag: 'storno' },
-                    { label: 'Contrib. employee (tax+EE)', val: totalEE, color: '#F5A623', tag: '' },
-                    { label: 'Contrib. employer (ER)', val: totalER, color: '#F5A623', tag: '' },
-                    { label: 'GROSS total', val: totalGross, color: '#DCE9F6', tag: '' },
+                    { label: 'Neto zarade', val: totalNet, color: '#00D47E', tag: 'fakture' },
+                    { label: 'Obustave trećim licima', val: totalThird, color: '#4EA8FF', tag: 'fakture' },
+                    { label: 'Zadržane obustave (storno)', val: totalRetained, color: '#FF5B5A', tag: 'storno' },
+                    { label: 'Porez i doprinosi na teret zaposlenog', val: totalEE, color: '#F5A623', tag: '' },
+                    { label: 'Doprinosi na teret poslodavca', val: totalER, color: '#F5A623', tag: '' },
+                    { label: 'Ukupno bruto', val: totalGross, color: '#DCE9F6', tag: '' },
                   ].map(row => (
                     <div key={row.label} style={s.summaryRow}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -825,8 +827,8 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                   ))}
                   <div style={{ ...s.summaryRow, borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(245,166,35,0.05)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                      <span style={{ fontSize: '12px', color: '#F5A623', fontWeight: '600' }}>Total — Poreska uprava</span>
-                      <span style={{ fontSize: '10px', color: '#7A9BB8' }}>± rounding:</span>
+                      <span style={{ fontSize: '12px', color: '#F5A623', fontWeight: '600' }}>Ukupno — Poreska uprava</span>
+                      <span style={{ fontSize: '10px', color: '#7A9BB8' }}>± zaokruživanje:</span>
                       <input type="number" style={{ ...s.input, width: '80px', padding: '3px 6px', fontSize: '12px', border: '1px solid rgba(245,166,35,0.4)' }}
                         value={taxRounding} onChange={e => setTaxRounding(e.target.value)} placeholder="0" />
                     </div>
@@ -839,10 +841,10 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
 
               <div style={s.section}>
                 <div style={s.sectionTitle}>
-                  <span>Employees</span>
+                  <span>Zaposleni</span>
                   <div style={{ display: 'flex', gap: '6px' }}>
-                    <button style={s.smallBtn} onClick={() => setEmployees(prev => prev.map(e => ({ ...e, accepted: true })))}>✓ Accept all</button>
-                    <button style={{ ...s.smallBtn, color: '#FF5B5A', borderColor: 'rgba(255,91,90,0.3)' }} onClick={() => setEmployees(prev => prev.map(e => ({ ...e, accepted: false })))}>✕ Reject all</button>
+                    <button style={s.smallBtn} onClick={() => setEmployees(prev => prev.map(e => ({ ...e, accepted: true })))}>✓ Prihvati sve</button>
+                    <button style={{ ...s.smallBtn, color: '#FF5B5A', borderColor: 'rgba(255,91,90,0.3)' }} onClick={() => setEmployees(prev => prev.map(e => ({ ...e, accepted: false })))}>✕ Odbij sve</button>
                   </div>
                 </div>
 
@@ -856,7 +858,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                           <div>
                             <div style={{ fontSize: '13px', fontWeight: '600', color: '#DCE9F6' }}>{emp.employee_name}</div>
                             <div style={{ fontSize: '11px', marginTop: '2px', color: emp.partner_id ? '#00D47E' : '#F5A623' }}>
-                              {emp.partner_id ? '✓ Partner matched' : '⚠ Will create new partner'}
+                              {emp.partner_id ? '✓ Partner pronađen' : '⚠ Biće napravljen novi partner'}
                             </div>
                           </div>
                         </div>
@@ -864,7 +866,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                           <span style={{ fontSize: '12px', fontWeight: '600', color: '#00D47E' }}>{fmtNum(emp.gross_salary, 0)} {currency}</span>
                           <button style={{ ...s.acceptBtn, background: emp.accepted ? 'rgba(255,91,90,0.12)' : 'rgba(0,212,126,0.15)', color: emp.accepted ? '#FF5B5A' : '#00D47E', borderColor: emp.accepted ? 'rgba(255,91,90,0.4)' : 'rgba(0,212,126,0.4)' }}
                             onClick={e2 => { e2.stopPropagation(); updateEmployee(emp.id, { accepted: !emp.accepted } as any) }}>
-                            {emp.accepted ? '✕ Reject' : '✓ Accept'}
+                            {emp.accepted ? '✕ Odbij' : '✓ Prihvati'}
                           </button>
                           <span style={{ fontSize: '11px', color: '#7A9BB8' }}>{emp.expanded ? '▲' : '▼'}</span>
                         </div>
@@ -874,12 +876,12 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                         <div style={s.empBody}>
                           <div style={s.grid2}>
                             <div style={s.field}>
-                              <label style={s.lbl}>Partner (employee)</label>
+                              <label style={s.lbl}>Partner (zaposleni)</label>
                               <div style={{ position: 'relative' }}>
                                 <input style={{ ...s.input, border: emp.partner_id ? '1.5px solid #00D47E' : '1px solid rgba(245,166,35,0.5)' }}
                                   value={emp.employee_name}
                                   onChange={e2 => updateEmployee(emp.id, { employee_name: e2.target.value, partner_id: '' } as any)}
-                                  placeholder="Search partner..." />
+                                  placeholder="Pretraga partnera…" />
                                 {!emp.partner_id && emp.employee_name.length > 2 && (
                                   <div style={s.dropdown}>
                                     {partners.filter((p: any) => p.is_individual && p.name.toLowerCase().includes(emp.employee_name.toLowerCase().slice(0, 5))).slice(0, 8).map(p => (
@@ -893,10 +895,10 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                               </div>
                             </div>
                             <div style={s.field}>
-                              <label style={s.lbl}>Department</label>
+                              <label style={s.lbl}>Sektor</label>
                               <select style={s.select} value={emp.department_id}
                                 onChange={e2 => { const d = departments.find(x => x.id === e2.target.value); updateEmployee(emp.id, { department_id: e2.target.value, department_name: d?.name || '', dept_subcategory_id: '', dept_subcategory_name: '' } as any) }}>
-                                <option value="">Select...</option>
+                                <option value="">Izaberite…</option>
                                 {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                               </select>
                             </div>
@@ -904,23 +906,23 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                           {emp.department_id && (
                             <div style={{ marginBottom: '10px' }}>
                               <div style={s.field}>
-                                <label style={s.lbl}>Dept. subcategory</label>
+                                <label style={s.lbl}>Podsektor</label>
                                 <select style={s.select} value={emp.dept_subcategory_id}
                                   onChange={e2 => { const d = deptSubs.find(x => x.id === e2.target.value); updateEmployee(emp.id, { dept_subcategory_id: e2.target.value, dept_subcategory_name: d?.name || '' } as any) }}>
-                                  <option value="">Select...</option>
+                                  <option value="">Izaberite…</option>
                                   {empDeptSubs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                                 </select>
                               </div>
                             </div>
                           )}
 
-                          <div style={s.empSection}>Salary components (editable)</div>
+                          <div style={s.empSection}>Delovi zarade (mogu da se menjaju)</div>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px', marginBottom: '10px' }}>
                             {([
-                              { label: 'Net salary', key: 'edit_net', color: '#00D47E' },
-                              { label: `Tax ${taxMode === 'incentive' ? '(30%)' : ''}`, key: 'edit_tax', color: '#F5A623' },
-                              { label: `Contrib EE${taxMode === 'incentive' ? ' (no PIO)' : ''}`, key: 'edit_contrib_ee', color: '#F5A623' },
-                              { label: `Contrib ER${taxMode === 'incentive' ? ' (no PIO)' : ''}`, key: 'edit_contrib_er', color: '#4EA8FF' },
+                              { label: 'Neto zarada', key: 'edit_net', color: '#00D47E' },
+                              { label: `Porez ${taxMode === 'incentive' ? '(30%)' : ''}`, key: 'edit_tax', color: '#F5A623' },
+                              { label: `Dopr. zaposlenog${taxMode === 'incentive' ? ' (bez PIO)' : ''}`, key: 'edit_contrib_ee', color: '#F5A623' },
+                              { label: `Dopr. poslodavca${taxMode === 'incentive' ? ' (bez PIO)' : ''}`, key: 'edit_contrib_er', color: '#4EA8FF' },
                             ] as { label: string; key: keyof ParsedEmployee; color: string }[]).map(item => (
                               <div key={String(item.key)} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '10px 10px 8px' }}>
                                 <div style={{ fontSize: '10px', color: '#7A9BB8', marginBottom: '6px', textTransform: 'uppercase' as const, letterSpacing: '0.06em' }}>{item.label}</div>
@@ -937,11 +939,11 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
 
                           {emp.deductions.length > 0 && (
                             <>
-                              <div style={s.empSection}>Deductions</div>
+                              <div style={s.empSection}>Obustave</div>
                               {emp.deductions.map(ded => (
                                 <div key={ded.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap' as const }}>
                                   <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '20px', whiteSpace: 'nowrap' as const, background: ded.type === 'fitpass' ? 'rgba(78,168,255,0.12)' : 'rgba(0,212,126,0.10)', color: ded.type === 'fitpass' ? '#4EA8FF' : '#00D47E' }}>
-                                    {ded.type === 'fitpass' ? '🏋️ FitPass' : '→ 3rd party'}
+                                    {ded.type === 'fitpass' ? '🏋️ FitPass' : '→ treće lice'}
                                   </span>
                                   <input style={{ ...s.input, flex: 2, minWidth: '140px', fontSize: '12px', padding: '5px 8px' }}
                                     value={ded.name} onChange={e2 => updateDeduction(emp.id, ded.id, { name: e2.target.value })} />
@@ -957,7 +959,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                                       <input style={{ ...s.input, fontSize: '11px', padding: '5px 8px', border: ded.partner_id ? '1.5px solid #00D47E' : undefined }}
                                         value={ded.partner_name}
                                         onChange={e2 => updateDeduction(emp.id, ded.id, { partner_name: e2.target.value, partner_id: '' })}
-                                        placeholder="Partner (payee)" />
+                                        placeholder="Partner (primalac)" />
                                       {ded.partner_name && !ded.partner_id && (
                                         <div style={{ ...s.dropdown, zIndex: 400 }}>
                                           {partners.filter(p => p.name.toLowerCase().includes(ded.partner_name.toLowerCase())).slice(0, 5).map(p => (
@@ -990,15 +992,15 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
 
         <div style={s.footer}>
           <div style={{ fontSize: '12px', color: '#7A9BB8' }}>
-            {step === 'review' && `${accepted.length} employees · Gross: ${fmtNum(totalGross, 0)} ${currency} · Tax inv: ${fmtNum(totalTaxObl, 0)} ${currency}${hasEurRate ? ` (${fmtEUR(book(totalGross).amount_eur, 0)} gross)` : ''}`}
-            {step === 'upload' && `Mode: ${taxMode === 'incentive' ? '🎯 Tax Incentives' : '📋 Standard'}`}
+            {step === 'review' && `Zaposleni: ${accepted.length} · Bruto: ${fmtNum(totalGross, 0)} ${currency} · Faktura za porez: ${fmtNum(totalTaxObl, 0)} ${currency}${hasEurRate ? ` (bruto ${fmtEUR(book(totalGross).amount_eur, 0)})` : ''}`}
+            {step === 'upload' && `Način: ${taxMode === 'incentive' ? '🎯 Poreske olakšice' : '📋 Standardno'}`}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button style={s.btnGhost} onClick={step === 'upload' ? onClose : () => setStep('upload')}>{step === 'upload' ? 'Cancel' : '← Back'}</button>
+            <button style={s.btnGhost} onClick={step === 'upload' ? onClose : () => setStep('upload')}>{step === 'upload' ? 'Otkaži' : '← Nazad'}</button>
             {step === 'review' && (
               <button style={{ ...s.btnPrimary, opacity: (!companyId || accepted.length === 0) ? 0.5 : 1 }}
                 onClick={handlePost} disabled={!companyId || accepted.length === 0 || !hasEurRate}>
-                📊 Post {accepted.length} employees
+                📊 Proknjiži ({countOf(accepted.length, 'zaposleni', 'zaposlena', 'zaposlenih')})
               </button>
             )}
           </div>

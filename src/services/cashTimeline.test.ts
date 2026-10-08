@@ -135,9 +135,9 @@ describe('the balance, walked out from the reading', () => {
       },
     }))
     expect(t.trough!.amount).toBeLessThan(0)
-    expect(t.problems.join(' ')).toMatch(/goes negative in 2026-10/)
+    expect(t.problems.join(' ')).toMatch(/prelazi u minus u mesecu oktobar 2026/)
     // Written in the app's money notation, with the currency it is in.
-    expect(t.problems.join(' ')).toMatch(/reaching -340\.000,00 RSD\./)
+    expect(t.problems.join(' ')).toMatch(/dostiže -340\.000,00 RSD\./)
   })
 })
 
@@ -148,7 +148,7 @@ describe('what it refuses to draw', () => {
     const t = cashTimeline(base({ position: null }))
     expect(t.months.every(m => m.closing === null)).toBe(true)
     expect(t.trough).toBeNull()
-    expect(t.problems.join(' ')).toMatch(/no cash position/i)
+    expect(t.problems.join(' ')).toMatch(/stanje novca nije uneto/i)
   })
 
   it('still shows the flows without a balance', () => {
@@ -160,7 +160,7 @@ describe('what it refuses to draw', () => {
     const t = cashTimeline(base({ position: { amount: 600000, asOf: '2025-02-10' } }))
     expect(t.anchorMonth).toBeNull()
     expect(t.months.every(m => m.closing === null)).toBe(true)
-    expect(t.problems.join(' ')).toMatch(/outside the months drawn/i)
+    expect(t.problems.join(' ')).toMatch(/van prikazanih meseci/i)
   })
 })
 

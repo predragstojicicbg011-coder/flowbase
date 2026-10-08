@@ -25,7 +25,7 @@ function NbsMergeDialog({ existingPartner, existingAccounts, nbsResult, onConfir
   const fields: { key: string; label: string; existing: string; nbs: string }[] = [
     { key: 'name', label: 'Naziv', existing: existingPartner.name || '—', nbs: nbsResult.name || '—' },
     { key: 'tax_id', label: 'PIB', existing: existingPartner.tax_id || '—', nbs: nbsResult.pib || '—' },
-    { key: 'registration_number', label: 'Registration number', existing: existingPartner.registration_number || '—', nbs: nbsResult.mb || '—' },
+    { key: 'registration_number', label: 'Matični broj', existing: existingPartner.registration_number || '—', nbs: nbsResult.mb || '—' },
     { key: 'address', label: 'Adresa', existing: existingPartner.address || '—', nbs: nbsResult.address || '—' },
     { key: 'city', label: 'Grad', existing: existingPartner.city || '—', nbs: nbsResult.city || '—' },
   ].filter(f => f.nbs !== '—' && f.nbs !== f.existing)
@@ -57,7 +57,7 @@ function NbsMergeDialog({ existingPartner, existingAccounts, nbsResult, onConfir
         <div style={{ background: '#060E1A', padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div style={{ color: '#DCE9F6', fontSize: '15px', fontWeight: '500' }}>🔄 NBS podaci — pregled izmena</div>
-            <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', marginTop: '2px' }}>Choose what to update</div>
+            <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', marginTop: '2px' }}>Izaberite šta ažurirate</div>
           </div>
           <button style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', fontSize: '22px', cursor: 'pointer' }} onClick={onCancel}>×</button>
         </div>
@@ -65,7 +65,7 @@ function NbsMergeDialog({ existingPartner, existingAccounts, nbsResult, onConfir
         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
           {!hasChanges ? (
             <div style={{ padding: '20px', textAlign: 'center', color: '#5DCAA5', fontSize: '13px', background: 'rgba(0,212,126,0.07)', borderRadius: '8px' }}>
-              ✓ NBS data matches what is on file — nothing to update
+              ✓ Podaci iz NBS se slažu sa postojećim — nema šta da se ažurira
             </div>
           ) : (
             <>
@@ -93,7 +93,7 @@ function NbsMergeDialog({ existingPartner, existingAccounts, nbsResult, onConfir
                   {fields.length > 1 && (
                     <button style={{ marginTop: '8px', background: 'none', border: 'none', color: '#7A9BB8', fontSize: '11px', cursor: 'pointer', padding: '4px 0' }}
                       onClick={() => setSelectedFields(Object.fromEntries(fields.map(f => [f.key, !Object.values(selectedFields).every(Boolean)])))}>
-                      {Object.values(selectedFields).every(Boolean) ? 'Clear all' : 'Select all'}
+                      {Object.values(selectedFields).every(Boolean) ? 'Poništi izbor' : 'Izaberi sve'}
                     </button>
                   )}
                 </div>
@@ -102,7 +102,7 @@ function NbsMergeDialog({ existingPartner, existingAccounts, nbsResult, onConfir
               {newAccounts.length > 0 && (
                 <div>
                   <div style={{ fontSize: '11px', fontWeight: '500', color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px', paddingBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.075)' }}>
-                    New accounts from NBS ({newAccounts.length})
+                    Novi računi iz NBS ({newAccounts.length})
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {newAccounts.map((acc: any) => (
@@ -121,7 +121,7 @@ function NbsMergeDialog({ existingPartner, existingAccounts, nbsResult, onConfir
                   </div>
                   {existingAccounts.length > 0 && (
                     <div style={{ marginTop: '8px', fontSize: '11px', color: 'rgba(255,255,255,0.3)' }}>
-                      {existingAccounts.length} account(s) already on file are not shown
+                      Već uneti računi se ne prikazuju: {existingAccounts.length}
                     </div>
                   )}
                 </div>
@@ -131,7 +131,7 @@ function NbsMergeDialog({ existingPartner, existingAccounts, nbsResult, onConfir
         </div>
 
         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid rgba(255,255,255,0.075)', display: 'flex', gap: '8px', justifyContent: 'flex-end', background: '#111F30' }}>
-          <button style={ds.btnGhost} onClick={onCancel}>Cancel</button>
+          <button style={ds.btnGhost} onClick={onCancel}>Otkaži</button>
           {hasChanges && (
             <button style={ds.btnPrimary} onClick={handleConfirm}>
               ✓ Primeni odabrane izmene
@@ -209,7 +209,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
     for (let i = 0; i < checks.length; i++) {
       const { data } = await checks[i]
       if (data && data.length > 0) {
-        return { partner: data[0], field: i === 0 ? 'PIB' : 'Registration number' }
+        return { partner: data[0], field: i === 0 ? 'PIB' : 'matični broj' }
       }
     }
     return null
@@ -222,7 +222,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
     try {
       const { data, error } = await supabase.functions.invoke('lookup-pib', { body: { mb } })
       if (error) {
-        setNbsError(`NBS error: ${error.message}`)
+        setNbsError(`Greška NBS: ${error.message}`)
       } else if (data?.success && data?.name) {
         setNbsResult(data)
         // If editing existing partner — show merge dialog instead of auto-applying
@@ -235,12 +235,12 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
           if (data.mb) setRegistrationNumber(data.mb)
           if (data.address) setAddress(data.address)
           if (data.city) setCity(data.city)
-          if (!country) setCountry('Serbia')
+          if (!country) setCountry('Srbija')
         }
       } else {
-        setNbsError(data?.error || 'No company with that number in the NBS register.')
+        setNbsError(data?.error || 'U registru NBS nema firme sa tim brojem.')
       }
-    } catch (e: any) { setNbsError(`Error: ${e.message}`) }
+    } catch (e: any) { setNbsError(`Greška: ${e.message}`) }
     setNbsLoading(false)
   }
 
@@ -296,7 +296,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
   }
 
   const deleteAccount = async (accountId: string) => {
-    if (!window.confirm('Delete this bank account?')) return
+    if (!window.confirm('Obrisati ovaj tekući račun?')) return
     await supabase.from('partner_accounts').delete().eq('id', accountId)
     fetchAccounts()
   }
@@ -342,12 +342,12 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
     }
     if (partner?.id) {
       const { error } = await supabase.from('partners').update(payload).eq('id', partner.id)
-      if (error) { setSaveError(`Error: ${error.message}`); setSaving(false); return }
+      if (error) { setSaveError(`Greška: ${error.message}`); setSaving(false); return }
       setSuccess(true)
       setTimeout(() => { setSuccess(false); onSaved({ ...partner, ...payload }) }, 1200)
     } else {
       const { data: newP, error } = await supabase.from('partners').insert(payload).select().single()
-      if (error) { setSaveError(`Error: ${error.message}`); setSaving(false); return }
+      if (error) { setSaveError(`Greška: ${error.message}`); setSaving(false); return }
       setSavedPartnerId(newP.id)
 
       // Save all accounts: initialAccountNumber + NBS accounts
@@ -397,10 +397,10 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1D9E75" strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg>
         </div>
         <div style={{ fontFamily: 'Georgia,serif', fontSize: '18px', color: '#DCE9F6' }}>
-          {partner ? 'Partner updated!' : 'Partner added!'}
+          {partner ? 'Partner je izmenjen.' : 'Partner je dodat.'}
         </div>
         {initialAccountNumber && !partner && (
-          <div style={{ fontSize: '12px', color: '#5DCAA5' }}>✓ Account {initialAccountNumber} was added automatically</div>
+          <div style={{ fontSize: '12px', color: '#5DCAA5' }}>✓ Račun {initialAccountNumber} je automatski dodat</div>
         )}
       </div>
     </div>
@@ -412,15 +412,15 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
     <div style={ds.overlay}>
       <div style={ds.dialog}>
         <div style={ds.header}>
-          <div style={ds.headerTitle}>{partner ? 'Edit partner' : 'New partner'}</div>
+          <div style={ds.headerTitle}>{partner ? 'Izmena partnera' : 'Novi partner'}</div>
           <button style={ds.closeBtn} onClick={onClose}>×</button>
         </div>
 
         {currentPartnerId && (
           <div style={ds.tabBar}>
-            <button style={{ ...ds.tab, ...(activeTab === 'info' ? ds.tabActive : {}) }} onClick={() => setActiveTab('info')}>📋 Basic info</button>
+            <button style={{ ...ds.tab, ...(activeTab === 'info' ? ds.tabActive : {}) }} onClick={() => setActiveTab('info')}>📋 Osnovni podaci</button>
             <button style={{ ...ds.tab, ...(activeTab === 'accounts' ? ds.tabActive : {}) }} onClick={() => setActiveTab('accounts')}>
-              🏦 Bank accounts
+              🏦 Tekući računi
               {accounts.length > 0 && <span style={ds.tabBadge}>{accounts.length}</span>}
             </button>
           </div>
@@ -433,7 +433,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
               {duplicateWarning && (
                 <div style={{ marginBottom: '16px', padding: '12px 16px', background: 'rgba(255,91,90,0.10)', border: '1px solid rgba(255,91,90,0.3)', borderRadius: '10px' }}>
                   <div style={{ fontSize: '13px', fontWeight: '500', color: '#FF5B5A', marginBottom: '6px' }}>
-                    ⚠️ A partner with the same {duplicateWarning.field} already exists
+                    ⚠️ Već postoji partner sa istim podatkom: {duplicateWarning.field}
                   </div>
                   <div style={{ fontSize: '12px', color: '#DCE9F6' }}>
                     <strong>{duplicateWarning.partner.name}</strong>
@@ -442,24 +442,24 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                   </div>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                     <button style={{ ...ds.btnGhost, fontSize: '12px', padding: '5px 12px' }} onClick={() => setDuplicateWarning(null)}>
-                      Ignore and continue
+                      Zanemari i nastavi
                     </button>
                     <button style={{ ...ds.btnPrimary, fontSize: '12px', padding: '5px 12px' }} onClick={() => { setDuplicateWarning(null); onClose() }}>
-                      Open the existing one
+                      Otvori postojećeg
                     </button>
                   </div>
                 </div>
               )}
 
               <div style={ds.section}>
-                <div style={ds.sectionTitle}>🏛 NBS lookup — search the register by registration number</div>
+                <div style={ds.sectionTitle}>🏛 Pretraga NBS — pretražite registar po matičnom broju</div>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     style={{ ...ds.input, flex: 1, fontFamily: 'monospace', letterSpacing: '0.1em', fontSize: '15px' }}
                     value={nbsPib}
                     onChange={e => { setNbsPib(e.target.value.replace(/\D/g, '').slice(0, 8)); setNbsResult(null); setNbsError('') }}
                     onKeyDown={e => { if (e.key === 'Enter') lookupNBS() }}
-                    placeholder="Registration number (8 digits)..."
+                    placeholder="Matični broj (8 cifara)…"
                     maxLength={8}
                   />
                   <button
@@ -471,11 +471,11 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                       color: nbsPib.length >= 8 && !nbsLoading ? '#060E1A' : '#7A9BB8',
                     }}
                     onClick={lookupNBS} disabled={nbsPib.length < 8 || nbsLoading}>
-                    {nbsLoading ? '⏳ Searching...' : '🔍 NBS Lookup'}
+                    {nbsLoading ? '⏳ Pretraga…' : '🔍 Pretraži NBS'}
                   </button>
                 </div>
                 <div style={{ marginTop: '6px', fontSize: '11px', color: '#7A9BB8' }}>
-                  Enter the registration number and press Enter — the company details fill in automatically
+                  Unesite matični broj i pritisnite Enter — podaci o firmi se popunjavaju automatski
                 </div>
 
                 {nbsError && (
@@ -508,7 +508,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                     {nbsResult.accounts?.length > 0 && !currentPartnerId && (
                       <div style={{ marginTop: '12px', borderTop: '1px solid rgba(0,212,126,0.15)', paddingTop: '10px' }}>
                         <div style={{ fontSize: '11px', color: '#7A9BB8', marginBottom: '6px', fontWeight: '500' }}>
-                          Accounts from NBS ({nbsResult.accounts.length}) — added when you save
+                          Računi iz NBS ({nbsResult.accounts.length}) — dodaju se pri čuvanju
                         </div>
                         {nbsResult.accounts.map((acc: { account: string; bankName: string }) => (
                           <div key={acc.account} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
@@ -522,7 +522,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                     {nbsResult.accounts?.length > 0 && currentPartnerId && (
                       <div style={{ marginTop: '12px', borderTop: '1px solid rgba(0,212,126,0.15)', paddingTop: '10px' }}>
                         <div style={{ fontSize: '11px', color: '#7A9BB8', marginBottom: '6px', fontWeight: '500' }}>
-                          Accounts from NBS ({nbsResult.accounts.length})
+                          Računi iz NBS ({nbsResult.accounts.length})
                         </div>
                         {nbsResult.accounts.map((acc: { account: string; bankName: string }) => {
                           const exists = accounts.find(a => a.account_number === acc.account)
@@ -533,7 +533,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                                 {acc.bankName && <span style={{ fontSize: '11px', color: '#7A9BB8', marginLeft: '8px' }}>{acc.bankName}</span>}
                               </div>
                               {exists
-                                ? <span style={{ fontSize: '10px', color: '#5DCAA5' }}>✓ already added</span>
+                                ? <span style={{ fontSize: '10px', color: '#5DCAA5' }}>✓ već dodat</span>
                                 : <button style={{ ...ds.accountBtn, color: '#00D47E', borderColor: 'rgba(0,212,126,0.3)' }} onClick={() => applyNbsAccount(acc.account, acc.bankName)}>+ Dodaj</button>
                               }
                             </div>
@@ -546,16 +546,16 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
               </div>
 
               <div style={ds.section}>
-                <div style={ds.sectionTitle}>Basic info</div>
+                <div style={ds.sectionTitle}>Osnovni podaci</div>
                 <div style={ds.row2}>
                   <div style={ds.field}>
-                    <label style={ds.lbl}>Name <span style={{ color: '#E24B4A' }}>*</span></label>
-                    <input style={ds.input} value={name} onChange={e => setName(e.target.value)} placeholder="Partner name..." />
+                    <label style={ds.lbl}>Naziv <span style={{ color: '#E24B4A' }}>*</span></label>
+                    <input style={ds.input} value={name} onChange={e => setName(e.target.value)} placeholder="Naziv partnera…" />
                   </div>
                   <div style={ds.field}>
-                    <label style={ds.lbl}>Type <span style={{ color: '#E24B4A' }}>*</span></label>
+                    <label style={ds.lbl}>Tip <span style={{ color: '#E24B4A' }}>*</span></label>
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      {[{ id: 'vendor', label: '📤 Vendor' }, { id: 'customer', label: '📥 Customer' }, { id: 'both', label: '🔄 Both' }, { id: 'company', label: '🏢 Company' }].map(t => (
+                      {[{ id: 'vendor', label: '📤 Dobavljač' }, { id: 'customer', label: '📥 Kupac' }, { id: 'both', label: '🔄 Oba' }, { id: 'company', label: '🏢 Firma' }].map(t => (
                         <div key={t.id} style={{ ...ds.typeChip, ...(type === t.id ? ds.typeChipActive : {}) }} onClick={() => setType(t.id)}>{t.label}</div>
                       ))}
                     </div>
@@ -563,47 +563,47 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                 </div>
                 <div style={ds.row2}>
                   <div style={ds.field}>
-                    <label style={ds.lbl}>PIB / Tax ID</label>
-                    <input style={{ ...ds.input, fontFamily: 'monospace' }} value={taxId} onChange={e => setTaxId(e.target.value)} placeholder="e.g. 102937492" />
+                    <label style={ds.lbl}>PIB</label>
+                    <input style={{ ...ds.input, fontFamily: 'monospace' }} value={taxId} onChange={e => setTaxId(e.target.value)} placeholder="npr. 102937492" />
                   </div>
                   <div style={ds.field}>
-                    <label style={ds.lbl}>Registration number</label>
-                    <input style={{ ...ds.input, fontFamily: 'monospace' }} value={registrationNumber} onChange={e => setRegistrationNumber(e.target.value)} placeholder="e.g. 12345678" />
+                    <label style={ds.lbl}>Matični broj</label>
+                    <input style={{ ...ds.input, fontFamily: 'monospace' }} value={registrationNumber} onChange={e => setRegistrationNumber(e.target.value)} placeholder="npr. 12345678" />
                   </div>
                 </div>
                 <div style={ds.row2}>
                   <div style={ds.field}>
-                    <label style={ds.lbl}>Address</label>
-                    <input style={ds.input} value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address..." />
+                    <label style={ds.lbl}>Adresa</label>
+                    <input style={ds.input} value={address} onChange={e => setAddress(e.target.value)} placeholder="Ulica i broj…" />
                   </div>
                   <div style={ds.field}>
-                    <label style={ds.lbl}>City</label>
-                    <input style={ds.input} value={city} onChange={e => setCity(e.target.value)} placeholder="City..." />
+                    <label style={ds.lbl}>Grad</label>
+                    <input style={ds.input} value={city} onChange={e => setCity(e.target.value)} placeholder="Grad…" />
                   </div>
                 </div>
                 <div style={ds.field}>
-                  <label style={ds.lbl}>Country</label>
-                  <input style={ds.input} value={country} onChange={e => setCountry(e.target.value)} placeholder="e.g. Serbia" />
+                  <label style={ds.lbl}>Država</label>
+                  <input style={ds.input} value={country} onChange={e => setCountry(e.target.value)} placeholder="npr. Srbija" />
                 </div>
               </div>
 
               <div style={ds.section}>
-                <div style={ds.sectionTitle}>Contact</div>
+                <div style={ds.sectionTitle}>Kontakt</div>
                 <div style={ds.row3}>
-                  <div style={ds.field}><label style={ds.lbl}>Contact person</label><input style={ds.input} value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Full name..." /></div>
+                  <div style={ds.field}><label style={ds.lbl}>Kontakt osoba</label><input style={ds.input} value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Ime i prezime…" /></div>
                   <div style={ds.field}><label style={ds.lbl}>Email</label><input style={ds.input} type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="email@example.com" /></div>
-                  <div style={ds.field}><label style={ds.lbl}>Phone</label><input style={ds.input} value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="+381..." /></div>
+                  <div style={ds.field}><label style={ds.lbl}>Telefon</label><input style={ds.input} value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="+381..." /></div>
                 </div>
               </div>
 
               <div style={ds.section}>
-                <div style={ds.sectionTitle}>Note & status</div>
+                <div style={ds.sectionTitle}>Napomena i status</div>
                 <div style={ds.field}>
-                  <label style={ds.lbl}>Note</label>
-                  <textarea style={ds.textarea} value={note} onChange={e => setNote(e.target.value)} placeholder="Additional notes..." />
+                  <label style={ds.lbl}>Napomena</label>
+                  <textarea style={ds.textarea} value={note} onChange={e => setNote(e.target.value)} placeholder="Dodatne napomene…" />
                 </div>
                 <div style={{ ...ds.toggleRow, marginTop: '10px' }}>
-                  <span style={{ fontSize: '13px', color: '#DCE9F6' }}>Active partner</span>
+                  <span style={{ fontSize: '13px', color: '#DCE9F6' }}>Aktivan partner</span>
                   <label style={ds.toggle}>
                     <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} style={{ opacity: 0, width: 0, height: 0 }} />
                     <span style={{ ...ds.toggleSlider, background: isActive ? '#1D9E75' : '#ddd' }} />
@@ -611,8 +611,8 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                 </div>
                 <div style={{ ...ds.toggleRow, marginTop: '8px' }}>
                   <div>
-                    <span style={{ fontSize: '13px', color: '#DCE9F6' }}>👤 Individual</span>
-                    <div style={{ fontSize: '11px', color: '#7A9BB8', marginTop: '2px' }}>Marks employees and private individuals — they show up in Payroll Import</div>
+                    <span style={{ fontSize: '13px', color: '#DCE9F6' }}>👤 Fizičko lice</span>
+                    <div style={{ fontSize: '11px', color: '#7A9BB8', marginTop: '2px' }}>Označava zaposlene i fizička lica — prikazuju se u uvozu zarada</div>
                   </div>
                   <label style={ds.toggle}>
                     <input type="checkbox" checked={isIndividual} onChange={e => setIsIndividual(e.target.checked)} style={{ opacity: 0, width: 0, height: 0 }} />
@@ -623,7 +623,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
 
               {initialAccountNumber && !currentPartnerId && (
                 <div style={{ padding: '10px 14px', background: 'rgba(0,212,126,0.07)', border: '1px solid rgba(0,212,126,0.2)', borderRadius: '8px', fontSize: '12px', color: '#5DCAA5' }}>
-                  ✓ Account <strong style={{ fontFamily: 'monospace' }}>{initialAccountNumber}</strong> will be added when you save
+                  ✓ Račun <strong style={{ fontFamily: 'monospace' }}>{initialAccountNumber}</strong> biće dodat pri čuvanju
                 </div>
               )}
 
@@ -637,11 +637,11 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
 
           {activeTab === 'accounts' && (
             <div style={ds.section}>
-              <div style={ds.sectionTitle}>Bank accounts</div>
+              <div style={ds.sectionTitle}>Tekući računi</div>
               {loadingAccounts ? (
-                <div style={{ padding: '20px', textAlign: 'center' as const, color: '#7A9BB8', fontSize: '13px' }}>Loading...</div>
+                <div style={{ padding: '20px', textAlign: 'center' as const, color: '#7A9BB8', fontSize: '13px' }}>Učitavanje…</div>
               ) : accounts.length === 0 ? (
-                <div style={{ padding: '20px', textAlign: 'center' as const, color: 'rgba(255,255,255,0.30)', fontSize: '13px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px', marginBottom: '16px' }}>No bank accounts yet.</div>
+                <div style={{ padding: '20px', textAlign: 'center' as const, color: 'rgba(255,255,255,0.30)', fontSize: '13px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px', marginBottom: '16px' }}>Još nema tekućih računa.</div>
               ) : (
                 <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column' as const, gap: '8px' }}>
                   {accounts.map(acc => (
@@ -649,36 +649,36 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6', fontFamily: 'monospace' }}>{acc.account_number}</span>
-                          {acc.is_primary && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: 'rgba(0,212,126,0.12)', color: '#00D47E' }}>★ Primary</span>}
+                          {acc.is_primary && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: 'rgba(0,212,126,0.12)', color: '#00D47E' }}>★ Glavni</span>}
                           <span style={{ fontSize: '10px', padding: '1px 7px', borderRadius: '20px', background: 'rgba(255,255,255,0.06)', color: '#7A9BB8' }}>{acc.currency || 'RSD'}</span>
                         </div>
                         {acc.bank_name && <div style={{ fontSize: '11px', color: '#7A9BB8', marginTop: '2px' }}>{acc.bank_name}</div>}
                       </div>
                       <div style={{ display: 'flex', gap: '6px' }}>
-                        {!acc.is_primary && <button style={ds.accountBtn} onClick={() => setPrimary(acc.id)}>★ Set primary</button>}
-                        <button style={{ ...ds.accountBtn, color: '#FF5B5A', borderColor: '#F5A9A9' }} onClick={() => deleteAccount(acc.id)}>Delete</button>
+                        {!acc.is_primary && <button style={ds.accountBtn} onClick={() => setPrimary(acc.id)}>★ Postavi kao glavni</button>}
+                        <button style={{ ...ds.accountBtn, color: '#FF5B5A', borderColor: '#F5A9A9' }} onClick={() => deleteAccount(acc.id)}>Obriši</button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
               <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '10px', padding: '14px', border: '0.5px solid rgba(255,255,255,0.10)' }}>
-                <div style={{ fontSize: '11px', fontWeight: '500', color: '#7A9BB8', textTransform: 'uppercase' as const, letterSpacing: '0.07em', marginBottom: '10px' }}>Add new account</div>
+                <div style={{ fontSize: '11px', fontWeight: '500', color: '#7A9BB8', textTransform: 'uppercase' as const, letterSpacing: '0.07em', marginBottom: '10px' }}>Novi račun</div>
                 <div style={ds.row2}>
-                  <div style={ds.field}><label style={ds.lbl}>Account number *</label><input style={ds.input} value={newAccNum} onChange={e => setNewAccNum(e.target.value)} placeholder="e.g. 265-1234567-89" /></div>
-                  <div style={ds.field}><label style={ds.lbl}>Bank name</label><input style={ds.input} value={newBankName} onChange={e => setNewBankName(e.target.value)} placeholder="e.g. Raiffeisen" /></div>
+                  <div style={ds.field}><label style={ds.lbl}>Broj računa *</label><input style={ds.input} value={newAccNum} onChange={e => setNewAccNum(e.target.value)} placeholder="npr. 265-1234567-89" /></div>
+                  <div style={ds.field}><label style={ds.lbl}>Banka</label><input style={ds.input} value={newBankName} onChange={e => setNewBankName(e.target.value)} placeholder="npr. Raiffeisen" /></div>
                 </div>
                 <div style={ds.row2}>
-                  <div style={ds.field}><label style={ds.lbl}>Currency</label>
+                  <div style={ds.field}><label style={ds.lbl}>Valuta</label>
                     <select style={ds.select} value={newCurrency} onChange={e => setNewCurrency(e.target.value)}>
                       {DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}
                     </select>
                   </div>
-                  <div style={ds.field}><label style={ds.lbl}>Model</label><input style={ds.input} value={newModel} onChange={e => setNewModel(e.target.value)} placeholder="e.g. 97" /></div>
+                  <div style={ds.field}><label style={ds.lbl}>Model</label><input style={ds.input} value={newModel} onChange={e => setNewModel(e.target.value)} placeholder="npr. 97" /></div>
                 </div>
                 <button style={{ ...ds.btnPrimary, opacity: !newAccNum.trim() || addingAccount || !currentPartnerId ? 0.6 : 1 }}
                   onClick={addAccount} disabled={!newAccNum.trim() || addingAccount || !currentPartnerId}>
-                  {addingAccount ? 'Adding...' : '+ Add account'}
+                  {addingAccount ? 'Dodavanje…' : '+ Dodaj račun'}
                 </button>
               </div>
             </div>
@@ -687,14 +687,14 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
 
         <div style={ds.footer}>
           <div style={{ display: 'flex', gap: '8px', flex: 1 }}>
-            <button style={ds.btnGhost} onClick={onClose}>Cancel</button>
+            <button style={ds.btnGhost} onClick={onClose}>Otkaži</button>
             {partner?.id && onDelete && (
-              <button style={ds.btnDelete} onClick={() => onDelete(partner.id, partner.name)}>🗑 Delete</button>
+              <button style={ds.btnDelete} onClick={() => onDelete(partner.id, partner.name)}>🗑 Obriši</button>
             )}
           </div>
           {activeTab === 'info' && (
             <button style={ds.btnPrimary} onClick={handleSave} disabled={saving || !name.trim()}>
-              {saving ? 'Saving...' : partner ? 'Update partner' : 'Save partner'}
+              {saving ? 'Čuvanje…' : partner ? 'Sačuvaj izmene' : 'Sačuvaj partnera'}
             </button>
           )}
         </div>

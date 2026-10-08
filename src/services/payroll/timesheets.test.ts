@@ -52,15 +52,15 @@ describe('checkTimesheet', () => {
     // rather than guessed at.
     const [p] = checkTimesheet(sheet({ regular_hours: 180 }), FUND)
     expect(p.level).toBe('error')
-    expect(p.message).toContain('12 over')
-    expect(p.message).toContain('overtime')
+    expect(p.message).toContain('12 preko fonda')
+    expect(p.message).toContain('prekovremeni rad')
   })
 
   it('refuses hours that do not reach the fund', () => {
     // Missing hours quietly become a smaller salary that looks deliberate.
     const [p] = checkTimesheet(sheet({ regular_hours: 160 }), FUND)
     expect(p.level).toBe('error')
-    expect(p.message).toContain('8 unaccounted for')
+    expect(p.message).toContain('8 nije raspoređeno')
   })
 
   it('accepts a month made up entirely of absence', () => {
@@ -71,12 +71,12 @@ describe('checkTimesheet', () => {
   it('warns, rather than passing over, a month with no hour fund', () => {
     const [p] = checkTimesheet(sheet({ regular_hours: 168 }), null)
     expect(p.level).toBe('warning')
-    expect(p.message).toContain('cannot be reconciled')
+    expect(p.message).toContain('ne mogu da se usklade')
   })
 
   it('reports a negative entry as an error', () => {
     const problems = checkTimesheet(sheet({ regular_hours: 176, sick_hours: -8 }), FUND)
-    expect(problems.some(p => p.message.includes('Sick leave'))).toBe(true)
+    expect(problems.some(p => p.message.includes('Bolovanje do 30 dana, 65%: sati ne mogu biti negativni'))).toBe(true)
   })
 })
 
@@ -138,7 +138,7 @@ describe('saveTimesheet', () => {
     // PostgREST calls a refused write a success with no rows, and the page
     // would go on showing hours that nothing has stored.
     await expect(saveTimesheet(client({ data: [], error: null }), sheet()))
-      .rejects.toThrow(/refused/)
+      .rejects.toThrow(/upis odbijen/)
   })
 
   it('passes the database error through', async () => {

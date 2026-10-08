@@ -101,7 +101,7 @@ const panel = (sourceType: 'transaction' | 'invoice' = 'transaction', sourceId =
 
 /** Tick the one candidate and hand back the allocation field. */
 async function link(): Promise<HTMLInputElement> {
-  const add = await screen.findByText('+ Link')
+  const add = await screen.findByText('+ Poveži')
   fireEvent.click(add)
   return await screen.findByRole('spinbutton') as HTMLInputElement
 }
@@ -130,13 +130,13 @@ describe('a payment in the same currency as the bill', () => {
   it('says it settles the bill in full rather than leaving it to be worked out', async () => {
     panel()
     await link()
-    expect(screen.getByText(/Settles this invoice in full/)).toBeInTheDocument()
+    expect(screen.getByText(/Zatvara ovu fakturu u celosti/)).toBeInTheDocument()
   })
 
   it('STORES WHAT WAS TYPED, and derives the dinars and euros from it', async () => {
     panel()
     await link()
-    fireEvent.click(screen.getByText(/Save & reconcile/))
+    fireEvent.click(screen.getByText(/Sačuvaj i upari/))
     await waitFor(() => expect(written()).toBeDefined())
     expect(written()!.payload.allocated_amount).toBe(134561.52)
     // At the invoice's stored rates the whole bill is its own book figures.
@@ -148,7 +148,7 @@ describe('a payment in the same currency as the bill', () => {
     panel()
     const field = await link()
     fireEvent.change(field, { target: { value: '100000' } })
-    fireEvent.click(screen.getByText(/Save & reconcile/))
+    fireEvent.click(screen.getByText(/Sačuvaj i upari/))
     await waitFor(() => expect(written()).toBeDefined())
     expect(written()!.payload.allocated_amount).toBe(100000)
   })
@@ -158,7 +158,7 @@ describe('a payment in the same currency as the bill', () => {
     const field = await link()
     fireEvent.change(field, { target: { value: '100000' } })
     // 134.561,52 − 100.000,00, in the bill's own currency.
-    expect(await screen.findByText(/Leaves 34\.561,52 RSD still owed/)).toBeInTheDocument()
+    expect(await screen.findByText(/Ostaje dug od 34\.561,52 RSD/)).toBeInTheDocument()
   })
 })
 
@@ -179,7 +179,7 @@ describe('a bill that something has already settled part of', () => {
     panel()
     const field = await link()
     expect(Number(field.value)).toBe(34561.52)
-    expect(screen.getByText(/Settles this invoice in full/)).toBeInTheDocument()
+    expect(screen.getByText(/Zatvara ovu fakturu u celosti/)).toBeInTheDocument()
   })
 })
 
@@ -207,8 +207,8 @@ describe('when the source and the bill are in different currencies', () => {
     // screen that is nobody's actual money.
     panel()
     await link()
-    expect(screen.getByText(/not all in the same currency/)).toBeInTheDocument()
-    expect(screen.getByText(/Shown in RSD/)).toBeInTheDocument()
+    expect(screen.getByText(/nisu sve u istoj valuti/)).toBeInTheDocument()
+    expect(screen.getByText(/Prikazano u RSD/)).toBeInTheDocument()
   })
 })
 
@@ -231,7 +231,7 @@ describe('a euro bill paid in euros', () => {
   it('books the link at the INVOICE rate, so it adds up to the bill', async () => {
     panel()
     await link()
-    fireEvent.click(screen.getByText(/Save & reconcile/))
+    fireEvent.click(screen.getByText(/Sačuvaj i upari/))
     await waitFor(() => expect(written()).toBeDefined())
     expect(written()!.payload).toMatchObject({
       allocated_amount: 1000, allocated_amount_rsd: 117200, allocated_amount_eur: 1000,
@@ -253,7 +253,7 @@ describe('a bill without stored rates', () => {
 
   it('says why it cannot be allocated instead of guessing a rate', async () => {
     panel()
-    fireEvent.click(await screen.findByText('+ Link'))
+    fireEvent.click(await screen.findByText('+ Poveži'))
     expect(await screen.findByText(/nema exchange_rate/)).toBeInTheDocument()
     expect(written()).toBeUndefined()
   })
@@ -282,7 +282,7 @@ describe('opened from the invoice instead of the payment', () => {
   it('writes the link with the invoice as the invoice, not the transaction', async () => {
     panel('invoice', 'inv1')
     await link()
-    fireEvent.click(screen.getByText(/Save & reconcile/))
+    fireEvent.click(screen.getByText(/Sačuvaj i upari/))
     await waitFor(() => expect(written()).toBeDefined())
     expect(written()!.payload.invoice_id).toBe('inv1')
     expect(written()!.payload.transaction_id).toBe('tx1')

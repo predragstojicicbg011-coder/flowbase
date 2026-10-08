@@ -29,6 +29,8 @@ import PayrollPostingPanel from '../components/PayrollPostingPanel'
 import PayrollMonths from '../components/PayrollMonths'
 import PayslipDialog from '../components/PayslipDialog'
 import { fmtNum } from '../utils/formatters'
+import { countOf } from '../utils/plural'
+import { srDate } from '../utils/months'
 
 /**
  * The monthly calculations.
@@ -220,7 +222,7 @@ export default function Payroll() {
   }, [roster])
 
   const recalculate = async (run: PayrollRun) => {
-    if (!companyId) { setError('Choose a single company first.'); return }
+    if (!companyId) { setError('Prvo izaberite jednu firmu.'); return }
     setRecalculating(run.key); setError(null)
     try {
       const context: SaveContext = {
@@ -237,8 +239,8 @@ export default function Payroll() {
 
   const copyForComparison = (run: PayrollRun) => {
     const rows = [
-      ['Code', 'Employee', 'Hours', 'Gross', 'Tax', 'Contrib. employee',
-        'Contrib. employer', 'Net', 'Total cost'].join('\t'),
+      ['Šifra', 'Zaposleni', 'Sati', 'Bruto', 'Osnovica za doprinose', 'Porez',
+        'Doprinosi zaposlenog', 'Doprinosi poslodavca', 'Neto', 'Ukupan trošak'].join('\t'),
       ...run.salaries.map(s => [
         s.code || '', s.name, s.hours, s.line.gross, s.line.contributionBase, s.line.incomeTax,
         s.line.employeeContributions, s.line.employerContributions,
@@ -257,10 +259,10 @@ export default function Payroll() {
       <div style={s.body}>
         <div style={s.pageHeader}>
           <div>
-            <div style={s.pageTitle}>Payroll</div>
+            <div style={s.pageTitle}>Zarade</div>
             <div style={s.pageSub}>
-              A second opinion on what the month costs, to be held against MPP —
-              nothing here is filed and nothing is paid
+              Kontrolni obračun troška meseca, za poređenje sa MPP-om — ovde se ništa
+              ne prijavljuje i ništa ne isplaćuje
             </div>
           </div>
         </div>
@@ -270,15 +272,15 @@ export default function Payroll() {
             onChange={e => setMonth(e.target.value)} />
           {showPicker && (
             <select style={s.filterSelect} value={companyId} onChange={e => setCompanyId(e.target.value)}>
-              <option value="">All companies</option>
+              <option value="">Sve firme</option>
               {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
           <div style={s.totalBadge}>
-            {rate ? `1 EUR = ${money(rate.eur)} RSD on ${rate.date}`
-              : rateError ? 'No rate' : 'Loading the rate…'}
+            {rate ? `1 EUR = ${money(rate.eur)} RSD na dan ${srDate(rate.date)}`
+              : rateError ? 'Nema kursa' : 'Učitavanje kursa…'}
           </div>
-          <div style={s.totalBadge}>{fund.monthHours} h fund</div>
+          <div style={s.totalBadge}>Fond sati: {fund.monthHours} h</div>
         </div>
 
         <PayrollMonths companyId={companyId} current={month} onPick={setMonth} />
@@ -287,14 +289,15 @@ export default function Payroll() {
 
         {rates.why && (
           <div style={s.error}>
-            <b>This month cannot be calculated.</b> {rates.why}
+            <b>Ovaj mesec ne može da se obračuna.</b> {rates.why}
           </div>
         )}
 
         {rateError && (
           <div style={s.error}>
-            The exchange rate for {rateDateFor(month)} could not be read ({rateError}).
-            Euro contracts and euro deductions cannot be turned into dinars until it is.
+            Kurs NBS za {srDate(rateDateFor(month))} nije dostupan ({rateError}). Ugovori i
+            obustave u evrima ne mogu da se preračunaju u dinare dok se kurs ne učita.
+            Pokušajte ponovo kasnije.
           </div>
         )}
 
@@ -303,20 +306,19 @@ export default function Payroll() {
         {roster.offPayroll.length > 0 && (
           <div style={s.offBox}>
             <div style={s.offTitle}>
-              {roster.offPayroll.length} employed and deliberately not on this month
+              Zaposleni koji namerno nisu u obračunu za ovaj mesec: {roster.offPayroll.length}
             </div>
             <div style={s.offHint}>
-              Their salary is not this company&rsquo;s to work out. Listed rather than
-              dropped: somebody quietly absent from a payroll is exactly the error this
-              is meant to catch, and an excluded person who is invisible looks the same
-              as a forgotten one.
+              Njihovu zaradu ova firma ne obračunava. Navedeni su umesto da budu izostavljeni:
+              neko ko tiho nedostaje u obračunu je upravo greška koju ovo treba da uhvati, a
+              nevidljiva izuzeta osoba izgleda isto kao zaboravljena.
             </div>
             {roster.offPayroll.map(o => (
               <div key={o.employee.id} style={s.offRow}>
                 <span style={s.offName}>{o.employee.full_name}</span>
                 <span style={s.offWhy}>
-                  {absenceLabel(o.absence.reason)} · {o.absence.valid_from} →
-                  {' '}{o.absence.valid_to || 'not back yet'}
+                  {absenceLabel(o.absence.reason)} · {srDate(o.absence.valid_from)} →
+                  {' '}{o.absence.valid_to ? srDate(o.absence.valid_to) : 'još nije vraćen'}
                 </span>
               </div>
             ))}
@@ -326,12 +328,12 @@ export default function Payroll() {
         {blocking && (
           <div style={s.problems}>
             <div style={s.problemsTitle}>
-              This is not a check of anything yet — {roster.problems.length + (result?.problems.length ?? 0)}
-              {' '}of {employees.length} could not be calculated
+              Ovo još nije provera — nije obračunato {roster.problems.length + (result?.problems.length ?? 0)}
+              {' '}od {employees.length} zaposlenih
             </div>
             <div style={s.problemsHint}>
-              A total that is missing a person agrees with nothing. Fix these on the
-              HR Administration page and the figures below become comparable.
+              Zbir kome nedostaje neko se ni sa čim ne slaže. Ispravite ovo na strani
+              Kadrovska evidencija i iznosi ispod postaće uporedivi.
             </div>
             {roster.problems.map(p => (
               <div key={p.employee.id} style={s.problemRow}>
@@ -354,16 +356,16 @@ export default function Payroll() {
               widths={[86, 60, 92, 52, 80, 46, 88, 64, 74]} />
           </div>
         ) : !result ? (
-          <div style={s.emptyState}>Nothing can be calculated for this month.</div>
+          <div style={s.emptyState}>Za ovaj mesec ništa ne može da se obračuna.</div>
         ) : (
           <>
             {total && (
               <div style={s.summaryRow} className="mf-stagger">
-                <Card label="Gross" value={money(total.gross)} />
-                <Card label="Net" value={money(total.net)} />
-                <Card label="Tax and contributions"
+                <Card label="Bruto" value={money(total.gross)} />
+                <Card label="Neto" value={money(total.net)} />
+                <Card label="Porez i doprinosi"
                   value={money(total.incomeTax + total.employeeContributions + total.employerContributions)} />
-                <Card label="What the month costs" value={money(total.totalCost)} />
+                <Card label="Ukupan trošak meseca" value={money(total.totalCost)} />
               </div>
             )}
 
@@ -377,7 +379,7 @@ export default function Payroll() {
                       <div style={s.runTitle}>
                         {run.label}
                         <span style={s.runCount}>
-                          {count} {count === 1 ? 'line' : 'lines'}
+                          {countOf(count, 'stavka', 'stavke', 'stavki')}
                         </span>
                       </div>
                       <div style={s.runDesc}>{RUN_DESCRIPTIONS[run.key]}</div>
@@ -394,29 +396,29 @@ export default function Payroll() {
                         if (!sv) {
                           return (
                             <span style={s.stateMuted}>
-                              Not calculated yet — nothing is kept for this run
+                              Još nije obračunato — za ovaj obračun ništa nije sačuvano
                             </span>
                           )
                         }
                         if (sv.status === 'posted') {
                           return (
                             <span style={s.statePosted}>
-                              Posted {sv.posted_at?.slice(0, 10)} and locked. Its figures are
-                              what the invoices were written from; delete the posting below
-                              to change them.
+                              Proknjiženo {sv.posted_at ? srDate(sv.posted_at) : ''} i zaključano.
+                              Iz ovih iznosa su napisane fakture; da biste ih menjali, poništite
+                              knjiženje ispod.
                             </span>
                           )
                         }
                         return inStep(run) ? (
                           <span style={s.stateOk}>
-                            Calculated {sv.calculated_at?.slice(0, 10)} and in step with what
-                            is shown
+                            Obračunato {sv.calculated_at ? srDate(sv.calculated_at) : ''} i
+                            slaže se sa prikazanim
                           </span>
                         ) : (
                           <span style={s.stateStale}>
-                            What is kept says {money(Number(sv.total_cost))} and this month
-                            now comes to {money(run.totals.totalCost)}. Something behind it
-                            has changed — recalculate before posting.
+                            Sačuvani obračun iznosi {money(Number(sv.total_cost))}, a mesec sada
+                            iznosi {money(run.totals.totalCost)}. Nešto se u međuvremenu
+                            promenilo — ponovo obračunajte pre knjiženja.
                           </span>
                         )
                       })()}
@@ -424,37 +426,37 @@ export default function Payroll() {
                         style={savedFor(run.key)?.status === 'posted' ? s.disabledSmall : s.primarySmall}
                         disabled={savedFor(run.key)?.status === 'posted' || recalculating === run.key}
                         title={savedFor(run.key)?.status === 'posted'
-                          ? 'This run is posted. Delete the posting to unlock it.' : undefined}
+                          ? 'Obračun je proknjižen. Poništite knjiženje da biste ga otključali.' : undefined}
                         onClick={() => recalculate(run)}>
-                        {recalculating === run.key ? 'Recalculating…' : 'Recalculate'}
+                        {recalculating === run.key ? 'Obračunavanje…' : 'Ponovo obračunaj'}
                       </button>
                     </div>
                   )}
 
                   {isOpen && count === 0 && (
-                    <div style={s.emptyRun}>Nobody falls into this run this month.</div>
+                    <div style={s.emptyRun}>U ovom mesecu niko ne ulazi u ovaj obračun.</div>
                   )}
 
                   {isOpen && count > 0 && (
                     <>
                       <div style={s.runTools}>
                         <button style={s.ghostSmall} onClick={() => copyForComparison(run)}>
-                          Copy as a table, to paste beside the MPP export
+                          Kopiraj kao tabelu, za poređenje sa izvozom iz MPP-a
                         </button>
                       </div>
                       <div style={{ overflowX: 'auto' as const }}>
                         <table style={s.table}>
                           <thead>
                             <tr style={s.thead}>
-                              <th style={s.th}>Employee</th>
-                              <th style={s.thRight}>Hours</th>
-                              <th style={s.thRight}>Gross / base</th>
-                              <th style={s.thRight}>Tax</th>
-                              <th style={s.thRight}>Contrib. employee</th>
-                              <th style={s.thRight}>Contrib. employer</th>
-                              <th style={s.thRight}>Net</th>
-                              <th style={s.thRight}>Deducted</th>
-                              <th style={s.thRight}>Total cost</th>
+                              <th style={s.th}>Zaposleni</th>
+                              <th style={s.thRight}>Sati</th>
+                              <th style={s.thRight}>Bruto / osnovica</th>
+                              <th style={s.thRight}>Porez</th>
+                              <th style={s.thRight}>Dopr. zaposlenog</th>
+                              <th style={s.thRight}>Dopr. poslodavca</th>
+                              <th style={s.thRight}>Neto</th>
+                              <th style={s.thRight}>Obustave</th>
+                              <th style={s.thRight}>Ukupan trošak</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -462,7 +464,7 @@ export default function Payroll() {
                               <tr key={line.employeeId}
                                 style={{ ...s.tr, background: i % 2 === 0 ? '#0D1B2C' : '#111F30',
                                   cursor: 'pointer' }}
-                                title="Open the payslip"
+                                title="Otvori platni listić"
                                 onClick={() => setPayslip({ line, runLabel: run.label })}>
                                 <td style={s.td}>
                                   <div style={{ fontWeight: '600', fontSize: '13px', color: '#00D47E' }}>
@@ -470,20 +472,20 @@ export default function Payroll() {
                                   </div>
                                   <div style={s.smallCell}>
                                     {line.code ? `#${line.code} · ` : ''}
-                                    {money(line.contractedNet)} contracted
-                                    {line.seniorityNet > 0 && `, of which ${money(line.seniorityNet)} seniority`}
+                                    ugovoreno {money(line.contractedNet)}
+                                    {line.seniorityNet > 0 && `, od toga minuli rad ${money(line.seniorityNet)}`}
                                   </div>
                                 </td>
                                 <td style={s.tdRight}>
                                   {line.hours}
-                                  <div style={s.smallCell}>of {line.monthHours}</div>
+                                  <div style={s.smallCell}>od {line.monthHours}</div>
                                 </td>
                                 <td style={s.tdRight}>
                                   {money(line.line.gross)}
                                   {Math.abs(line.line.contributionBase - line.line.gross) > 0.005 && (
                                     <div style={{ ...s.smallCell, color: '#C8A24A' }}
-                                      title="Contributions are charged on this, not on the gross — it is above the ceiling">
-                                      base {money(line.line.contributionBase)}
+                                      title="Doprinosi se obračunavaju na ovaj iznos, a ne na bruto — bruto je iznad najviše osnovice doprinosa">
+                                      osnovica {money(line.line.contributionBase)}
                                     </div>
                                   )}
                                 </td>
@@ -497,7 +499,7 @@ export default function Payroll() {
                                       {money(line.deductions.total)}
                                       {line.deductions.thirdParty > 0 && (
                                         <div style={{ ...s.smallCell, color: '#FF5B5A' }}>
-                                          {money(line.deductions.thirdParty)} out
+                                          {money(line.deductions.thirdParty)} trećem licu
                                         </div>
                                       )}
                                     </>
@@ -526,7 +528,7 @@ export default function Payroll() {
                               </tr>
                             ))}
                             <tr style={s.totalRow}>
-                              <td style={s.td}><b>Total</b></td>
+                              <td style={s.td}><b>Ukupno</b></td>
                               <td style={s.tdRight}></td>
                               <td style={s.tdRight}><b>{money(run.totals.gross)}</b></td>
                               <td style={s.tdRight}><b>{money(run.totals.incomeTax)}</b></td>
@@ -561,10 +563,10 @@ export default function Payroll() {
 
             {blocking && (
               <div style={s.note}>
-                Posting is not offered while anybody is missing from the month. Entries
-                written now would have to be unpicked and redone once they are added,
-                and an entry matched to a bank payment in the meantime is far harder to
-                take back than one that was never made.
+                Knjiženje nije ponuđeno dok neko nedostaje u obračunu meseca. Stavke upisane
+                sada morale bi da se ponište i ponovo upišu kada se dodaju, a stavku koja je
+                u međuvremenu uparena sa plaćanjem mnogo je teže vratiti nego onu koja nikad
+                nije upisana.
               </div>
             )}
 
@@ -580,7 +582,7 @@ export default function Payroll() {
           currencyRates={rate ? { EUR: rate.eur } : {}}
           runLabel={payslip.runLabel}
           month={month}
-          companyName={companies.find(c => c.id === companyId)?.name || 'All companies'}
+          companyName={companies.find(c => c.id === companyId)?.name || 'Sve firme'}
           onClose={() => setPayslip(null)}
         />
       )}

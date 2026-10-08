@@ -31,29 +31,29 @@ import type { DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 /** The classification levels, in the order they are written out. */
 export const CLASS_COLUMNS = [
-  'Project',
-  'P&L category', 'P&L sub-category',
-  'Department', 'Dept. sub-category', 'Expense description',
+  'Projekat',
+  'P&L kategorija', 'P&L potkategorija',
+  'Sektor', 'Podsektor', 'Opis troška',
 ] as const
 
 export interface SummaryRow {
-  Branch: string
-  Level: number
-  Line: string
+  'Grana': string
+  'Nivo': number
+  'Stavka': string
   /** The project (or Opšti troškovi) on the project branch; blank on the others. */
-  Project: string
-  'P&L category': string
-  'P&L sub-category': string
-  Department: string
-  'Dept. sub-category': string
-  'Expense description': string
-  Amount: number
-  'Prior amount': number
-  Change: number
-  'Change %': number | ''
-  '% of total': number
-  Transactions: number
-  Excluded: string
+  'Projekat': string
+  'P&L kategorija': string
+  'P&L potkategorija': string
+  'Sektor': string
+  'Podsektor': string
+  'Opis troška': string
+  'Iznos': number
+  'Prethodni iznos': number
+  'Promena': number
+  'Promena %': number | ''
+  '% od ukupnog': number
+  'Broj transakcija': number
+  'Isključeno': string
 }
 
 const money2 = (n: number) => Math.round(n * 100) / 100
@@ -68,16 +68,16 @@ const pct1 = (n: number) => Math.round(n * 10) / 10
  * that mean something different per branch.
  */
 export const BRANCH_LEVELS: Record<Branch, readonly string[]> = {
-  pl: ['P&L category', 'P&L sub-category', 'Expense description'],
-  department: ['Department', 'Dept. sub-category', 'Expense description'],
+  pl: ['P&L kategorija', 'P&L potkategorija', 'Opis troška'],
+  department: ['Sektor', 'Podsektor', 'Opis troška'],
   // The project branch puts the project first and then breaks it down the
   // same way the P&L branch does, so the two can be read side by side.
-  project: ['Project', 'P&L category', 'P&L sub-category'],
+  project: ['Projekat', 'P&L kategorija', 'P&L potkategorija'],
 }
 
 /** What the `Branch` column of a summary sheet says. */
 export const BRANCH_NAME: Record<Branch, string> = {
-  pl: 'P&L', department: 'Department', project: 'Project',
+  pl: 'P&L', department: 'Sektor', project: 'Projekat',
 }
 
 /**
@@ -99,29 +99,29 @@ export function summaryRows(
   const walk = (list: ComparedNode[]) => {
     for (const n of list) {
       const cls: Record<string, string> = {
-        Project: '',
-        'P&L category': '', 'P&L sub-category': '',
-        Department: '', 'Dept. sub-category': '', 'Expense description': '',
+        'Projekat': '',
+        'P&L kategorija': '', 'P&L potkategorija': '',
+        'Sektor': '', 'Podsektor': '', 'Opis troška': '',
       }
       n.path.forEach((seg, i) => { if (levels[i]) cls[levels[i]] = seg })
 
       out.push({
-        Branch: BRANCH_NAME[branch],
-        Level: n.depth + 1,
-        Line: n.label,
-        Project: cls.Project,
-        'P&L category': cls['P&L category'],
-        'P&L sub-category': cls['P&L sub-category'],
-        Department: cls.Department,
-        'Dept. sub-category': cls['Dept. sub-category'],
-        'Expense description': cls['Expense description'],
-        Amount: money2(n.amount),
-        'Prior amount': money2(n.priorAmount),
-        Change: money2(n.delta),
-        'Change %': n.deltaPct === null ? '' : pct1(n.deltaPct),
-        '% of total': total > 0 ? pct1((n.amount / total) * 100) : 0,
-        Transactions: n.count,
-        Excluded: isExcluded(n.key) ? 'yes' : '',
+        'Grana': BRANCH_NAME[branch],
+        'Nivo': n.depth + 1,
+        'Stavka': n.label,
+        'Projekat': cls['Projekat'],
+        'P&L kategorija': cls['P&L kategorija'],
+        'P&L potkategorija': cls['P&L potkategorija'],
+        'Sektor': cls['Sektor'],
+        'Podsektor': cls['Podsektor'],
+        'Opis troška': cls['Opis troška'],
+        'Iznos': money2(n.amount),
+        'Prethodni iznos': money2(n.priorAmount),
+        'Promena': money2(n.delta),
+        'Promena %': n.deltaPct === null ? '' : pct1(n.deltaPct),
+        '% od ukupnog': total > 0 ? pct1((n.amount / total) * 100) : 0,
+        'Broj transakcija': n.count,
+        'Isključeno': isExcluded(n.key) ? 'da' : '',
       })
       // Depth-first, so a parent is always directly above its children and the
       // sheet reads top down the way the screen does.
@@ -145,26 +145,26 @@ export interface EntryDetail {
 }
 
 export interface EntryRowOut {
-  Date: string
-  Source: string
-  'Document no.': string
+  'Datum': string
+  'Izvor': string
+  'Broj dokumenta': string
   Partner: string
-  Company: string
+  'Firma': string
   /** The row's own project — a split line's, not its document's — or Opšti troškovi. */
-  Project: string
-  'P&L category': string
-  'P&L sub-category': string
-  Department: string
-  'Dept. sub-category': string
-  'Expense description': string
-  Currency: string
-  Amount: number | ''
+  'Projekat': string
+  'P&L kategorija': string
+  'P&L potkategorija': string
+  'Sektor': string
+  'Podsektor': string
+  'Opis troška': string
+  'Valuta': string
+  'Iznos': number | ''
   /** The book figure in dinars. */
-  'Amount RSD': number
+  'Iznos RSD': number
   /** The book figure in euros; blank where the row has none yet. */
-  'Amount EUR': number | ''
-  'Cash flow': string
-  Note: string
+  'Iznos EUR': number | ''
+  'Novčani tok': string
+  'Napomena': string
 }
 
 /**
@@ -184,23 +184,23 @@ export function entryRows(
     .map(e => {
       const d = e.id ? detailById.get(e.id) : undefined
       return {
-        Date: d?.date || e.pl_date,
-        Source: String(e.source || '').toLowerCase().startsWith('inv') ? 'Invoice' : 'Transaction',
-        'Document no.': d?.documentNo || '',
+        'Datum': d?.date || e.pl_date,
+        'Izvor': String(e.source || '').toLowerCase().startsWith('inv') ? 'Faktura' : 'Transakcija',
+        'Broj dokumenta': d?.documentNo || '',
         Partner: d?.partner || '',
-        Company: d?.company || '',
-        Project: projectRootOf(e),
-        'P&L category': e.pl_category || '',
-        'P&L sub-category': e.pl_subcategory || '',
-        Department: e.department || '',
-        'Dept. sub-category': e.dept_subcategory || '',
-        'Expense description': e.expense_description || '',
-        Currency: d?.currency || '',
-        Amount: d?.amount == null ? '' : money2(d.amount),
-        'Amount RSD': money2(e.amount_rsd || 0),
-        'Amount EUR': e.amount_eur == null ? '' : money2(e.amount_eur),
-        'Cash flow': d?.cfType || '',
-        Note: d?.note || '',
+        'Firma': d?.company || '',
+        'Projekat': projectRootOf(e),
+        'P&L kategorija': e.pl_category || '',
+        'P&L potkategorija': e.pl_subcategory || '',
+        'Sektor': e.department || '',
+        'Podsektor': e.dept_subcategory || '',
+        'Opis troška': e.expense_description || '',
+        'Valuta': d?.currency || '',
+        'Iznos': d?.amount == null ? '' : money2(d.amount),
+        'Iznos RSD': money2(e.amount_rsd || 0),
+        'Iznos EUR': e.amount_eur == null ? '' : money2(e.amount_eur),
+        'Novčani tok': d?.cfType || '',
+        'Napomena': d?.note || '',
       }
     })
 }
@@ -227,30 +227,30 @@ export interface PreambleFacts {
  * Written as Field/Value pairs rather than prose so it survives being read by
  * something that is not a person, and placed first so it is what opens.
  */
-export function preambleRows(f: PreambleFacts): { Field: string; Value: string | number }[] {
+export function preambleRows(f: PreambleFacts): { 'Polje': string; 'Vrednost': string | number }[] {
   const c = f.currency
   return [
-    { Field: 'Report', Value: 'Expense Analysis' },
-    { Field: 'Period', Value: f.period },
-    { Field: 'Compared with', Value: f.priorPeriod },
-    { Field: 'Company', Value: f.company },
-    { Field: 'Generated', Value: f.generatedAt },
-    { Field: '', Value: '' },
-    { Field: `Total expenses (${c})`, Value: money2(f.total) },
-    { Field: `Prior period total (${c})`, Value: money2(f.prior) },
-    { Field: `Change (${c})`, Value: money2(f.total - f.prior) },
-    { Field: `Excluded by hiding (${c})`, Value: money2(f.excluded) },
-    { Field: `Adjusted total (${c})`, Value: money2(f.adjusted) },
-    { Field: `Unassigned, department branch (${c})`, Value: money2(f.unassigned) },
-    { Field: 'Lines making 80% of spend', Value: f.paretoLines },
-    { Field: 'Entries listed', Value: f.entryCount },
-    { Field: '', Value: '' },
-    { Field: 'Sheet: By department', Value: 'The tree grouped department first. One row per line, with every classification level in its own column.' },
-    { Field: 'Sheet: By P&L', Value: 'The same money grouped by P&L category. Every branch totals the same figure.' },
-    { Field: 'Sheet: By project', Value: 'The same money grouped by project, then P&L category. A split document counts on each project for its own line; rows with no project are Opšti troškovi (overhead).' },
-    { Field: 'Sheet: Entries', Value: 'One row per transaction or invoice, with its full classification repeated on it. This is the sheet to pivot, filter or hand to an analysis tool.' },
-    { Field: '', Value: '' },
-    { Field: 'Amounts', Value: `Totals are in ${c}, summed from each entry's Amount ${c}. Amount RSD and Amount EUR are the book figures every entry carries; Currency and Amount are the document's own.` },
-    { Field: 'Excluded rows', Value: 'Lines hidden on screen are still listed, marked in the Excluded column, so nothing is silently missing.' },
+    { 'Polje': 'Izveštaj', 'Vrednost': 'P&L analiza' },
+    { 'Polje': 'Period', 'Vrednost': f.period },
+    { 'Polje': 'Upoređeno sa', 'Vrednost': f.priorPeriod },
+    { 'Polje': 'Firma', 'Vrednost': f.company },
+    { 'Polje': 'Napravljeno', 'Vrednost': f.generatedAt },
+    { 'Polje': '', 'Vrednost': '' },
+    { 'Polje': `Ukupni troškovi (${c})`, 'Vrednost': money2(f.total) },
+    { 'Polje': `Ukupno u prethodnom periodu (${c})`, 'Vrednost': money2(f.prior) },
+    { 'Polje': `Promena (${c})`, 'Vrednost': money2(f.total - f.prior) },
+    { 'Polje': `Isključeno sakrivanjem (${c})`, 'Vrednost': money2(f.excluded) },
+    { 'Polje': `Korigovano ukupno (${c})`, 'Vrednost': money2(f.adjusted) },
+    { 'Polje': `Nedodeljeno, grana sektora (${c})`, 'Vrednost': money2(f.unassigned) },
+    { 'Polje': 'Stavke koje čine 80% troškova', 'Vrednost': f.paretoLines },
+    { 'Polje': 'Broj navedenih stavki', 'Vrednost': f.entryCount },
+    { 'Polje': '', 'Vrednost': '' },
+    { 'Polje': 'List: Po sektorima', 'Vrednost': 'Stablo grupisano prvo po sektoru. Jedan red po stavci, sa svakim nivoom klasifikacije u posebnoj koloni.' },
+    { 'Polje': 'List: Po P&L', 'Vrednost': 'Isti novac grupisan po P&L kategoriji. Svaka grana daje isti ukupan iznos.' },
+    { 'Polje': 'List: Po projektima', 'Vrednost': 'Isti novac grupisan po projektu, pa po P&L kategoriji. Podeljen dokument se računa na svakom projektu za svoju stavku; redovi bez projekta su Opšti troškovi.' },
+    { 'Polje': 'List: Stavke', 'Vrednost': 'Jedan red po transakciji ili fakturi, sa celom klasifikacijom ponovljenom na njemu. Ovo je list za pivot tabelu, filtriranje ili alat za analizu.' },
+    { 'Polje': '', 'Vrednost': '' },
+    { 'Polje': 'Iznosi', 'Vrednost': `Ukupni iznosi su u ${c}, sabrani iz kolone Iznos ${c} svake stavke. Iznos RSD i Iznos EUR su knjiženi iznosi svake stavke; Valuta i Iznos su iznosi samog dokumenta.` },
+    { 'Polje': 'Isključeni redovi', 'Vrednost': 'Stavke sakrivene na ekranu su i dalje navedene, označene u koloni Isključeno, tako da ništa ne nedostaje bez traga.' },
   ]
 }

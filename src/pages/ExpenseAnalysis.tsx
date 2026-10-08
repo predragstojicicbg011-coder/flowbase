@@ -21,6 +21,8 @@ import {
 import {
   summaryRows, entryRows, preambleRows, type EntryDetail,
 } from '../services/expenseExport'
+import { capitalize, monthLongLabel } from '../utils/months'
+import { countOf } from '../utils/plural'
 
 // ── P&L Analysis ────────────────────────────────────────────────────────────
 //
@@ -55,7 +57,7 @@ import {
 // report, three tabs, one total.
 
 
-const pct = (n: number | null, dp = 1) => n === null ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(dp)}%`
+const pct = (n: number | null, dp = 1) => n === null ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(dp).replace('.', ',')}%`
 
 /** Month keys for a period, plus the comparable prior period of equal length. */
 function periodRange(mode: 'month' | 'quarter' | 'ytd', anchor: string) {
@@ -70,7 +72,7 @@ function periodRange(mode: 'month' | 'quarter' | 'ytd', anchor: string) {
     return {
       from: iso(y, m, 1), to: iso(y, m, lastDay(y, m)),
       priorFrom: iso(py, pm, 1), priorTo: iso(py, pm, lastDay(py, pm)),
-      label: anchor, priorLabel: `${py}-${String(pm).padStart(2, '0')}`,
+      label: capitalize(monthLongLabel(anchor)), priorLabel: capitalize(monthLongLabel(`${py}-${String(pm).padStart(2, '0')}`)),
     }
   }
   if (mode === 'quarter') {
@@ -82,13 +84,13 @@ function periodRange(mode: 'month' | 'quarter' | 'ytd', anchor: string) {
     return {
       from: iso(y, qs, 1), to: iso(y, qs + 2, lastDay(y, qs + 2)),
       priorFrom: iso(py, pqs, 1), priorTo: iso(py, pqs + 2, lastDay(py, pqs + 2)),
-      label: `${y} Q${q + 1}`, priorLabel: `${py} Q${pq + 1}`,
+      label: `${q + 1}. kvartal ${y}.`, priorLabel: `${pq + 1}. kvartal ${py}.`,
     }
   }
   return {
     from: iso(y, 1, 1), to: iso(y, m, lastDay(y, m)),
     priorFrom: iso(y - 1, 1, 1), priorTo: iso(y - 1, m, lastDay(y - 1, m)),
-    label: `${y} YTD`, priorLabel: `${y - 1} YTD`,
+    label: `${y}. od početka godine`, priorLabel: `${y - 1}. od početka godine`,
   }
 }
 
@@ -112,7 +114,7 @@ export default function ExpenseAnalysis() {
   const [companyId, setCompanyId] = useState('all')
   // With one company, "all" is that company and is called by its name.
   const companyName = companyId === 'all'
-    ? (showPicker ? 'All companies' : defaultCompany?.name || 'All companies')
+    ? (showPicker ? 'Sve firme' : defaultCompany?.name || 'Sve firme')
     : companies.find(c => c.id === companyId)?.name || ''
   const [mode, setMode] = useState<'month' | 'quarter' | 'ytd'>('ytd')
   const [anchor, setAnchor] = useState(new Date().toISOString().slice(0, 7))
@@ -320,23 +322,23 @@ export default function ExpenseAnalysis() {
         entryCount: entries.length,
         generatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
         currency,
-      })), 'Read me')
+      })), 'Pročitaj me')
       // Every branch, not whichever one happened to be open. A reader who
       // opens the file a week later has no idea which tab it was exported from.
       const SHEETS: [Branch, string][] = [
-        ['pl', 'By P&L'],
-        ['department', 'By department'],
-        ['project', 'By project'],
+        ['pl', 'Po P&L'],
+        ['department', 'Po sektorima'],
+        ['project', 'Po projektima'],
       ]
       for (const [b, sheet] of SHEETS) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
           summaryRows(treeFor(b), b, total, isExcluded)), sheet)
       }
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(entries), 'Entries')
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(entries), 'Stavke')
 
-      XLSX.writeFile(wb, `pl-analysis-${range.label.replace(/\s+/g, '-')}.xlsx`)
+      XLSX.writeFile(wb, `pl-analiza-${range.label.replace(/[\s.,]+/g, '-').replace(/-+$/, '')}.xlsx`)
     } catch (err: any) {
-      setError(`Export failed: ${err.message}`)
+      setError(`Izvoz nije uspeo: ${err.message}`)
     }
     setExporting(false)
   }
@@ -381,8 +383,8 @@ export default function ExpenseAnalysis() {
                 {n.label}
               </span>
               {n.label === UNASSIGNED && (
-                <span style={s.warnPill} title="These rows carry no department — they cannot be reported by owner">
-                  unclassified
+                <span style={s.warnPill} title="Ovi redovi nemaju sektor — ne mogu da se prikažu po odgovornom">
+                  neklasifikovano
                 </span>
               )}
             </div>
@@ -402,7 +404,7 @@ export default function ExpenseAnalysis() {
           <td style={{ ...s.td, ...s.num, color: 'rgba(255,255,255,0.30)', fontSize: '11px' }}>{n.count}</td>
           <td style={{ ...s.td, textAlign: 'right' }}>
             <button style={s.hideBtn} onClick={() => toggle(hidden, n.key, setHidden)}
-              title={isHidden ? 'Include in total' : 'Exclude from total'}>
+              title={isHidden ? 'Uključi u ukupno' : 'Isključi iz ukupnog'}>
               {isHidden ? 'show' : 'hide'}
             </button>
           </td>
@@ -416,36 +418,36 @@ export default function ExpenseAnalysis() {
       <div style={s.body}>
         <div style={s.pageHeader}>
           <div>
-            <div style={s.pageTitle}>P&amp;L Analysis</div>
+            <div style={s.pageTitle}>P&amp;L analiza</div>
             <div style={s.pageSub}>
-              {loading ? 'Loading…'
-                : `${companyName}${projectFilter ? ` · ${projectFilterName}` : ''} · ${range.label} vs ${range.priorLabel} · ${curExp.length.toLocaleString()} entries · ${currency}`
-                  + (missingFigure > 0 ? ` · ${missingFigure.toLocaleString()} with no ${currency} figure, counted as zero` : '')}
+              {loading ? 'Učitavanje…'
+                : `${companyName}${projectFilter ? ` · ${projectFilterName}` : ''} · ${range.label} u odnosu na ${range.priorLabel} · ${countOf(curExp.length, 'stavka', 'stavke', 'stavki')} · ${currency}`
+                  + (missingFigure > 0 ? ` · ${missingFigure.toLocaleString('sr-RS')} bez iznosa u ${currency}, računato kao nula` : '')}
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             {showPicker && (
               <select style={s.sel} value={companyId} onChange={e => setCompanyId(e.target.value)}>
-                <option value="all">All companies</option>
+                <option value="all">Sve firme</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
-            <select style={s.sel} value={projectFilter} title="Project"
+            <select style={s.sel} value={projectFilter} title="Projekat"
               onChange={e => { setProjectFilter(e.target.value); setSelected(null) }}>
-              <option value="">All projects</option>
+              <option value="">Svi projekti</option>
               <option value={PROJECT_FILTER_OVERHEAD}>{OVERHEAD_LABEL}</option>
               {projectChoices.map(p => (
                 <option key={p.id} value={p.id}>{projectLabel(p)}{p.active ? '' : ' (zatvoren)'}</option>
               ))}
             </select>
             <select style={s.sel} value={mode} onChange={e => setMode(e.target.value as any)}>
-              <option value="month">Monthly</option>
-              <option value="quarter">Quarterly</option>
-              <option value="ytd">Year to date</option>
+              <option value="month">Mesečno</option>
+              <option value="quarter">Kvartalno</option>
+              <option value="ytd">Od početka godine</option>
             </select>
             <input type="month" style={s.sel} value={anchor} onChange={e => setAnchor(e.target.value)} />
             <button style={s.exportBtn} onClick={exportXlsx} disabled={loading || exporting || total === 0}>
-              {exporting ? 'Exporting…' : '⬇ Export'}
+              {exporting ? 'Izvoz…' : '⬇ Izvezi'}
             </button>
           </div>
         </div>
@@ -484,12 +486,12 @@ export default function ExpenseAnalysis() {
               </button>
             ))}
           </div>
-          <input style={{ ...s.sel, minWidth: '240px' }} placeholder="Search any level…"
+          <input style={{ ...s.sel, minWidth: '240px' }} placeholder="Pretraga na svim nivoima…"
             value={search} onChange={e => setSearch(e.target.value)} />
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
-            <button style={s.ghost} onClick={() => setExpanded(new Set(flatten(tree).map(n => n.key)))}>Expand all</button>
-            <button style={s.ghost} onClick={() => setExpanded(new Set())}>Collapse</button>
-            {hidden.size > 0 && <button style={s.ghost} onClick={() => setHidden(new Set())}>Show all ({hidden.size})</button>}
+            <button style={s.ghost} onClick={() => setExpanded(new Set(flatten(tree).map(n => n.key)))}>Otvori sve</button>
+            <button style={s.ghost} onClick={() => setExpanded(new Set())}>Sklopi</button>
+            {hidden.size > 0 && <button style={s.ghost} onClick={() => setHidden(new Set())}>Prikaži sve ({hidden.size})</button>}
           </div>
         </div>
 
@@ -513,9 +515,9 @@ export default function ExpenseAnalysis() {
 
         {drifting && (
           <div style={{ ...s.banner, borderColor: 'rgba(245,166,35,0.35)', background: 'rgba(245,166,35,0.08)', color: '#F5A623' }}>
-            This view totals {money(total)}, {money(Math.abs(drift))} {drift > 0 ? 'more' : 'less'} than
-            the {money(recon.plTotal)} the other tabs show. Every tab files the same rows, so this is a
-            fault in the report, not in the books — please report it.
+            Ovaj prikaz daje ukupno {money(total)}, što je {money(Math.abs(drift))} {drift > 0 ? 'više' : 'manje'} od
+            {' '}{money(recon.plTotal)} koliko pokazuju ostali prikazi. Svi prikazi raspoređuju iste redove, pa je ovo
+            greška u izveštaju, a ne u knjigama — molimo prijavite je.
           </div>
         )}
 
@@ -525,13 +527,13 @@ export default function ExpenseAnalysis() {
               <thead>
                 <tr style={s.theadRow}>
                   <th style={{ ...s.th, minWidth: '300px' }}>{BRANCH_COLUMNS[branch]}</th>
-                  <th style={{ ...s.th, textAlign: 'right' }}>Amount</th>
-                  <th style={{ ...s.th, textAlign: 'right' }}>% total</th>
+                  <th style={{ ...s.th, textAlign: 'right' }}>Iznos</th>
+                  <th style={{ ...s.th, textAlign: 'right' }}>% ukupno</th>
                   <th style={{ ...s.th, textAlign: 'right' }}>{range.priorLabel}</th>
-                  <th style={{ ...s.th, textAlign: 'right' }}>Change</th>
+                  <th style={{ ...s.th, textAlign: 'right' }}>Promena</th>
                   <th style={{ ...s.th, textAlign: 'right' }}>%</th>
                   <th style={s.th}>Trend</th>
-                  <th style={{ ...s.th, textAlign: 'right' }}>Tx</th>
+                  <th style={{ ...s.th, textAlign: 'right' }}>Br.</th>
                   <th style={{ ...s.th, textAlign: 'right' }} />
                 </tr>
               </thead>
@@ -542,13 +544,13 @@ export default function ExpenseAnalysis() {
                         widths={[88, 56, 92, 50, 80, 44, 84]} />
                     </td></tr>
                   : compared.length === 0
-                    ? <tr><td colSpan={9} style={s.loading}>No expenses in this period.</td></tr>
+                    ? <tr><td colSpan={9} style={s.loading}>Nema troškova u ovom periodu.</td></tr>
                     : renderRows(compared)}
               </tbody>
               {!loading && compared.length > 0 && (
                 <tfoot>
                   <tr style={s.totalRow}>
-                    <td style={{ ...s.td, fontWeight: 600 }}>{hidden.size > 0 ? 'Adjusted total' : 'Total'}</td>
+                    <td style={{ ...s.td, fontWeight: 600 }}>{hidden.size > 0 ? 'Korigovano ukupno' : 'Ukupno'}</td>
                     <td style={{ ...s.td, ...s.num, fontWeight: 600 }}>{money(adjusted)}</td>
                     <td colSpan={7} style={s.td} />
                   </tr>
@@ -560,22 +562,22 @@ export default function ExpenseAnalysis() {
 
         {selectedNode && !editorNode && (
           <EntriesModal
-            kicker="ACTUAL TRANSACTIONS"
+            kicker="STVARNE TRANSAKCIJE"
             title={selectedNode.label}
             subtitle={
               <>
                 {selectedNode.path.join(' › ')}
                 <span style={{ marginLeft: '12px', color: '#FF5B5A', fontWeight: '600', fontFamily: "'DM Mono', monospace" }}>
-                  {money(selectedNode.amount)} total
+                  ukupno {money(selectedNode.amount)}
                 </span>
                 <span style={{ marginLeft: '10px' }}>
-                  {total > 0 ? ((selectedNode.amount / total) * 100).toFixed(1) : '0'}% of {range.label}
+                  {total > 0 ? ((selectedNode.amount / total) * 100).toFixed(1).replace('.', ',') : '0'}% od: {range.label}
                 </span>
               </>
             }
             footerLeft={
-              `${drillRows.length.toLocaleString()} transaction${drillRows.length !== 1 ? 's' : ''} · `
-              + `grouped by month, newest first · amounts in ${currency} · click Edit to modify`
+              `${countOf(drillRows.length, 'transakcija', 'transakcije', 'transakcija')} · `
+              + `po mesecima, najnovije prvo · iznosi u ${currency} · kliknite Izmeni za izmenu`
             }
             onClose={() => setSelected(null)}>
 
@@ -597,13 +599,13 @@ export default function ExpenseAnalysis() {
         {editorNode}
 
         <div style={s.footnote}>
-          All three tabs read the same rows, so they always total the same. A row missing a
-          department is placed under <strong>Unassigned</strong> rather than dropped, which is why the
-          department view reconciles. <strong>By project</strong> files each row under its own project;
-          a document split across several projects counts on each for its split line, and a row with
-          no project is <strong>{OVERHEAD_LABEL}</strong> — overhead is never spread over the projects.
-          Hiding a line removes it from the total so you can ask what spend looks like without it;
-          the excluded amount stays on screen.
+          Sva tri prikaza čitaju iste redove, pa uvek daju isti ukupan iznos. Red bez sektora se
+          stavlja pod <strong>{UNASSIGNED}</strong> umesto da se izostavi, zato se prikaz po sektorima
+          slaže. <strong>Po projektu</strong> svaki red ide pod svoj projekat; dokument podeljen na više
+          projekata računa se na svakom za njegovu stavku podele, a red bez projekta je
+          {' '}<strong>{OVERHEAD_LABEL}</strong> — opšti troškovi se nikad ne raspoređuju na projekte.
+          Sakrivanje stavke uklanja je iz ukupnog iznosa, da biste videli kako troškovi izgledaju bez nje;
+          isključeni iznos ostaje na ekranu.
         </div>
       </div>
     </div>

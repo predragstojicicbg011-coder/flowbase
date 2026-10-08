@@ -103,7 +103,7 @@ describe('the branches draw', () => {
     // all at once the canvas grows to several thousand pixels and answers
     // nothing.
     const { container } = render(branches())
-    fireEvent.click(screen.getByRole('button', { name: 'Two levels' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Dva nivoa' }))
     capture('branches-2-two-levels', container.innerHTML)
 
     expect(screen.getByLabelText(/^Contributions on behalf of the employee,/))
@@ -124,7 +124,7 @@ describe('the branches draw', () => {
 
   it('folds back to the categories alone', () => {
     render(branches())
-    fireEvent.click(screen.getByRole('button', { name: 'Fold all' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sklopi sve' }))
     expect(screen.queryByLabelText(/^Net salaries,/)).not.toBeInTheDocument()
     expect(screen.getByLabelText(/^Employee and Labour,/)).toBeInTheDocument()
   })
@@ -135,10 +135,10 @@ describe('the branches draw', () => {
     // eight: folded away is folded away at every depth, so the two inside
     // Contributions count too.
     const { container } = render(branches())
-    fireEvent.click(screen.getByRole('button', { name: 'Fold all' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sklopi sve' }))
     // Split across text nodes in one span, so read the span rather than
     // asking for a string React never renders as one.
-    expect(container.textContent).toMatch(/10 lines folded away/)
+    expect(container.textContent).toMatch(/10 stavki sklopljeno/)
   })
 
   it('opens the ledger for a line with nothing under it', () => {
@@ -155,8 +155,8 @@ describe('the branches draw', () => {
 
   it('carries a legend for only the behaviours on screen', () => {
     render(branches())
-    expect(screen.getByText('Fixed')).toBeInTheDocument()
-    expect(screen.getByText('Too little history')).toBeInTheDocument()
+    expect(screen.getByText('Fiksni')).toBeInTheDocument()
+    expect(screen.getByText('Premalo istorije')).toBeInTheDocument()
   })
 })
 

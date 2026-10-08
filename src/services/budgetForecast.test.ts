@@ -839,8 +839,8 @@ describe('reading the budget in EUR', () => {
     const dinarOnly = adjE({ id: 'old', amount_rsd: 5000, amount_eur: null })
     expect(ledgerReadableIn([dinarOnly], 'RSD')).toBe(true)
     expect(ledgerReadableIn([dinarOnly], 'EUR')).toBe(false)
-    expect(() => ledgerFigure(dinarOnly, 'EUR')).toThrow(/no EUR figure/)
-    expect(() => applyLedger(0, [dinarOnly], 'EUR')).toThrow(/no EUR figure/)
+    expect(() => ledgerFigure(dinarOnly, 'EUR')).toThrow(/nema iznos u EUR/)
+    expect(() => applyLedger(0, [dinarOnly], 'EUR')).toThrow(/nema iznos u EUR/)
     expect(applyLedger(0, [dinarOnly], 'RSD')).toBe(5000)
   })
 

@@ -55,7 +55,7 @@ describe('the skeletons', () => {
   it('announces that something is on its way, once, for a whole group', () => {
     render(<SkeletonRows rows={5} />)
     const status = screen.getByRole('status')
-    expect(status).toHaveAttribute('aria-label', 'Loading')
+    expect(status).toHaveAttribute('aria-label', 'Učitavanje')
     expect(status.querySelectorAll('.mf-skeleton')).toHaveLength(5)
   })
 

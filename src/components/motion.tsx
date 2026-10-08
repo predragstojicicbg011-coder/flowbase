@@ -144,7 +144,7 @@ export function SkeletonRows({ rows = 4, height = 12, gap = 10, widths }: {
   const w = widths ?? [92, 78, 85, 64, 88, 72]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap, padding: '4px 0' }}
-      role="status" aria-label="Loading">
+      role="status" aria-label="Učitavanje">
       {Array.from({ length: rows }, (_, i) => (
         <Skeleton key={i} height={height} width={`${w[i % w.length]}%`} />
       ))}

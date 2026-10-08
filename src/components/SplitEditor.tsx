@@ -5,6 +5,7 @@ import type { Project } from '../services/projects'
 import SplitScriptBuilder, { type ClassificationOptions } from './SplitScriptBuilder'
 import { DIALOG } from './dialogTheme'
 import { fmtMoney, fmtNum } from '../utils/formatters'
+import { countOf } from '../utils/plural'
 import {
   emptyLine, splitInHalf, sumOf, remainderOf, isBalanced, whySplitNotSavable,
   absorbRemainder, applyScript, scriptMatching,
@@ -169,10 +170,10 @@ export default function SplitEditor({
       <div style={s.empty}>
         <button type="button" style={s.start} disabled={disabled}
           onClick={() => onChange(splitInHalf(parent, () => makeKey()))}>
-          ＋ Split across several costs
+          ＋ Podeli na više troškova
         </button>
         <span style={s.hint}>
-          {hint || 'One payment, two or more expenses — each with its own classification.'}
+          {hint || 'Jedno plaćanje, dva ili više troškova — svaki sa svojom klasifikacijom.'}
         </span>
       </div>
     )
@@ -181,11 +182,11 @@ export default function SplitEditor({
   return (
     <div style={s.wrap}>
       <div style={s.head}>
-        <span style={s.title}>Split across {lines.length} costs</span>
+        <span style={s.title}>Podela na {countOf(lines.length, 'trošak', 'troška', 'troškova')}</span>
         <button type="button" style={s.ghost} disabled={disabled}
-          title="Remove the split and book this as one expense again"
+          title="Ukloni podelu i knjiži ovo ponovo kao jedan trošak"
           onClick={() => onChange([])}>
-          Remove the split
+          Ukloni podelu
         </button>
       </div>
 
@@ -204,9 +205,9 @@ export default function SplitEditor({
                   if (script) set(i, applyScript(line, script))
                 }}
                 options={options}
-                allLabel="— pick what this part is for —"
-                searchPlaceholder="Type to find a template…"
-                emptyMessage="No template of that name"
+                allLabel="— izaberite namenu ovog dela —"
+                searchPlaceholder="Pretraga šablona…"
+                emptyMessage="Nema šablona sa tim nazivom"
                 disabled={disabled}
                 style={{ ...s.input, flex: 1 }}
               />
@@ -216,7 +217,7 @@ export default function SplitEditor({
                   that should be one. */}
               {classification && client && (
                 <button type="button" style={s.newScript} disabled={disabled}
-                  title="Make a template for this cost"
+                  title="Napravi šablon za ovaj trošak"
                   onClick={() => setBuilding(building === line.key ? null : line.key)}>
                   {building === line.key ? '×' : '+'}
                 </button>
@@ -260,7 +261,7 @@ export default function SplitEditor({
                 {line.pl_category
                   ? [line.pl_category, line.pl_subcategory, line.department, line.expense_description]
                       .filter(Boolean).join(' › ')
-                  : <span style={{ color: DIALOG.amber }}>nothing picked yet</span>}
+                  : <span style={{ color: DIALOG.amber }}>još ništa nije izabrano</span>}
               </div>
             </div>
 
@@ -272,18 +273,18 @@ export default function SplitEditor({
                 value={shown(line)}
                 placeholder="0.00"
                 title={i === lines.length - 1
-                  ? 'This line takes up whatever the others leave'
-                  : 'Changing this adjusts the last line'}
+                  ? 'Ova stavka preuzima ono što ostale ne pokriju'
+                  : 'Izmena ovde menja poslednju stavku'}
                 onChange={e => setAmount(i, e.target.value)} />
               {i === lines.length - 1 && lines.length > 1 && (
-                <div style={s.balancer}>takes the balance</div>
+                <div style={s.balancer}>preuzima ostatak</div>
               )}
             </div>
 
             <button type="button" style={s.remove} disabled={disabled || lines.length <= 1}
               title={lines.length <= 1
-                ? 'A split of one is not a split — use “Remove the split”'
-                : 'Remove this line'}
+                ? 'Podela na jednu stavku nije podela — koristite „Ukloni podelu“'
+                : 'Ukloni ovu stavku'}
               onClick={() => onChange(lines.filter((_, j) => j !== i))}>
               ✕
             </button>
@@ -299,14 +300,14 @@ export default function SplitEditor({
             // the amount it is about to be given nine times out of ten.
             { ...emptyLine(makeKey()), amount: left > 0 ? left : null },
           ])}>
-          ＋ Add a line
+          ＋ Dodaj stavku
         </button>
 
         <div style={s.sums}>
           <span>
-            Lines <b style={{ color: DIALOG.text }}>{money(total, parent.currency)}</b>
+            Stavke <b style={{ color: DIALOG.text }}>{money(total, parent.currency)}</b>
           </span>
-          <span style={{ color: DIALOG.dim }}>of</span>
+          <span style={{ color: DIALOG.dim }}>od</span>
           <span>
             <b style={{ color: DIALOG.text }}>{money(parent.amount || 0, parent.currency)}</b>
           </span>
@@ -315,16 +316,16 @@ export default function SplitEditor({
             color: balanced ? DIALOG.accent : DIALOG.amber,
           }}>
             {balanced
-              ? '✓ balanced'
+              ? '✓ usklađeno'
               : left > 0
-                ? `${money(left, parent.currency)} left`
-                : `${money(Math.abs(left), parent.currency)} over`}
+                ? `preostalo ${money(left, parent.currency)}`
+                : `višak ${money(Math.abs(left), parent.currency)}`}
           </span>
           {!balanced && (
             <button type="button" style={s.ghost} disabled={disabled}
-              title="Put the difference on the last line"
+              title="Prebaci razliku na poslednju stavku"
               onClick={() => onChange(absorbRemainder(parent, lines))}>
-              Put it on line {lines.length}
+              Prebaci na stavku {lines.length}
             </button>
           )}
         </div>

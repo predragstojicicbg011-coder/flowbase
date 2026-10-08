@@ -5,6 +5,7 @@ import { proposePairs, summarize, PassthroughRow, MATCH_LIMITS } from '../servic
 import { DIALOG } from './dialogTheme'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtRSD } from '../utils/formatters'
+import { countOf } from '../utils/plural'
 
 // ── Pass-through auto-matching ──────────────────────────────────────────────
 // The engine only PROPOSES. Nothing is written until the user confirms, and
@@ -13,9 +14,9 @@ import { fmtRSD } from '../utils/formatters'
 interface Props { onClose: () => void; onPaired: () => void }
 
 const CONF_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  high:   { bg: 'rgba(0,212,126,0.13)',  color: '#00D47E', label: 'high' },
-  medium: { bg: 'rgba(245,166,35,0.13)', color: '#F5A623', label: 'medium' },
-  low:    { bg: 'rgba(122,155,184,0.13)', color: '#7A9BB8', label: 'low' },
+  high:   { bg: 'rgba(0,212,126,0.13)',  color: '#00D47E', label: 'visoka' },
+  medium: { bg: 'rgba(245,166,35,0.13)', color: '#F5A623', label: 'srednja' },
+  low:    { bg: 'rgba(122,155,184,0.13)', color: '#7A9BB8', label: 'niska' },
 }
 
 // Rows print in the viewer's display currency. The gap between two legs is
@@ -77,7 +78,7 @@ export default function AutoMatchPanel({ onClose, onPaired }: Props) {
 
   const confirmPairs = async () => {
     if (chosen.length === 0) return
-    if (!window.confirm(`Pair ${chosen.length} ${chosen.length === 1 ? 'entry pair' : 'entry pairs'}? This modifies data.`)) return
+    if (!window.confirm(`Upariti ${countOf(chosen.length, 'par stavki', 'para stavki', 'parova stavki')}? Ovo menja podatke.`)) return
     setPosting(true); setError('')
     let ok = 0, failed = 0
 
@@ -108,10 +109,10 @@ export default function AutoMatchPanel({ onClose, onPaired }: Props) {
       <div style={s.modal} onClick={e => e.stopPropagation()}>
         <div style={s.header}>
           <div>
-            <div style={s.title}>Pass-through auto-matching</div>
+            <div style={s.title}>Automatsko uparivanje prolaznih stavki</div>
             <div style={s.sub}>
-              Proposals are never posted automatically — you confirm them. Limits: amount within{' '}
-              {(MATCH_LIMITS.maxRelAmountDiff * 100).toFixed(0)}%, dates within {MATCH_LIMITS.maxDayGap} days.
+              Predlozi se nikad ne knjiže automatski — vi ih potvrđujete. Granice: iznos u okviru{' '}
+              {(MATCH_LIMITS.maxRelAmountDiff * 100).toFixed(0)}%, datumi u okviru {MATCH_LIMITS.maxDayGap} dana.
             </div>
           </div>
           <button style={s.close} onClick={onClose}>×</button>
@@ -124,35 +125,35 @@ export default function AutoMatchPanel({ onClose, onPaired }: Props) {
             </select>
           )}
           <select style={s.select} value={minConfidence} onChange={e => setMinConfidence(e.target.value as any)}>
-            <option value="high">high confidence only</option>
-            <option value="medium">medium and high</option>
-            <option value="low">all, including low</option>
+            <option value="high">samo visoka pouzdanost</option>
+            <option value="medium">srednja i visoka</option>
+            <option value="low">sve, uključujući nisku</option>
           </select>
-          <button style={s.ghost} onClick={load} disabled={loading}>{loading ? '…' : 'Refresh'}</button>
+          <button style={s.ghost} onClick={load} disabled={loading}>{loading ? '…' : 'Osveži'}</button>
         </div>
 
         <div style={s.statRow}>
-          <Stat label="unpaired" value={rows.length} />
-          <Stat label="proposals" value={stats.total} />
-          <Stat label="high" value={stats.high} color="#00D47E" />
-          <Stat label="medium" value={stats.medium} color="#F5A623" />
-          <Stat label="low" value={stats.low} color="#7A9BB8" />
+          <Stat label="neupareno" value={rows.length} />
+          <Stat label="predlozi" value={stats.total} />
+          <Stat label="visoka" value={stats.high} color="#00D47E" />
+          <Stat label="srednja" value={stats.medium} color="#F5A623" />
+          <Stat label="niska" value={stats.low} color="#7A9BB8" />
         </div>
 
         {error && <div style={s.error}>{error}</div>}
         {result && (
           <div style={result.failed ? s.error : s.success}>
-            Paired: {result.ok}{result.failed ? ` · failed: ${result.failed}` : ''}
+            Upareno: {result.ok}{result.failed ? ` · neuspešno: ${result.failed}` : ''}
           </div>
         )}
 
         <div style={s.list}>
-          {loading ? <div style={s.muted}>Loading…</div>
+          {loading ? <div style={s.muted}>Učitavanje…</div>
             : visible.length === 0 ? (
               <div style={s.muted}>
                 {rows.length === 0
-                  ? 'No unpaired entries for this company.'
-                  : `None of the ${rows.length} unpaired entries pass the current limits. Lower the confidence threshold or pair manually.`}
+                  ? 'Nema neuparenih stavki za ovu firmu.'
+                  : `Nijedna od ${rows.length} neuparenih stavki ne prolazi trenutne granice. Snizite prag pouzdanosti ili uparite ručno.`}
               </div>
             ) : visible.map(p => {
               const cs = CONF_STYLE[p.confidence]
@@ -175,8 +176,8 @@ export default function AutoMatchPanel({ onClose, onPaired }: Props) {
 
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <span style={{ ...s.badge, background: cs.bg, color: cs.color }}>{cs.label}</span>
-                    <div style={s.score}>{p.score} pts</div>
-                    {p.amountDiffRsd > 0 && <div style={s.diff}>diff {fmtRSD(p.amountDiffRsd)}</div>}
+                    <div style={s.score}>{countOf(p.score, 'poen', 'poena', 'poena')}</div>
+                    {p.amountDiffRsd > 0 && <div style={s.diff}>razlika {fmtRSD(p.amountDiffRsd)}</div>}
                   </div>
                 </div>
               )
@@ -185,14 +186,14 @@ export default function AutoMatchPanel({ onClose, onPaired }: Props) {
 
         <div style={s.footer}>
           <div style={s.muted}>
-            {chosen.length} of {visible.length} selected
+            Izabrano: {chosen.length} od {visible.length}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button style={s.ghost} onClick={onClose}>Close</button>
+            <button style={s.ghost} onClick={onClose}>Zatvori</button>
             <button style={{ ...s.primary, opacity: chosen.length === 0 || posting ? 0.5 : 1 }}
               disabled={chosen.length === 0 || posting}
               onClick={confirmPairs}>
-              {posting ? 'Saving…' : `Pair ${chosen.length}`}
+              {posting ? 'Čuvanje…' : `Upari (${chosen.length})`}
             </button>
           </div>
         </div>
@@ -207,7 +208,7 @@ function Side({ dir, row }: { dir: string; row: PassthroughRow }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <span style={{ ...s.dirTag, background: dir === 'IN' ? 'rgba(0,212,126,0.15)' : 'rgba(255,91,90,0.15)', color: dir === 'IN' ? '#00D47E' : '#FF5B5A' }}>{dir}</span>
+        <span style={{ ...s.dirTag, background: dir === 'IN' ? 'rgba(0,212,126,0.15)' : 'rgba(255,91,90,0.15)', color: dir === 'IN' ? '#00D47E' : '#FF5B5A' }}>{dir === 'IN' ? 'UPLATA' : 'ISPLATA'}</span>
         <span style={s.amount}>{book === null ? '—' : format(Math.abs(book))}</span>
       </div>
       <div style={s.meta}>

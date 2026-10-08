@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import { fetchRuns, byMonth, type RunMonth } from '../services/payroll/savedRuns'
+import { RUN_LABELS, type RunKey } from '../services/payroll/runs'
 import { fmtNum } from '../utils/formatters'
+import { countOf } from '../utils/plural'
+import { monthShortLabel } from '../utils/months'
 
 /**
  * Every month that has been calculated, newest first.
@@ -49,13 +52,13 @@ export default function PayrollMonths({ companyId, current, onPick }: {
     <div style={s.panel}>
       <button style={s.head} onClick={() => setOpen(v => !v)}>
         <div>
-          <div style={s.title}>Calculated months</div>
+          <div style={s.title}>Obračunati meseci</div>
           <div style={s.hint}>
-            {months.length} {months.length === 1 ? 'month' : 'months'} kept.
-            {' '}{months.filter(m => m.posted > 0).length} of them posted to the ledger.
+            Sačuvano: {countOf(months.length, 'mesec', 'meseca', 'meseci')}.
+            {' '}Proknjiženo u glavnu knjigu: {months.filter(m => m.posted > 0).length}.
           </div>
         </div>
-        <span style={s.chevron}>{open ? 'show fewer' : `show all ${months.length}`}</span>
+        <span style={s.chevron}>{open ? 'Prikaži manje' : `Prikaži sve (${months.length})`}</span>
       </button>
 
       <div style={s.rows}>
@@ -66,19 +69,19 @@ export default function PayrollMonths({ companyId, current, onPick }: {
             <button key={m.month}
               style={{ ...s.row, ...(isCurrent ? s.rowCurrent : {}) }}
               onClick={() => onPick(m.month)}>
-              <span style={s.month}>{m.month}</span>
+              <span style={s.month}>{monthShortLabel(m.month)}</span>
               <span style={{
                 ...s.badge,
                 background: allPosted ? 'rgba(0,212,126,0.12)'
                   : m.posted > 0 ? 'rgba(200,162,74,0.13)' : 'rgba(255,255,255,0.06)',
                 color: allPosted ? '#00D47E' : m.posted > 0 ? '#D8B96A' : '#7A9BB8',
               }}>
-                {allPosted ? 'Posted'
-                  : m.posted > 0 ? `${m.posted} of ${m.runs.length} posted`
-                  : 'Draft'}
+                {allPosted ? 'Proknjiženo'
+                  : m.posted > 0 ? `Proknjiženo ${m.posted} od ${m.runs.length}`
+                  : 'Nacrt'}
               </span>
               <span style={s.runs}>
-                {m.runs.map(r => r.label).join(' · ')}
+                {m.runs.map(r => RUN_LABELS[r.run_key as RunKey] ?? r.label).join(' · ')}
               </span>
               <span style={s.cost}>{money(m.totalCost)}</span>
             </button>

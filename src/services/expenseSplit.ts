@@ -31,6 +31,7 @@
 // time, and it is the line the person was last looking at.
 
 import { partBookAmounts, round2 } from './bookAmounts'
+import { fmtNum } from '../utils/formatters'
 
 export interface SplitLine {
   /** Stable within the editor, so a line can be removed without reordering. */
@@ -119,28 +120,28 @@ export function whySplitNotSavable(
   if (lines.length === 0) return null
 
   if (lines.length < 2) {
-    return 'A split needs at least two lines. Remove it, or add a second.'
+    return 'Podela mora imati najmanje dve stavke. Uklonite je ili dodajte drugu.'
   }
 
   const blank = lines.findIndex(l => !l.pl_category.trim())
   if (blank >= 0) {
-    return `Line ${blank + 1} has no P&L category. Every line is its own entry in `
-      + 'the report, and one without a category lands in Unassigned.'
+    return `Stavka ${blank + 1} nema P&L kategoriju. Svaka stavka je zaseban unos u `
+      + 'izveštaju, a stavka bez kategorije završava u „Nedodeljeno“.'
   }
 
   const noAmount = lines.findIndex(l => !(l.amount && l.amount > 0))
   if (noAmount >= 0) {
-    return `Line ${noAmount + 1} has no amount. A line worth nothing is not a split, `
-      + 'it is a line to remove.'
+    return `Stavka ${noAmount + 1} nema iznos. Stavka bez vrednosti nije podela, `
+      + 'već stavka koju treba ukloniti.'
   }
 
   const left = remainderOf(parent, lines)
   if (Math.abs(left) > SPLIT_TOLERANCE) {
     return left > 0
-      ? `The lines come to ${sumOf(lines).toFixed(2)} and the total is `
-        + `${(parent.amount || 0).toFixed(2)} — ${Math.abs(left).toFixed(2)} is not accounted for.`
-      : `The lines come to ${sumOf(lines).toFixed(2)}, which is `
-        + `${Math.abs(left).toFixed(2)} MORE than the ${(parent.amount || 0).toFixed(2)} being split.`
+      ? `Stavke iznose ${fmtNum(sumOf(lines))}, a ukupno je `
+        + `${fmtNum(parent.amount || 0)} — ${fmtNum(Math.abs(left))} nije raspoređeno.`
+      : `Stavke iznose ${fmtNum(sumOf(lines))}, što je `
+        + `${fmtNum(Math.abs(left))} VIŠE od iznosa koji se deli (${fmtNum(parent.amount || 0)}).`
   }
 
   return null

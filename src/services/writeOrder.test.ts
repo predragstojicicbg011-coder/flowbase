@@ -177,7 +177,7 @@ describe('planDelete', () => {
     expect(plan.kind).toBe('refuse')
     if (plan.kind === 'refuse') {
       expect(plan.reason).toContain('2026-01')
-      expect(plan.reason).toContain('nothing was deleted')
+      expect(plan.reason).toContain('ništa nije obrisano')
     }
   })
 
@@ -216,22 +216,22 @@ describe('reportStepFailure', () => {
   it('says nothing was lost when the delete itself was refused', () => {
     const msg = reportStepFailure('transaction', 'Period 2026-01 je zakljucan')
     expect(msg).toContain('Period 2026-01 je zakljucan')
-    expect(msg).toContain('untouched')
-    expect(msg).toContain('nothing was lost')
+    expect(msg).toContain('netaknuti')
+    expect(msg).toContain('ništa nije izgubljeno')
   })
 
   it('names the invoice allocations left dangling when their removal failed', () => {
     const msg = reportStepFailure('invoiceLinks', 'network')
-    expect(msg).toContain('The transaction was deleted')
-    expect(msg).toContain('invoice allocations could not be removed')
-    expect(msg).toContain('credit instalments were left alone')
+    expect(msg).toContain('Transakcija je obrisana')
+    expect(msg).toContain('raspodela na fakture nije mogla da se ukloni')
+    expect(msg).toContain('rate kredita nisu dirane')
   })
 
   it('names the instalments left dangling when their reset failed', () => {
     const msg = reportStepFailure('installments', 'network')
-    expect(msg).toContain('credit')
-    expect(msg).toContain('instalments it settled could not be reopened')
-    expect(msg).toContain('Bank Credits')
+    expect(msg).toContain('rate kredita')
+    expect(msg).toContain('nisu mogle ponovo da se otvore')
+    expect(msg).toContain('Kreditima')
   })
 
   it('reports a distinct sentence for every step in the order', () => {
@@ -243,14 +243,14 @@ describe('reportStepFailure', () => {
 describe('reportLinkFailure', () => {
   it('says the previous allocation is still there when the insert failed', () => {
     const msg = reportLinkFailure('insertReplacement', 'RLS')
-    expect(msg).toContain('Nothing was removed')
-    expect(msg).toContain('still allocated')
+    expect(msg).toContain('Ništa nije uklonjeno')
+    expect(msg).toContain('ista kao pre')
   })
 
   it('warns that the invoice counts both when the cleanup failed', () => {
     const msg = reportLinkFailure('removeSuperseded', 'RLS')
-    expect(msg).toContain('counts both')
-    expect(msg).toContain('more paid than it is')
+    expect(msg).toContain('računa obe')
+    expect(msg).toContain('više plaćena nego što jeste')
   })
 
   it('writes the replacement before removing what it supersedes', () => {
@@ -306,7 +306,7 @@ describe('deleteTransactionSafely — the atomic path', () => {
     expect(out.ok).toBe(false)
     expect(out.done).toEqual([])
     expect(out.message).toContain('zakljucan')
-    expect(out.message).toContain('nothing was lost')
+    expect(out.message).toContain('ništa nije izgubljeno')
     // The fault this whole change is about: these three used to be gone.
     expect(db.rows.invoice_transaction_links).toHaveLength(2)
     expect(db.rows.credit_installments.find(i => i.id === 'i-1')).toMatchObject({ transaction_id: 'tx-1', paid_amount: 100, status: 'paid' })
@@ -339,7 +339,7 @@ describe('deleteTransactionInSteps — the path for a database without the RPC',
 
     expect(out.ok).toBe(false)
     expect(out.done).toEqual([])
-    expect(out.message).toContain('2026-01 is locked')
+    expect(out.message).toContain('2026-01 je zaključan')
     expect(db.rows.invoice_transaction_links).toHaveLength(2)
     expect(db.rows.credit_installments.find(i => i.id === 'i-1')).toMatchObject({ transaction_id: 'tx-1', paid_amount: 100, status: 'paid' })
     expect(db.rows.transactions.find(t => t.id === 'tx-1')!.deleted_at).toBeNull()
@@ -355,7 +355,7 @@ describe('deleteTransactionInSteps — the path for a database without the RPC',
 
     expect(out.ok).toBe(false)
     expect(out.done).toEqual([])
-    expect(out.message).toContain('nothing was lost')
+    expect(out.message).toContain('ništa nije izgubljeno')
     expect(db.rows.invoice_transaction_links).toHaveLength(2)
     expect(db.rows.credit_installments.find(i => i.id === 'i-1')!.status).toBe('paid')
     expect(db.calls.some(c => c.table === 'invoice_transaction_links')).toBe(false)
@@ -391,7 +391,7 @@ describe('deleteTransactionInSteps — the path for a database without the RPC',
   it('refuses a transaction that is not there rather than deleting links for it', async () => {
     const out = await deleteTransactionInSteps(makeClient(db), { transactionId: 'tx-missing' })
     expect(out.ok).toBe(false)
-    expect(out.message).toContain('may already have been deleted')
+    expect(out.message).toContain('možda je već obrisana')
     expect(db.rows.invoice_transaction_links).toHaveLength(2)
   })
 
@@ -416,7 +416,7 @@ describe('deleteTransactionInSteps — the path for a database without the RPC',
     }
     const out = await deleteTransactionInSteps(client, { transactionId: 'tx-1' })
     expect(out.ok).toBe(false)
-    expect(out.message).toContain('still there')
+    expect(out.message).toContain('i dalje postoji')
     expect(db.rows.invoice_transaction_links).toHaveLength(2)
   })
 
@@ -426,7 +426,7 @@ describe('deleteTransactionInSteps — the path for a database without the RPC',
 
     expect(out.ok).toBe(false)
     expect(out.done).toEqual(['transaction'])
-    expect(out.message).toContain('The transaction was deleted')
+    expect(out.message).toContain('Transakcija je obrisana')
     expect(out.message).toContain('connection reset')
     // The instalments were never reached, which is what the message says.
     expect(db.rows.credit_installments.find(i => i.id === 'i-1')!.status).toBe('paid')
@@ -438,8 +438,8 @@ describe('deleteTransactionInSteps — the path for a database without the RPC',
 
     expect(out.ok).toBe(false)
     expect(out.done).toEqual(['transaction', 'invoiceLinks'])
-    expect(out.message).toContain('invoice allocations removed')
-    expect(out.message).toContain('Bank Credits')
+    expect(out.message).toContain('raspodela na fakture uklonjena')
+    expect(out.message).toContain('Kreditima')
   })
 
   it('proceeds when the period-lock pre-check cannot be read at all', async () => {
@@ -469,7 +469,7 @@ describe('reallocateInvoiceLink', () => {
 
     expect(out.ok).toBe(false)
     expect(out.done).toEqual([])
-    expect(out.message).toContain('Nothing was removed')
+    expect(out.message).toContain('Ništa nije uklonjeno')
     // The allocation that existed a moment ago is still there.
     expect(db.rows.invoice_transaction_links.map(l => l.id)).toEqual(['l-old', 'l-other'])
     // And no delete was even attempted.
@@ -515,7 +515,7 @@ describe('reallocateInvoiceLink', () => {
 
     expect(out.ok).toBe(false)
     expect(out.done).toEqual(['insertReplacement'])
-    expect(out.message).toContain('counts both')
+    expect(out.message).toContain('računa obe')
     // More than they started with — never less.
     expect(db.rows.invoice_transaction_links.filter(l => l.invoice_id === 'inv-1')).toHaveLength(2)
   })
@@ -524,8 +524,8 @@ describe('reallocateInvoiceLink', () => {
 describe('reportPostFailure', () => {
   it('says nothing was written when the first step fails, so nobody hunts for damage', () => {
     const msg = reportPostFailure('Payroll', 'the payroll record', 'Period 2026-01 is locked', [])
-    expect(msg).toContain('Nothing was written')
-    expect(msg).toContain('retrying is safe')
+    expect(msg).toContain('Ništa nije upisano')
+    expect(msg).toContain('bezbedno pokušati ponovo')
   })
 
   it('names what already landed, so a retry does not double it', () => {
@@ -535,7 +535,7 @@ describe('reportPostFailure', () => {
     ])
     expect(msg).toContain('the payroll record')
     expect(msg).toContain('13 payroll lines')
-    expect(msg).toContain('duplicated')
+    expect(msg).toContain('duplirano')
   })
 
   it('carries the database message through rather than replacing it', () => {
@@ -545,14 +545,14 @@ describe('reportPostFailure', () => {
 
   it('names the step that failed', () => {
     expect(reportPostFailure('Payroll', 'the tax invoice', 'x', []))
-      .toContain('failed writing the tax invoice')
+      .toContain('Upis nije uspeo — the tax invoice')
   })
 
   it('counts only where a count was given', () => {
     const msg = reportPostFailure('An invoice', 'the link', 'x', [
       { label: 'the invoice' }, { label: 'child invoices', count: 4 },
     ])
-    expect(msg).toContain('Already written: the invoice, 4 child invoices.')
+    expect(msg).toContain('Već upisano: the invoice, 4 child invoices.')
   })
 })
 
@@ -593,7 +593,7 @@ describe('softDeleteRow', () => {
     const { client } = stub({ data: false })
     const r = await softDeleteRow(client, 'passthrough', 'pt-1')
     expect(r.ok).toBe(false)
-    expect(r.message).toContain('already deleted')
+    expect(r.message).toContain('već obrisan')
   })
 
   it('passes a null author rather than omitting it', async () => {
@@ -614,7 +614,7 @@ describe('runWrite', () => {
   it('puts what the user was doing in front of the database message', async () => {
     const r = await runWrite('Rename category', answer({ message: 'permission denied' }))
     expect(r.ok).toBe(false)
-    expect(r.message).toBe('Rename category failed: permission denied')
+    expect(r.message).toBe('Rename category nije uspelo: permission denied')
   })
 
   it('carries the message through rather than replacing it', async () => {

@@ -146,12 +146,35 @@ export function unmatchedEmployees(
 //
 // The rows payroll wrote before this existed carry the person's name in their
 // note and nothing in their Partner column. The note's shape is this
-// application's own — `<tag> — Net salary — <name>` — so the name can be read
+// application's own — `<tag> — Neto zarada — <name>` — so the name can be read
 // back out of it and matched exactly as a new posting is, by the same
 // function, rather than by a second rule written in SQL that would drift.
+//
+// TWO SPELLINGS, BOTH FOR GOOD. Notes were written in English until the
+// interface went Serbian, and those rows are in the ledger and stay there.
+// Every reader below accepts both the legacy English wording
+// (`Payroll 2026-09 — Net salary — <name> [posting <id>]`) and the Serbian
+// one (`Zarade 2026-09 — Neto zarada — <name> [knjiženje <id>]`).
+
+/** The tag a posting stamps on every invoice it writes. */
+export function postingTag(postingId: string): string {
+  return `[knjiženje ${postingId}]`
+}
+
+/**
+ * The PostgREST `or` filter for rows a posting wrote, in either spelling of
+ * the tag. Values are quoted because the bracket and the space would
+ * otherwise be read as part of the filter syntax.
+ */
+export const POSTED_NOTE_FILTER = 'note.like."%[posting %",note.like."%[knjiženje %"'
+
+/** Whether a note carries a posting tag, legacy or current. */
+export function hasPostingTag(note: string | null | undefined): boolean {
+  return /\[(?:posting|knjiženje) /u.test(note || '')
+}
 
 /** The legs whose note names a person. */
-const NOTE_LEG = /—\s*Net salary\s*—\s*([^[]+?)\s*(?:,\s*after\b|\[|$)/u
+const NOTE_LEG = /—\s*(?:Net salary|Neto zarada)\s*—\s*([^[]+?)\s*(?:,\s*(?:after|nakon)\b|\[|$)/u
 
 /**
  * The employee a posted payroll row was for, read out of its note.
@@ -251,7 +274,7 @@ export type PostedRow =
   | { kind: 'deduction'; label: string; employee: string }
   | { kind: 'other' }
 
-const DEDUCTION_NOTE = /—\s*Deduction forwarded:\s*(.+?)\s*—\s*([^[]+?)\s*(?:\[|$)/u
+const DEDUCTION_NOTE = /—\s*(?:Deduction forwarded|Prosleđena obustava):\s*(.+?)\s*—\s*([^[]+?)\s*(?:\[|$)/u
 
 /**
  * What a posted payroll row is, from the note this application wrote on it.
@@ -264,7 +287,7 @@ export function classifyPostedNote(note: string | null | undefined): PostedRow {
   const text = note || ''
   const person = employeeNameFromNote(text)
   if (person) return { kind: 'employee', name: person }
-  if (/—\s*Tax and contributions\b/u.test(text)) return { kind: 'tax' }
+  if (/—\s*(?:Tax and contributions|Porez i doprinosi)(?![\p{L}\p{N}])/u.test(text)) return { kind: 'tax' }
   const deduction = DEDUCTION_NOTE.exec(text)
   if (deduction) {
     return { kind: 'deduction', label: deduction[1].trim(), employee: deduction[2].trim() }
@@ -276,13 +299,14 @@ export function classifyPostedNote(note: string | null | undefined): PostedRow {
 /**
  * The month a posted payroll row is for, read out of its own note.
  *
- * Every one of them opens `Payroll 2026-09 — …`. Taken from the row rather
+ * Every one of them opens `Zarade 2026-09 — …` (or, written before the
+ * interface was Serbian, `Payroll 2026-09 — …`). Taken from the row rather
  * than from whatever month the screen happens to be showing: a run for
  * September written up in October falls due in September, and a backfill that
  * used the open month would give an August row an October due date and be
  * wrong in a way nobody would question.
  */
 export function payrollMonthFromNote(note: string | null | undefined): string | null {
-  const found = /\bPayroll\s+(\d{4}-\d{2})\b/.exec(note || '')
+  const found = /\b(?:Payroll|Zarade)\s+(\d{4}-\d{2})\b/.exec(note || '')
   return found ? found[1] : null
 }

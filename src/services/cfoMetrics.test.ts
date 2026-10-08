@@ -92,18 +92,18 @@ describe('burn, and how long it can go on', () => {
     // a screen that exists to be trusted.
     const r = burnAndRunway([point({ result: -100000 })], null)
     expect(r.months).toBeNull()
-    expect(r.unknown).toMatch(/cash position/i)
+    expect(r.unknown).toMatch(/stanje novca/i)
     expect(r.burn).toBe(100000)
   })
 
   it('says there is no burn rather than dividing by zero', () => {
     const r = burnAndRunway([point({ result: 50000 }), point({ result: 20000 })], 600000)
     expect(r.months).toBeNull()
-    expect(r.unknown).toMatch(/lost money/i)
+    expect(r.unknown).toMatch(/u gubitku/i)
   })
 
   it('has nothing to say about a history of no complete months', () => {
-    expect(burnAndRunway([point({ complete: false })], 100).unknown).toMatch(/complete month/i)
+    expect(burnAndRunway([point({ complete: false })], 100).unknown).toMatch(/završenog meseca/i)
   })
 })
 
@@ -278,10 +278,10 @@ describe('money earned and not yet collected', () => {
     ], 'RSD', '2026-09-26', 900000)
 
     const by = Object.fromEntries(r.buckets.map(b => [b.label, b.amount]))
-    expect(by['Not yet due']).toBe(1000)
-    expect(by['1–30 days']).toBe(2000)
-    expect(by['31–60 days']).toBe(3000)
-    expect(by['Over 90 days']).toBe(4000)
+    expect(by['Nije dospelo']).toBe(1000)
+    expect(by['1–30 dana']).toBe(2000)
+    expect(by['31–60 dana']).toBe(3000)
+    expect(by['Preko 90 dana']).toBe(4000)
     expect(r.overdue).toBe(9000)
     expect(r.total).toBe(10000)
   })
@@ -291,7 +291,7 @@ describe('money earned and not yet collected', () => {
     // with a missing field is wrong in the one direction nobody checks.
     const r = receivables([inv(null, 5000)], 'RSD', '2026-09-26', 900000)
     expect(r.total).toBe(5000)
-    expect(r.buckets.find(b => b.label === 'Not yet due')!.amount).toBe(5000)
+    expect(r.buckets.find(b => b.label === 'Nije dospelo')!.amount).toBe(5000)
   })
 
   it('works DSO off revenue per day over the window', () => {
@@ -320,6 +320,6 @@ describe('money earned and not yet collected', () => {
 
   it('counts the invoices in each band as well as their value', () => {
     const r = receivables([inv('2026-08-01', 10), inv('2026-08-02', 20)], 'RSD', '2026-09-26', 1)
-    expect(r.buckets.find(b => b.label === '31–60 days')!.count).toBe(2)
+    expect(r.buckets.find(b => b.label === '31–60 dana')!.count).toBe(2)
   })
 })

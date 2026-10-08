@@ -45,17 +45,17 @@ describe('App', () => {
   it('shows the sign-in screen to a signed-out user', async () => {
     render(<App />)
     await waitFor(() => {
-      expect(screen.getByText(/welcome back/i)).toBeInTheDocument()
+      expect(screen.getByText(/dobro došli/i)).toBeInTheDocument()
     })
-    expect(screen.getByText(/sign in to your mcflow account/i)).toBeInTheDocument()
+    expect(screen.getByText(/prijavite se na svoj mcflow nalog/i)).toBeInTheDocument()
   })
 
   it('does not show navigation to a signed-out user', async () => {
     render(<App />)
     await waitFor(() => {
-      expect(screen.getByText(/welcome back/i)).toBeInTheDocument()
+      expect(screen.getByText(/dobro došli/i)).toBeInTheDocument()
     })
     // The sidebar must not appear before sign-in.
-    expect(screen.queryByText(/bank credits/i)).not.toBeInTheDocument()
+    expect(screen.queryByText('Krediti')).not.toBeInTheDocument()
   })
 })

@@ -68,12 +68,37 @@ const TABLE_FOR: Record<Level, LookupTable> = {
 }
 
 const LABEL_FOR: Record<Level, string> = {
-  pl_category: 'P&L category',
-  pl_subcategory: 'P&L sub-category',
-  department: 'Department',
-  dept_subcategory: 'Dept. sub-category',
-  expense_description: 'Expense description',
+  pl_category: 'P&L kategorija',
+  pl_subcategory: 'P&L potkategorija',
+  department: 'Sektor',
+  dept_subcategory: 'Podsektor',
+  expense_description: 'Opis troška',
 }
+
+/** The same names in the accusative, for "Izaberite …". */
+const PICK_FOR: Record<Level, string> = {
+  pl_category: 'P&L kategoriju',
+  pl_subcategory: 'P&L potkategoriju',
+  department: 'sektor',
+  dept_subcategory: 'podsektor',
+  expense_description: 'opis troška',
+}
+
+/** The placeholder of the box that adds a new name, with the right gender. */
+const NEW_FOR: Record<Level, string> = {
+  pl_category: 'Nova P&L kategorija…',
+  pl_subcategory: 'Nova P&L potkategorija…',
+  department: 'Novi sektor…',
+  dept_subcategory: 'Novi podsektor…',
+  expense_description: 'Novi opis troška…',
+}
+
+/**
+ * A level label as it reads mid-sentence: the first letter lowered, unless it
+ * starts an abbreviation — `Sektor` → `sektor`, `P&L kategorija` stays.
+ */
+const midSentence = (label: string): string =>
+  /^[A-ZČĆŠŽĐ][a-zčćšžđ]/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label
 
 /**
  * Which level OWNS each lookup table, in the database rather than in a branch.
@@ -119,15 +144,15 @@ export function scopeOfNewLine(
   levelLabels: string[],
 ): { onParent: boolean; text: string } | null {
   if (pathLabels.length === 0 || levelLabels.length === 0) return null
-  const landsOn = levelLabels[Math.min(pathLabels.length, levelLabels.length) - 1].toLowerCase()
+  const landsOn = midSentence(levelLabels[Math.min(pathLabels.length, levelLabels.length) - 1])
   if (pathLabels.length >= levelLabels.length) {
-    return { onParent: false, text: `a ${landsOn} line, the deepest there is.` }
+    return { onParent: false, text: `najdublji nivo (${landsOn}).` }
   }
-  const next = levelLabels[pathLabels.length].toLowerCase()
+  const next = midSentence(levelLabels[pathLabels.length])
   return {
     onParent: true,
-    text: `the ${landsOn} itself, not on any ${next} under it. It will show as its own row `
-      + `beneath them — pick a ${next} below if you meant one in particular.`,
+    text: `na sam nivo „${landsOn}“, ne na neku stavku nivoa „${next}“ ispod njega. Prikazaće se `
+      + `kao zaseban red ispod njih — popunite i polje „${next}“ ako ste mislili na određenu stavku.`,
   }
 }
 
@@ -304,9 +329,9 @@ export default function AddBudgetLineDialog({
       parentField: ownedByPrevious && owner ? owner.field : undefined,
       /** Why this level cannot take a new name, when it cannot. */
       addNote: !ownedByPrevious && i > 0 && owner
-        ? 'A new ' + LABEL_FOR[level].toLowerCase() + ' belongs to a '
-          + LABEL_FOR[owner.parent].toLowerCase()
-          + ', which this branch does not ask for. Switch to the Department branch to add one.'
+        ? 'Nova stavka nivoa „' + midSentence(LABEL_FOR[level]) + '“ pripada nivou „'
+          + midSentence(LABEL_FOR[owner.parent])
+          + '“, koji se u ovoj grani ne bira. Pređite na granu Sektor da biste je dodali.'
         : '',
     }
   }), [levels, picks, lookups])
@@ -347,10 +372,10 @@ export default function AddBudgetLineDialog({
    * does.
    */
   const whyNotReady = (): string | null => {
-    if (!month) return 'Pick the month this budget is for.'
+    if (!month) return 'Izaberite mesec za koji je ovaj budžet.'
     if (!complete) {
-      return 'Pick at least a ' + LABEL_FOR[levels[0]].toLowerCase()
-        + ' — a budget line has to name the line it is for.'
+      return 'Izaberite bar ' + PICK_FOR[levels[0]]
+        + ' — budžetska stavka mora da kaže na šta se odnosi.'
     }
     return null
   }
@@ -397,19 +422,19 @@ export default function AddBudgetLineDialog({
       <div style={s.dialog}>
         <div style={chrome.header}>
           <div>
-            <div style={chrome.headerTitle}>Add a budget line</div>
-            <div style={chrome.headerSub}>A line nothing has been spent on yet</div>
+            <div style={chrome.headerTitle}>Dodaj budžetsku stavku</div>
+            <div style={chrome.headerSub}>Stavka na koju još ništa nije potrošeno</div>
           </div>
-          <button style={chrome.closeBtn} onClick={onClose} aria-label="Close">×</button>
+          <button style={chrome.closeBtn} onClick={onClose} aria-label="Zatvori">×</button>
         </div>
 
         <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {loadError && (
-            <div style={s.problem}>⚠️ The classifications could not be loaded: {loadError}</div>
+            <div style={s.problem}>⚠️ Klasifikacije nisu učitane: {loadError}. Zatvorite prozor i pokušajte ponovo.</div>
           )}
 
           {loading ? (
-            <div style={{ fontSize: '13px', color: DIALOG.dim }}>Loading classifications…</div>
+            <div style={{ fontSize: '13px', color: DIALOG.dim }}>Učitavanje klasifikacija…</div>
           ) : specs.map((spec, i) => (
             <div key={spec.level}>
               <div style={s.lbl}>
@@ -425,7 +450,7 @@ export default function AddBudgetLineDialog({
                   onChange={e => pick(i, e.target.value)}
                 >
                   <option value="">
-                    {spec.enabled ? 'Select ' + spec.label.toLowerCase() + '…' : 'Pick the level above first'}
+                    {spec.enabled ? 'Izaberite ' + PICK_FOR[spec.level] + '…' : 'Prvo izaberite nivo iznad'}
                   </option>
                   {spec.options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </select>
@@ -439,7 +464,7 @@ export default function AddBudgetLineDialog({
                     parentField={spec.parentField}
                     currentCount={spec.options.length}
                     disabled={!spec.enabled}
-                    placeholder={'New ' + spec.label.toLowerCase() + '…'}
+                    placeholder={NEW_FOR[spec.level]}
                     onAdded={item => added(i, item)}
                   />
                 ) : null}
@@ -451,15 +476,15 @@ export default function AddBudgetLineDialog({
           ))}
 
           <div>
-            <div style={s.lbl}>Project</div>
+            <div style={s.lbl}>Projekat</div>
             {projectLocked
               ? <div style={{ fontSize: '13px', color: DIALOG.text }}>{projectLabelById(projects, project)}</div>
-              : <ProjectSelect value={project} onChange={setProject} title="Project" />}
+              : <ProjectSelect value={project} onChange={setProject} title="Projekat" />}
           </div>
 
           <div>
-            <div style={s.lbl}>Month <span style={{ color: DIALOG.red }}>*</span></div>
-            <select style={s.input} aria-label="Month" value={month}
+            <div style={s.lbl}>Mesec <span style={{ color: DIALOG.red }}>*</span></div>
+            <select style={s.input} aria-label="Mesec" value={month}
               onChange={e => { setMonth(e.target.value); setError('') }}>
               {months.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
@@ -474,21 +499,21 @@ export default function AddBudgetLineDialog({
               <div style={scope?.onParent
                 ? { fontSize: '12px', lineHeight: 1.5, color: DIALOG.amber, background: DIALOG.amberFill, border: '0.5px solid ' + DIALOG.amber, borderRadius: '8px', padding: '9px 12px' }
                 : { fontSize: '12px', lineHeight: 1.5, color: DIALOG.dim }}>
-                Recorded on <span style={{ color: scope?.onParent ? DIALOG.amber : DIALOG.text, fontWeight: '500' }}>{pathLabels.join(' → ')}</span>
+                Beleži se na <span style={{ color: scope?.onParent ? DIALOG.amber : DIALOG.text, fontWeight: '500' }}>{pathLabels.join(' → ')}</span>
                 {' — '}{scope?.text}
               </div>
             )
           })() : (
             <div style={{ fontSize: '12px', color: DIALOG.dim, lineHeight: 1.5 }}>
-              A line is recorded at the deepest level you fill in. Leave a level blank and the budget sits on the one above it.
+              Stavka se beleži na najdubljem nivou koji popunite. Ako nivo ostavite prazan, budžet ostaje na nivou iznad njega.
             </div>
           )}
 
           {/* Who it lands on, said beside the button that saves it: the group,
               which is the only thing a budget line is recorded against. */}
           <div style={{ fontSize: '12px', color: DIALOG.dim, lineHeight: 1.5 }}>
-            Recorded for <span style={{ color: DIALOG.text }}>the group</span> — budgets are
-            set consolidated, not per company.
+            Beleži se za <span style={{ color: DIALOG.text }}>grupu</span> — budžeti se
+            postavljaju konsolidovano, ne po firmi.
           </div>
 
           {/* A refusal that the required markers do not explain by themselves:
@@ -501,13 +526,13 @@ export default function AddBudgetLineDialog({
         </div>
 
         <div style={{ padding: '1rem 1.5rem', borderTop: '0.5px solid ' + DIALOG.border, display: 'flex', justifyContent: 'flex-end', gap: '8px', background: DIALOG.raised }}>
-          <button style={s.ghost} onClick={onClose}>Cancel</button>
+          <button style={s.ghost} onClick={onClose}>Otkaži</button>
           <button
             style={{ ...s.primary, opacity: refusal ? 0.5 : 1 }}
             disabled={!!refusal}
             onClick={proceed}
           >
-            Continue
+            Dalje
           </button>
         </div>
       </div>

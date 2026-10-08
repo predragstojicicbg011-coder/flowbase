@@ -89,6 +89,9 @@ export function mismatches(
   return out
 }
 
+/** Display labels for the stored status keys. */
+const STATUS_LABEL: Record<string, string> = { paid: 'plaćeno', partial: 'delimično', unpaid: 'neplaćeno' }
+
 /**
  * What to put in front of the person, in the words of what they were told.
  *
@@ -97,13 +100,14 @@ export function mismatches(
  */
 export function describeMismatches(list: Mismatch[]): string {
   if (list.length === 0) return ''
+  const label = (s: string) => STATUS_LABEL[s] || s
   const one = (m: Mismatch) => {
     const who = m.invoiceNumber || m.invoiceId
     return m.actual === 'missing'
-      ? `${who} could not be read back at all`
-      : `${who} was expected to be ${m.expected} and is ${m.actual}`
+      ? `${who} nije moguće ponovo učitati`
+      : `${who}: očekivan status „${label(m.expected)}“, a stvarni je „${label(m.actual)}“`
   }
-  return 'Everything was written, but the result is not what this dialog said it would be: '
+  return 'Sve je upisano, ali rezultat nije ono što je ovaj dijalog najavio: '
     + list.map(one).join('; ')
-    + '. Open the invoice and check its allocations before relying on the figures.'
+    + '. Otvorite fakturu i proverite raspodelu pre nego što se oslonite na iznose.'
 }

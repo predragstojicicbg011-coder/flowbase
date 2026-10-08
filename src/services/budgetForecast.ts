@@ -624,7 +624,7 @@ export function ledgerReadableIn(adjustments: Adjustment[], currency: BudgetCurr
 export function ledgerFigure(a: Adjustment, currency: BudgetCurrency): number {
   const n = figureIn(a, 'amount', currency)
   if (n === null) {
-    throw new Error(`Budget entry ${a.id} has no ${currency} figure; this ledger cannot be read in ${currency}.`)
+    throw new Error(`Izmena budžeta ${a.id} nema iznos u ${currency}, pa se budžet ne može prikazati u ${currency}.`)
   }
   return n
 }

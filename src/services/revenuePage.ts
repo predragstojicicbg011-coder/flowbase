@@ -350,7 +350,7 @@ export function planCellAction(
   if (v === null) {
     return existing?.id ? { kind: 'delete', id: existing.id } : { kind: 'none' }
   }
-  if (Number.isNaN(v)) return { kind: 'error', message: `„${input.trim()}" nije ispravan iznos.` }
+  if (Number.isNaN(v)) return { kind: 'error', message: `„${input.trim()}“ nije ispravan iznos.` }
   if (v < 0) return { kind: 'error', message: 'Planirani iznos ne može biti negativan.' }
   const amount = round2(v)
   if (existing && round2(Number(existing.amount)) === amount && existing.currency === currency) return { kind: 'none' }

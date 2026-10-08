@@ -28,12 +28,12 @@ const BLANK: ScriptDraft = {
 }
 
 const CF = [
-  { value: '', label: '— none —' },
-  { value: 'recurring', label: 'Recurring' },
-  { value: 'one_time', label: 'One-time' },
-  { value: 'accrual', label: 'Accrual' },
-  { value: 'capex', label: 'CapEx' },
-  { value: 'reimbursable', label: 'Reimbursable' },
+  { value: '', label: '— bez —' },
+  { value: 'recurring', label: 'Ponavljajući' },
+  { value: 'one_time', label: 'Jednokratni' },
+  { value: 'accrual', label: 'Razgraničenje' },
+  { value: 'capex', label: 'Kapitalni izdatak' },
+  { value: 'reimbursable', label: 'Refundacija' },
 ]
 
 export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
@@ -55,7 +55,7 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
       supabase.from('pl_categories').select('name'),
       supabase.from('departments').select('name'),
     ])
-    if (err) setError(`The templates could not be read: ${err.message}`)
+    if (err) setError(`Šabloni nisu mogli da se učitaju: ${err.message}`)
     setScripts(sortScripts(data || []))
     setKnownCategories(new Set((cats || []).map((c: any) => c.name)))
     setKnownDepartments(new Set((depts || []).map((d: any) => d.name)))
@@ -80,9 +80,9 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
 
     const row = toRow(draft)
     const ok = draft.id
-      ? await reportWrite('Save the template', supabase.from('quick_fill_scripts')
+      ? await reportWrite('Čuvanje šablona', supabase.from('quick_fill_scripts')
           .update({ ...row, updated_at: new Date().toISOString() }).eq('id', draft.id).select('id'))
-      : await reportWrite('Add the template', supabase.from('quick_fill_scripts')
+      : await reportWrite('Dodavanje šablona', supabase.from('quick_fill_scripts')
           .insert(row).select('id'))
     if (!ok) return
     setDraft(null)
@@ -91,11 +91,11 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
 
   const remove = async (sc: any) => {
     if (!window.confirm(
-      `Delete the template "${sc.name}"?\n\n`
-      + 'Entries already classified with it keep their classification — a template '
-      + 'is copied onto an entry, not referenced by it. Only the shortcut goes.')) return
+      `Obrisati šablon „${sc.name}“?\n\n`
+      + 'Stavke koje su već razvrstane njime zadržavaju klasifikaciju — šablon se '
+      + 'prepisuje na stavku, a ne referencira. Briše se samo prečica.')) return
     setError(''); setNotice('')
-    const ok = await reportWrite('Delete the template',
+    const ok = await reportWrite('Brisanje šablona',
       supabase.from('quick_fill_scripts').delete().eq('id', sc.id).select('id'))
     if (ok) await load()
   }
@@ -123,15 +123,15 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
     <div style={s.wrap}>
       <div style={s.head}>
         <div>
-          <div style={s.title}>Classification templates</div>
+          <div style={s.title}>Šabloni klasifikacije</div>
           <div style={s.sub}>
-            Shortcuts that fill in a whole classification at once. Shared with everyone —
-            they are the chart of accounts written as a shortcut, not a personal setting.
+            Prečice koje odjednom popunjavaju celu klasifikaciju. Zajedničke su za sve —
+            to je kontni plan zapisan kao prečica, a ne lično podešavanje.
           </div>
         </div>
         {canEdit && (
           <button style={s.primary} onClick={() => { setDraft({ ...BLANK }); setError('') }}>
-            + New template
+            + Novi šablon
           </button>
         )}
       </div>
@@ -141,39 +141,39 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
 
       {draft && (
         <div style={s.editor}>
-          <div style={s.editorTitle}>{draft.id ? 'Edit template' : 'New template'}</div>
+          <div style={s.editorTitle}>{draft.id ? 'Izmena šablona' : 'Novi šablon'}</div>
           <div style={s.grid}>
-            {field('Name', 'name', 'e.g. Bank fee — domestic')}
-            {field('Icon', 'icon', '⚡')}
-            {field('P&L category', 'pl_category')}
-            {field('P&L sub-category', 'pl_subcategory')}
-            {field('Department', 'department')}
-            {field('Dept. sub-category', 'dept_subcategory')}
-            {field('Expense description', 'expense_description')}
-            {choice('Cash flow type', 'cf_type', CF)}
+            {field('Naziv', 'name', 'npr. Bankarska provizija — domaća')}
+            {field('Ikonica', 'icon', '⚡')}
+            {field('P&L kategorija', 'pl_category')}
+            {field('Potkategorija', 'pl_subcategory')}
+            {field('Sektor', 'department')}
+            {field('Podsektor', 'dept_subcategory')}
+            {field('Opis troška', 'expense_description')}
+            {choice('Tip novčanog toka', 'cf_type', CF)}
           </div>
           <div style={s.editorFoot}>
             <span style={s.hint}>
-              A level left blank is left blank on the entry. The name is the only thing required.
+              Nivo ostavljen prazan ostaje prazan i na stavci. Obavezan je samo naziv.
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button style={s.ghost} onClick={() => { setDraft(null); setError('') }}>Cancel</button>
-              <button style={s.primary} onClick={save}>Save</button>
+              <button style={s.ghost} onClick={() => { setDraft(null); setError('') }}>Otkaži</button>
+              <button style={s.primary} onClick={save}>Sačuvaj</button>
             </div>
           </div>
         </div>
       )}
 
-      <input style={{ ...s.input, marginBottom: '10px' }} placeholder="Search templates…"
+      <input style={{ ...s.input, marginBottom: '10px' }} placeholder="Pretraga šablona…"
         value={search} onChange={e => setSearch(e.target.value)} />
 
       {loading ? (
-        <div style={s.empty}>Loading…</div>
+        <div style={s.empty}>Učitavanje…</div>
       ) : visible.length === 0 ? (
         <div style={s.empty}>
           {scripts.length === 0
-            ? 'No templates yet. Create one, or import what this browser still holds.'
-            : 'No template matches that.'}
+            ? 'Još nema šablona. Napravite novi ili uvezite one koje ovaj pregledač još čuva.'
+            : 'Nijedan šablon ne odgovara pretrazi.'}
         </div>
       ) : (
         <div style={s.list}>
@@ -192,15 +192,15 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
                   </div>
                   {(staleCat || staleDept) && (
                     <div style={s.stale}>
-                      Names {staleCat && !staleDept ? 'a P&L category' : staleDept && !staleCat ? 'a department' : 'a category and a department'} that
-                      no longer exists — entries made with it will carry a classification nothing else uses.
+                      Navodi {staleCat && !staleDept ? 'P&L kategoriju koja' : staleDept && !staleCat ? 'sektor koji' : 'kategoriju i sektor koji'} više
+                      ne postoje — stavke napravljene njime nosiće klasifikaciju koju ništa drugo ne koristi.
                     </div>
                   )}
                 </div>
                 {canEdit && (
                   <div style={{ display: 'flex', gap: '6px' }}>
-                    <button style={s.ghost} onClick={() => { setDraft({ ...sc }); setError('') }}>Edit</button>
-                    <button style={s.danger} onClick={() => remove(sc)}>Delete</button>
+                    <button style={s.ghost} onClick={() => { setDraft({ ...sc }); setError('') }}>Izmeni</button>
+                    <button style={s.danger} onClick={() => remove(sc)}>Obriši</button>
                   </div>
                 )}
               </div>

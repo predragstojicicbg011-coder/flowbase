@@ -4,6 +4,7 @@ import { SkeletonRows } from '../components/motion'
 import { runWrite } from '../services/writeOrder'
 import PartnerDialog from '../components/PartnerDialog'
 import { fetchAllPartners } from '../services/allPartners'
+import { countOf } from '../utils/plural'
 
 export default function Partners() {
   const [partners, setPartners] = useState<any[]>([])
@@ -34,27 +35,26 @@ export default function Partners() {
     ])
     const total = (txCount || 0) + (invCount || 0) + (ptCount || 0)
     if (total > 0) {
-      const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
       const details = [
-        txCount ? plural(txCount, 'transaction') : '',
-        invCount ? plural(invCount, 'invoice') : '',
-        ptCount ? plural(ptCount, 'pass-through') : '',
+        txCount ? countOf(txCount, 'transakciju', 'transakcije', 'transakcija') : '',
+        invCount ? countOf(invCount, 'fakturu', 'fakture', 'faktura') : '',
+        ptCount ? countOf(ptCount, 'prolaznu stavku', 'prolazne stavke', 'prolaznih stavki') : '',
       ].filter(Boolean).join(', ')
-      window.alert(`"${name}" cannot be deleted — it is still linked to ${details}. Remove those links first.`)
+      window.alert(`„${name}“ ne može da se obriše — još je povezan sa: ${details}. Prvo uklonite te veze.`)
       return
     }
-    if (!window.confirm(`Obrisati partnera "${name}"? Ova akcija ce obrisati i sve bankove racune partnera.`)) return
+    if (!window.confirm(`Obrisati partnera „${name}“? Biće obrisani i svi tekući računi partnera.`)) return
     // The partner goes first. The other order removes the accounts and then
     // discovers it may not remove the partner, leaving them stripped of their
     // bank details for nothing.
-    const gone = await runWrite('Delete the partner', supabase.from('partners').delete().eq('id', id))
+    const gone = await runWrite('Brisanje partnera', supabase.from('partners').delete().eq('id', id))
     if (!gone.ok) { window.alert(gone.message); return }
-    const accounts = await runWrite('Remove the bank accounts',
+    const accounts = await runWrite('Brisanje tekućih računa',
       supabase.from('partner_accounts').delete().eq('partner_id', id))
     if (!accounts.ok) {
       window.alert(`${accounts.message}
 
-The partner was deleted; their bank accounts were left behind.`)
+Partner je obrisan, ali su njegovi tekući računi ostali.`)
     }
     fetchPartners()
   }
@@ -78,7 +78,7 @@ The partner was deleted; their bank accounts were left behind.`)
     company: { bg: 'rgba(255,255,255,0.06)', color: '#7A9BB8' },
   }
   const typeLabels: Record<string, string> = {
-    vendor: 'Vendor', customer: 'Customer', both: 'Both', company: 'Company',
+    vendor: 'Dobavljač', customer: 'Kupac', both: 'Kupac i dobavljač', company: 'Firma',
   }
 
   return (
@@ -86,57 +86,57 @@ The partner was deleted; their bank accounts were left behind.`)
       <div style={s.body}>
         <div style={s.pageHeader}>
           <div>
-            <div style={s.pageTitle}>Partners</div>
-            <div style={s.pageSub}>Vendors, customers and all business contacts</div>
+            <div style={s.pageTitle}>Partneri</div>
+            <div style={s.pageSub}>Dobavljači, kupci i svi poslovni kontakti</div>
           </div>
           <button style={s.newBtn} onClick={() => { setEditPartner(null); setShowDialog(true) }}>
-            + New partner
+            + Novi partner
           </button>
         </div>
 
         <div style={s.summaryRow}>
           <div style={s.summaryCard}>
-            <div style={s.summaryLabel}>Total partners</div>
+            <div style={s.summaryLabel}>Ukupno partnera</div>
             <div style={s.summaryVal}>{partners.length}</div>
           </div>
           <div style={s.summaryCard}>
-            <div style={s.summaryLabel}>Vendors</div>
+            <div style={s.summaryLabel}>Dobavljači</div>
             <div style={{ ...s.summaryVal, color: '#FF5B5A' }}>
               {partners.filter(p => p.type === 'vendor' || p.type === 'both').length}
             </div>
           </div>
           <div style={s.summaryCard}>
-            <div style={s.summaryLabel}>Customers</div>
+            <div style={s.summaryLabel}>Kupci</div>
             <div style={{ ...s.summaryVal, color: '#00D47E' }}>
               {partners.filter(p => p.type === 'customer' || p.type === 'both').length}
             </div>
           </div>
           <div style={s.summaryCard}>
-            <div style={s.summaryLabel}>Active</div>
+            <div style={s.summaryLabel}>Aktivni</div>
             <div style={s.summaryVal}>{partners.filter(p => p.is_active !== false).length}</div>
           </div>
           <div style={s.summaryCard}>
-            <div style={s.summaryLabel}>Individuals</div>
+            <div style={s.summaryLabel}>Fizička lica</div>
             <div style={{ ...s.summaryVal, color: '#9D97FF' }}>{partners.filter(p => p.is_individual === true).length}</div>
           </div>
         </div>
 
         <div style={s.filterBar}>
-          <input type="text" placeholder="Search name, tax ID or email..."
+          <input type="text" placeholder="Pretraga po nazivu, PIB-u ili emailu…"
             value={search} onChange={e => setSearch(e.target.value)} style={s.searchInput} />
           <select value={filterType} onChange={e => setFilterType(e.target.value)} style={s.filterSelect}>
-            <option value="all">All types</option>
-            <option value="vendor">Vendors</option>
-            <option value="customer">Customers</option>
-            <option value="both">Both</option>
-            <option value="company">Company</option>
+            <option value="all">Svi tipovi</option>
+            <option value="vendor">Dobavljači</option>
+            <option value="customer">Kupci</option>
+            <option value="both">Kupci i dobavljači</option>
+            <option value="company">Firme</option>
           </select>
           <select value={filterIndividual} onChange={e => setFilterIndividual(e.target.value)} style={s.filterSelect}>
-            <option value="all">All entities</option>
-            <option value="individual">👤 Individuals only</option>
-            <option value="company">🏢 Companies only</option>
+            <option value="all">Sva lica</option>
+            <option value="individual">👤 Samo fizička lica</option>
+            <option value="company">🏢 Samo pravna lica</option>
           </select>
-          <div style={s.totalBadge}>{filtered.length} partners</div>
+          <div style={s.totalBadge}>{countOf(filtered.length, 'partner', 'partnera', 'partnera')}</div>
         </div>
 
         <div style={s.tableWrap}>
@@ -148,21 +148,21 @@ The partner was deleted; their bank accounts were left behind.`)
           ) : filtered.length === 0 ? (
             <div style={s.emptyState}>
               <div style={{ fontSize: '32px', marginBottom: '12px' }}>🤝</div>
-              <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>No partners yet</div>
-              <div style={{ fontSize: '13px', color: '#7A9BB8', marginBottom: '20px' }}>Add your first vendor or customer.</div>
-              <button style={s.newBtn} onClick={() => setShowDialog(true)}>+ New partner</button>
+              <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>Još nema partnera</div>
+              <div style={{ fontSize: '13px', color: '#7A9BB8', marginBottom: '20px' }}>Dodajte prvog dobavljača ili kupca.</div>
+              <button style={s.newBtn} onClick={() => setShowDialog(true)}>+ Novi partner</button>
             </div>
           ) : (
             <table style={s.table}>
               <thead>
                 <tr style={s.thead}>
-                  <th style={s.th}>Name</th>
-                  <th style={s.th}>Type</th>
-                  <th style={s.th}>Tax ID / PIB</th>
-                  <th style={s.th}>City</th>
-                  <th style={s.th}>Contact</th>
+                  <th style={s.th}>Naziv</th>
+                  <th style={s.th}>Tip</th>
+                  <th style={s.th}>PIB</th>
+                  <th style={s.th}>Grad</th>
+                  <th style={s.th}>Kontakt</th>
                   <th style={s.th}>Email</th>
-                  <th style={s.th}>Phone</th>
+                  <th style={s.th}>Telefon</th>
                   <th style={s.th}>Status</th>
                   <th style={s.th}></th>
                 </tr>
@@ -180,7 +180,7 @@ The partner was deleted; their bank accounts were left behind.`)
                         <span style={{ ...s.badge, background: typeColors[p.type || 'vendor']?.bg || 'rgba(255,255,255,0.06)', color: typeColors[p.type || 'vendor']?.color || '#666' }}>
                           {typeLabels[p.type || 'vendor'] || p.type}
                         </span>
-                        {p.is_individual && <span style={{ ...s.badge, background: 'rgba(157,151,255,0.12)', color: '#9D97FF' }}>👤 Individual</span>}
+                        {p.is_individual && <span style={{ ...s.badge, background: 'rgba(157,151,255,0.12)', color: '#9D97FF' }}>👤 Fizičko lice</span>}
                       </div>
                     </td>
                     <td style={s.td}><span style={s.monoCell}>{p.tax_id || '—'}</span></td>
@@ -190,7 +190,7 @@ The partner was deleted; their bank accounts were left behind.`)
                     <td style={s.td}><span style={s.smallCell}>{p.contact_phone || '—'}</span></td>
                     <td style={s.td}>
                       <span style={{ ...s.badge, background: p.is_active !== false ? 'rgba(0,212,126,0.12)' : 'rgba(255,255,255,0.06)', color: p.is_active !== false ? '#085041' : '#888' }}>
-                        {p.is_active !== false ? 'Active' : 'Inactive'}
+                        {p.is_active !== false ? 'Aktivan' : 'Neaktivan'}
                       </span>
                     </td>
                     <td style={s.td} onClick={e => e.stopPropagation()}>

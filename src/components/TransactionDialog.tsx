@@ -42,6 +42,13 @@ import { fmtMoney, fmtNum } from '../utils/formatters'
 import {
   ADVANCE_BADGE_STYLE, ADVANCE_LABEL, doubleCountHint, effectiveAdvance, paymentSubtypeFor, whyAdvanceNotSavable,
 } from '../services/advanceReceipt'
+import { countOf } from '../utils/plural'
+
+/** Display labels for the stored tag keys; the keys stay as they are in the data. */
+const TAG_LABEL: Record<string, string> = {
+  Recurring: 'Ponavljajući', Prepayment: 'Unapred plaćeno', Accrual: 'Razgraničenje',
+  'Capital expenditure': 'Kapitalni izdatak', 'Tax deductible': 'Poreski priznat', Reimbursable: 'Refundacija',
+}
 
 interface Props {
   onClose: () => void
@@ -403,23 +410,23 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
   const runValidation = () => {
     const e: ValidationErrors = {}
-    if (!companyId) e.companyId = 'Company is required'
-    if (!bankId) e.bankId = 'Bank is required'
-    if (!currency) e.currency = 'Currency is required'
-    if (!txDate) e.txDate = 'Transaction date is required'
-    if (!amount || parseFloat(amount) <= 0) e.amount = 'Amount must be greater than 0'
-    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Exchange rate is required'
-    if (txType === 'invoice_payment' && linkedInvoices.length === 0) e.linkedInvoices = 'Select at least one invoice to close'
-    if (txType === 'credit_payment' && selectedInstallmentIds.length === 0) e.creditInstallments = 'Select at least one installment'
+    if (!companyId) e.companyId = 'Firma je obavezna'
+    if (!bankId) e.bankId = 'Banka je obavezna'
+    if (!currency) e.currency = 'Valuta je obavezna'
+    if (!txDate) e.txDate = 'Datum transakcije je obavezan'
+    if (!amount || parseFloat(amount) <= 0) e.amount = 'Iznos mora biti veći od 0'
+    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Kurs je obavezan'
+    if (txType === 'invoice_payment' && linkedInvoices.length === 0) e.linkedInvoices = 'Izaberite bar jednu fakturu koju plaćanje zatvara'
+    if (txType === 'credit_payment' && selectedInstallmentIds.length === 0) e.creditInstallments = 'Izaberite bar jednu ratu'
     if (txType === 'direct') {
       if (directSubtype === 'expense') {
         // A split payment is classified by its lines, and the fields below
         // are filled from them. Demanding them again would refuse a payment
         // that is fully classified.
-        if (!plCatId && !splitActive) e.plCat = 'P&L Category is required'
-        if (!deptId && !splitActive) e.dept = 'Department is required'
+        if (!plCatId && !splitActive) e.plCat = 'P&L kategorija je obavezna'
+        if (!deptId && !splitActive) e.dept = 'Sektor je obavezan'
       }
-      if (directSubtype === 'revenue' && !revStream && !isAdvanceFlag) e.revStream = 'Revenue stream is required'
+      if (directSubtype === 'revenue' && !revStream && !isAdvanceFlag) e.revStream = 'Vrsta prihoda je obavezna'
       const whyAdvance = whyAdvanceNotSavable({
         type: txType, subtype: directSubtype, isAdvance: isAdvanceFlag, projectId,
         splitLines: splitLines.length,
@@ -650,7 +657,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         // Not fatal: the payment can still be edited. But it must not look as
         // though it closes nothing, which is the state this whole effect
         // exists to stop.
-        setPostError(`Could not read the invoices this payment closes: ${error.message}`)
+        setPostError(`Fakture koje ovo plaćanje zatvara nisu mogle da se učitaju: ${error.message}`)
         setLinksLoading(false)
         return
       }
@@ -822,7 +829,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     } catch (err) {
       // RateUnavailableError, in its own words. Nothing is guessed; the
       // person can retry or type the rate.
-      setRateSource(err instanceof Error ? `${err.message} — enter it manually` : 'No official rate — enter it manually')
+      setRateSource(err instanceof Error ? `${err.message} — unesite ga ručno` : 'Nema zvaničnog kursa — unesite ga ručno')
       setRateMissing(true)
     }
     setFetchingRate(false)
@@ -830,7 +837,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
   const toggleTag = (t: string) => setTags(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
 
-  const stepTitles = ['Basic information', 'Amount & currency', 'Type & classification', 'Review']
+  const stepTitles = ['Osnovni podaci', 'Iznos i valuta', 'Tip i klasifikacija', 'Pregled']
 
   const getStatusStyle = (status: string): React.CSSProperties => {
     const map: Record<string, React.CSSProperties> = {
@@ -844,11 +851,11 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
   const cfLabel = () => {
     if (!cfType) return '—'
-    if (cfType === 'recurring') return `Recurring ${cfFrequency}`
-    if (cfType === 'one_time') return 'One-time'
-    if (cfType === 'accrual') return `Accrual ${cfAccrualFrom ? `${cfAccrualFrom} → ${cfAccrualTo}` : ''}`
-    if (cfType === 'capex') return `CapEx (${cfCapexMonths || '?'} months)`
-    if (cfType === 'reimbursable') return `Reimbursable${cfReimbursableDate ? ` by ${cfReimbursableDate}` : ''}`
+    if (cfType === 'recurring') return `Ponavljajući, ${cfFrequency === 'monthly' ? 'mesečno' : cfFrequency === 'quarterly' ? 'kvartalno' : cfFrequency === 'yearly' ? 'godišnje' : cfFrequency}`
+    if (cfType === 'one_time') return 'Jednokratni'
+    if (cfType === 'accrual') return `Razgraničenje ${cfAccrualFrom ? `${cfAccrualFrom} → ${cfAccrualTo}` : ''}`
+    if (cfType === 'capex') return `Kapitalni izdatak (${cfCapexMonths || '?'} mes.)`
+    if (cfType === 'reimbursable') return `Refundacija${cfReimbursableDate ? ` do ${cfReimbursableDate}` : ''}`
     return '—'
   }
 
@@ -884,7 +891,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       ])
       const checkErr = linkRes.error || instRes.error
       if (checkErr) {
-        setPostError(`Could not check whether this transaction may be moved: ${checkErr.message}. Nothing was changed.`)
+        setPostError(`Nije moguće proveriti da li ova transakcija sme da se premesti: ${checkErr.message}. Ništa nije promenjeno.`)
         return
       }
       links = linkRes.count ?? 0
@@ -903,7 +910,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     // down by — see services/creditPayment.ts.
     const booked = book.amounts
     if (!booked) {
-      setPostError(`${book.error || 'Exchange rate is required'}. Nothing was posted.`)
+      setPostError(`${book.error || 'Kurs je obavezan'}. Ništa nije proknjiženo.`)
       return
     }
     let creditLegs: ReturnType<typeof creditLegBooker> | null = null
@@ -912,7 +919,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       try {
         creditLegs = creditLegBooker(credit?.currency, booked, credit?.name)
       } catch (err: any) {
-        setPostError(`${err.message}. Nothing was posted.`)
+        setPostError(`${err.message}. Ništa nije proknjiženo.`)
         return
       }
     }
@@ -993,24 +1000,24 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           // the restrictive hide-deleted policy is checked against the NEW
           // row, and setting `deleted_at` is what makes it fail. See
           // 20260921090000.
-          if (!rowId) throw new Error('This row has no id, so it cannot be moved.')
+          if (!rowId) throw new Error('Ova stavka nema ID, pa ne može da se premesti.')
           const del = await softDeleteRow(supabase, 'transactions', rowId)
           const delErr = del.ok ? null : { message: del.message }
           if (delErr) {
             const { error: undoErr } = await supabase.from('passthrough').delete().eq('id', moved.id)
             throw new Error(undoErr
-              ? `The pass-through entry was created but the original transaction could not be removed (${delErr.message}), `
-                + `and the new entry could not be taken back either (${undoErr.message}). `
-                + `The amount is now recorded twice — pass-through id ${moved.id} has to be deleted by hand.`
-              : `The original transaction could not be removed (${delErr.message}). `
-                + 'The pass-through entry was taken back — nothing was changed.')
+              ? `Prolazna stavka je napravljena, ali originalna transakcija nije mogla da se ukloni (${delErr.message}), `
+                + `a ni nova stavka nije mogla da se povuče (${undoErr.message}). `
+                + `Iznos je sada evidentiran dva puta — prolaznu stavku ${moved.id} treba ručno obrisati.`
+              : `Originalna transakcija nije mogla da se ukloni (${delErr.message}). `
+                + 'Prolazna stavka je povučena — ništa nije promenjeno.')
           }
         } else if (plan.kind === 'update') {
           const { data: updated, error: ptErr } = await supabase
             .from('passthrough').update(ptPayload).eq('id', rowId).select('id')
           if (ptErr) throw ptErr
           if (!updated || updated.length === 0)
-            throw new Error(`No pass-through entry with id ${rowId} was updated — nothing was saved.`)
+            throw new Error(`Prolazna stavka ${rowId} nije izmenjena — ništa nije sačuvano.`)
         } else {
           const { error: ptErr } = await supabase.from('passthrough').insert(ptPayload)
           if (ptErr) throw ptErr
@@ -1022,9 +1029,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         // stored figure in that currency, and each leg is a row in that
         // currency at the payment's rates, the last leg taking the rounding —
         // services/creditPayment.ts.
-        if (!creditLegs) throw new Error('The credit payment was not prepared — nothing was posted.')
+        if (!creditLegs) throw new Error('Otplata kredita nije pripremljena — ništa nije proknjiženo.')
         const legs = creditLegs
-        const creditName = credits.find(c => c.id === selectedCreditId)?.name || 'Credit'
+        const creditName = credits.find(c => c.id === selectedCreditId)?.name || 'Kredit'
         let remaining = legs.payable
 
         // Sort selected installments by due_date (oldest first)
@@ -1141,7 +1148,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           }).eq('id', instId).select('id')
           if (instErr) throw instErr
           if (!instRows || instRows.length === 0)
-            throw new Error(`Instalment ${inst.installment_no} was not marked paid — the payment rows for it are already posted, so the credit has to be checked by hand.`)
+            throw new Error(`Rata ${inst.installment_no} nije označena kao plaćena — stavke plaćanja za nju su već proknjižene, pa kredit treba ručno proveriti.`)
         }
 
         // Close credit if all installments paid
@@ -1167,17 +1174,17 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           if (insErr) throw insErr
           txId = newTx.id
 
-          if (!rowId) throw new Error('This row has no id, so it cannot be moved.')
+          if (!rowId) throw new Error('Ova stavka nema ID, pa ne može da se premesti.')
           const del = await softDeleteRow(supabase, 'passthrough', rowId)
           const delErr = del.ok ? null : { message: del.message }
           if (delErr) {
             const { error: undoErr } = await supabase.from('transactions').delete().eq('id', txId)
             throw new Error(undoErr
-              ? `The transaction was created but the original pass-through entry could not be removed (${delErr.message}), `
-                + `and the new transaction could not be taken back either (${undoErr.message}). `
-                + `The amount is now recorded twice — transaction id ${txId} has to be deleted by hand.`
-              : `The original pass-through entry could not be removed (${delErr.message}). `
-                + 'The transaction was taken back — nothing was changed.')
+              ? `Transakcija je napravljena, ali originalna prolazna stavka nije mogla da se ukloni (${delErr.message}), `
+                + `a ni nova transakcija nije mogla da se povuče (${undoErr.message}). `
+                + `Iznos je sada evidentiran dva puta — transakciju ${txId} treba ručno obrisati.`
+              : `Originalna prolazna stavka nije mogla da se ukloni (${delErr.message}). `
+                + 'Transakcija je povučena — ništa nije promenjeno.')
           }
         } else if (plan.kind === 'update') {
           // `.select()` is what turns a zero-row update back into an error.
@@ -1186,7 +1193,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
             .from('transactions').update(payload).eq('id', rowId).select('id')
           if (updErr) throw updErr
           if (!updated || updated.length === 0)
-            throw new Error(`No transaction with id ${rowId} was updated — nothing was saved.`)
+            throw new Error(`Transakcija ${rowId} nije izmenjena — ništa nije sačuvano.`)
           txId = rowId as string
         } else {
           const { data: newTx, error: insErr } = await supabase.from('transactions').insert(payload).select('id').single()
@@ -1235,7 +1242,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
             if (delErr) throw delErr
             if (!removed || removed.length < plan.toRemove.length) {
               throw new Error(
-                `Expected to release ${plan.toRemove.length} invoice(s) from this payment but released ${removed?.length ?? 0}. Nothing else was changed.`)
+                `Očekivano je da se od ovog plaćanja odvoji faktura: ${plan.toRemove.length}, a odvojeno je: ${removed?.length ?? 0}. Ništa drugo nije promenjeno.`)
             }
           }
 
@@ -1384,7 +1391,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       if (!settlementWarning) setTimeout(() => { setSuccess(false); onClose() }, 1500)
     } catch (err: any) {
       console.error(err)
-      setPostError(`Could not post this transaction: ${err?.message || err}`)
+      setPostError(`Transakcija nije proknjižena: ${err?.message || err}`)
     }
     setSaving(false)
   }
@@ -1395,7 +1402,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: DIALOG.accentFill, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={DIALOG.accent} strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg>
         </div>
-        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>{movedTo ? 'Transaction moved!' : transaction ? 'Transaction updated!' : 'Transaction posted!'}</div>
+        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>{movedTo ? 'Transakcija je premeštena.' : transaction ? 'Transakcija je izmenjena.' : 'Transakcija je proknjižena.'}</div>
         {settlementWarning && (
           <div style={{
             fontSize: '12px', lineHeight: 1.5, color: DIALOG.amber, background: DIALOG.amberFill,
@@ -1406,10 +1413,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           </div>
         )}
         <div style={{ fontSize: '13px', color: DIALOG.dim }}>{
-          movedTo === 'passthrough' ? 'Moved to Pass-through. The original transaction was removed.'
-            : movedTo === 'transactions' ? 'Moved out of Pass-through. The original entry was removed.'
-              : txType === 'invoice_payment' ? (linkSummary || `${linkedInvoices.length} invoice(s) updated.`)
-                : 'Posted to P&L and cash flow.'
+          movedTo === 'passthrough' ? 'Premešteno u prolazne stavke. Originalna transakcija je uklonjena.'
+            : movedTo === 'transactions' ? 'Premešteno iz prolaznih stavki. Originalna stavka je uklonjena.'
+              : txType === 'invoice_payment' ? (linkSummary || `Ažurirano faktura: ${linkedInvoices.length}.`)
+                : 'Proknjiženo u P&L i novčani tok.'
         }</div>
       </div>
     </div>
@@ -1420,11 +1427,11 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   // because then each line carries its own project and this one is null.
   const projectPanel = (
     <div style={s.section}>
-      <div style={s.sectionTitle}>Project</div>
+      <div style={s.sectionTitle}>Projekat</div>
       {splitActive ? (
         <div style={{ fontSize: '11.5px', color: DIALOG.dim, lineHeight: 1.5 }}>
-          This payment is split — each line above carries its own project.
-          Remove the split to put the whole payment on one project.
+          Plaćanje je podeljeno — svaka stavka iznad nosi svoj projekat.
+          Uklonite podelu da biste celo plaćanje stavili na jedan projekat.
         </div>
       ) : (
         <ProjectSelect value={projectId} onChange={setProjectId} companyId={companyId || null}
@@ -1436,14 +1443,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   // ── Cash Flow Classification panel ──────────────────
   const cfPanel = (
     <div style={s.section}>
-      <div style={s.sectionTitle}>Cash flow classification</div>
+      <div style={s.sectionTitle}>Klasifikacija novčanog toka</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '8px' }}>
         {[
-          { id: 'recurring', label: '🔁 Recurring', sub: 'Monthly/Qtrly/Yearly' },
-          { id: 'one_time', label: '1️⃣ One-time', sub: 'Non-repeating' },
-          { id: 'accrual', label: '📅 Accrual', sub: 'Period-based' },
-          { id: 'capex', label: '🏗 CapEx', sub: 'Capital expenditure' },
-          { id: 'reimbursable', label: '↩️ Reimbursable', sub: 'Expected return' },
+          { id: 'recurring', label: '🔁 Ponavljajući', sub: 'Mesečno/kvart./god.' },
+          { id: 'one_time', label: '1️⃣ Jednokratni', sub: 'Ne ponavlja se' },
+          { id: 'accrual', label: '📅 Razgraničenje', sub: 'Po periodu' },
+          { id: 'capex', label: '🏗 Kap. izdatak', sub: 'Kapitalni izdatak' },
+          { id: 'reimbursable', label: '↩️ Refundacija', sub: 'Očekuje se povraćaj' },
         ].map(a => (
           <div key={a.id}
             style={{ ...s.allocBtn, ...(cfType === a.id ? { border: '2px solid ' + DIALOG.accent, background: DIALOG.accentFill } : {}) }}
@@ -1457,25 +1464,25 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       {cfType === 'recurring' && (
         <div style={{ marginTop: '12px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-            {[{ id: 'monthly', label: '📆 Monthly' }, { id: 'quarterly', label: '📊 Quarterly' }, { id: 'yearly', label: '📅 Yearly' }].map(f => (
+            {[{ id: 'monthly', label: '📆 Mesečno' }, { id: 'quarterly', label: '📊 Kvartalno' }, { id: 'yearly', label: '📅 Godišnje' }].map(f => (
               <div key={f.id}
                 style={{ flex: 1, padding: '8px', border: cfFrequency === f.id ? '2px solid ' + DIALOG.accent : '0.5px solid ' + DIALOG.border, borderRadius: '8px', background: cfFrequency === f.id ? DIALOG.accentFill : DIALOG.raised, cursor: 'pointer', textAlign: 'center' as const, fontSize: '12px', fontWeight: cfFrequency === f.id ? '600' : '400', color: cfFrequency === f.id ? DIALOG.accent : DIALOG.dim }}
                 onClick={() => setCfFrequency(f.id)}>{f.label}</div>
             ))}
           </div>
           <div style={s.field}>
-            <label style={s.lbl}>Next month estimate ({currency || '—'})</label>
+            <label style={s.lbl}>Procena za sledeći mesec ({currency || '—'})</label>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <input type="number" style={{ ...s.input, flex: 1 }} value={cfNextMonthEst}
                 onChange={e => setCfNextMonthEst(e.target.value)}
-                placeholder={amount ? `Auto: ${fmtNum(parseFloat(amount))}` : '0.00'} />
+                placeholder={amount ? `Automatski: ${fmtNum(parseFloat(amount))}` : '0.00'} />
               {!cfNextMonthEst && amount && (
-                <button style={s.linkBtn} onClick={() => setCfNextMonthEst(amount)}>Use this amount</button>
+                <button style={s.linkBtn} onClick={() => setCfNextMonthEst(amount)}>Preuzmi ovaj iznos</button>
               )}
             </div>
             {amount && (
               <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '4px' }}>
-                Auto: {fmtNum(cfFrequency === 'monthly' ? parseFloat(amount) : cfFrequency === 'quarterly' ? parseFloat(amount) / 3 : parseFloat(amount) / 12)} {currency}/mo
+                Automatski: {fmtNum(cfFrequency === 'monthly' ? parseFloat(amount) : cfFrequency === 'quarterly' ? parseFloat(amount) / 3 : parseFloat(amount) / 12)} {currency}/mes.
               </div>
             )}
           </div>
@@ -1486,17 +1493,17 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         <div style={{ marginTop: '12px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={s.row2}>
             <div style={s.field}>
-              <label style={s.lbl}>From</label>
+              <label style={s.lbl}>Od</label>
               <input type="date" style={s.input} value={cfAccrualFrom} onChange={e => setCfAccrualFrom(e.target.value)} />
             </div>
             <div style={s.field}>
-              <label style={s.lbl}>To</label>
+              <label style={s.lbl}>Do</label>
               <input type="date" style={s.input} value={cfAccrualTo} onChange={e => setCfAccrualTo(e.target.value)} />
             </div>
           </div>
           {cfAccrualFrom && cfAccrualTo && amount && (
             <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '4px' }}>
-              {(() => { const m = Math.max(1, Math.round((new Date(cfAccrualTo).getTime() - new Date(cfAccrualFrom).getTime()) / (1000*60*60*24*30))); return `Monthly: ${fmtMoney(parseFloat(amount)/m, currency)} × ${m} months` })()}
+              {(() => { const m = Math.max(1, Math.round((new Date(cfAccrualTo).getTime() - new Date(cfAccrualFrom).getTime()) / (1000*60*60*24*30))); return `Mesečno: ${fmtMoney(parseFloat(amount)/m, currency)} × ${m} mes.` })()}
             </div>
           )}
         </div>
@@ -1505,11 +1512,11 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       {cfType === 'capex' && (
         <div style={{ marginTop: '12px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={s.field}>
-            <label style={s.lbl}>Amortization period (months)</label>
-            <input type="number" style={s.input} value={cfCapexMonths} onChange={e => setCfCapexMonths(e.target.value)} placeholder="e.g. 36" min="1" />
+            <label style={s.lbl}>Period amortizacije (meseci)</label>
+            <input type="number" style={s.input} value={cfCapexMonths} onChange={e => setCfCapexMonths(e.target.value)} placeholder="npr. 36" min="1" />
             {cfCapexMonths && amount && (
               <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '4px' }}>
-                Monthly depreciation: {(parseFloat(amount) / parseFloat(cfCapexMonths)).toFixed(2)} {currency}/mo
+                Mesečna amortizacija: {fmtNum(parseFloat(amount) / parseFloat(cfCapexMonths))} {currency}/mes.
               </div>
             )}
           </div>
@@ -1519,7 +1526,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       {cfType === 'reimbursable' && (
         <div style={{ marginTop: '12px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
           <div style={s.field}>
-            <label style={s.lbl}>Expected reimbursement date</label>
+            <label style={s.lbl}>Očekivani datum refundacije</label>
             <input type="date" style={s.input} value={cfReimbursableDate} onChange={e => setCfReimbursableDate(e.target.value)} />
           </div>
         </div>
@@ -1527,7 +1534,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
       {cfType === 'one_time' && (
         <div style={{ marginTop: '8px', fontSize: '12px', color: DIALOG.dim, background: DIALOG.raised, borderRadius: '8px', padding: '10px 12px' }}>
-          One-time expense — will not be included in future month estimates.
+          Jednokratni trošak — neće ući u procene za naredne mesece.
         </div>
       )}
     </div>
@@ -1538,15 +1545,15 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       <div style={s.dialog}>
         <div style={s.header}>
           <div>
-            <div style={s.headerTitle}>{transaction ? 'Edit transaction' : 'New transaction'}</div>
-            <div style={s.headerSub}>Step {step} of 4 — {stepTitles[step - 1]}</div>
+            <div style={s.headerTitle}>{transaction ? 'Izmena transakcije' : 'Nova transakcija'}</div>
+            <div style={s.headerSub}>Korak {step} od 4 — {stepTitles[step - 1]}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {txType === 'direct' && <div style={s.plBadge}>P&L Impact</div>}
-            {txType === 'invoice_payment' && <div style={s.cashBadge}>Cash Flow Only</div>}
+            {txType === 'direct' && <div style={s.plBadge}>Utiče na P&L</div>}
+            {txType === 'invoice_payment' && <div style={s.cashBadge}>Samo novčani tok</div>}
             {advance && <span style={{ ...ADVANCE_BADGE_STYLE, marginLeft: '6px' }}>{ADVANCE_LABEL}</span>}
-            {txType === 'passthrough' && <div style={{ ...s.cashBadge, background: 'rgba(230,180,50,0.2)', color: DIALOG.amber, border: '0.5px solid rgba(230,180,50,0.3)' }}>Pass-through</div>}
-            {txType === 'credit_payment' && <div style={{ ...s.cashBadge, background: 'rgba(78,168,255,0.2)', color: '#4EA8FF', border: '0.5px solid rgba(78,168,255,0.3)' }}>Credit payment</div>}
+            {txType === 'passthrough' && <div style={{ ...s.cashBadge, background: 'rgba(230,180,50,0.2)', color: DIALOG.amber, border: '0.5px solid rgba(230,180,50,0.3)' }}>Prolazna stavka</div>}
+            {txType === 'credit_payment' && <div style={{ ...s.cashBadge, background: 'rgba(78,168,255,0.2)', color: '#4EA8FF', border: '0.5px solid rgba(78,168,255,0.3)' }}>Otplata kredita</div>}
             <span style={s.logoText}>MCFlow</span>
             <button style={s.closeBtn} onClick={onClose}>×</button>
           </div>
@@ -1581,7 +1588,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           <div style={s.validationBanner}>
             <span>⚠️</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '500', fontSize: '12px' }}>Fix {totalErrors} error{totalErrors > 1 ? 's' : ''} before posting:</div>
+              <div style={{ fontWeight: '500', fontSize: '12px' }}>Ispravite pre knjiženja ({countOf(totalErrors, 'greška', 'greške', 'grešaka')}):</div>
               <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.9 }}>{Object.values(errors).join(' · ')}</div>
             </div>
             <button style={s.bannerClose} onClick={() => setShowValidationSummary(false)}>×</button>
@@ -1594,24 +1601,24 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           {step === 1 && (
             <>
               <div style={s.section}>
-                <div style={s.sectionTitle}>Bank & account</div>
+                <div style={s.sectionTitle}>Banka i račun</div>
                 <div style={s.row2}>
                   {showPicker && (
                     <div style={s.field}>
-                      <label style={s.lbl}>Company <span style={s.req}>*</span></label>
+                      <label style={s.lbl}>Firma <span style={s.req}>*</span></label>
                       <select style={{ ...s.select, ...(fieldErr('companyId') ? s.inputError : {}) }} value={companyId}
                         onChange={e => { setCompanyId(e.target.value); touch('companyId') }} onBlur={() => touch('companyId')}>
-                        <option value="">Select company...</option>
+                        <option value="">Izaberite firmu…</option>
                         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                       {fieldErr('companyId') && <span style={s.errorMsg}>{fieldErr('companyId')}</span>}
                     </div>
                   )}
                   <div style={s.field}>
-                    <label style={s.lbl}>Bank / Account <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Banka / račun <span style={s.req}>*</span></label>
                     <select style={{ ...s.select, ...(fieldErr('bankId') ? s.inputError : {}) }} value={bankId}
                       onChange={e => { setBankId(e.target.value); touch('bankId') }} onBlur={() => touch('bankId')}>
-                      <option value="">Select bank...</option>
+                      <option value="">Izaberite banku…</option>
                       {banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                     {fieldErr('bankId') && <span style={s.errorMsg}>{fieldErr('bankId')}</span>}
@@ -1619,10 +1626,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                 </div>
                 <div style={s.row2}>
                   <div style={s.field}>
-                    <label style={s.lbl}>Currency <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Valuta <span style={s.req}>*</span></label>
                     <select style={{ ...s.select, ...(fieldErr('currency') ? s.inputError : {}) }} value={currency}
                       onChange={e => { setCurrency(e.target.value); touch('currency') }} onBlur={() => touch('currency')}>
-                      <option value="">Select...</option>
+                      <option value="">Izaberite…</option>
                       {(companies.find(c => c.id === companyId)?.currencies || DOCUMENT_CURRENCIES).map((cur: string) => (
                         <option key={cur}>{cur}</option>
                       ))}
@@ -1630,17 +1637,17 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                     {fieldErr('currency') && <span style={s.errorMsg}>{fieldErr('currency')}</span>}
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Statement number</label>
-                    <input style={s.input} value={statement} onChange={e => setStatement(e.target.value)} placeholder="e.g. 2026-001" />
+                    <label style={s.lbl}>Broj izvoda</label>
+                    <input style={s.input} value={statement} onChange={e => setStatement(e.target.value)} placeholder="npr. 2026-001" />
                   </div>
                 </div>
               </div>
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Date & partner</div>
+                <div style={s.sectionTitle}>Datum i partner</div>
                 <div style={s.row2}>
                   <div style={s.field}>
-                    <label style={s.lbl}>Transaction date <span style={s.req}>*</span></label>
+                    <label style={s.lbl}>Datum transakcije <span style={s.req}>*</span></label>
                     <input type="date" style={{ ...s.input, ...(fieldErr('txDate') ? s.inputError : {}) }} value={txDate}
                       onChange={e => { setTxDate(e.target.value); touch('txDate') }} onBlur={() => touch('txDate')} />
                     {fieldErr('txDate') && <span style={s.errorMsg}>{fieldErr('txDate')}</span>}
@@ -1650,20 +1657,20 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                     {!showNewPartner ? (
                       <>
                         <input style={s.input} value={partnerSearch}
-                          onChange={e => { setPartnerSearch(e.target.value); setPartnerId('') }} placeholder="Search partner..." />
+                          onChange={e => { setPartnerSearch(e.target.value); setPartnerId('') }} placeholder="Pretraga partnera…" />
                         {partnerSearch && !partnerId && (
                           <div style={s.dropdown}>
                             {filteredPartners.slice(0, 6).map(p => (
                               <div key={p.id} style={s.dropdownItem} onClick={() => { setPartnerId(p.id); setPartnerSearch(p.name) }}>{p.name}</div>
                             ))}
-                            <div style={{ ...s.dropdownItem, color: DIALOG.accent }} onClick={() => { setShowNewPartner(true); setPartnerSearch('') }}>+ Add new partner</div>
+                            <div style={{ ...s.dropdownItem, color: DIALOG.accent }} onClick={() => { setShowNewPartner(true); setPartnerSearch('') }}>+ Dodaj novog partnera</div>
                           </div>
                         )}
                       </>
                     ) : (
                       <>
-                        <input style={s.input} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="New partner name..." />
-                        <button style={s.linkBtn} onClick={() => setShowNewPartner(false)}>← Back to search</button>
+                        <input style={s.input} value={newPartnerName} onChange={e => setNewPartnerName(e.target.value)} placeholder="Naziv novog partnera…" />
+                        <button style={s.linkBtn} onClick={() => setShowNewPartner(false)}>← Nazad na pretragu</button>
                       </>
                     )}
                   </div>
@@ -1672,35 +1679,35 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
               <div style={s.section}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                  <div style={s.sectionTitle}>Payment reference</div>
-                  <button style={s.linkBtn} onClick={() => setShowBankFields(!showBankFields)}>{showBankFields ? '− Hide' : '+ Show'}</button>
+                  <div style={s.sectionTitle}>Podaci za plaćanje</div>
+                  <button style={s.linkBtn} onClick={() => setShowBankFields(!showBankFields)}>{showBankFields ? '− Sakrij' : '+ Prikaži'}</button>
                 </div>
                 {showBankFields ? (
                   <div style={s.row3}>
                     <div style={s.field}>
-                      <label style={s.lbl}>Account number (RSD)</label>
+                      <label style={s.lbl}>Broj računa (RSD)</label>
                       {partnerAccounts.length > 1 ? (
                         <>
                           <select style={s.select} value={selectedAccountId} onChange={e => handleAccountSelect(e.target.value)}>
-                            {!selectedAccountId && <option value="">Typed in — not a saved account</option>}
+                            {!selectedAccountId && <option value="">Uneto ručno — nije sačuvan račun</option>}
                             {partnerAccounts.map((acc: any) => (
                               <option key={acc.id} value={acc.id}>{acc.account_number}{acc.bank_name ? ` — ${acc.bank_name}` : ''}{acc.is_primary ? ' ★' : ''}</option>
                             ))}
                           </select>
                           {!selectedAccountId && (
                             <input style={{ ...s.input, marginTop: '4px' }} value={accNum}
-                              onChange={e => setAccNum(e.target.value)} placeholder="Partner account" />
+                              onChange={e => setAccNum(e.target.value)} placeholder="Račun partnera" />
                           )}
                         </>
                       ) : (
-                        <input style={s.input} value={accNum} onChange={e => setAccNum(e.target.value)} placeholder="Partner account" />
+                        <input style={s.input} value={accNum} onChange={e => setAccNum(e.target.value)} placeholder="Račun partnera" />
                       )}
                     </div>
-                    <div style={s.field}><label style={s.lbl}>Model</label><input style={s.input} value={model} onChange={e => setModel(e.target.value)} placeholder="e.g. 97" /></div>
-                    <div style={s.field}><label style={s.lbl}>Reference number</label><input style={s.input} value={refNum} onChange={e => setRefNum(e.target.value)} placeholder="Poziv na broj" /></div>
+                    <div style={s.field}><label style={s.lbl}>Model</label><input style={s.input} value={model} onChange={e => setModel(e.target.value)} placeholder="npr. 97" /></div>
+                    <div style={s.field}><label style={s.lbl}>Poziv na broj</label><input style={s.input} value={refNum} onChange={e => setRefNum(e.target.value)} placeholder="Poziv na broj" /></div>
                   </div>
                 ) : (
-                  <div style={{ fontSize: '12px', color: DIALOG.faint }}>Account number, model, poziv na broj.</div>
+                  <div style={{ fontSize: '12px', color: DIALOG.faint }}>Broj računa, model, poziv na broj.</div>
                 )}
               </div>
             </>
@@ -1709,9 +1716,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           {/* ── STEP 2 ── */}
           {step === 2 && (
             <div style={s.section}>
-              <div style={s.sectionTitle}>Amount & currency conversion</div>
+              <div style={s.sectionTitle}>Iznos i preračun valute</div>
               <div style={s.toggleRow}>
-                <span style={s.toggleLabel}>Amount indexed in foreign currency?</span>
+                <span style={s.toggleLabel}>Iznos indeksiran u stranoj valuti?</span>
                 <label style={s.toggle}>
                   <input type="checkbox" checked={isIndexed} onChange={e => setIsIndexed(e.target.checked)} style={{ opacity: 0, width: 0, height: 0 }} />
                   <span style={{ ...s.toggleSlider, background: isIndexed ? DIALOG.accent : DIALOG.border }} />
@@ -1719,44 +1726,44 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               </div>
               <div style={{ ...s.infoBox, margin: '10px 0' }}>
                 {currency === 'RSD'
-                  ? `Booked in RSD; the NBS EUR rate on the transaction date (${txDate}) gives the EUR figure.`
-                  : `NBS middle rate on the transaction date (${txDate}), in RSD per 1 ${currency || 'unit'}.`}
-                {txType === 'credit_payment' && ` The instalments are paid down by the ${creditCurrency || 'credit currency'} figure.`}
+                  ? `Knjiži se u RSD; iznos u EUR daje kurs NBS za EUR na datum transakcije (${txDate}).`
+                  : `Srednji kurs NBS na datum transakcije (${txDate}), u RSD za 1 ${currency || 'jedinicu'}.`}
+                {txType === 'credit_payment' && ` Rate se umanjuju za iznos u ${creditCurrency || 'valuti kredita'}.`}
               </div>
               <div style={s.row2}>
                 <div style={s.field}>
-                  <label style={s.lbl}>Amount ({currency || '—'}) <span style={s.req}>*</span></label>
+                  <label style={s.lbl}>Iznos ({currency || '—'}) <span style={s.req}>*</span></label>
                   <input type="number" style={{ ...s.input, ...(fieldErr('amount') ? s.inputError : {}) }} value={amount}
                     onChange={e => { setAmount(e.target.value); touch('amount') }} onBlur={() => touch('amount')} placeholder="0.00" />
                   {fieldErr('amount') && <span style={s.errorMsg}>{fieldErr('amount')}</span>}
                 </div>
                 <div style={s.field}>
-                  <label style={s.lbl}>{currency && currency !== 'RSD' ? `RSD per 1 ${currency}` : 'RSD per 1 EUR'} <span style={s.req}>*</span></label>
+                  <label style={s.lbl}>{currency && currency !== 'RSD' ? `RSD za 1 ${currency}` : 'RSD za 1 EUR'} <span style={s.req}>*</span></label>
                   <div style={{ display: 'flex', gap: '6px' }}>
                     {currency && currency !== 'RSD' ? (
                       <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={exRate}
                         onChange={e => { setExRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                        placeholder="Click Fetch" />
+                        placeholder="Kliknite Preuzmi" />
                     ) : (
                       <input type="number" style={{ ...s.input, flex: 1, ...(fieldErr('exRate') ? s.inputError : {}) }} value={eurRate}
                         onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                        placeholder="Click Fetch" />
+                        placeholder="Kliknite Preuzmi" />
                     )}
-                    <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate || !currency}>{fetchingRate ? '...' : 'Fetch'}</button>
+                    <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate || !currency}>{fetchingRate ? '...' : 'Preuzmi'}</button>
                   </div>
                   {currency === 'USD' && (
                     <input type="number" style={{ ...s.input, marginTop: '6px' }} value={eurRate}
                       onChange={e => { setEurRate(e.target.value); touch('exRate') }} onBlur={() => touch('exRate')}
-                      placeholder="RSD per 1 EUR" aria-label="RSD per 1 EUR" />
+                      placeholder="RSD za 1 EUR" aria-label="RSD za 1 EUR" />
                   )}
-                  {rateSource && <div style={{ fontSize: '11px', color: rateMissing ? '#FF5B5A' : DIALOG.accent, fontWeight: rateMissing ? 600 : 400, marginTop: '4px' }}>Source: {rateSource}</div>}
+                  {rateSource && <div style={{ fontSize: '11px', color: rateMissing ? '#FF5B5A' : DIALOG.accent, fontWeight: rateMissing ? 600 : 400, marginTop: '4px' }}>Izvor: {rateSource}</div>}
                   {fieldErr('exRate') && <span style={s.errorMsg}>{fieldErr('exRate')}</span>}
                 </div>
               </div>
               <div style={s.convRow}>
-                <div><div style={s.convLabel}>Original amount</div><div style={s.convVal}>{amount ? fmtMoney(parseFloat(amount), currency) : '—'}</div></div>
+                <div><div style={s.convLabel}>Originalni iznos</div><div style={s.convVal}>{amount ? fmtMoney(parseFloat(amount), currency) : '—'}</div></div>
                 <div style={{ fontSize: '20px', color: DIALOG.faint, alignSelf: 'flex-end', paddingBottom: '4px' }}>→</div>
-                <div><div style={s.convLabel}>RSD (book)</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
+                <div><div style={s.convLabel}>RSD (knjiženo)</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
                 <div><div style={s.convLabel}>EUR</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountEur, 'EUR') : '—'}</div></div>
               </div>
             </div>
@@ -1780,32 +1787,32 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
                   client={supabase}
                   onScriptsChanged={() => { fetchScripts(supabase).then(setQuickFillScripts as any) }}
-                  hint="One payment, two or more expenses — each with its own classification."
+                  hint="Jedno plaćanje, dva ili više troškova — svaki sa svojom klasifikacijom."
                 />
               )}
 
               <div style={s.section}>
-                <div style={s.sectionTitle}>Transaction type <span style={s.req}>*</span></div>
+                <div style={s.sectionTitle}>Tip transakcije <span style={s.req}>*</span></div>
                 <div style={{ ...s.typeGrid, gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
                   <div style={{ ...s.typeCard, ...(txType === 'invoice_payment' ? s.typeCardPayment : {}) }} onClick={() => setTxType('invoice_payment')}>
                     <div style={{ fontSize: '24px', marginBottom: '6px' }}>💳</div>
-                    <div style={s.typeCardTitle}>Invoice payment</div>
-                    <div style={s.typeCardSub}>Closes one or more open invoices. No new P&L impact.</div>
+                    <div style={s.typeCardTitle}>Plaćanje fakture</div>
+                    <div style={s.typeCardSub}>Zatvara jednu ili više otvorenih faktura. Bez novog uticaja na P&L.</div>
                   </div>
                   <div style={{ ...s.typeCard, ...(txType === 'direct' ? s.typeCardDirect : {}) }} onClick={() => setTxType('direct')}>
                     <div style={{ fontSize: '24px', marginBottom: '6px' }}>⚡</div>
-                    <div style={s.typeCardTitle}>Direct transaction</div>
-                    <div style={s.typeCardSub}>No invoice exists or will exist. Impacts P&L directly.</div>
+                    <div style={s.typeCardTitle}>Direktna transakcija</div>
+                    <div style={s.typeCardSub}>Faktura ne postoji niti će postojati. Direktno utiče na P&L.</div>
                   </div>
                   <div style={{ ...s.typeCard, ...(txType === 'passthrough' ? { border: '2px solid ' + DIALOG.amber, background: DIALOG.amberFill } : {}) }} onClick={() => setTxType('passthrough')}>
                     <div style={{ fontSize: '24px', marginBottom: '6px' }}>🔄</div>
-                    <div style={s.typeCardTitle}>Pass-through</div>
-                    <div style={s.typeCardSub}>Money in transit — no P&L impact. Paired IN/OUT entries.</div>
+                    <div style={s.typeCardTitle}>Prolazna stavka</div>
+                    <div style={s.typeCardSub}>Novac u prolazu — bez uticaja na P&L. Uparene UPLATA i ISPLATA.</div>
                   </div>
                   <div style={{ ...s.typeCard, ...(txType === 'credit_payment' ? { border: '2px solid #4EA8FF', background: DIALOG.blueFill } : {}) }} onClick={() => { setTxType('credit_payment'); resetCredit() }}>
                     <div style={{ fontSize: '24px', marginBottom: '6px' }}>🏦</div>
-                    <div style={s.typeCardTitle}>Credit payment</div>
-                    <div style={s.typeCardSub}>Close bank credit installments. Marks them paid in Bank Credits.</div>
+                    <div style={s.typeCardTitle}>Otplata kredita</div>
+                    <div style={s.typeCardSub}>Zatvara rate kredita. Označava ih kao plaćene u Kreditima.</div>
                   </div>
                 </div>
               </div>
@@ -1814,12 +1821,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                 <div style={s.section}>
                   <div style={s.row2}>
                     <div style={s.field}>
-                      <label style={s.lbl}>Direction <span style={s.req}>*</span></label>
+                      <label style={s.lbl}>Smer <span style={s.req}>*</span></label>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <div style={{ ...s.typeChip, flex: 1, ...(ptDirection === 'in' ? { border: '2px solid ' + DIALOG.accent, background: DIALOG.accentFill, color: DIALOG.accent, fontWeight: '500' } : {}) }}
-                          onClick={() => setPtDirection('in')}>📥 IN</div>
+                          onClick={() => setPtDirection('in')}>📥 UPLATA</div>
                         <div style={{ ...s.typeChip, flex: 1, ...(ptDirection === 'out' ? { border: '2px solid ' + DIALOG.red, background: DIALOG.redFill, color: DIALOG.red, fontWeight: '500' } : {}) }}
-                          onClick={() => setPtDirection('out')}>📤 OUT</div>
+                          onClick={() => setPtDirection('out')}>📤 ISPLATA</div>
                       </div>
                     </div>
                     <div style={s.field}>
@@ -1828,8 +1835,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                     </div>
                   </div>
                   <div style={s.field}>
-                    <label style={s.lbl}>Note</label>
-                    <textarea style={{ ...s.textarea, marginTop: '4px' }} value={note} onChange={e => setNote(e.target.value)} placeholder="Pass-through description..." />
+                    <label style={s.lbl}>Napomena</label>
+                    <textarea style={{ ...s.textarea, marginTop: '4px' }} value={note} onChange={e => setNote(e.target.value)} placeholder="Opis prolazne stavke…" />
                   </div>
                 </div>
               )}
@@ -1853,7 +1860,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               {txType === 'invoice_payment' && (
                 <div style={s.section}>
                   <div style={{ ...s.infoBox, marginBottom: '12px' }}>
-                    This transaction will close the selected invoice(s). P&L was already booked when those invoices were posted.
+                    Ova transakcija zatvara izabrane fakture. P&L je već proknjižen kada su te fakture proknjižene.
                   </div>
                   {fieldErr('linkedInvoices') && (
                     <div style={{ ...s.infoBox, background: DIALOG.redFill, borderColor: DIALOG.redSoft, color: DIALOG.red, marginBottom: '12px' }}>
@@ -1862,10 +1869,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   )}
                   <input style={{ ...s.input, marginBottom: '10px', width: '100%', boxSizing: 'border-box' as const }}
                     value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)}
-                    placeholder="Search by partner or invoice number..." />
+                    placeholder="Pretraga po partneru ili broju fakture…" />
                   {filteredOpenInvoices.length === 0 ? (
                     <div style={{ padding: '20px', textAlign: 'center' as const, color: DIALOG.faint, fontSize: '13px', background: DIALOG.raised, borderRadius: '8px' }}>
-                      No open invoices found for this company.
+                      Ova firma nema otvorenih faktura.
                     </div>
                   ) : (
                     <div style={s.invoiceList}>
@@ -1880,10 +1887,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px', flexWrap: 'wrap' as const }}>
                                 <span style={{ fontSize: '13px', fontWeight: '600', color: DIALOG.text }}>{inv.partner_name || '—'}</span>
                                 {inv.invoice_number && <span style={s.invNumBadge}>{inv.invoice_number}</span>}
-                                <span style={{ ...s.statusBadge, ...getStatusStyle(inv.calculated_status) }}>{inv.calculated_status}</span>
+                                <span style={{ ...s.statusBadge, ...getStatusStyle(inv.calculated_status) }}>{({ paid: 'plaćeno', partial: 'delimično', unpaid: 'neplaćeno', overdue: 'u kašnjenju' } as Record<string, string>)[inv.calculated_status] || inv.calculated_status}</span>
                               </div>
                               <div style={{ fontSize: '11px', color: DIALOG.dim, marginBottom: '2px' }}>
-                                {inv.invoice_date}{inv.due_date && ` · Due: ${inv.due_date}`}
+                                {inv.invoice_date}{inv.due_date && ` · Dospeće: ${inv.due_date}`}
                               </div>
                               {inv.expense_description && (
                                 <div style={{ fontSize: '11px', color: DIALOG.dim, fontStyle: 'italic' }}>{inv.expense_description}</div>
@@ -1894,12 +1901,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                                 {fmtMoney(inv.amount || 0, inv.currency || 'RSD')}
                               </div>
                               <div style={{ fontSize: '11px', color: remOwn > 0 ? DIALOG.red : DIALOG.accent, marginTop: '1px' }}>
-                                Rem: {fmtMoney(remOwn, inv.currency || 'RSD')}
+                                Preostalo: {fmtMoney(remOwn, inv.currency || 'RSD')}
                               </div>
                             </div>
                             {!linked
-                              ? <button style={s.addBtn} onClick={() => addInvoiceLink(inv)}>+ Add</button>
-                              : <button style={s.removeBtn} onClick={() => removeInvoiceLink(inv.id)}>✕ Remove</button>
+                              ? <button style={s.addBtn} onClick={() => addInvoiceLink(inv)}>+ Dodaj</button>
+                              : <button style={s.removeBtn} onClick={() => removeInvoiceLink(inv.id)}>✕ Ukloni</button>
                             }
                           </div>
                         )
@@ -1908,27 +1915,27 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   )}
                   {linksLoading && (
                     <div style={{ marginTop: '16px', fontSize: '12px', color: DIALOG.dim }}>
-                      Reading the invoices this payment closes…
+                      Učitavanje faktura koje ovo plaćanje zatvara…
                     </div>
                   )}
                   {!linksLoading && linkedInvoices.length === 0 && releasing.length > 0 && (
                     <div style={{ ...s.releaseNotice, marginTop: '16px' }}>
-                      Saving will release every invoice this payment closed — {releasing.map(r => r.invoice_number).join(', ')}.
-                      Pick at least one for it to close, or leave the transaction as it is.
+                      Čuvanjem se od ovog plaćanja odvajaju sve fakture koje je zatvaralo — {releasing.map(r => r.invoice_number).join(', ')}.
+                      Izaberite bar jednu koju zatvara ili ostavite transakciju kakva jeste.
                     </div>
                   )}
                   {!linksLoading && linkedInvoices.length > 0 && (
                     <div style={{ marginTop: '16px' }}>
                       <div style={s.sectionTitle}>
-                        {originalLinkIds.length > 0 ? 'Invoices this payment closes' : 'Allocation per invoice'}
+                        {originalLinkIds.length > 0 ? 'Fakture koje ovo plaćanje zatvara' : 'Raspodela po fakturi'}
                       </div>
                       {linkedInvoices.map(link => (
                         <div key={link.invoice_id} style={s.allocRow}>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.text }}>{link.partner_name}</div>
                             <div style={{ fontSize: '11px', color: DIALOG.dim }}>
-                              {link.invoice_number} · Invoice {formatMoney(link.amount ?? 0, allocationCurrency(link))}
-                              {' · '}Outstanding {formatMoney(link.outstanding_own || 0, allocationCurrency(link))}
+                              {link.invoice_number} · Faktura {formatMoney(link.amount ?? 0, allocationCurrency(link))}
+                              {' · '}Preostali dug {formatMoney(link.outstanding_own || 0, allocationCurrency(link))}
                             </div>
                             {/* What the invoice is still owed AFTER this figure.
                                 The field means "what this link allocates in
@@ -1947,15 +1954,15 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                               if (Math.abs(left) <= 0.01) {
                                 return (
                                   <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '2px' }}>
-                                    ✓ Settles this invoice in full
+                                    ✓ Zatvara ovu fakturu u celosti
                                   </div>
                                 )
                               }
                               return (
                                 <div style={{ fontSize: '11px', color: left > 0 ? DIALOG.amber : DIALOG.red, marginTop: '2px' }}>
                                   {left > 0
-                                    ? `Leaves ${formatMoney(left, allocationCurrency(link))} still owed`
-                                    : `Allocates ${formatMoney(-left, allocationCurrency(link))} more than this invoice is owed`}
+                                    ? `Ostaje dug od ${formatMoney(left, allocationCurrency(link))}`
+                                    : `Raspoređuje ${formatMoney(-left, allocationCurrency(link))} više od duga po ovoj fakturi`}
                                 </div>
                               )
                             })()}
@@ -1966,17 +1973,17 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                               value={link.allocated_own ?? 0}
                               onChange={e => updateAllocated(link.invoice_id, parseFloat(e.target.value) || 0)} />
                             <button type="button" style={s.detachBtn}
-                              title={`Release ${link.invoice_number} from this payment`}
-                              onClick={() => removeInvoiceLink(link.invoice_id)}>Detach</button>
+                              title={`Odvoji ${link.invoice_number} od ovog plaćanja`}
+                              onClick={() => removeInvoiceLink(link.invoice_id)}>Odvoji</button>
                           </div>
                         </div>
                       ))}
                       {releasing.length > 0 && (
                         <div style={s.releaseNotice}>
-                          Saving will release {releasing.length} invoice{releasing.length === 1 ? '' : 's'} from this
-                          payment — {releasing.map(r => r.invoice_number).join(', ')}.
-                          {releasing.length === 1 ? ' It goes' : ' They go'} back to unpaid unless another payment covers
-                          {releasing.length === 1 ? ' it' : ' them'}.
+                          Čuvanjem se od ovog plaćanja odvaja {countOf(releasing.length, 'faktura', 'fakture', 'faktura')}
+                          — {releasing.map(r => r.invoice_number).join(', ')}.
+                          {releasing.length === 1 ? ' Vraća se' : ' Vraćaju se'} u neplaćene, osim ako ih ne pokrije
+                          drugo plaćanje.
                         </div>
                       )}
                       {/* In the shared currency when the payment and every
@@ -1986,22 +1993,22 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                           rather than converting something into nobody's money. */}
                       <div style={s.allocSummaryBox}>
                         <div style={s.allocSummaryRow}>
-                          <span>Transaction total</span>
+                          <span>Iznos transakcije</span>
                           <span style={{ fontWeight: '500' }}>{formatMoney(allocCurrency ? (parseFloat(amount) || 0) : amountRsd, allocCurrency || 'RSD')}</span>
                         </div>
                         <div style={s.allocSummaryRow}>
-                          <span>Total allocated</span>
+                          <span>Ukupno raspoređeno</span>
                           <span style={{ fontWeight: '500', color: DIALOG.accent }}>{formatMoney(allocCurrency ? totalAllocatedOwn : totalAllocatedRsd, allocCurrency || 'RSD')}</span>
                         </div>
                         {Math.abs(allocCurrency ? unallocatedOwn : unallocatedRsd) > 0.01 && (
                           <div style={{ ...s.allocSummaryRow, color: (allocCurrency ? unallocatedOwn : unallocatedRsd) > 0 ? DIALOG.amber : DIALOG.red }}>
-                            <span>{(allocCurrency ? unallocatedOwn : unallocatedRsd) > 0 ? 'Unallocated' : 'Over-allocated'}</span>
+                            <span>{(allocCurrency ? unallocatedOwn : unallocatedRsd) > 0 ? 'Neraspoređeno' : 'Previše raspoređeno'}</span>
                             <span style={{ fontWeight: '500' }}>{formatMoney(Math.abs(allocCurrency ? unallocatedOwn : unallocatedRsd), allocCurrency || 'RSD')}</span>
                           </div>
                         )}
                         {!allocCurrency && linkedInvoices.length > 0 && (
                           <div style={{ fontSize: '10.5px', color: DIALOG.dim, marginTop: '6px', lineHeight: 1.4 }}>
-                            Shown in RSD (book): this payment and the invoices it closes are not all in the same currency.
+                            Prikazano u RSD (knjiženo): ovo plaćanje i fakture koje zatvara nisu sve u istoj valuti.
                           </div>
                         )}
                       </div>
@@ -2017,19 +2024,19 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                               onChange={e => setBookDifference(e.target.checked)}
                               style={{ accentColor: DIALOG.accent, cursor: 'pointer' }} />
                             <span>
-                              Book the {fxDifference.kind === 'gain' ? 'gain' : 'shortfall'} of{' '}
-                              <strong>{formatMoney(fxAmountOwn, fxCurrency)}</strong> as a currency difference
+                              Proknjiži {fxDifference.kind === 'gain' ? 'pozitivnu' : 'negativnu'} kursnu razliku od{' '}
+                              <strong>{formatMoney(fxAmountOwn, fxCurrency)}</strong>
                             </span>
                           </label>
                           <div style={s.fxNote}>{fxDifference.note}</div>
                           {bookDifference && (
                             <>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                                <span style={{ fontSize: '11.5px', color: DIALOG.dim, whiteSpace: 'nowrap' as const }}>Classify as</span>
+                                <span style={{ fontSize: '11.5px', color: DIALOG.dim, whiteSpace: 'nowrap' as const }}>Razvrstaj kao</span>
                                 <select style={{ ...s.select, flex: 1 }}
                                   value={fxScript?.id || ''}
                                   onChange={e => setDifferenceScriptId(e.target.value)}>
-                                  {fxScripts.length === 0 && <option value="">No quick-fill templates saved</option>}
+                                  {fxScripts.length === 0 && <option value="">Nema sačuvanih šablona</option>}
                                   {fxScripts.map(sc => (
                                     <option key={sc.id} value={sc.id}>{sc.name} — {sc.pl_category}</option>
                                   ))}
@@ -2037,19 +2044,19 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                               </div>
                               {!fxScript && (
                                 <div style={{ ...s.fxNote, color: DIALOG.red }}>
-                                  No template is set up for currency differences, so there is no classification to
-                                  book this under. Create one called "Currency Differences" in a Bank statement or
-                                  Bulk import row first.
+                                  Nema šablona za kursne razlike, pa nema klasifikacije pod kojom bi se ovo
+                                  proknjižilo. Prvo napravite šablon „Kursne razlike“ u stavci izvoda ili
+                                  grupnog uvoza.
                                 </div>
                               )}
                               {fxScript && (
                                 <div style={s.fxNote}>
-                                  A second {fxDifference.direction} transaction of{' '}
-                                  {formatMoney(fxAmountOwn, fxCurrency)} will be posted on {txDate} under{' '}
+                                  Dodatna transakcija ({fxDifference.direction === 'revenue' ? 'prihod' : 'trošak'}) od{' '}
+                                  {formatMoney(fxAmountOwn, fxCurrency)} biće proknjižena {txDate} pod{' '}
                                   {fxScript.pl_category}{fxScript.pl_subcategory ? ' / ' + fxScript.pl_subcategory : ''}
                                   {fxDifference.linksToInvoice
-                                    ? ', and linked to this invoice so it closes.'
-                                    : '. The invoice is already closed by the payment itself.'}
+                                    ? ' i povezana sa ovom fakturom da bi se ona zatvorila.'
+                                    : '. Faktura je već zatvorena samim plaćanjem.'}
                                 </div>
                               )}
                             </>
@@ -2064,8 +2071,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                       {linkedInvoices.length > 1 && (parseFloat(amount) || 0) > 0 && Math.abs(unallocatedRsd) > 0.01 && (
                         <div style={s.fxBox}>
                           <div style={{ ...s.fxNote, marginTop: 0 }}>
-                            A currency difference can only be booked when the payment closes one invoice — with
-                            several, which of them the difference belongs to is a judgement, not arithmetic.
+                            Kursna razlika može da se proknjiži samo kada plaćanje zatvara jednu fakturu — kod
+                            više faktura, kojoj razlika pripada je stvar procene, a ne računa.
                           </div>
                         </div>
                       )}
@@ -2077,10 +2084,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               {txType === 'direct' && (
                 <>
                   <div style={s.section}>
-                    <div style={s.sectionTitle}>Subtype</div>
+                    <div style={s.sectionTitle}>Podtip</div>
                     <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                      <div style={{ ...s.typeChip, ...(directSubtype === 'expense' ? s.typeChipExpense : {}) }} onClick={() => setDirectSubtype('expense')}>📤 Expense</div>
-                      <div style={{ ...s.typeChip, ...(directSubtype === 'revenue' ? s.typeChipRevenue : {}) }} onClick={() => setDirectSubtype('revenue')}>📥 Revenue</div>
+                      <div style={{ ...s.typeChip, ...(directSubtype === 'expense' ? s.typeChipExpense : {}) }} onClick={() => setDirectSubtype('expense')}>📤 Trošak</div>
+                      <div style={{ ...s.typeChip, ...(directSubtype === 'revenue' ? s.typeChipRevenue : {}) }} onClick={() => setDirectSubtype('revenue')}>📥 Prihod</div>
                     </div>
                   </div>
 
@@ -2092,12 +2099,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                           ? { opacity: 0.5, pointerEvents: 'none' as const, userSelect: 'none' as const }
                           : {}),
                       }}>
-                        <div style={s.sectionTitle}>P&L classification</div>
+                        <div style={s.sectionTitle}>P&L klasifikacija</div>
                         {splitActive && (
                           <div style={{ ...s.infoBox, marginBottom: '12px', background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber }}>
-                            Taken from the largest line of the split above, and locked while it
-                            stands. The split is what the P&amp;L reads; this is what the ledger
-                            lists the payment under. Remove the split to set it by hand.
+                            Preuzeto iz najveće stavke podele iznad i zaključano dok podela postoji.
+                            P&amp;L čita podelu; ovo je ono pod čim glavna knjiga vodi plaćanje.
+                            Uklonite podelu da biste ovo podesili ručno.
                           </div>
                         )}
                         {quickFillScripts.length > 0 && (
@@ -2109,7 +2116,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                                 onChange={e => setQfSearch(e.target.value)}
                                 onFocus={() => setQfOpen(true)}
                                 onBlur={() => setTimeout(() => setQfOpen(false), 150)}
-                                placeholder="⚡ Quick fill — click or search…"
+                                placeholder="⚡ Brza popuna — kliknite ili pretražite…"
                               />
                               <span style={{ position: 'absolute' as const, right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '10px', color: DIALOG.accent, pointerEvents: 'none' as const }}>
                                 {qfOpen ? '▲' : '▼'}
@@ -2125,7 +2132,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                                     sc.department.toLowerCase().includes(qfSearch.toLowerCase())
                                   )
                                   return filtered.length === 0
-                                    ? <div style={{ padding: '10px 12px', fontSize: '12px', color: DIALOG.dim }}>No matches for "{qfSearch}"</div>
+                                    ? <div style={{ padding: '10px 12px', fontSize: '12px', color: DIALOG.dim }}>Nema rezultata za „{qfSearch}“</div>
                                     : filtered.map(sc => (
                                         <div key={sc.id}
                                           style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: '0.5px solid ' + DIALOG.borderSoft, display: 'flex', flexDirection: 'column' as const, gap: '2px' }}
@@ -2140,31 +2147,31 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                             {savingTemplate ? (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
                                 <input autoFocus style={{ ...s.input, flex: 1, fontSize: '12px', padding: '6px 9px' }}
-                                  placeholder="Name this template…"
+                                  placeholder="Naziv šablona…"
                                   value={templateName}
                                   onChange={e => setTemplateName(e.target.value)}
                                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveAsTemplate() } }} />
-                                <button type="button" style={s.qfSaveBtn} onClick={saveAsTemplate}>Save</button>
+                                <button type="button" style={s.qfSaveBtn} onClick={saveAsTemplate}>Sačuvaj</button>
                                 <button type="button" style={s.qfCancelBtn}
-                                  onClick={() => { setSavingTemplate(false); setTemplateName('') }}>Cancel</button>
+                                  onClick={() => { setSavingTemplate(false); setTemplateName('') }}>Otkaži</button>
                               </div>
                             ) : (
                               <button type="button" style={s.qfNewBtn}
-                                title="Save the classification filled in above as a template, shared with everyone"
+                                title="Sačuvaj gornju klasifikaciju kao šablon, zajednički za sve"
                                 onClick={() => setSavingTemplate(true)}>
-                                + Save this classification as a template
+                                + Sačuvaj ovu klasifikaciju kao šablon
                               </button>
                             )}
                           </div>
                         )}
                         <div style={s.row2}>
                           <div style={s.field}>
-                            <label style={s.lbl}>P&L Category <span style={s.req}>*</span></label>
+                            <label style={s.lbl}>P&L kategorija <span style={s.req}>*</span></label>
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                             <SearchableSelect value={plCatId}
                               onChange={v => { const cat = plCategories.find(c => c.id === v); setPlCatId(v); setPlCatName(cat?.name || ''); setPlSubId(''); setPlSubName(''); touch('plCat') }}
                               options={expenseCategories.map(c => ({ value: c.id, label: c.name }))}
-                              allLabel="Select P&L category..." searchPlaceholder="Type to search categories…"
+                              allLabel="Izaberite P&L kategoriju…" searchPlaceholder="Pretraga kategorija…"
                               style={{ ...pickerChrome, flex: 1, ...(fieldErr('plCat') ? pickerError : {}) }} />
                             <InlineCategoryAdd table="pl_categories"
                               currentCount={plCategories.length}
@@ -2173,12 +2180,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                             {fieldErr('plCat') && <span style={s.errorMsg}>{fieldErr('plCat')}</span>}
                           </div>
                           <div style={s.field}>
-                            <label style={s.lbl}>P&L Sub-category</label>
+                            <label style={s.lbl}>Potkategorija</label>
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                             <SearchableSelect value={plSubId}
                               onChange={v => { const sub = plSubcategories.find(s => s.id === v); setPlSubId(v); setPlSubName(sub?.name || '') }}
                               options={currentPlSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                              allLabel="Select sub-category..." searchPlaceholder="Type to search sub-categories…"
+                              allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
                               disabled={!plCatId || currentPlSubs.length === 0}
                               style={{ ...pickerChrome, flex: 1 }} />
                             <InlineCategoryAdd table="pl_subcategories" parentId={plCatId} parentField="category_id"
@@ -2189,12 +2196,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                         </div>
                         <div style={s.row2}>
                           <div style={s.field}>
-                            <label style={s.lbl}>Department <span style={s.req}>*</span></label>
+                            <label style={s.lbl}>Sektor <span style={s.req}>*</span></label>
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                             <SearchableSelect value={deptId}
                               onChange={v => { const dept = departments.find(d => d.id === v); setDeptId(v); setDeptName(dept?.name || ''); setDeptSubId(''); setDeptSubName(''); setExpDesc(''); touch('dept') }}
                               options={departments.map(d => ({ value: d.id, label: d.name }))}
-                              allLabel="Select department..." searchPlaceholder="Type to search departments…"
+                              allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                               style={{ ...pickerChrome, flex: 1, ...(fieldErr('dept') ? pickerError : {}) }} />
                             <InlineCategoryAdd table="departments"
                               currentCount={departments.length}
@@ -2203,12 +2210,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                             {fieldErr('dept') && <span style={s.errorMsg}>{fieldErr('dept')}</span>}
                           </div>
                           <div style={s.field}>
-                            <label style={s.lbl}>Dept. sub-category</label>
+                            <label style={s.lbl}>Podsektor</label>
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                             <SearchableSelect value={deptSubId}
                               onChange={v => { const sub = deptSubcategories.find(s => s.id === v); setDeptSubId(v); setDeptSubName(sub?.name || ''); setExpDesc('') }}
                               options={currentDeptSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                              allLabel="Select sub-category..." searchPlaceholder="Type to search sub-categories…"
+                              allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
                               disabled={!deptId || currentDeptSubs.length === 0}
                               style={{ ...pickerChrome, flex: 1 }} />
                             <InlineCategoryAdd table="dept_subcategories" parentId={deptId} parentField="department_id"
@@ -2218,15 +2225,15 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                           </div>
                         </div>
                         <div style={s.field}>
-                          <label style={s.lbl}>Expense description</label>
+                          <label style={s.lbl}>Opis troška</label>
                           <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                             {currentExpDescs.length > 0 ? (
                               <SearchableSelect value={expDesc} onChange={setExpDesc}
                                 options={currentExpDescs.map(d => ({ value: d.name, label: d.name }))}
-                                allLabel="Select description..." searchPlaceholder="Type to search descriptions…"
+                                allLabel="Izaberite opis…" searchPlaceholder="Pretraga opisa…"
                                 style={{ ...pickerChrome, flex: 1 }} />
                             ) : (
-                              <input style={{ ...s.input, flex: 1 }} value={expDesc} onChange={e => setExpDesc(e.target.value)} placeholder="Enter expense description..." />
+                              <input style={{ ...s.input, flex: 1 }} value={expDesc} onChange={e => setExpDesc(e.target.value)} placeholder="Unesite opis troška…" />
                             )}
                             <InlineCategoryAdd table="expense_descriptions" parentId={deptSubId} parentField="dept_subcategory_id"
                               currentCount={currentExpDescs.length} disabled={!deptSubId}
@@ -2272,12 +2279,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                       ) : null
                     })()}
                     <div style={s.section}>
-                      <div style={s.sectionTitle}>Revenue details</div>
+                      <div style={s.sectionTitle}>Podaci o prihodu</div>
                       <div style={s.field}>
-                        <label style={s.lbl}>Revenue stream {!advance && <span style={s.req}>*</span>}</label>
+                        <label style={s.lbl}>Vrsta prihoda {!advance && <span style={s.req}>*</span>}</label>
                         <select style={{ ...s.select, ...(fieldErr('revStream') ? s.inputError : {}) }} value={revStream}
                           onChange={e => { setRevStream(e.target.value); touch('revStream') }} onBlur={() => touch('revStream')}>
-                          <option value="">Select stream...</option>
+                          <option value="">Izaberite vrstu prihoda…</option>
                           {REVENUE_STREAMS.map(r => <option key={r}>{r}</option>)}
                         </select>
                         {fieldErr('revStream') && <span style={s.errorMsg}>{fieldErr('revStream')}</span>}
@@ -2288,15 +2295,15 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   )}
 
                   <div style={s.section}>
-                    <div style={s.sectionTitle}>Tags & note</div>
+                    <div style={s.sectionTitle}>Oznake i napomena</div>
                     <div style={s.tagRow}>
                       {['Recurring', 'Prepayment', 'Accrual', 'Capital expenditure', 'Tax deductible', 'Reimbursable'].map(t => (
-                        <span key={t} style={{ ...s.tag, ...(tags.includes(t) ? s.tagActive : {}) }} onClick={() => toggleTag(t)}>{t}</span>
+                        <span key={t} style={{ ...s.tag, ...(tags.includes(t) ? s.tagActive : {}) }} onClick={() => toggleTag(t)}>{TAG_LABEL[t] || t}</span>
                       ))}
                     </div>
                     <div style={{ marginTop: '10px' }}>
-                      <label style={s.lbl}>Note</label>
-                      <textarea style={{ ...s.textarea, marginTop: '4px' }} value={note} onChange={e => setNote(e.target.value)} placeholder="Additional notes..." />
+                      <label style={s.lbl}>Napomena</label>
+                      <textarea style={{ ...s.textarea, marginTop: '4px' }} value={note} onChange={e => setNote(e.target.value)} placeholder="Dodatne napomene…" />
                     </div>
                   </div>
                 </>
@@ -2307,16 +2314,16 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           {/* ── STEP 4 — Review ── */}
           {step === 4 && (
             <div style={s.section}>
-              <div style={s.sectionTitle}>Review</div>
+              <div style={s.sectionTitle}>Pregled</div>
               {txType === 'credit_payment' && selectedInstallmentIds.length > 0 && (
                 <div style={{ ...s.infoBox, background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, marginBottom: '14px', display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <span>🏦</span>
                   <div>
                     <div style={{ fontWeight: '500', marginBottom: '2px' }}>
-                      Closing {selectedInstallmentIds.length} installment{selectedInstallmentIds.length > 1 ? 's' : ''} from: {credits.find(c => c.id === selectedCreditId)?.name || '—'}
+                      Zatvara se {countOf(selectedInstallmentIds.length, 'rata', 'rate', 'rata')} kredita: {credits.find(c => c.id === selectedCreditId)?.name || '—'}
                     </div>
                     <div style={{ fontSize: '11px', fontFamily: "'DM Mono',monospace" }}>
-                      Total: {fmtMoney(creditSelectedTotal, creditCurrency || 'RSD')}
+                      Ukupno: {fmtMoney(creditSelectedTotal, creditCurrency || 'RSD')}
                     </div>
                   </div>
                 </div>
@@ -2325,40 +2332,40 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                 <div style={{ ...s.infoBox, marginBottom: '14px', display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <span>✅</span>
                   <div>
-                    <div style={{ fontWeight: '500', marginBottom: '2px' }}>All fields valid — ready to post</div>
-                    <div style={{ fontSize: '11px', opacity: 0.85 }}>{advance ? 'Avans: novac primljen, obaveza prema investitoru — bez uticaja na bilans uspeha.' : txType === 'direct' ? 'This transaction will impact P&L directly.' : txType === 'credit_payment' ? `Creates ${selectedInstallmentIds.length * 2} P&L entries (principal + interest per installment).` : `This transaction closes ${linkedInvoices.length} invoice(s). No P&L impact.`}</div>
+                    <div style={{ fontWeight: '500', marginBottom: '2px' }}>Sva polja su ispravna — spremno za knjiženje</div>
+                    <div style={{ fontSize: '11px', opacity: 0.85 }}>{advance ? 'Avans: novac primljen, obaveza prema investitoru — bez uticaja na bilans uspeha.' : txType === 'direct' ? 'Ova transakcija direktno utiče na P&L.' : txType === 'credit_payment' ? `Pravi P&L stavki: ${selectedInstallmentIds.length * 2} (glavnica i kamata po rati).` : `Ova transakcija zatvara ${countOf(linkedInvoices.length, 'fakturu', 'fakture', 'faktura')}. Bez uticaja na P&L.`}</div>
                   </div>
                 </div>
               ) : (
                 <div style={{ ...s.validationBanner, marginBottom: '14px', position: 'relative' }}>
                   <span>⚠️</span>
                   <div>
-                    <div style={{ fontWeight: '500', fontSize: '12px' }}>{totalErrors} required field{totalErrors > 1 ? 's' : ''} missing</div>
+                    <div style={{ fontWeight: '500', fontSize: '12px' }}>Nedostaju obavezna polja: {totalErrors}</div>
                     <div style={{ fontSize: '11px', marginTop: '2px' }}>{Object.values(errors).join(' · ')}</div>
                   </div>
                 </div>
               )}
               {[
-                { title: 'Transaction info', rows: [
-                  ['Company', companies.find(c => c.id === companyId)?.name || '—'],
-                  ['Bank', banks.find(b => b.id === bankId)?.name || '—'],
+                { title: 'Podaci o transakciji', rows: [
+                  ['Firma', companies.find(c => c.id === companyId)?.name || '—'],
+                  ['Banka', banks.find(b => b.id === bankId)?.name || '—'],
                   ['Partner', showNewPartner ? newPartnerName : (partners.find(p => p.id === partnerId)?.name || partnerSearch || '—')],
-                  ['Date', txDate],
-                  ['Type', txType === 'invoice_payment' ? 'Invoice payment' : txType === 'credit_payment' ? 'Credit payment' : txType === 'passthrough' ? 'Pass-through' : advance ? `${ADVANCE_LABEL} (bez uticaja na bilans uspeha)` : `Direct (${directSubtype})`],
+                  ['Datum', txDate],
+                  ['Tip', txType === 'invoice_payment' ? 'Plaćanje fakture' : txType === 'credit_payment' ? 'Otplata kredita' : txType === 'passthrough' ? 'Prolazna stavka' : advance ? `${ADVANCE_LABEL} (bez uticaja na bilans uspeha)` : `Direktna (${directSubtype === 'revenue' ? 'prihod' : 'trošak'})`],
                   ...(advance ? [['Projekat', projectLabelById(projects, projectId)]] : []),
                 ]},
-                ...(txType === 'invoice_payment' && linkedInvoices.length > 0 ? [{ title: 'Linked invoices', rows: linkedInvoices.map(l => [`${l.partner_name} (${l.invoice_number})`, `${formatMoney(l.allocated_own || 0, allocationCurrency(l))} allocated`]) }] : []),
-                ...(txType === 'direct' && directSubtype === 'expense' ? [{ title: 'P&L & expense type', rows: [
-                  ['P&L Category', plCatName || '—'],
-                  ['Department', deptName || '—'],
-                  ['Description', expDesc || '—'],
-                  ['Project', splitActive ? 'By split line' : projectLabelById(projects, projectId)],
-                  ['CF Classification', cfLabel()],
+                ...(txType === 'invoice_payment' && linkedInvoices.length > 0 ? [{ title: 'Povezane fakture', rows: linkedInvoices.map(l => [`${l.partner_name} (${l.invoice_number})`, `raspoređeno ${formatMoney(l.allocated_own || 0, allocationCurrency(l))}`]) }] : []),
+                ...(txType === 'direct' && directSubtype === 'expense' ? [{ title: 'P&L i vrsta troška', rows: [
+                  ['P&L kategorija', plCatName || '—'],
+                  ['Sektor', deptName || '—'],
+                  ['Opis', expDesc || '—'],
+                  ['Projekat', splitActive ? 'Po stavkama podele' : projectLabelById(projects, projectId)],
+                  ['Novčani tok', cfLabel()],
                 ]}] : []),
-                { title: 'Amounts', rows: [
-                  ['Original amount', amount ? fmtMoney(parseFloat(amount), currency) : '—'],
-                  ['Exchange rate', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'Manual'})` : 'N/A'],
-                  ['RSD (book)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
+                { title: 'Iznosi', rows: [
+                  ['Originalni iznos', amount ? fmtMoney(parseFloat(amount), currency) : '—'],
+                  ['Kurs', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'ručno'})` : 'nije dostupno'],
+                  ['RSD (knjiženo)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
                   ['EUR', book.amounts ? fmtMoney(amountEur, 'EUR') : '—'],
                 ]},
               ].map(sec => (
@@ -2380,23 +2387,23 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
         <div style={s.footer}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: DIALOG.dim }}>Step {step} of 4</span>
+            <span style={{ fontSize: '12px', color: DIALOG.dim }}>Korak {step} od 4</span>
             {totalErrors > 0 && Object.keys(touched).length > 0 && (
               <span style={{ fontSize: '11px', color: DIALOG.red, background: DIALOG.redFill, padding: '2px 8px', borderRadius: '20px' }}>
-                {totalErrors} field{totalErrors > 1 ? 's' : ''} missing
+                Nedostaje polja: {totalErrors}
               </span>
             )}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {step > 1 && <button style={s.btnGhost} onClick={() => setStep(step - 1)}>Back</button>}
-            {step < 4 && <button style={s.btnPrimary} onClick={() => { touchStep(step); setStep(step + 1) }}>Continue</button>}
+            {step > 1 && <button style={s.btnGhost} onClick={() => setStep(step - 1)}>Nazad</button>}
+            {step < 4 && <button style={s.btnPrimary} onClick={() => { touchStep(step); setStep(step + 1) }}>Dalje</button>}
             {step === 4 && (
               <button
                 style={{ ...s.btnPrimary, opacity: saving || whySplit ? 0.55 : 1 }}
                 onClick={handlePost}
                 disabled={saving || !!whySplit}
                 title={whySplit || undefined}>
-                {saving ? 'Saving...' : transaction ? 'Update transaction' : 'Post transaction'}
+                {saving ? 'Čuvanje…' : transaction ? 'Sačuvaj izmene' : 'Proknjiži transakciju'}
               </button>
             )}
           </div>

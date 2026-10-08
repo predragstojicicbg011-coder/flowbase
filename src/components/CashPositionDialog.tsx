@@ -44,17 +44,17 @@ export default function CashPositionDialog({ onClose, onSaved, current }: {
     // An empty box is not zero. Zero cash is a real and serious reading and a
     // person who means it types 0; a blank means they have not answered.
     if (!usable) {
-      setError('Type what is in the accounts. An empty box is not zero — type 0 if that is what you mean.')
+      setError('Unesite stanje na računima. Prazno polje nije nula — unesite 0 ako je to stanje.')
       return
     }
-    if (!asOf) { setError('Say which day this was read.'); return }
+    if (!asOf) { setError('Unesite datum na koji je stanje očitano.'); return }
     setSaving(true); setError('')
 
     let amountEur: number
     try {
       amountEur = (await toBookAmounts(parsed as number, 'RSD', asOf)).amount_eur
     } catch (e: any) {
-      setError(`Not saved: ${e?.message || String(e)}`)
+      setError(`Nije sačuvano: ${e?.message || String(e)}`)
       setSaving(false)
       return
     }
@@ -64,7 +64,7 @@ export default function CashPositionDialog({ onClose, onSaved, current }: {
     const { error: upErr } = await supabase.from('cash_positions')
       .upsert({ as_of: asOf, amount_rsd: parsed, amount_eur: amountEur, note: note.trim() || null },
         { onConflict: 'as_of' })
-    if (upErr) { setError(`Could not save: ${upErr.message}`); setSaving(false); return }
+    if (upErr) { setError(`Čuvanje nije uspelo: ${upErr.message}`); setSaving(false); return }
     onSaved()
     onClose()
   }
@@ -74,46 +74,45 @@ export default function CashPositionDialog({ onClose, onSaved, current }: {
       <div style={s.dialog}>
         <div style={chrome.header}>
           <div>
-            <div style={chrome.headerTitle}>Cash on hand</div>
-            <div style={chrome.headerSub}>What the runway is divided out of</div>
+            <div style={chrome.headerTitle}>Stanje novca</div>
+            <div style={chrome.headerSub}>Osnovica za izračun koliko dugo novac traje</div>
           </div>
-          <button style={chrome.closeBtn} onClick={onClose} aria-label="Close">×</button>
+          <button style={chrome.closeBtn} onClick={onClose} aria-label="Zatvori">×</button>
         </div>
 
         <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div style={{ fontSize: '12px', color: DIALOG.faint, lineHeight: 1.55 }}>
-            There is no cash balance in the ledger to read this from — it records movements,
-            and nothing carries an opening figure. So it is asked for, and kept with its date:
-            a runway worked out today should still be readable next quarter at the figure it
-            was actually worked out from.
+            Glavna knjiga ne sadrži stanje novca — beleži samo promene, a nijedna stavka ne nosi
+            početno stanje. Zato se stanje unosi ručno i čuva sa datumom: proračun urađen danas
+            treba i sledećeg kvartala da se čita prema iznosu iz kog je zaista izračunat.
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <div style={s.lbl}>Read on</div>
+              <div style={s.lbl}>Stanje na dan</div>
               <input style={s.input} type="date" value={asOf} max={today}
-                aria-label="Read on" onChange={e => setAsOf(e.target.value)} />
+                aria-label="Stanje na dan" onChange={e => setAsOf(e.target.value)} />
             </div>
             <div>
-              <div style={s.lbl}>Total, all accounts, RSD</div>
+              <div style={s.lbl}>Ukupno, svi računi, RSD</div>
               <input style={s.input} type="number" value={amount} autoFocus
-                aria-label="Total, all accounts, RSD"
+                aria-label="Ukupno, svi računi, RSD"
                 onChange={e => setAmount(e.target.value)} placeholder="71850000.00" />
             </div>
           </div>
 
           {current && (
             <div style={{ fontSize: '11.5px', color: DIALOG.dim }}>
-              The last reading was {fmtRSD(current.amount)} on {current.asOf}.
-              {current.asOf === asOf && ' Saving replaces it — one reading per day.'}
+              Poslednje uneto stanje: {fmtRSD(current.amount)} na dan {current.asOf}.
+              {current.asOf === asOf && ' Čuvanje ga zamenjuje — jedno stanje po danu.'}
             </div>
           )}
 
           <div>
-            <div style={s.lbl}>Note</div>
-            <input style={s.input} value={note} aria-label="Note"
+            <div style={s.lbl}>Napomena</div>
+            <input style={s.input} value={note} aria-label="Napomena"
               onChange={e => setNote(e.target.value)}
-              placeholder="Four accounts, EUR and RSD converted at the day's rate" />
+              placeholder="Četiri računa, EUR i RSD preračunati po kursu na taj dan" />
           </div>
 
           {error && (
@@ -124,9 +123,9 @@ export default function CashPositionDialog({ onClose, onSaved, current }: {
         </div>
 
         <div style={{ padding: '1rem 1.5rem', borderTop: '0.5px solid ' + DIALOG.border, display: 'flex', justifyContent: 'flex-end', gap: '8px', background: DIALOG.raised }}>
-          <button style={s.cancel} onClick={onClose}>Cancel</button>
+          <button style={s.cancel} onClick={onClose}>Otkaži</button>
           <button style={{ ...s.save, opacity: saving ? 0.6 : 1 }} onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Save reading'}
+            {saving ? 'Čuvanje…' : 'Sačuvaj stanje'}
           </button>
         </div>
       </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabase'
 import { fmtMoney, fmtMoneyCompact } from '../utils/formatters'
 import { runWrite } from '../services/writeOrder'
+import { countOf, plural } from '../utils/plural'
 import {
   rateOn, revolvingSchedule, outstandingOf, defaultMaturity,
   type RateReset, type ScheduleRow,
@@ -53,6 +54,10 @@ const fmtIn = (n: number | null, currency: string) =>
 
 const fmtInCompact = (n: number | null, currency: string) =>
   n === null ? '—' : fmtMoneyCompact(n, currency || 'RSD')
+
+/** 'YYYY-MM-DD' → '08.10.2026.', read from the string so no time zone can move the day. */
+const fmtDate = (iso: string | null | undefined) =>
+  iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}.` : '—'
 
 /**
  * The section's totals, one per currency the tranches are in.
@@ -171,14 +176,14 @@ export default function RevolvingCredits({ credits, onRefresh, onEdit }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
         <div style={{ flex: 1 }} />
         <div style={{ fontSize: '11px', color: '#7A9BB8' }}>
-          {credits.length} tranche{credits.length === 1 ? '' : 's'} ·{' '}
+          {countOf(credits.length, 'tranša', 'tranše', 'tranši')} ·{' '}
           {totals.map((t, i) => (
             <React.Fragment key={t.currency}>
               {i > 0 && ' · '}
-              <strong style={{ color: '#DCE9F6' }}>{fmtInCompact(t.principal, t.currency)}</strong> principal
+              <strong style={{ color: '#DCE9F6' }}>{fmtInCompact(t.principal, t.currency)}</strong> glavnica
               {t.interest === null
-                ? <span style={{ color: '#F5A623' }}> · interest not priced</span>
-                : <> · {fmtInCompact(t.interest, t.currency)} interest to maturity</>}
+                ? <span style={{ color: '#F5A623' }}> · kamata nije obračunata</span>
+                : <> · {fmtInCompact(t.interest, t.currency)} kamate do dospeća</>}
             </React.Fragment>
           ))}
         </div>
@@ -288,14 +293,14 @@ function Tranche({ credit, resets, open, onToggle, onExtend, onPrice, onEdit, on
       total_amount: r.total_amount,
       status: 'outstanding',
       notes: r.principal_amount > 0
-        ? 'Revolving — repayment at maturity'
-        : 'Revolving — monthly interest',
+        ? 'Revolving — otplata glavnice o dospeću'
+        : 'Revolving — mesečna kamata',
     }))
 
-    const { ok, message } = await runWrite('Generate the revolving schedule',
+    const { ok, message } = await runWrite('Pravljenje plana otplate',
       supabase.from('credit_installments').insert(rows))
     setBusy(false)
-    setMsg(ok ? `${rows.length} instalment${rows.length === 1 ? '' : 's'} written.` : message)
+    setMsg(ok ? `Upisano: ${countOf(rows.length, 'rata', 'rate', 'rata')}.` : message)
     if (ok) onRefresh()
   }
 
@@ -311,25 +316,25 @@ function Tranche({ credit, resets, open, onToggle, onExtend, onPrice, onEdit, on
           <div style={{ fontSize: '14px', color: '#E8F1FB', fontWeight: 500 }}>{credit.name}</div>
           <div style={{ fontSize: '11px', color: '#7A9BB8', marginTop: '3px' }}>
             {credit.bank}
-            {credit.disbursement_date && ` · drawn ${credit.disbursement_date}`}
+            {credit.disbursement_date && ` · povučeno ${fmtDate(credit.disbursement_date)}`}
           </div>
         </div>
 
-        <Cell label="Principal" value={fmtIn(credit.principal_amount, credit.currency)} />
+        <Cell label="Glavnica" value={fmtIn(credit.principal_amount, credit.currency)} />
 
-        <Cell label="Rate"
+        <Cell label="Kamatna stopa"
           value={rate === null ? '—' : `${rate.toFixed(2)}%`}
           sub={credit.rate_description || credit.reference_rate_name || ''}
           warn={rate === null} />
 
-        <Cell label="Interest / month"
+        <Cell label="Kamata mesečno"
           value={monthly === null ? '—' : fmtIn(monthly, credit.currency)}
-          sub={monthly === null ? 'enter the benchmark' : ''}
+          sub={monthly === null ? 'unesite referentnu stopu' : ''}
           warn={monthly === null} />
 
-        <Cell label="Matures"
-          value={credit.maturity_date || '—'}
-          sub={days === null ? '' : days < 0 ? `${-days} days overdue` : `in ${days} days`}
+        <Cell label="Dospeće"
+          value={fmtDate(credit.maturity_date)}
+          sub={days === null ? '' : days < 0 ? `kasni ${countOf(-days, 'dan', 'dana', 'dana')}` : `za ${countOf(days, 'dan', 'dana', 'dana')}`}
           warn={soon} />
 
         <div style={{ fontSize: '11px', color: '#7A9BB8' }}>{open ? '▼' : '▶'}</div>
@@ -339,48 +344,48 @@ function Tranche({ credit, resets, open, onToggle, onExtend, onPrice, onEdit, on
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '16px 20px', background: '#0A1525' }}>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
             <button onClick={onPrice} style={btn('#4EA8FF')}>
-              {rate === null ? 'Enter the benchmark rate' : 'Record a rate reset'}
+              {rate === null ? 'Unesi referentnu stopu' : 'Unesi promenu kamatne stope'}
             </button>
-            <button onClick={onExtend} style={btn('#8B8BFF')}>Extend the maturity</button>
+            <button onClick={onExtend} style={btn('#8B8BFF')}>Produži dospeće</button>
             {/* The tranche itself: principal, margin, benchmark name, dates.
                 A reset prices a period; this corrects what the line IS. */}
             {onEdit && (
               <button onClick={onEdit} style={btn('#7A9BB8')}
-                title="Correct the line itself — principal, margin, benchmark, dates">
-                Edit credit
+                title="Ispravi sam kredit — glavnicu, maržu, referentnu stopu, datume">
+                Izmeni kredit
               </button>
             )}
             <button onClick={generate} disabled={busy || schedule.length === 0}
               title={schedule.length === 0
-                ? 'The line has no rate yet, so there is no interest to schedule'
-                : 'Write the interest months and the repayment into the credit schedule'}
+                ? 'Kredit još nema kamatnu stopu, pa nema kamate za plan otplate'
+                : 'Upiši mesečne kamate i otplatu glavnice u plan otplate'}
               style={{ ...btn('#00D47E'), opacity: busy || schedule.length === 0 ? 0.45 : 1 }}>
-              {busy ? 'Writing…' : 'Generate the schedule'}
+              {busy ? 'Upisivanje…' : 'Napravi plan otplate'}
             </button>
             {msg && <span style={{ fontSize: '11.5px', color: '#7A9BB8', alignSelf: 'center' }}>{msg}</span>}
           </div>
 
           <div style={{ fontSize: '11.5px', color: '#7A9BB8', lineHeight: 1.7, marginBottom: '14px' }}>
-            Interest only until <strong style={{ color: '#DCE9F6' }}>{credit.maturity_date || 'maturity'}</strong>,
-            then <strong style={{ color: '#DCE9F6' }}>{fmtIn(credit.principal_amount, credit.currency)}</strong> repaid in one payment.
-            {' '}Still owed from this month:{' '}
-            <strong style={{ color: '#DCE9F6' }}>{fmtIn(owed.principal, credit.currency)}</strong> principal
+            Samo kamata do <strong style={{ color: '#DCE9F6' }}>{credit.maturity_date ? fmtDate(credit.maturity_date) : 'dospeća'}</strong>,
+            a zatim se <strong style={{ color: '#DCE9F6' }}>{fmtIn(credit.principal_amount, credit.currency)}</strong> vraća jednokratno.
+            {' '}Duguje se od ovog meseca:{' '}
+            <strong style={{ color: '#DCE9F6' }}>{fmtIn(owed.principal, credit.currency)}</strong> glavnice
             {owed.interest === null
-              ? <span style={{ color: '#F5A623' }}> and an unpriced amount of interest — record the benchmark to see it</span>
-              : <> plus <strong style={{ color: '#DCE9F6' }}>{fmtIn(owed.interest, credit.currency)}</strong> interest over {schedule.length} month{schedule.length === 1 ? '' : 's'}</>}
+              ? <span style={{ color: '#F5A623' }}> i kamata koja još nije obračunata — unesite referentnu stopu da biste je videli</span>
+              : <> i <strong style={{ color: '#DCE9F6' }}>{fmtIn(owed.interest, credit.currency)}</strong> kamate za {countOf(schedule.length, 'mesec', 'meseca', 'meseci')}</>}
             {existing !== null && existing > 0 && (
-              <> · <span style={{ color: '#F5A623' }}>{existing} outstanding instalment{existing === 1 ? '' : 's'} already on the schedule — generating replaces the ones from this month on</span></>
+              <> · <span style={{ color: '#F5A623' }}>{countOf(existing, 'neplaćena rata', 'neplaćene rate', 'neplaćenih rata')} već {plural(existing, 'postoji', 'postoje', 'postoji')} u planu otplate — novi plan zamenjuje rate od ovog meseca nadalje</span></>
             )}
           </div>
 
           {history.length > 0 && (
             <div style={{ marginBottom: '6px' }}>
               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '6px' }}>
-                Rolled {history.length} time{history.length === 1 ? '' : 's'}
+                Produžen {countOf(history.length, 'put', 'puta', 'puta')}
               </div>
               {history.map((h, i) => (
                 <div key={i} style={{ fontSize: '11.5px', color: '#7A9BB8', lineHeight: 1.8 }}>
-                  {h.extended_on}: {h.previous_maturity || '—'} → <strong style={{ color: '#DCE9F6' }}>{h.new_maturity}</strong>
+                  {fmtDate(h.extended_on)}: {fmtDate(h.previous_maturity)} → <strong style={{ color: '#DCE9F6' }}>{fmtDate(h.new_maturity)}</strong>
                   {h.reason ? ` · ${h.reason}` : ''}
                 </div>
               ))}
@@ -420,9 +425,9 @@ function ExtendDialog({ credit, onClose, onSaved }: {
   const [error, setError] = useState('')
 
   const save = async () => {
-    if (!to) { setError('Pick the new maturity date.'); return }
+    if (!to) { setError('Izaberite novi datum dospeća.'); return }
     if (credit.maturity_date && to <= credit.maturity_date) {
-      setError('The new maturity has to be later than the current one. To shorten a line, close it and record the repayment.')
+      setError('Novo dospeće mora biti posle trenutnog. Da biste skratili kredit, zatvorite ga i unesite otplatu.')
       return
     }
     setSaving(true); setError('')
@@ -439,7 +444,7 @@ function ExtendDialog({ credit, onClose, onSaved }: {
     })
     if (logErr) { setError(logErr.message); setSaving(false); return }
 
-    const { ok, message } = await runWrite('Extend the maturity',
+    const { ok, message } = await runWrite('Produženje dospeća',
       supabase.from('credits').update({ maturity_date: to, last_payment_date: to }).eq('id', credit.id))
     setSaving(false)
     if (!ok) { setError(message); return }
@@ -447,25 +452,25 @@ function ExtendDialog({ credit, onClose, onSaved }: {
   }
 
   return (
-    <Dialog kicker="Revolving" title="Extend the maturity" onClose={onClose}>
+    <Dialog kicker="Revolving" title="Produženje dospeća" onClose={onClose}>
       {error && <Problem>{error}</Problem>}
-      <Field label="Currently matures">
+      <Field label="Trenutno dospeće">
         <div style={{ ...inp, background: 'transparent', color: '#7A9BB8' }}>
-          {credit.maturity_date || '—'}
+          {fmtDate(credit.maturity_date)}
         </div>
       </Field>
-      <Field label="New maturity *">
+      <Field label="Novo dospeće *">
         <input type="date" style={inp} value={to} onChange={e => setTo(e.target.value)} />
       </Field>
-      <Field label="Why">
-        <input style={inp} placeholder="e.g. rolled for another year" value={reason} onChange={e => setReason(e.target.value)} />
+      <Field label="Razlog">
+        <input style={inp} placeholder="npr. produžen za još godinu dana" value={reason} onChange={e => setReason(e.target.value)} />
       </Field>
       <div style={{ fontSize: '11.5px', color: '#7A9BB8', lineHeight: 1.6, marginBottom: '16px' }}>
-        The roll is recorded as well as applied, so how many times this line has been
-        extended stays answerable. Regenerate the schedule afterwards to bill interest
-        through to the new date.
+        Produženje se beleži, a ne samo primenjuje, pa se uvek vidi koliko je puta
+        ovaj kredit produžen. Posle toga ponovo napravite plan otplate da bi kamata
+        bila obračunata do novog datuma.
       </div>
-      <Actions onClose={onClose} onSave={save} saving={saving} label="Extend" />
+      <Actions onClose={onClose} onSave={save} saving={saving} label="Produži" />
     </Dialog>
   )
 }
@@ -504,7 +509,7 @@ function RateDialog({ credit, onClose, onSaved }: {
     const why = whyNotPriceable(typed, mode, margin, from)
     if (why) { setError(why); return }
     setSaving(true); setError('')
-    const { ok, message } = await runWrite('Record the rate reset',
+    const { ok, message } = await runWrite('Unos promene kamatne stope',
       supabase.from('credit_rate_resets').insert({
         credit_id: credit.id,
         effective_from: from,
@@ -517,12 +522,12 @@ function RateDialog({ credit, onClose, onSaved }: {
   }
 
   return (
-    <Dialog kicker="Revolving" title="Record a rate reset" onClose={onClose}>
+    <Dialog kicker="Revolving" title="Promena kamatne stope" onClose={onClose}>
       {error && <Problem>{error}</Problem>}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
         {([
-          ['benchmark', `${credit.reference_rate_name || 'Benchmark'} only`],
-          ['allin', 'All-in rate'],
+          ['benchmark', `Samo ${credit.reference_rate_name || 'referentna stopa'}`],
+          ['allin', 'Ukupna kamatna stopa'],
         ] as const).map(([m, label]) => (
           <button key={m} type="button" onClick={() => setMode(m)}
             style={{
@@ -537,35 +542,35 @@ function RateDialog({ credit, onClose, onSaved }: {
         ))}
       </div>
       <Field label={mode === 'benchmark'
-        ? `${credit.reference_rate_name || 'Benchmark'} (%) *`
-        : 'All-in rate, margin included (%) *'}>
-        <input style={inp} placeholder={mode === 'benchmark' ? 'e.g. 2.4' : 'e.g. 5.35'}
+        ? `${credit.reference_rate_name || 'Referentna stopa'} (%) *`
+        : 'Ukupna stopa, sa maržom (%) *'}>
+        <input style={inp} placeholder={mode === 'benchmark' ? 'npr. 2,4' : 'npr. 5,35'}
           value={rate} onChange={e => setRate(e.target.value)} />
       </Field>
-      <Field label="Applies from *">
+      <Field label="Važi od *">
         <input type="date" style={inp} value={from} onChange={e => setFrom(e.target.value)} />
       </Field>
-      <Field label="Note">
-        <input style={inp} placeholder="e.g. Q4 reset" value={note} onChange={e => setNote(e.target.value)} />
+      <Field label="Napomena">
+        <input style={inp} placeholder="npr. promena za 4. kvartal" value={note} onChange={e => setNote(e.target.value)} />
       </Field>
       <div style={{ fontSize: '11.5px', color: '#7A9BB8', lineHeight: 1.6, marginBottom: '16px' }}>
-        Margin <strong style={{ color: '#DCE9F6' }}>{margin ?? '—'}%</strong>
+        Marža <strong style={{ color: '#DCE9F6' }}>{margin ?? '—'}%</strong>
         {benchmark !== null && (
-          <> · benchmark <strong style={{ color: '#DCE9F6' }}>{benchmark.toFixed(2)}%</strong></>
+          <> · referentna stopa <strong style={{ color: '#DCE9F6' }}>{benchmark.toFixed(2)}%</strong></>
         )}
-        {allIn !== null && <> · all-in <strong style={{ color: '#DCE9F6' }}>{allIn.toFixed(2)}%</strong></>}.
+        {allIn !== null && <> · ukupno <strong style={{ color: '#DCE9F6' }}>{allIn.toFixed(2)}%</strong></>}.
         {mode === 'allin' && (
-          <> {' '}The benchmark is what gets stored — it is the half that moves, and a
-          reset holding the total would be wrong the moment the margin was corrected.</>
+          <> {' '}Čuva se referentna stopa — to je deo koji se menja, a promena koja bi
+          čuvala ukupnu stopu bila bi pogrešna čim se marža ispravi.</>
         )}
         {margin == null && (
-          <span style={{ color: '#F5A623' }}> {' '}This line has no margin recorded yet —
-          set one with Edit credit, or the all-in rate cannot be split.</span>
+          <span style={{ color: '#F5A623' }}> {' '}Za ovaj kredit još nije uneta marža —
+          unesite je preko „Izmeni kredit“, inače ukupna stopa ne može da se razdvoji.</span>
         )}
-        {' '}Resets are appended, never edited: a month already billed keeps the rate it
-        was billed at, and this one prices the months from the date above onward.
+        {' '}Promene se samo dodaju, nikad ne menjaju: mesec koji je već obračunat zadržava
+        svoju stopu, a ova važi za mesece od gornjeg datuma nadalje.
       </div>
-      <Actions onClose={onClose} onSave={save} saving={saving} label="Record" />
+      <Actions onClose={onClose} onSave={save} saving={saving} label="Sačuvaj" />
     </Dialog>
   )
 }
@@ -598,14 +603,14 @@ export function whyNotPriceable(
 ): string | null {
   if (!Number.isFinite(typed)) {
     return mode === 'benchmark'
-      ? 'Enter the benchmark rate, e.g. 2.4 for 2.4%.'
-      : 'Enter the all-in rate, e.g. 5.35 for 5.35%.'
+      ? 'Unesite referentnu stopu, npr. 2,4 za 2,4%.'
+      : 'Unesite ukupnu kamatnu stopu, npr. 5,35 za 5,35%.'
   }
   if (mode === 'allin' && (margin === null || margin === undefined)) {
-    return 'This line has no margin recorded, so an all-in rate cannot be split into one. '
-      + 'Set the margin with Edit credit, or enter the benchmark on its own.'
+    return 'Za ovaj kredit nije uneta marža, pa ukupna stopa ne može da se razdvoji. '
+      + 'Unesite maržu preko „Izmeni kredit“ ili unesite samo referentnu stopu.'
   }
-  if (!from) return 'Say which day this rate starts applying.'
+  if (!from) return 'Unesite datum od kog stopa važi.'
   return null
 }
 
@@ -622,7 +627,7 @@ const Dialog = ({ kicker, title, onClose, children }: {
           <div style={{ fontSize: '10px', fontWeight: 600, color: '#8B8BFF', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px' }}>{kicker}</div>
           <div style={{ fontFamily: "'DM Serif Display', Georgia, serif", fontSize: '20px', color: '#E8F1FB' }}>{title}</div>
         </div>
-        <button onClick={onClose} aria-label="Close"
+        <button onClick={onClose} aria-label="Zatvori"
           style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: '#7A9BB8', width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer', fontSize: '18px' }}>×</button>
       </div>
       <div style={{ padding: '22px' }}>{children}</div>
@@ -647,10 +652,10 @@ const Actions = ({ onClose, onSave, saving, label }: {
   onClose: () => void; onSave: () => void; saving: boolean; label: string
 }) => (
   <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-    <button onClick={onClose} style={{ fontFamily: "'Inter',sans-serif", fontSize: '13px', padding: '8px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', background: 'transparent', color: '#7A9BB8', cursor: 'pointer' }}>Cancel</button>
+    <button onClick={onClose} style={{ fontFamily: "'Inter',sans-serif", fontSize: '13px', padding: '8px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', background: 'transparent', color: '#7A9BB8', cursor: 'pointer' }}>Otkaži</button>
     <button onClick={onSave} disabled={saving}
       style={{ fontFamily: "'Inter',sans-serif", fontSize: '13px', fontWeight: 600, padding: '8px 18px', borderRadius: '8px', border: 'none', background: '#8B8BFF', color: '#060E1A', cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
-      {saving ? 'Saving…' : label}
+      {saving ? 'Čuvanje…' : label}
     </button>
   </div>
 )

@@ -3,6 +3,8 @@ import { supabase } from '../supabase'
 import { fetchAllPages } from '../utils/fetchAllPages'
 import { fmtMoneyCompact, fmtMoney, type BudgetFigureFormat } from '../utils/formatters'
 import { makeClassKey } from '../services/budgetKeys'
+import { countOf, plural } from '../utils/plural'
+import { srDate } from '../utils/months'
 import { carriesInto, isCreditPayment, figureIn, type Adjustment, type BudgetCurrency } from '../services/budgetForecast'
 import {
   EntriesModal, EntryRow, useEntryEditor, em,
@@ -214,7 +216,7 @@ export default function BudgetDrillModal({
 
   return (
     <EntriesModal
-      kicker={drill.mode === 'actual' ? 'ACTUAL TRANSACTIONS' : 'BUDGET ESTIMATE'}
+      kicker={drill.mode === 'actual' ? 'OSTVARENE TRANSAKCIJE' : 'BUDŽETSKA PROCENA'}
       title={drill.rowLabel}
       subtitle={
         <>
@@ -223,27 +225,27 @@ export default function BudgetDrillModal({
             <span style={{ marginLeft: '12px', color: '#FF5B5A', fontWeight: '600', fontFamily: "'DM Mono', monospace" }}>
               {/* Capped lists do not add up to the cell, and saying "total"
                   when they do not is how a report loses its reader. */}
-              {format(total)}{capped ? ` across the ${entries.length} shown` : ' total'}
+              {format(total)}{capped ? ` za ${countOf(entries.length, 'prikazanu stavku', 'prikazane stavke', 'prikazanih stavki')}` : ' ukupno'}
             </span>
           )}
         </>
       }
       footerLeft={drill.mode === 'estimate'
-        ? (onChange ? <button style={dm.changeBtn} onClick={onChange}>Change this figure</button> : undefined)
+        ? (onChange ? <button style={dm.changeBtn} onClick={onChange}>Izmeni ovaj iznos</button> : undefined)
         : (!loading && entries.length > 0
           ? (capped
-            ? `Showing ${entries.length.toLocaleString()} of ${matched.toLocaleString()} transactions · click Edit to modify`
-            : `${matched.toLocaleString()} transaction${matched !== 1 ? 's' : ''} · click Edit to modify`)
+            ? `Prikazano ${entries.length.toLocaleString('sr-Latn-RS')} od ${matched.toLocaleString('sr-Latn-RS')} transakcija · kliknite Izmeni za izmenu`
+            : `${matched.toLocaleString('sr-Latn-RS')} ${plural(matched, 'transakcija', 'transakcije', 'transakcija')} · kliknite Izmeni za izmenu`)
           : undefined)}
       onClose={onClose}>
 
       {(loadError || error) && <div style={em.errorBox}>{loadError || error}</div>}
 
       {loading ? (
-        <div style={em.empty}>Loading…</div>
+        <div style={em.empty}>Učitavanje…</div>
       ) : drill.mode === 'actual' ? (
         entries.length === 0 ? (
-          <div style={em.empty}>No transactions found for this category and month.</div>
+          <div style={em.empty}>Nema transakcija za ovu kategoriju i mesec.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {entries.map(item => (
@@ -254,18 +256,18 @@ export default function BudgetDrillModal({
       ) : (
         <>
           <div style={em.infoBox}>
-            <div style={{ fontSize: '12px', fontWeight: '600', color: '#00D47E', marginBottom: '6px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>How a budget figure is arrived at</div>
+            <div style={{ fontSize: '12px', fontWeight: '600', color: '#00D47E', marginBottom: '6px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>Kako nastaje budžetski iznos</div>
             <div style={{ fontSize: '13px', color: '#DCE9F6', lineHeight: 1.55 }}>
-              The benchmark month's own spend, carried forward by the cash-flow classification already on it —
-              monthly every month, quarterly and yearly in the month they fall due, one-time and capex not at all.
-              Every change since is a ledger entry, and a parent is the sum of what sits under it.
+              Potrošnja referentnog meseca, preneta dalje prema klasifikaciji novčanog toka koju već ima —
+              mesečni troškovi svakog meseca, kvartalni i godišnji u mesecu dospeća, jednokratni i kapitalni nikako.
+              Svaka kasnija promena je zabeležena izmena budžeta, a nadređena stavka je zbir svega ispod nje.
             </div>
           </div>
 
           {/* 1 — the entries the figure was seeded from. */}
-          <div style={em.sectionTitle}>What seeds this</div>
+          <div style={em.sectionTitle}>Odakle potiče iznos</div>
           {entries.length === 0
-            ? <div style={dm.nothing}>Nothing recurring in {benchmarkLabel} for this line.</div>
+            ? <div style={dm.nothing}>U referentnom mesecu ({benchmarkLabel}) nema ponavljajućih troškova za ovu stavku.</div>
             : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {entries.map(item => (
@@ -276,9 +278,9 @@ export default function BudgetDrillModal({
 
           {/* 2 — the ledger. Handed in by the page, so it is literally the set
               `applyLedger` moved the figure with, in the order it read them. */}
-          <div style={em.sectionTitle}>Changes</div>
+          <div style={em.sectionTitle}>Izmene</div>
           {ledgerEntries.length === 0
-            ? <div style={dm.nothing}>Never changed — this is the seeded figure.</div>
+            ? <div style={dm.nothing}>Nikad menjano — ovo je iznos preuzet iz referentnog meseca.</div>
             : ledgerEntries.map(a => {
               // In the table's currency where the entry has it; otherwise its
               // RSD figure, labelled RSD — never an RSD figure called EUR.
@@ -290,12 +292,12 @@ export default function BudgetDrillModal({
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
                   <span style={{ color: '#DCE9F6' }}>{a.reason}</span>
                   <span style={{ color: amount > 0 ? '#FF5B5A' : '#00D47E', whiteSpace: 'nowrap' }}>
-                    {a.kind === 'set' ? 'set to ' : amount > 0 ? '+' : ''}
+                    {a.kind === 'set' ? 'postavljeno na ' : amount > 0 ? '+' : ''}
                     {fmtMoney(amount, unit)}
                   </span>
                 </div>
                 <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px' }}>
-                  {new Date(a.created_at).toLocaleDateString('en-GB')}
+                  {srDate(a.created_at)}
                 </div>
               </div>
               )

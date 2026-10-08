@@ -35,6 +35,7 @@
 // after it has been summed.
 
 import { fmtMoney } from '../utils/formatters'
+import { monthLongLabel, srDate } from '../utils/months'
 import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 export type MonthKey = string
@@ -179,12 +180,12 @@ export function cashTimeline(input: CashInput): CashTimeline {
 
   if (!position) {
     problems.push(
-      'No cash position has been entered, so there is no balance to walk — only the '
-      + 'flows. Enter what is in the accounts and the balance appears.')
+      'Stanje novca nije uneto, pa nema stanja koje bi se pratilo — prikazani su samo '
+      + 'prilivi i odlivi. Unesite stanje na računima i pojaviće se i stanje.')
   } else if (anchorIndex === -1) {
     problems.push(
-      `The cash position was read on ${position.asOf}, which is outside the months drawn `
-      + 'here, so the balance cannot be anchored to it.')
+      `Stanje novca je uneto na dan ${srDate(position.asOf)}, što je van prikazanih meseci, `
+      + 'pa stanje ne može da se veže za njega.')
   } else {
     // The reading is a point inside its month; the column is month-end.
     const after = input.postedAfterReading || { inflow: 0, outflow: 0 }
@@ -208,7 +209,7 @@ export function cashTimeline(input: CashInput): CashTimeline {
 
   if (trough && (trough.closing as number) < 0) {
     problems.push(
-      `On this line the balance goes negative in ${trough.month}, reaching `
+      `Na ovoj liniji stanje prelazi u minus u mesecu ${monthLongLabel(trough.month)} i dostiže `
       + `${fmtMoney(trough.closing as number, input.currency)}.`)
   }
 

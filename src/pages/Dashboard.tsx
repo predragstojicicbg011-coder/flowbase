@@ -12,6 +12,13 @@ import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import MetricCard from '../components/MetricCard'
 import { SkeletonRows, Rise, useDrawLength } from '../components/motion'
 import { fetchAllPages, countRows } from '../utils/fetchAllPages'
+import { MONTHS_SHORT_SR } from '../utils/months'
+import { countOf } from '../utils/plural'
+
+/** How a partner's type reads on screen; the stored value stays English. */
+const PARTNER_TYPE_LABEL: Record<string, string> = {
+  vendor: 'dobavljač', customer: 'kupac', both: 'kupac i dobavljač', company: 'firma', investor: 'investitor', tenant: 'zakupac',
+}
 
 /** 'all' for every company together, otherwise one company's id. */
 type Entity = 'all' | string
@@ -102,8 +109,8 @@ function AreaChart({ months, revenues, expenses }: { months: string[]; revenues:
                 {/* Tooltip */}
                 <rect x={Math.min(xPos(i) - 45, W - padR - 95)} y={padT + 4} width="90" height="42" rx="6" fill="#0D1B2A" opacity="0.88" />
                 <text x={Math.min(xPos(i), W - padR - 50)} y={padT + 17} textAnchor="middle" fontSize="9.5" fill="#5DCAA5" fontFamily="system-ui" fontWeight="600">{m}</text>
-                <text x={Math.min(xPos(i), W - padR - 50)} y={padT + 29} textAnchor="middle" fontSize="8.5" fill="#9FE1CB" fontFamily="system-ui">Rev: {fmt(revenues[i])}</text>
-                <text x={Math.min(xPos(i), W - padR - 50)} y={padT + 40} textAnchor="middle" fontSize="8.5" fill="#F5A9A9" fontFamily="system-ui">Exp: {fmt(expenses[i])}</text>
+                <text x={Math.min(xPos(i), W - padR - 50)} y={padT + 29} textAnchor="middle" fontSize="8.5" fill="#9FE1CB" fontFamily="system-ui">Prihodi: {fmt(revenues[i])}</text>
+                <text x={Math.min(xPos(i), W - padR - 50)} y={padT + 40} textAnchor="middle" fontSize="8.5" fill="#F5A9A9" fontFamily="system-ui">Troškovi: {fmt(expenses[i])}</text>
               </>
             )}
             <rect
@@ -161,8 +168,8 @@ function DonutChart({ segments }: { segments: { label: string; value: number; co
         <path key={i} d={arc.d} fill={arc.color} fillOpacity="0.9" stroke="#0D1B2C" strokeWidth="1.5" />
       ))}
       <circle cx={cx} cy={cy} r={28} fill="#0D1B2C" />
-      <text x={cx} y={cy - 4} textAnchor="middle" fontSize="10" fill="#7A9BB8" fontFamily="system-ui">EXPENSES</text>
-      <text x={cx} y={cy + 10} textAnchor="middle" fontSize="9" fill="rgba(255,255,255,0.30)" fontFamily="system-ui">breakdown</text>
+      <text x={cx} y={cy - 4} textAnchor="middle" fontSize="10" fill="#7A9BB8" fontFamily="system-ui">TROŠKOVI</text>
+      <text x={cx} y={cy + 10} textAnchor="middle" fontSize="9" fill="rgba(255,255,255,0.30)" fontFamily="system-ui">struktura</text>
     </svg>
   )
 }
@@ -195,7 +202,7 @@ export default function Dashboard() {
   const [entity, setEntity] = useState<Entity>('all')
   const [dateFrom, setDateFrom] = useState(() => `${new Date().getFullYear()}-01-01`)
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0])
-  const [activeShortcut, setActiveShortcut] = useState('YTD')
+  const [activeShortcut, setActiveShortcut] = useState('Od početka godine')
   const { companies, defaultCompany, showPicker, loading: companiesLoading } = useCompanies()
   const [loading, setLoading] = useState(true)
 
@@ -223,7 +230,7 @@ export default function Dashboard() {
   // One chip for everything together and one per company. Shown only when
   // there is more than one company; with one, "all" IS that company.
   const entities = [
-    { id: 'all' as Entity, name: showPicker ? 'All companies' : (defaultCompany?.name || 'All companies'), sub: 'Consolidated', badge: 'ALL', color: '#1D9E75', bg: 'rgba(29,158,117,0.08)' },
+    { id: 'all' as Entity, name: showPicker ? 'Sve firme' : (defaultCompany?.name || 'Sve firme'), sub: 'Zbirno', badge: 'SVE', color: '#1D9E75', bg: 'rgba(29,158,117,0.08)' },
     ...companies.map((c, i) => {
       const color = ENTITY_COLORS[i % ENTITY_COLORS.length]
       return {
@@ -234,10 +241,10 @@ export default function Dashboard() {
   ]
 
   const shortcuts = [
-    { label: 'This month', from: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })(), to: new Date().toISOString().split('T')[0] },
-    { label: 'This quarter', from: (() => { const d = new Date(); const q = Math.floor(d.getMonth() / 3); return `${d.getFullYear()}-${String(q * 3 + 1).padStart(2, '0')}-01` })(), to: new Date().toISOString().split('T')[0] },
-    { label: 'YTD', from: `${new Date().getFullYear()}-01-01`, to: new Date().toISOString().split('T')[0] },
-    { label: 'Last month', from: (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })(), to: (() => { const d = new Date(); d.setDate(0); return d.toISOString().split('T')[0] })() },
+    { label: 'Ovaj mesec', from: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })(), to: new Date().toISOString().split('T')[0] },
+    { label: 'Ovaj kvartal', from: (() => { const d = new Date(); const q = Math.floor(d.getMonth() / 3); return `${d.getFullYear()}-${String(q * 3 + 1).padStart(2, '0')}-01` })(), to: new Date().toISOString().split('T')[0] },
+    { label: 'Od početka godine', from: `${new Date().getFullYear()}-01-01`, to: new Date().toISOString().split('T')[0] },
+    { label: 'Prošli mesec', from: (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })(), to: (() => { const d = new Date(); d.setDate(0); return d.toISOString().split('T')[0] })() },
   ]
 
   const CATEGORY_COLORS = ['#1D9E75', '#185FA5', '#BA7517', '#D4537E', '#7C3AED', '#0891B2', '#DC2626', '#059669']
@@ -279,7 +286,7 @@ export default function Dashboard() {
         if (e.tx_type === 'expense' || e.tx_type === 'invoice_expense') monthMap[key].expenses += amt(e)
       })
       const monthly = Object.entries(monthMap).sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => ({
-        month: new Date(key + '-01').toLocaleString('en', { month: 'short' }),
+        month: MONTHS_SHORT_SR[Number(key.slice(5, 7)) - 1] ?? key,
         ...v,
       }))
       setMonthlyData(monthly)
@@ -287,7 +294,7 @@ export default function Dashboard() {
       // ── Expense by category ──
       const catMap: Record<string, number> = {}
       ;(plEntries || []).filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').forEach(e => {
-        const cat = e.pl_category || 'Other'
+        const cat = e.pl_category || 'Ostalo'
         catMap[cat] = (catMap[cat] || 0) + amt(e)
       })
       const cats = Object.entries(catMap).sort(([, a], [, b]) => b - a).slice(0, 6).map(([label, value], i) => ({
@@ -333,7 +340,7 @@ export default function Dashboard() {
       })
       const partnerMap: Record<string, { amount: number; type: string }> = {}
       txData.forEach((t: any) => {
-        const name = t.partners?.name || 'Unknown'
+        const name = t.partners?.name || 'Nepoznat'
         const type = t.partners?.type || 'vendor'
         if (!partnerMap[name]) partnerMap[name] = { amount: 0, type }
         partnerMap[name].amount += amt(t)
@@ -351,12 +358,12 @@ export default function Dashboard() {
 
       // ── Alerts ──
       const newAlerts: { type: 'warn' | 'ok' | 'info'; text: string }[] = []
-      if (overdueCount > 0) newAlerts.push({ type: 'warn', text: `${overdueCount} overdue receivable${overdueCount > 1 ? 's' : ''}` })
-      if (overduePayables > 0) newAlerts.push({ type: 'warn', text: `${overduePayables} overdue supplier invoice${overduePayables > 1 ? 's' : ''}` })
-      if (receivables.length > 0) newAlerts.push({ type: 'info', text: `${receivables.length} open receivable${receivables.length > 1 ? 's' : ''} · ${money(unpaidTotal)} to collect` })
-      if (payables.length > 0) newAlerts.push({ type: 'info', text: `${payables.length} open supplier invoice${payables.length > 1 ? 's' : ''} · ${money(payablesTotal)} to pay` })
-      if (unmatchedPt > 0) newAlerts.push({ type: 'warn', text: `${unmatchedPt} unpaired pass-through entries` })
-      if (newAlerts.length === 0) newAlerts.push({ type: 'ok', text: 'All clear — no pending alerts' })
+      if (overdueCount > 0) newAlerts.push({ type: 'warn', text: `${countOf(overdueCount, 'izlazna faktura', 'izlazne fakture', 'izlaznih faktura')} u kašnjenju` })
+      if (overduePayables > 0) newAlerts.push({ type: 'warn', text: `${countOf(overduePayables, 'ulazna faktura', 'ulazne fakture', 'ulaznih faktura')} u kašnjenju` })
+      if (receivables.length > 0) newAlerts.push({ type: 'info', text: `${countOf(receivables.length, 'otvorena izlazna faktura', 'otvorene izlazne fakture', 'otvorenih izlaznih faktura')} · ${money(unpaidTotal)} za naplatu` })
+      if (payables.length > 0) newAlerts.push({ type: 'info', text: `${countOf(payables.length, 'otvorena ulazna faktura', 'otvorene ulazne fakture', 'otvorenih ulaznih faktura')} · ${money(payablesTotal)} za plaćanje` })
+      if (unmatchedPt > 0) newAlerts.push({ type: 'warn', text: `${countOf(unmatchedPt, 'neuparena prolazna stavka', 'neuparene prolazne stavke', 'neuparenih prolaznih stavki')}` })
+      if (newAlerts.length === 0) newAlerts.push({ type: 'ok', text: 'Sve je u redu — nema upozorenja' })
 
       setMetrics({
         totalRevenue: revenue, totalExpenses: expenses, netProfit: revenue - expenses,
@@ -375,7 +382,7 @@ export default function Dashboard() {
   }, [fetchAll, companiesLoading])
 
   const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const greeting = hour < 12 ? 'Dobro jutro' : hour < 17 ? 'Dobar dan' : 'Dobro veče'
   const username = user?.email?.split('@')[0] ?? 'admin'
   const margin = metrics.totalRevenue > 0 ? (metrics.netProfit / metrics.totalRevenue * 100) : 0
   const activeEntity = entities.find(e => e.id === entity) || entities[0]
@@ -391,7 +398,7 @@ export default function Dashboard() {
         {/* HEADER */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '2rem' }}>
           <div>
-            <div style={s.greetingDate}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase()}</div>
+            <div style={s.greetingDate}>{new Date().toLocaleDateString('sr-Latn-RS', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase()}</div>
             <h1 style={s.greetingTitle}>{greeting}, <span style={{ color: '#00D47E', fontStyle: 'italic' }}>{username}</span></h1>
           </div>
           {/* Period bar inline */}
@@ -435,11 +442,11 @@ export default function Dashboard() {
         <div style={s.metricsRow}>
           <Rise delay={0}>
           <MetricCard
-            label="Total Revenue"
+            label="Ukupni prihodi"
             value={loading ? '—' : money(metrics.totalRevenue)}
             amount={loading ? undefined : metrics.totalRevenue}
             format={money}
-            sub={`YTD ${activeEntity.name}`}
+            sub={`Od početka godine · ${activeEntity.name}`}
             color="#00D47E"
             darkColor="#00D47E"
             sparklineData={sparkRevenue}
@@ -447,11 +454,11 @@ export default function Dashboard() {
           </Rise>
           <Rise delay={55}>
           <MetricCard
-            label="Total Expenses"
+            label="Ukupni troškovi"
             value={loading ? '—' : money(metrics.totalExpenses)}
             amount={loading ? undefined : metrics.totalExpenses}
             format={money}
-            sub={metrics.totalRevenue > 0 ? `${((metrics.totalExpenses / metrics.totalRevenue) * 100).toFixed(0)}% of revenue` : 'No revenue'}
+            sub={metrics.totalRevenue > 0 ? `${((metrics.totalExpenses / metrics.totalRevenue) * 100).toFixed(0)}% prihoda` : 'Nema prihoda'}
             color="#FF5B5A"
             darkColor="#FF5B5A"
             sparklineData={sparkExpenses}
@@ -459,11 +466,11 @@ export default function Dashboard() {
           </Rise>
           <Rise delay={110}>
           <MetricCard
-            label="Net Profit / Loss"
+            label="Neto dobit / gubitak"
             value={loading ? '—' : money(metrics.netProfit)}
             amount={loading ? undefined : metrics.netProfit}
             format={money}
-            sub={`${margin.toFixed(1)}% margin`}
+            sub={`Marža ${margin.toFixed(1).replace('.', ',')}%`}
             color={metrics.netProfit >= 0 ? '#00D47E' : '#FF5B5A'}
             darkColor={metrics.netProfit >= 0 ? '#00D47E' : '#FF5B5A'}
             sparklineData={monthlyData.map(m => m.revenue - m.expenses)}
@@ -471,9 +478,9 @@ export default function Dashboard() {
           </Rise>
           <Rise delay={165}>
           <MetricCard
-            label="Receivables"
+            label="Potraživanja"
             value={loading ? '—' : metrics.openInvoicesCount > 0 ? money(metrics.unpaidInvoices) : fmtMoney(0, currency, 0)}
-            sub={`${metrics.openInvoicesCount} open${metrics.overdueCount > 0 ? ` · ${metrics.overdueCount} overdue` : ''} · payables ${money(metrics.payablesTotal)}`}
+            sub={`${metrics.openInvoicesCount} otvoreno${metrics.overdueCount > 0 ? ` · ${metrics.overdueCount} u kašnjenju` : ''} · obaveze ${money(metrics.payablesTotal)}`}
             color={metrics.overdueCount > 0 ? '#F5A623' : '#00D47E'}
             darkColor={metrics.overdueCount > 0 ? '#F5A623' : '#00D47E'}
             sparklineData={[]}
@@ -490,15 +497,15 @@ export default function Dashboard() {
             {/* Revenue vs Expenses Bar Chart */}
             <div style={s.card}>
               <div style={s.cardHeader}>
-                <div style={s.cardTitle}>Revenue vs Expenses</div>
+                <div style={s.cardTitle}>Prihodi i troškovi</div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                     <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#1D9E75', opacity: 0.85 }} />
-                    <span style={{ fontSize: '11px', color: '#7A9BB8' }}>Revenue</span>
+                    <span style={{ fontSize: '11px', color: '#7A9BB8' }}>Prihodi</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                     <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#E24B4A', opacity: 0.7 }} />
-                    <span style={{ fontSize: '11px', color: '#7A9BB8' }}>Expenses</span>
+                    <span style={{ fontSize: '11px', color: '#7A9BB8' }}>Troškovi</span>
                   </div>
                 </div>
               </div>
@@ -508,7 +515,7 @@ export default function Dashboard() {
                       widths={[70, 92, 58, 84, 96, 44]} />
                   </div>
               ) : monthlyData.length === 0 ? (
-                <div style={s.emptyBox}>No data for selected period</div>
+                <div style={s.emptyBox}>Nema podataka za izabrani period</div>
               ) : (
                 <div style={{ padding: '0 4px' }}>
                   <AreaChart
@@ -526,10 +533,10 @@ export default function Dashboard() {
               {/* Expense by Category */}
               <div style={s.card}>
                 <div style={s.cardHeader}>
-                  <div style={s.cardTitle}>Expense breakdown</div>
+                  <div style={s.cardTitle}>Struktura troškova</div>
                 </div>
                 {loading ? <SkeletonRows rows={6} /> : expenseByCategory.length === 0 ? (
-                  <div style={s.emptyBox}>No expenses</div>
+                  <div style={s.emptyBox}>Nema troškova</div>
                 ) : (
                   <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
                     <DonutChart segments={expenseByCategory} />
@@ -549,11 +556,11 @@ export default function Dashboard() {
               {/* Top Partners */}
               <div style={s.card}>
                 <div style={s.cardHeader}>
-                  <div style={s.cardTitle}>Top partners</div>
-                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.30)' }}>by volume</span>
+                  <div style={s.cardTitle}>Najveći partneri</div>
+                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.30)' }}>po prometu</span>
                 </div>
                 {loading ? <SkeletonRows rows={5} /> : topPartners.length === 0 ? (
-                  <div style={s.emptyBox}>No partner data</div>
+                  <div style={s.emptyBox}>Nema podataka o partnerima</div>
                 ) : (
                   <div>
                     {topPartners.map((p, i) => (
@@ -563,7 +570,7 @@ export default function Dashboard() {
                         value={p.amount}
                         max={maxPartner}
                         color={i === 0 ? '#0C447C' : i === 1 ? '#185FA5' : i === 2 ? '#4A90D9' : '#7FB8EE'}
-                        sub={p.type}
+                        sub={PARTNER_TYPE_LABEL[p.type] || p.type}
                       />
                     ))}
                   </div>
@@ -574,16 +581,16 @@ export default function Dashboard() {
             {/* Recent activity */}
             <div style={s.card}>
               <div style={s.cardHeader}>
-                <div style={s.cardTitle}>Recent transactions</div>
-                <button style={s.cardLink} onClick={() => setPage('transactions')}>View all →</button>
+                <div style={s.cardTitle}>Poslednje transakcije</div>
+                <button style={s.cardLink} onClick={() => setPage('transactions')}>Prikaži sve →</button>
               </div>
               {loading ? <SkeletonRows rows={5} height={14} /> : recentActivity.length === 0 ? (
-                <div style={s.emptyBox}>No transactions yet</div>
+                <div style={s.emptyBox}>Još nema transakcija</div>
               ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: '12px' }}>
                   <thead>
                     <tr>
-                      {['Date', 'Partner', 'Type', 'Amount', currency].map(h => (
+                      {['Datum', 'Partner', 'Tip', 'Iznos', currency].map(h => (
                         <th key={h} style={{ textAlign: 'left' as const, padding: '0 0 8px', fontSize: '9.5px', color: 'rgba(255,255,255,0.30)', fontWeight: '600', textTransform: 'uppercase' as const, letterSpacing: '0.09em' }}>{h}</th>
                       ))}
                     </tr>
@@ -595,7 +602,7 @@ export default function Dashboard() {
                         <td style={{ padding: '8px 8px 8px 0', fontWeight: '500', color: '#DCE9F6', maxWidth: '130px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{(t.partners as any)?.name || '—'}</td>
                         <td style={{ padding: '8px 8px 8px 0' }}>
                           <span style={{ fontSize: '10px', fontWeight: '500', padding: '2px 7px', borderRadius: '20px', background: t.type === 'direct' ? 'rgba(0,212,126,0.12)' : 'rgba(78,168,255,0.13)', color: t.type === 'direct' ? '#00D47E' : '#4EA8FF' }}>
-                            {t.type === 'invoice_payment' ? 'Inv. pay' : t.type}
+                            {t.type === 'invoice_payment' ? 'plać. fakture' : t.type === 'direct' ? 'direktna' : t.type}
                           </span>
                         </td>
                         <td style={{ padding: '8px 8px 8px 0', fontWeight: '500', color: '#DCE9F6', whiteSpace: 'nowrap' as const }}>{fmtMoney(t.amount || 0, t.currency || 'RSD')}</td>
@@ -614,7 +621,7 @@ export default function Dashboard() {
             {/* Alerts */}
             <div style={s.card}>
               <div style={s.cardHeader}>
-                <div style={s.cardTitle}>Alerts</div>
+                <div style={s.cardTitle}>Upozorenja</div>
                 <span style={{ fontSize: '10px', background: alerts.some(a => a.type === 'warn') ? '#FCEBEB' : '#E1F5EE', color: alerts.some(a => a.type === 'warn') ? '#A32D2D' : '#085041', padding: '2px 8px', borderRadius: '20px', fontWeight: '500' }}>
                   {alerts.length}
                 </span>
@@ -633,8 +640,8 @@ export default function Dashboard() {
             {topProjects.length > 0 && (
               <div style={s.card}>
                 <div style={s.cardHeader}>
-                  <div style={s.cardTitle}>Top projects by margin</div>
-                  <span style={{ fontSize: '11px', color: '#7A9BB8', cursor: 'pointer' }} onClick={() => setPage('projects')}>All →</span>
+                  <div style={s.cardTitle}>Projekti sa najvećom maržom</div>
+                  <span style={{ fontSize: '11px', color: '#7A9BB8', cursor: 'pointer' }} onClick={() => setPage('projects')}>Svi →</span>
                 </div>
                 {topProjects.map(p => (
                   <div key={p.projectId || 'overhead'} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
@@ -650,15 +657,15 @@ export default function Dashboard() {
             {/* At a glance */}
             <div style={s.card}>
               <div style={s.cardHeader}>
-                <div style={s.cardTitle}>At a glance</div>
+                <div style={s.cardTitle}>Ukratko</div>
               </div>
               {[
-                { label: 'Net margin', value: `${margin.toFixed(1)}%`, color: margin >= 0 ? '#00D47E' : '#FF5B5A' },
-                { label: 'Pass-through unpaired', value: String(metrics.unmatchedPassthrough), color: metrics.unmatchedPassthrough > 0 ? '#F5A623' : '#00D47E' },
-                { label: 'Overdue invoices', value: String(metrics.overdueCount), color: metrics.overdueCount > 0 ? '#FF5B5A' : '#00D47E' },
-                { label: 'Open invoices', value: String(metrics.openInvoicesCount), color: '#7A9BB8' },
-                { label: 'Expense categories', value: String(expenseByCategory.length), color: '#7A9BB8' },
-                { label: 'Active partners', value: String(topPartners.length), color: '#7A9BB8' },
+                { label: 'Neto marža', value: `${margin.toFixed(1).replace('.', ',')}%`, color: margin >= 0 ? '#00D47E' : '#FF5B5A' },
+                { label: 'Neuparene prolazne stavke', value: String(metrics.unmatchedPassthrough), color: metrics.unmatchedPassthrough > 0 ? '#F5A623' : '#00D47E' },
+                { label: 'Fakture u kašnjenju', value: String(metrics.overdueCount), color: metrics.overdueCount > 0 ? '#FF5B5A' : '#00D47E' },
+                { label: 'Otvorene fakture', value: String(metrics.openInvoicesCount), color: '#7A9BB8' },
+                { label: 'Kategorije troškova', value: String(expenseByCategory.length), color: '#7A9BB8' },
+                { label: 'Aktivni partneri', value: String(topPartners.length), color: '#7A9BB8' },
               ].map(item => (
                 <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
                   <span style={{ fontSize: '12px', color: '#7A9BB8' }}>{item.label}</span>
@@ -670,15 +677,15 @@ export default function Dashboard() {
             {/* Quick actions */}
             <div style={s.card}>
               <div style={s.cardHeader}>
-                <div style={s.cardTitle}>Quick actions</div>
+                <div style={s.cardTitle}>Brze akcije</div>
               </div>
               {[
-                { label: 'New invoice', icon: '📄', page: 'transactions' as Page, color: '#1D9E75' },
-                { label: 'New transaction', icon: '💳', page: 'transactions' as Page, color: '#0C447C' },
-                { label: 'Bulk import', icon: '📥', page: 'transactions' as Page, color: '#633806' },
-                { label: 'P&L analysis', icon: '📊', page: 'expenses' as Page, color: '#185FA5' },
-                { label: 'Cash Flow', icon: '💧', page: 'cashflow' as Page, color: '#0891B2' },
-                { label: 'Partners', icon: '🤝', page: 'partners' as Page, color: '#BA7517' },
+                { label: 'Nova faktura', icon: '📄', page: 'transactions' as Page, color: '#1D9E75' },
+                { label: 'Nova transakcija', icon: '💳', page: 'transactions' as Page, color: '#0C447C' },
+                { label: 'Grupni uvoz', icon: '📥', page: 'transactions' as Page, color: '#633806' },
+                { label: 'P&L analiza', icon: '📊', page: 'expenses' as Page, color: '#185FA5' },
+                { label: 'Novčani tok', icon: '💧', page: 'cashflow' as Page, color: '#0891B2' },
+                { label: 'Partneri', icon: '🤝', page: 'partners' as Page, color: '#BA7517' },
               ].map(action => (
                 <button key={action.label} style={s.quickBtn} onClick={() => setPage(action.page)}>
                   <span style={{ fontSize: '15px' }}>{action.icon}</span>

@@ -130,7 +130,7 @@ describe('who lands in which run', () => {
     const r = runsFor(input({ timesheets: {} }))
     expect(r.problems).toHaveLength(1)
     expect(r.problems[0].name).toBe('Gavrilov Dejan')
-    expect(r.problems[0].why).toContain('No timesheet')
+    expect(r.problems[0].why).toContain('Nema evidencije radnog vremena')
   })
 
   it('reports a month whose absence nothing has priced', () => {
@@ -139,7 +139,7 @@ describe('who lands in which run', () => {
     const r = runsFor(input({
       timesheets: { e1: sheet({ sick_hours: FUND }) }, coefficients: {},
     }))
-    expect(r.problems[0].why).toContain('sick leave')
+    expect(r.problems[0].why).toContain('bolovanje')
     expect(grandTotal(r.runs).gross).toBe(0)
   })
 
@@ -198,7 +198,7 @@ describe('deductions', () => {
       currencyRates: {},
     }))
     expect(grandTotal(r.runs).deductionsEmployer).toBe(0)
-    expect(r.problems[0].why).toContain('no rate for this month')
+    expect(r.problems[0].why).toContain('bez kursa za ovaj mesec')
   })
 
   it('skips one that has been switched off', () => {
@@ -222,7 +222,7 @@ describe('the runs', () => {
     // It is taxed once and carries no contributions, so an addition that is
     // not a salary gets its own run rather than being folded in.
     const r = runsFor(input({ people: [], timesheets: {} }))
-    expect(RUN_LABELS.other).toBe('Other income')
+    expect(RUN_LABELS.other).toBe('Ostala primanja')
     expect(r.runs.find(x => x.key === 'other')).toBeTruthy()
   })
 

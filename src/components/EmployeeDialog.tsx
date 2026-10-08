@@ -13,6 +13,8 @@ import { splitContractedNet } from '../services/payroll/engine'
 import SearchableSelect from './SearchableSelect'
 import { fetchAllPartners } from '../services/allPartners'
 import { fmtLocal, fmtNum } from '../utils/formatters'
+import { countOf } from '../utils/plural'
+import { srDate } from '../utils/months'
 import { OVERHEAD_LABEL } from '../services/projects'
 import {
   PL_CATEGORY, SUBCATEGORY, SALARY_DEPT_SUBCATEGORY, OTHER_INCOME_SUBCATEGORY,
@@ -124,23 +126,23 @@ export default function EmployeeDialog({ employee, companies, seniorityCoefficie
     if (timesheets > 0) {
       setDeleting(false)
       setError(
-        `${employee.full_name} has ${timesheets} month${timesheets === 1 ? '' : 's'} of hours `
-        + 'recorded, which means a payroll has been calculated from them. Deleting would '
-        + 'take that with it and leave a total nothing explains. Mark them as having left '
-        + 'instead — that keeps every month they were here.')
+        `${employee.full_name}: sati su upisani za ${countOf(timesheets, 'mesec', 'meseca', 'meseci')}, `
+        + 'što znači da je po njima obračunata zarada. Brisanje bi to odnelo sa sobom i '
+        + 'ostavilo zbir koji ništa ne objašnjava. Umesto toga unesite datum odlaska — '
+        + 'tako ostaje svaki mesec u kom je zaposleni bio tu.')
       return
     }
 
     const attached = [
-      contracts_ && `${contracts_} contract${contracts_ === 1 ? '' : 's'}`,
-      deductions_ && `${deductions_} deduction${deductions_ === 1 ? '' : 's'}`,
-      allocations_ && `${allocations_} cost allocation${allocations_ === 1 ? '' : 's'}`,
+      contracts_ && countOf(contracts_, 'ugovor', 'ugovora', 'ugovora'),
+      deductions_ && countOf(deductions_, 'obustava', 'obustave', 'obustava'),
+      allocations_ && countOf(allocations_, 'raspodela troškova', 'raspodele troškova', 'raspodela troškova'),
     ].filter(Boolean).join(', ')
 
     if (!window.confirm(
-      `Delete ${employee.full_name}?`
-      + (attached ? `\n\nThis also removes: ${attached}.` : '\n\nNothing else is attached.')
-      + '\n\nThis cannot be undone.')) {
+      `Obrisati zaposlenog ${employee.full_name}?`
+      + (attached ? `\n\nBrišu se i: ${attached}.` : '\n\nNema drugih povezanih podataka.')
+      + '\n\nOvo ne može da se poništi.')) {
       setDeleting(false)
       return
     }
@@ -148,18 +150,18 @@ export default function EmployeeDialog({ employee, companies, seniorityCoefficie
     const { data, error: err } = await supabase
       .from('employees').delete().eq('id', employee.id).select('id')
     setDeleting(false)
-    if (err) { setError(`They could not be deleted: ${err.message}`); return }
+    if (err) { setError(`Zaposleni nije obrisan: ${err.message}`); return }
     if (!data || data.length === 0) {
-      setError('Nothing was deleted and the database reported no error, which usually '
-        + 'means the write was refused.')
+      setError('Ništa nije obrisano, a baza nije javila grešku, što obično znači '
+        + 'da je upis odbijen. Proverite da ste prijavljeni kao administrator ili vlasnik.')
       return
     }
     onSaved()
   }
 
   const savePerson = async () => {
-    if (!person.full_name.trim()) { setError('Enter the employee name.'); return }
-    if (!person.company_id) { setError('Choose which company employs them.'); return }
+    if (!person.full_name.trim()) { setError('Unesite ime i prezime zaposlenog.'); return }
+    if (!person.company_id) { setError('Izaberite firmu u kojoj je zaposlen.'); return }
     setSaving(true); setError(null)
     const row = {
       ...person,
@@ -184,20 +186,20 @@ export default function EmployeeDialog({ employee, companies, seniorityCoefficie
       // and "duplicate key value violates unique constraint" tells somebody
       // adding a colleague nothing at all.
       setError(/duplicate key|unique constraint/i.test(err.message)
-        ? `Somebody at this company already has the code "${person.code.trim()}". `
-          + 'Codes come from MPP and each belongs to one person, so this is either a '
-          + 'typo or they are already here — search the list for them before adding '
-          + 'a second record.'
-        : `The employee could not be saved: ${err.message}`)
+        ? `U ovoj firmi neko već ima šifru „${person.code.trim()}“. `
+          + 'Šifre dolaze iz MPP i svaka pripada jednoj osobi, pa je ovo ili greška u kucanju '
+          + 'ili zaposleni već postoji — potražite ga na spisku pre nego što dodate '
+          + 'drugi zapis.'
+        : `Zaposleni nije sačuvan: ${err.message}`)
       return
     }
 
     // A refused write comes back as a success with no rows, which used to
     // close the dialog over an employee that was never created.
     if (!data || data.length === 0) {
-      setError('Nothing was saved and the database reported no error, which usually '
-        + 'means the write was refused. Check you are signed in as an administrator '
-        + 'or owner.')
+      setError('Ništa nije sačuvano, a baza nije javila grešku, što obično znači '
+        + 'da je upis odbijen. Proverite da ste prijavljeni kao administrator '
+        + 'ili vlasnik.')
       return
     }
 
@@ -209,14 +211,14 @@ export default function EmployeeDialog({ employee, companies, seniorityCoefficie
       <div style={s.dialog} onClick={e => e.stopPropagation()}>
         <div style={s.header}>
           <div>
-            <div style={s.title}>{isNew ? 'New employee' : person.full_name}</div>
+            <div style={s.title}>{isNew ? 'Novi zaposleni' : person.full_name}</div>
             <div style={s.sub}>
               {isNew
-                ? 'The contract and any deductions are added once they are saved'
-                : 'Contracts are dated — a pay rise ends the old one; ✎ corrects one that was typed wrongly'}
+                ? 'Ugovor i obustave dodaju se kada se zaposleni sačuva'
+                : 'Ugovori imaju datume — povišica završava stari ugovor; ✎ ispravlja pogrešno unet ugovor'}
             </div>
           </div>
-          <button style={s.close} onClick={onClose}>✕</button>
+          <button style={s.close} onClick={onClose} title="Zatvori" aria-label="Zatvori">✕</button>
         </div>
 
         <div style={s.tabs}>
@@ -224,7 +226,7 @@ export default function EmployeeDialog({ employee, companies, seniorityCoefficie
             <button key={key}
               style={{ ...s.tab, ...(tab === key ? s.tabOn : {}) }}
               disabled={key !== 'person' && isNew}
-              title={key !== 'person' && isNew ? 'Save the employee first' : undefined}
+              title={key !== 'person' && isNew ? 'Prvo sačuvajte zaposlenog' : undefined}
               onClick={() => setTab(key)}>
               {label}
             </button>
@@ -235,35 +237,35 @@ export default function EmployeeDialog({ employee, companies, seniorityCoefficie
 
         {currentAbsence && (
           <div style={s.offBanner}>
-            <b>Off payroll since {currentAbsence.valid_from}</b>
-            {currentAbsence.valid_to && ` until ${currentAbsence.valid_to}`}
-            {' — '}{absenceLabel(currentAbsence.reason).toLowerCase()}. Nothing below is
-            calculated or paid for those months; it is all kept for when they return.
+            <b>Van obračuna od {srDate(currentAbsence.valid_from)}</b>
+            {currentAbsence.valid_to && ` do ${srDate(currentAbsence.valid_to)}`}
+            {' — '}{absenceLabel(currentAbsence.reason).toLowerCase()}. Ništa od navedenog ispod
+            se ne obračunava niti isplaćuje za te mesece; sve se čuva za povratak zaposlenog.
           </div>
         )}
 
         <div style={s.body}>
           {tab === 'person' && (
             <div style={s.grid}>
-              <Field label="Full name">
+              <Field label="Ime i prezime">
                 <input style={s.input} value={person.full_name}
                   onChange={e => setPerson({ ...person, full_name: e.target.value })} />
               </Field>
               {showCompanyPicker(companies) && (
-                <Field label="Company">
+                <Field label="Firma">
                   <select style={s.input} value={person.company_id}
                     onChange={e => setPerson({ ...person, company_id: e.target.value })}>
                     {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </Field>
               )}
-              <Field label="Code in MPP" hint="How a row here is matched to a row in an export">
+              <Field label="Šifra u MPP" hint="Po njoj se red ovde uparuje sa redom u izvozu">
                 <input style={s.input} value={person.code}
                   onChange={e => setPerson({ ...person, code: e.target.value })} />
               </Field>
-              <Field label="Department"
-                hint="Set on the Cost allocation tab, with the dates it applies — it is
-                  what every entry this person generates posts to.">
+              <Field label="Sektor"
+                hint="Unosi se na kartici Raspodela troškova, sa datumima važenja — tu se
+                  knjiži svaka stavka koju ovaj zaposleni stvara.">
                 <div style={s.readOnly}>
                   {currentAllocation
                     ? <>
@@ -271,25 +273,25 @@ export default function EmployeeDialog({ employee, companies, seniorityCoefficie
                         {currentAllocation.dept_subcategory && ` · ${currentAllocation.dept_subcategory}`}
                       </>
                     : <span style={{ color: '#C8A24A' }}>
-                        Not allocated — nothing can be posted for them yet
+                        Nije raspoređen — za njega još ništa ne može da se proknjiži
                       </span>}
                 </div>
               </Field>
-              <Field label="Hired on">
+              <Field label="Datum zaposlenja">
                 <input type="date" style={s.input} value={person.hired_on}
                   onChange={e => setPerson({ ...person, hired_on: e.target.value })} />
               </Field>
-              <Field label="Seniority counts from"
-                hint="Датум почетка последњег ангажовања. Without it nobody gets any seniority.">
+              <Field label="Minuli rad se računa od"
+                hint="Datum početka poslednjeg angažovanja. Bez njega se minuli rad ne obračunava.">
                 <input type="date" style={s.input} value={person.seniority_from}
                   onChange={e => setPerson({ ...person, seniority_from: e.target.value })} />
               </Field>
-              <Field label="Left on" hint="The last day worked — that month is still paid">
+              <Field label="Datum odlaska" hint="Poslednji radni dan — taj mesec se i dalje isplaćuje">
                 <input type="date" style={s.input} value={person.left_on}
                   onChange={e => setPerson({ ...person, left_on: e.target.value })} />
               </Field>
               <div style={{ gridColumn: '1 / -1' }}>
-                <Field label="Note">
+                <Field label="Napomena">
                   <textarea style={{ ...s.input, minHeight: '56px', resize: 'vertical' as const }}
                     value={person.note} onChange={e => setPerson({ ...person, note: e.target.value })} />
                 </Field>
@@ -324,13 +326,13 @@ export default function EmployeeDialog({ employee, companies, seniorityCoefficie
           <div style={s.footer}>
             {!isNew && (
               <button style={s.danger} disabled={deleting} onClick={removePerson}>
-                {deleting ? 'Checking…' : 'Delete'}
+                {deleting ? 'Provera…' : 'Obriši'}
               </button>
             )}
             <div style={{ flex: 1 }} />
-            <button style={s.ghost} onClick={onClose}>Cancel</button>
+            <button style={s.ghost} onClick={onClose}>Otkaži</button>
             <button style={s.primary} onClick={savePerson} disabled={saving}>
-              {saving ? 'Saving…' : isNew ? 'Create employee' : 'Save'}
+              {saving ? 'Čuvanje…' : isNew ? 'Dodaj zaposlenog' : 'Sačuvaj'}
             </button>
           </div>
         )}
@@ -425,8 +427,8 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
     setBusy(false)
     if (err) {
       setError(err.message.includes('no_overlap')
-        ? 'Another contract already covers that period, so this one cannot move there.'
-        : `The contract could not be changed: ${err.message}`)
+        ? 'Drugi ugovor već pokriva taj period, pa ovaj ne može da se pomeri tamo.'
+        : `Ugovor nije izmenjen: ${err.message}`)
       return
     }
     setEditing(null)
@@ -440,7 +442,7 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
       contracts.filter(c => c.id !== open?.id))
     if (why) { setError(why); return }
     if (open && draft.valid_from <= open.valid_from) {
-      setError(`The current contract starts on ${open.valid_from}. A new one has to start after that.`)
+      setError(`Važeći ugovor počinje ${srDate(open.valid_from)}. Novi mora da počne posle tog datuma.`)
       return
     }
     setBusy(true); setError(null)
@@ -462,8 +464,8 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
     if (insErr) {
       setBusy(false)
       setError(insErr.message.includes('no_overlap')
-        ? 'Another contract already covers that period. End it first.'
-        : `The contract could not be added: ${insErr.message}`)
+        ? 'Drugi ugovor već pokriva taj period. Prvo ga završite.'
+        : `Ugovor nije dodat: ${insErr.message}`)
       return
     }
 
@@ -473,9 +475,9 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
         .update({ valid_to }).eq('id', id).select('id')
       if (endErr) {
         setBusy(false)
-        setError('The new contract was added, but the previous one could not be ended '
-          + `(${endErr.message}). Both now claim the same months — end the one starting `
-          + `${open.valid_from} before running a payroll.`)
+        setError('Novi ugovor je dodat, ali prethodni nije završen '
+          + `(${endErr.message}). Sada oba pokrivaju iste mesece — završite ugovor koji počinje `
+          + `${srDate(open.valid_from)} pre obračuna zarade.`)
         onChanged()
         return
       }
@@ -488,10 +490,10 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
 
   const remove = async (c: ContractRow) => {
     if (!window.confirm(
-      `Delete the contract from ${c.valid_from}? Any month calculated from it will `
-      + 'no longer reproduce.')) return
+      `Obrisati ugovor od ${srDate(c.valid_from)}? Nijedan mesec obračunat po njemu `
+      + 'više neće dati isti rezultat.')) return
     const { error: err } = await supabase.from('employee_contracts').delete().eq('id', c.id).select('id')
-    if (err) { setError(`It could not be deleted: ${err.message}`); return }
+    if (err) { setError(`Brisanje nije uspelo: ${err.message}`); return }
     onChanged()
   }
 
@@ -499,8 +501,8 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
     <div>
       {error && <div style={s.error}>{error}</div>}
 
-      <div style={s.sectionLabel}>History</div>
-      {contracts.length === 0 && <div style={s.empty}>No contract yet. Add the first one below.</div>}
+      <div style={s.sectionLabel}>Istorija</div>
+      {contracts.length === 0 && <div style={s.empty}>Još nema ugovora. Dodajte prvi ispod.</div>}
       {contracts.map(c => {
         // Seniority as at the last month this contract applies to: today while
         // it is still running, its final month once it has been superseded.
@@ -515,7 +517,7 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
           <div key={c.id} style={{ ...s.card, ...(c.valid_to === null ? s.cardOpen : {}) }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
               <div style={s.cardTitle}>
-                {c.valid_from} → {c.valid_to || 'still in force'}
+                {srDate(c.valid_from)} → {c.valid_to ? srDate(c.valid_to) : 'i dalje važi'}
               </div>
               {/* NAMED AND VISIBLE, both of them.
                   These were two emoji at 35% opacity with no colour of their
@@ -525,35 +527,35 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
                   in that state since it was written. */}
               <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                 <button className="mf-card-action" style={s.cardAction}
-                  title="Correct this contract — for a figure typed wrongly, not for a pay rise"
-                  onClick={() => startEditing(c)}>✎ Correct</button>
+                  title="Ispravi ovaj ugovor — za pogrešno unet iznos, ne za povišicu"
+                  onClick={() => startEditing(c)}>✎ Ispravi</button>
                 <button className="mf-card-danger" style={s.cardAction}
-                  title="Delete this contract entirely"
-                  onClick={() => remove(c)}>Delete</button>
+                  title="Obriši ceo ugovor"
+                  onClick={() => remove(c)}>Obriši</button>
               </div>
             </div>
             <div style={s.cardRow}>
               <b style={{ color: '#DCE9F6' }}>
                 {fmtLocal(c.net_amount, c.currency)}
               </b>
-              <span> net, including seniority</span>
+              <span> neto, sa minulim radom</span>
             </div>
             <div style={s.cardMeta}>
-              {years} {years === 1 ? 'year' : 'years'} of service
+              {countOf(years, 'godina', 'godine', 'godina')} staža
               {derived
-                ? <span title={`Counted from ${employee.seniority_from || 'no date set'}, as at ${asAt}`}>
-                    {' (as at '}{asAt}{')'}
+                ? <span title={`Računa se od ${employee.seniority_from ? srDate(employee.seniority_from) : 'datuma koji nije unet'}, na dan ${srDate(asAt)}`}>
+                    {' (na dan '}{srDate(asAt)}{')'}
                   </span>
-                : <span style={{ color: '#C8A24A' }}>{' (entered by hand)'}</span>}
+                : <span style={{ color: '#C8A24A' }}>{' (uneto ručno)'}</span>}
               {split
                 ? <>
-                    {' · base '}
+                    {' · osnovna '}
                     {fmtNum(split.base)}
-                    {' + seniority '}
+                    {' + minuli rad '}
                     {fmtNum(split.seniority)}
                   </>
                 : <span style={{ color: '#C8A24A' }}>
-                    {' · the seniority coefficient is not set, so the split is not shown'}
+                    {' · koeficijent minulog rada nije unet, pa podela nije prikazana'}
                   </span>}
             </div>
             {c.note && <div style={s.cardNote}>{c.note}</div>}
@@ -564,7 +566,7 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
       {editing ? (
         <>
           <div style={s.sectionLabel}>
-            Correcting the contract from {editing.valid_from}
+            Ispravka ugovora od {srDate(editing.valid_from)}
           </div>
 
           {/* Said while it is being typed, not after it is saved. */}
@@ -579,16 +581,16 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
           )}
 
           <div style={s.grid}>
-            <Field label="In force from">
+            <Field label="Važi od">
               <input type="date" style={s.input} value={edit.valid_from}
                 onChange={e => setEdit({ ...edit, valid_from: e.target.value })} />
             </Field>
-            <Field label="In force until"
-              hint="Empty means still in force. This is normally set by the next contract starting.">
+            <Field label="Važi do"
+              hint="Prazno znači da i dalje važi. Obično se popunjava kada počne sledeći ugovor.">
               <input type="date" style={s.input} value={edit.valid_to}
                 onChange={e => setEdit({ ...edit, valid_to: e.target.value })} />
             </Field>
-            <Field label="Currency">
+            <Field label="Valuta">
               <select style={s.input} value={edit.currency}
                 onChange={e => setEdit({ ...edit, currency: e.target.value })}>
                 <option value="RSD">RSD</option>
@@ -598,18 +600,18 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
                 {edit.currency === 'USD' && <option value="USD">USD</option>}
               </select>
             </Field>
-            <Field label="Contracted net" hint="The total on the payslip, seniority included">
+            <Field label="Ugovoreni neto" hint="Ukupan iznos na platnom listiću, sa minulim radom">
               <input style={s.input} inputMode="decimal" value={edit.net_amount}
                 onChange={e => setEdit({ ...edit, net_amount: e.target.value })} />
             </Field>
-            <Field label="Years of service"
-              hint="Leave empty — it is counted from the seniority date. Fill it in only where MPP disagrees.">
-              <input style={s.input} inputMode="numeric" placeholder="derived"
+            <Field label="Godine staža"
+              hint="Ostavite prazno — računa se od datuma za minuli rad. Popunite samo ako se MPP ne slaže.">
+              <input style={s.input} inputMode="numeric" placeholder="izračunato"
                 value={edit.service_years}
                 onChange={e => setEdit({ ...edit, service_years: e.target.value })} />
             </Field>
             <div style={{ gridColumn: '1 / -1' }}>
-              <Field label="Note">
+              <Field label="Napomena">
                 <input style={s.input} value={edit.note}
                   onChange={e => setEdit({ ...edit, note: e.target.value })} />
               </Field>
@@ -617,28 +619,28 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
           </div>
           <div style={{ marginTop: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button style={s.primary} onClick={saveEdit} disabled={busy}>
-              {busy ? 'Saving…' : 'Save the correction'}
+              {busy ? 'Čuvanje…' : 'Sačuvaj ispravku'}
             </button>
             <button style={s.ghost} onClick={() => { setEditing(null); setError(null) }}>
-              Cancel
+              Otkaži
             </button>
             <span style={{ fontSize: '11.5px', color: '#7A9BB8' }}>
-              For a pay rise, cancel and add a new contract instead — that keeps what
-              the old months cost.
+              Za povišicu otkažite i umesto toga dodajte novi ugovor — tako ostaje ono što su
+              koštali raniji meseci.
             </span>
           </div>
         </>
       ) : (
       <>
       <div style={s.sectionLabel}>
-        {open ? 'New contract — the current one ends the day this begins' : 'Add a contract'}
+        {open ? 'Novi ugovor — važeći se završava na dan kada ovaj počinje' : 'Dodaj ugovor'}
       </div>
       <div style={s.grid}>
-        <Field label="In force from">
+        <Field label="Važi od">
           <input type="date" style={s.input} value={draft.valid_from}
             onChange={e => setDraft({ ...draft, valid_from: e.target.value })} />
         </Field>
-        <Field label="Currency">
+        <Field label="Valuta">
           <select style={s.input} value={draft.currency}
             onChange={e => setDraft({ ...draft, currency: e.target.value })}>
             <option value="RSD">RSD</option>
@@ -648,18 +650,18 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
             {draft.currency === 'USD' && <option value="USD">USD</option>}
           </select>
         </Field>
-        <Field label="Contracted net" hint="The total on the payslip, seniority included">
+        <Field label="Ugovoreni neto" hint="Ukupan iznos na platnom listiću, sa minulim radom">
           <input style={s.input} inputMode="decimal" value={draft.net_amount}
             onChange={e => setDraft({ ...draft, net_amount: e.target.value })} />
         </Field>
-        <Field label="Years of service"
-          hint="Leave empty — it is counted from the seniority date. Fill it in only where MPP disagrees.">
-          <input style={s.input} inputMode="numeric" placeholder="derived"
+        <Field label="Godine staža"
+          hint="Ostavite prazno — računa se od datuma za minuli rad. Popunite samo ako se MPP ne slaže.">
+          <input style={s.input} inputMode="numeric" placeholder="izračunato"
             value={draft.service_years}
             onChange={e => setDraft({ ...draft, service_years: e.target.value })} />
         </Field>
         <div style={{ gridColumn: '1 / -1' }}>
-          <Field label="Note">
+          <Field label="Napomena">
             <input style={s.input} value={draft.note}
               onChange={e => setDraft({ ...draft, note: e.target.value })} />
           </Field>
@@ -667,7 +669,7 @@ export function ContractsTab({ employee, contracts, seniorityCoefficient, onChan
       </div>
       <div style={{ marginTop: '12px' }}>
         <button style={s.primary} onClick={add} disabled={busy}>
-          {busy ? 'Saving…' : 'Add contract'}
+          {busy ? 'Čuvanje…' : 'Dodaj ugovor'}
         </button>
       </div>
       </>
@@ -721,14 +723,14 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
   }
 
   const save = async () => {
-    if (!draft.label.trim()) { setError('Give the deduction a name.'); return }
-    if (!draft.valid_from) { setError('Say which date it starts.'); return }
+    if (!draft.label.trim()) { setError('Unesite naziv obustave.'); return }
+    if (!draft.valid_from) { setError('Unesite datum početka.'); return }
     if (draft.valid_to && draft.valid_to <= draft.valid_from) {
-      setError('The end date has to be after the start date.'); return
+      setError('Datum završetka mora biti posle datuma početka.'); return
     }
     const value = Number(draft.value)
-    if (!Number.isFinite(value) || value <= 0) { setError('Enter how much is deducted.'); return }
-    if (draft.kind === 'percent' && value > 100) { setError('A percentage cannot be over 100.'); return }
+    if (!Number.isFinite(value) || value <= 0) { setError('Unesite koliko se obustavlja.'); return }
+    if (draft.kind === 'percent' && value > 100) { setError('Procenat ne može biti veći od 100.'); return }
 
     setBusy(true); setError(null)
     const row = {
@@ -753,10 +755,10 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
       ? await supabase.from('employee_deductions').update(row).eq('id', draft.id).select('id')
       : await supabase.from('employee_deductions').insert(row).select('id')
     setBusy(false)
-    if (err) { setError(`The deduction could not be saved: ${err.message}`); return }
+    if (err) { setError(`Obustava nije sačuvana: ${err.message}`); return }
     if (!data || data.length === 0) {
-      setError('Nothing was saved and the database reported no error, which usually '
-        + 'means the write was refused. Check you are signed in as an administrator.')
+      setError('Ništa nije sačuvano, a baza nije javila grešku, što obično znači '
+        + 'da je upis odbijen. Proverite da ste prijavljeni kao administrator.')
       return
     }
     setDraft(blank)
@@ -773,50 +775,50 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
   const toggle = async (d: DeductionRow) => {
     const { data, error: err } = await supabase.from('employee_deductions')
       .update({ is_active: d.is_active === false }).eq('id', d.id).select('id')
-    if (err) { setError(`It could not be switched: ${err.message}`); return }
-    if (!data || data.length === 0) { setError('The change was refused.'); return }
+    if (err) { setError(`Obustava nije uključena/isključena: ${err.message}`); return }
+    if (!data || data.length === 0) { setError('Izmena je odbijena. Proverite da ste prijavljeni kao administrator.'); return }
     onChanged()
   }
 
   const end = async (d: DeductionRow) => {
     const date = window.prompt(
-      `End "${d.label}" from which date? To pause it instead use Off, which keeps it `
-      + 'as the same arrangement.', new Date().toISOString().slice(0, 10))
+      `Od kog datuma se završava „${d.label}“ (GGGG-MM-DD)? Za privremeni prekid koristite `
+      + 'Isključi, tako ostaje isti aranžman.', new Date().toISOString().slice(0, 10))
     if (!date) return
     const { error: err } = await supabase.from('employee_deductions')
       .update({ valid_to: date }).eq('id', d.id).select('id')
-    if (err) { setError(`It could not be ended: ${err.message}`); return }
+    if (err) { setError(`Obustava nije završena: ${err.message}`); return }
     onChanged()
   }
 
   const remove = async (d: DeductionRow) => {
     if (!window.confirm(
-      `Delete "${d.label}" entirely? The months it already ran in would no longer `
-      + 'recalculate. Switching it off or ending it keeps that history.')) return
+      `Obrisati celu obustavu „${d.label}“? Meseci u kojima je već obračunata više se `
+      + 'ne bi isto obračunali. Isključivanje ili završetak čuvaju tu istoriju.')) return
     const { error: err } = await supabase.from('employee_deductions').delete().eq('id', d.id).select('id')
-    if (err) { setError(`It could not be deleted: ${err.message}`); return }
+    if (err) { setError(`Brisanje nije uspelo: ${err.message}`); return }
     if (draft.id === d.id) setDraft(blank)
     onChanged()
   }
 
   const money = (d: DeductionRow) => d.amount !== null
     ? fmtLocal(d.amount, d.currency || 'RSD')
-    : `${((d.percent_of_net || 0) * 100).toFixed(2)}% of net`
+    : `${fmtNum((d.percent_of_net || 0) * 100)}% neta`
 
   return (
     <div>
       {error && <div style={s.error}>{error}</div>}
 
       <div style={s.hintBox}>
-        A deduction paid on to a third party — a loan, a union, a garnishment — leaves the
-        company and is a payable. One that stays with the employer, such as a membership the
-        company buys and then withholds, does not. It changes nobody pay either way, so it
-        will never show up as a discrepancy against the accountant; it only decides how the
-        amount is booked. The imported ones are all marked <b>stays with the employer</b>,
-        which is a reading of the register rather than something it stated.
+        Obustava koja se prosleđuje trećem licu — kredit, sindikat, administrativna zabrana —
+        izlazi iz firme i predstavlja obavezu. Obustava koja ostaje kod poslodavca, na primer
+        članarina koju firma plaća pa je zadržava, to nije. Ni u jednom slučaju ne menja
+        ničiju zaradu, pa se nikad neće pojaviti kao odstupanje od knjigovođe; određuje samo
+        kako se iznos knjiži. Sve uvezene obustave označene su kao <b>zadržana obustava</b>,
+        što je tumačenje registra, a ne nešto što je u njemu navedeno.
       </div>
 
-      {deductions.length === 0 && <div style={s.empty}>Nothing is deducted from this employee.</div>}
+      {deductions.length === 0 && <div style={s.empty}>Ovom zaposlenom se ništa ne obustavlja.</div>}
       {deductions.map(d => {
         const off = d.is_active === false
         return (
@@ -829,13 +831,13 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
               <div style={s.cardTitle}>
                 {d.label}
-                {off && <span style={s.offBadge}>Off</span>}
+                {off && <span style={s.offBadge}>Isključeno</span>}
               </div>
               <div style={{ display: 'flex', gap: '6px' }}>
-                <button style={s.ghostSmall} onClick={() => edit(d)}>Edit</button>
-                <button style={s.ghostSmall} onClick={() => toggle(d)}>{off ? 'On' : 'Off'}</button>
-                {d.valid_to === null && <button style={s.ghostSmall} onClick={() => end(d)}>End</button>}
-                <button className="mf-trash" title="Delete" aria-label="Delete" style={s.deleteBtn} onClick={() => remove(d)}>&#128465;</button>
+                <button style={s.ghostSmall} onClick={() => edit(d)}>Izmeni</button>
+                <button style={s.ghostSmall} onClick={() => toggle(d)}>{off ? 'Uključi' : 'Isključi'}</button>
+                {d.valid_to === null && <button style={s.ghostSmall} onClick={() => end(d)}>Završi</button>}
+                <button className="mf-trash" title="Obriši" aria-label="Obriši" style={s.deleteBtn} onClick={() => remove(d)}>&#128465;</button>
               </div>
             </div>
             <div style={s.cardRow}>
@@ -852,7 +854,7 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
                     company buys and then withholds rather than money
                     forwarded on. Hidden, the classification read as a guess
                     and got flagged as one for three days. */}
-                {d.goes_to === 'third_party' ? 'To third party' : 'Stays with employer'}
+                {d.goes_to === 'third_party' ? 'Prosleđena obustava' : 'Zadržana obustava'}
                 {d.payee ? ` \u00b7 ${d.payee}` : ''}
               </span>
             </div>
@@ -863,8 +865,8 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
               <div style={s.cardWarn}>{deductionWarning(d, payerName)}</div>
             )}
             <div style={s.cardMeta}>
-              {d.valid_from} &rarr; {d.valid_to || (off ? 'paused' : 'still running')}
-              {(d.currency || 'RSD') !== 'RSD' && ' \u00b7 converted at the rate of the month'}
+              {srDate(d.valid_from)} &rarr; {d.valid_to ? srDate(d.valid_to) : (off ? 'pauzirano' : 'i dalje traje')}
+              {(d.currency || 'RSD') !== 'RSD' && ' \u00b7 preračunava se po kursu za mesec'}
             </div>
             {d.note && <div style={s.cardNote}>{d.note}</div>}
           </div>
@@ -872,18 +874,18 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
       })}
 
       <div style={s.sectionLabel}>
-        {editing ? `Editing ${draft.label || 'a deduction'}` : 'Add a deduction'}
+        {editing ? `Izmena: ${draft.label || 'obustava'}` : 'Dodaj obustavu'}
       </div>
       <div style={s.grid}>
-        <Field label="Name">
+        <Field label="Naziv">
           <input style={s.input} value={draft.label}
             onChange={e => setDraft({ ...draft, label: e.target.value })} />
         </Field>
-        <Field label="Where it goes">
+        <Field label="Kome ide">
           <select style={s.input} value={draft.goes_to}
             onChange={e => setDraft({ ...draft, goes_to: e.target.value as any })}>
-            <option value="employer">Stays with the employer</option>
-            <option value="third_party">To a third party</option>
+            <option value="employer">Zadržana obustava (ostaje kod poslodavca)</option>
+            <option value="third_party">Prosleđena obustava (trećem licu)</option>
           </select>
         </Field>
         {/* PICKED, not typed.
@@ -897,7 +899,7 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
             The text field stays underneath for a payee that genuinely is not
             a partner — a court, a person — because refusing to record one
             would be a worse answer than an unmatched name. */}
-        <Field label="Payee" hint="Pick the partner it is forwarded to, so the posting can find them">
+        <Field label="Primalac" hint="Izaberite partnera kome se prosleđuje, da bi ga knjiženje pronašlo">
           <SearchableSelect
             value={draft.payee_partner_id}
             onChange={id => {
@@ -911,27 +913,27 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
               })
             }}
             options={partners.map(p => ({ value: p.id, label: p.name }))}
-            allLabel="— not a partner —"
-            searchPlaceholder="Type to find a partner…"
-            emptyMessage="No partner of that name"
+            allLabel="— nije partner —"
+            searchPlaceholder="Pretraga partnera…"
+            emptyMessage="Nema partnera sa tim imenom"
             style={s.input}
           />
         </Field>
-        <Field label="Payee as the arrangement names it"
+        <Field label="Primalac kako je naveden u ugovoru"
           hint={draft.payee_partner_id
-            ? 'Taken from the partner you picked. Edit it only if the paperwork says otherwise.'
-            : 'Free text, for a payee that is not in Partners. The posting will try to match it.'}>
+            ? 'Preuzeto od izabranog partnera. Izmenite samo ako dokumentacija kaže drugačije.'
+            : 'Slobodan tekst, za primaoca koji nije među partnerima. Knjiženje će pokušati da ga upari.'}>
           <input style={s.input} value={draft.payee}
             onChange={e => setDraft({ ...draft, payee: e.target.value })} />
         </Field>
-        <Field label="How it is worked out">
+        <Field label="Način obračuna">
           <select style={s.input} value={draft.kind}
             onChange={e => setDraft({ ...draft, kind: e.target.value as any })}>
-            <option value="amount">A fixed amount</option>
-            <option value="percent">A percentage of net</option>
+            <option value="amount">Fiksni iznos</option>
+            <option value="percent">Procenat neta</option>
           </select>
         </Field>
-        <Field label={draft.kind === 'amount' ? 'Amount' : 'Percent of net'}>
+        <Field label={draft.kind === 'amount' ? 'Iznos' : 'Procenat neta'}>
           <div style={{ display: 'flex', gap: '6px' }}>
             <input style={s.input} inputMode="decimal" value={draft.value}
               onChange={e => setDraft({ ...draft, value: e.target.value })} />
@@ -947,23 +949,23 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
             )}
           </div>
         </Field>
-        <Field label="Running">
+        <Field label="Aktivna">
           <label style={s.checkLine}>
             <input type="checkbox" checked={draft.is_active}
               onChange={e => setDraft({ ...draft, is_active: e.target.checked })} />
-            <span>{draft.is_active ? 'Deducted each month' : 'Paused, and skipped by every run'}</span>
+            <span>{draft.is_active ? 'Obustavlja se svakog meseca' : 'Pauzirano, svaki obračun je preskače'}</span>
           </label>
         </Field>
-        <Field label="From">
+        <Field label="Od">
           <input type="date" style={s.input} value={draft.valid_from}
             onChange={e => setDraft({ ...draft, valid_from: e.target.value })} />
         </Field>
-        <Field label="Until" hint="Leave empty while it is still running">
+        <Field label="Do" hint="Ostavite prazno dok i dalje traje">
           <input type="date" style={s.input} value={draft.valid_to}
             onChange={e => setDraft({ ...draft, valid_to: e.target.value })} />
         </Field>
         <div style={{ gridColumn: '1 / -1' }}>
-          <Field label="Note">
+          <Field label="Napomena">
             <input style={s.input} value={draft.note}
               onChange={e => setDraft({ ...draft, note: e.target.value })} />
           </Field>
@@ -971,11 +973,11 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
       </div>
       <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
         <button style={s.primary} onClick={save} disabled={busy}>
-          {busy ? 'Saving...' : editing ? 'Save changes' : 'Add deduction'}
+          {busy ? 'Čuvanje…' : editing ? 'Sačuvaj izmene' : 'Dodaj obustavu'}
         </button>
         {editing && (
           <button style={s.ghost} onClick={() => { setDraft(blank); setError(null) }}>
-            Cancel, and add a new one instead
+            Otkaži i dodaj novu
           </button>
         )}
       </div>
@@ -1027,10 +1029,10 @@ function AllocationTab({ employee, rows, onChanged }: {
   const [error, setError] = useState<string | null>(null)
 
   const save = async () => {
-    if (!draft.department.trim()) { setError('Say which department carries this cost.'); return }
-    if (!draft.valid_from) { setError('Say which date it takes effect from.'); return }
+    if (!draft.department.trim()) { setError('Izaberite sektor koji snosi ovaj trošak.'); return }
+    if (!draft.valid_from) { setError('Unesite datum od kog važi.'); return }
     if (draft.valid_to && draft.valid_to <= draft.valid_from) {
-      setError('The end date has to be after the start date.'); return
+      setError('Datum završetka mora biti posle datuma početka.'); return
     }
     setBusy(true); setError(null)
     const row = {
@@ -1047,22 +1049,22 @@ function AllocationTab({ employee, rows, onChanged }: {
     setBusy(false)
     if (err) {
       setError(err.message.includes('no_overlap')
-        ? 'Another allocation already covers part of that period. Two departments for '
-          + 'one month would put the same salary in two places. End the old one first.'
-        : `It could not be saved: ${err.message}`)
+        ? 'Druga raspodela već pokriva deo tog perioda. Dva sektora za '
+          + 'isti mesec stavila bi istu zaradu na dva mesta. Prvo završite staru raspodelu.'
+        : `Raspodela nije sačuvana: ${err.message}`)
       return
     }
-    if (!data || data.length === 0) { setError('The write was refused.'); return }
+    if (!data || data.length === 0) { setError('Upis je odbijen. Proverite da ste prijavljeni kao administrator.'); return }
     setDraft(blank); onChanged()
   }
 
   const remove = async (r: CostAllocationRow) => {
     if (!window.confirm(
-      `Delete the allocation from ${r.valid_from}? Months posted under it would no `
-      + 'longer say where the cost went.')) return
+      `Obrisati raspodelu od ${srDate(r.valid_from)}? Za mesece proknjižene po njoj više `
+      + 'se ne bi videlo gde je trošak otišao.')) return
     const { error: err } = await supabase.from('employee_cost_allocation')
       .delete().eq('id', r.id).select('id')
-    if (err) { setError(`It could not be deleted: ${err.message}`); return }
+    if (err) { setError(`Brisanje nije uspelo: ${err.message}`); return }
     onChanged()
   }
 
@@ -1076,26 +1078,26 @@ function AllocationTab({ employee, rows, onChanged }: {
       {error && <div style={s.error}>{error}</div>}
 
       <div style={s.hintBox}>
-        Five fields decide where a cost lands, and for a payroll only <b>one of them is
-        about the person</b>: which department carries them. The rest follow from what
-        the amount is. Without an allocation a posting refuses rather than letting the
-        cost fall into Unassigned, where a salary looks like an ordinary cost of nobody.
+        Pet polja određuje gde trošak završava, a kod zarada se <b>samo jedno odnosi na
+        zaposlenog</b>: koji sektor ga snosi. Ostala slede iz toga šta je iznos. Bez
+        raspodele knjiženje odbija da trošak ode u neraspoređeno, gde bi zarada izgledala
+        kao običan trošak bez nosioca.
       </div>
 
       <div style={s.chainBox}>
-        <div style={s.chainTitle}>What will be booked for {employee.full_name}</div>
+        <div style={s.chainTitle}>Šta će se proknjižiti za {employee.full_name}</div>
         {([
-          ['Net salary', SUBCATEGORY.net],
-          ['Income tax', SUBCATEGORY.tax],
-          ['Contributions, employee', SUBCATEGORY.employee],
-          ['Contributions, employer', SUBCATEGORY.employer],
+          ['Neto zarada', SUBCATEGORY.net],
+          ['Porez na zarade', SUBCATEGORY.tax],
+          ['Doprinosi na teret zaposlenog', SUBCATEGORY.employee],
+          ['Doprinosi na teret poslodavca', SUBCATEGORY.employer],
         ] as const).map(([what, sub]) => (
           <div key={sub} style={s.chainRow}>
             <span style={s.chainWhat}>{what}</span>
             <span style={s.chainPath}>
               {PL_CATEGORY} &rsaquo; {sub} &rsaquo;{' '}
               <b style={{ color: draft.department ? '#00D47E' : '#C8A24A' }}>
-                {draft.department || 'choose a department'}
+                {draft.department || 'izaberite sektor'}
               </b>
               {' '}&rsaquo; {draft.dept_subcategory || SALARY_DEPT_SUBCATEGORY}
               {' '}&rsaquo; {employee.full_name}
@@ -1103,45 +1105,44 @@ function AllocationTab({ employee, rows, onChanged }: {
           </div>
         ))}
         <div style={{ ...s.chainRow, borderTop: '0.5px solid rgba(255,255,255,0.08)', paddingTop: '7px' }}>
-          <span style={s.chainWhat}>Other income</span>
+          <span style={s.chainWhat}>Ostala primanja</span>
           <span style={s.chainPath}>
             {PL_CATEGORY} &rsaquo; {OTHER_INCOME_SUBCATEGORY} &rsaquo;{' '}
             <b style={{ color: draft.department ? '#00D47E' : '#C8A24A' }}>
-              {draft.department || 'choose a department'}
+              {draft.department || 'izaberite sektor'}
             </b>
             {' '}&rsaquo; {draft.dept_subcategory || SALARY_DEPT_SUBCATEGORY}
             {' '}&rsaquo; {employee.full_name}
           </span>
         </div>
         <div style={s.chainNote}>
-          Projekti: the cost is shared over projects by the hours on each, entered on the
-          timesheet under &ldquo;Sati po projektima&rdquo;; hours on no project, and paid
-          absences, go to {OVERHEAD_LABEL}.
+          Projekti: trošak se deli na projekte prema satima na svakom, koji se unose u
+          evidenciji radnog vremena pod &bdquo;Sati po projektima&ldquo;; sati bez projekta i
+          plaćena odsustva idu u {OVERHEAD_LABEL}.
         </div>
         <div style={s.chainNote}>
-          Only the department is a choice. The sub-category follows from what the amount
-          is — an addition paid outside the salary lands in the same team, but not among
-          the net salaries.
+          Bira se samo sektor. Potkategorija sledi iz toga šta je iznos — dodatak isplaćen
+          van zarade ide u isti tim, ali ne među neto zarade.
         </div>
       </div>
 
       {rows.length === 0 && (
         <div style={s.empty}>
-          No allocation yet. Their organisational unit is
-          {' '}<b>{employee.organisational_unit || 'not set'}</b>; map it on the Payroll
-          page and every employee in it gets one, or set this person&rsquo;s here.
+          Još nema raspodele. Organizaciona jedinica zaposlenog je
+          {' '}<b>{employee.organisational_unit || 'nije uneta'}</b>; povežite je na strani
+          Zarade i svi zaposleni u njoj dobijaju raspodelu, ili je ovde unesite samo za ovog zaposlenog.
         </div>
       )}
       {rows.map(r => (
         <div key={r.id} style={{ ...s.card, ...(r.valid_to === null ? s.cardOpen : {}) }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <div style={s.cardTitle}>{r.valid_from} &rarr; {r.valid_to || 'indefinite'}</div>
+            <div style={s.cardTitle}>{srDate(r.valid_from)} &rarr; {r.valid_to ? srDate(r.valid_to) : 'neograničeno'}</div>
             <div style={{ display: 'flex', gap: '6px' }}>
               <button style={s.ghostSmall} onClick={() => setDraft({
                 id: r.id, department: r.department, dept_subcategory: r.dept_subcategory || '',
                 valid_from: r.valid_from, valid_to: r.valid_to || '', note: r.note || '',
-              })}>Edit</button>
-              <button className="mf-trash" title="Delete" aria-label="Delete" style={s.deleteBtn} onClick={() => remove(r)}>&#128465;</button>
+              })}>Izmeni</button>
+              <button className="mf-trash" title="Obriši" aria-label="Obriši" style={s.deleteBtn} onClick={() => remove(r)}>&#128465;</button>
             </div>
           </div>
           <div style={s.cardRow}>
@@ -1152,36 +1153,36 @@ function AllocationTab({ employee, rows, onChanged }: {
         </div>
       ))}
 
-      <div style={s.sectionLabel}>{draft.id ? 'Editing an allocation' : 'Add an allocation'}</div>
+      <div style={s.sectionLabel}>{draft.id ? 'Izmena raspodele' : 'Dodaj raspodelu'}</div>
       <div style={s.grid}>
-        <Field label="Department" hint="The one field that is about this person">
+        <Field label="Sektor" hint="Jedino polje koje se odnosi na zaposlenog">
           <select style={s.input} value={draft.department}
             onChange={e => setDraft({ ...draft, department: e.target.value, dept_subcategory: '' })}>
-            <option value="">— choose —</option>
+            <option value="">— izaberite —</option>
             {departments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
           </select>
         </Field>
-        <Field label="Sub-category"
-          hint={`Normally ${SALARY_DEPT_SUBCATEGORY}`}>
+        <Field label="Podsektor"
+          hint={`Obično ${SALARY_DEPT_SUBCATEGORY}`}>
           <select style={s.input} value={draft.dept_subcategory}
             disabled={!chosenDept}
             onChange={e => setDraft({ ...draft, dept_subcategory: e.target.value })}>
             <option value="">
-              {chosenDept ? `— ${SALARY_DEPT_SUBCATEGORY} —` : 'choose a department first'}
+              {chosenDept ? `— ${SALARY_DEPT_SUBCATEGORY} —` : 'prvo izaberite sektor'}
             </option>
             {subsForDept.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
         </Field>
-        <Field label="From">
+        <Field label="Od">
           <input type="date" style={s.input} value={draft.valid_from}
             onChange={e => setDraft({ ...draft, valid_from: e.target.value })} />
         </Field>
-        <Field label="Until" hint="Leave empty for indefinite">
+        <Field label="Do" hint="Ostavite prazno za neograničeno">
           <input type="date" style={s.input} value={draft.valid_to}
             onChange={e => setDraft({ ...draft, valid_to: e.target.value })} />
         </Field>
         <div style={{ gridColumn: '1 / -1' }}>
-          <Field label="Note">
+          <Field label="Napomena">
             <input style={s.input} value={draft.note}
               onChange={e => setDraft({ ...draft, note: e.target.value })} />
           </Field>
@@ -1189,11 +1190,11 @@ function AllocationTab({ employee, rows, onChanged }: {
       </div>
       <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
         <button style={s.primary} onClick={save} disabled={busy}>
-          {busy ? 'Saving...' : draft.id ? 'Save changes' : 'Add allocation'}
+          {busy ? 'Čuvanje…' : draft.id ? 'Sačuvaj izmene' : 'Dodaj raspodelu'}
         </button>
         {draft.id && (
           <button style={s.ghost} onClick={() => { setDraft(blank); setError(null) }}>
-            Cancel
+            Otkaži
           </button>
         )}
       </div>
@@ -1204,11 +1205,11 @@ function AllocationTab({ employee, rows, onChanged }: {
 type TabKey = 'person' | 'contracts' | 'allocation' | 'absence' | 'deductions'
 
 const TABS: [TabKey, string][] = [
-  ['person', 'Person'],
-  ['contracts', 'Salary'],
-  ['allocation', 'Cost allocation'],
-  ['absence', 'Off payroll'],
-  ['deductions', 'Deductions'],
+  ['person', 'Lični podaci'],
+  ['contracts', 'Zarada'],
+  ['allocation', 'Raspodela troškova'],
+  ['absence', 'Van obračuna'],
+  ['deductions', 'Obustave'],
 ]
 
 /**
@@ -1236,9 +1237,9 @@ function AbsenceTab({ employee, rows, onChanged }: {
   const [error, setError] = useState<string | null>(null)
 
   const save = async () => {
-    if (!draft.valid_from) { setError('Say which date they come off the payroll.'); return }
+    if (!draft.valid_from) { setError('Unesite datum od kog zaposleni nije u obračunu.'); return }
     if (draft.valid_to && draft.valid_to <= draft.valid_from) {
-      setError('The end date has to be after the start date.'); return
+      setError('Datum završetka mora biti posle datuma početka.'); return
     }
     setBusy(true); setError(null)
     const row = {
@@ -1254,23 +1255,23 @@ function AbsenceTab({ employee, rows, onChanged }: {
     setBusy(false)
     if (err) {
       setError(err.message.includes('no_overlap')
-        ? 'Another period already covers part of that. They would be off the payroll '
-          + 'either way, but two rows give two different answers about why — and the why '
-          + 'is what somebody reads and acts on.'
-        : `It could not be saved: ${err.message}`)
+        ? 'Drugi period već pokriva deo ovoga. Zaposleni bi u svakom slučaju bio van obračuna, '
+          + 'ali dva reda daju dva različita razloga — a razlog je ono što neko čita i '
+          + 'po čemu postupa. Izmenite postojeći period.'
+        : `Period nije sačuvan: ${err.message}`)
       return
     }
-    if (!data || data.length === 0) { setError('The write was refused.'); return }
+    if (!data || data.length === 0) { setError('Upis je odbijen. Proverite da ste prijavljeni kao administrator.'); return }
     setDraft(blank); onChanged()
   }
 
   const remove = async (r: AbsenceRow) => {
     if (!window.confirm(
-      `Delete the period from ${r.valid_from}? Those months would start calculating a `
-      + 'salary this company does not pay.')) return
+      `Obrisati period od ${srDate(r.valid_from)}? Za te mesece bi se počela obračunavati `
+      + 'zarada koju ova firma ne isplaćuje.')) return
     const { error: err } = await supabase.from('employee_payroll_absence')
       .delete().eq('id', r.id).select('id')
-    if (err) { setError(`It could not be deleted: ${err.message}`); return }
+    if (err) { setError(`Brisanje nije uspelo: ${err.message}`); return }
     onChanged()
   }
 
@@ -1279,29 +1280,29 @@ function AbsenceTab({ employee, rows, onChanged }: {
       {error && <div style={s.error}>{error}</div>}
 
       <div style={s.hintBox}>
-        For somebody who is still employed but whose salary is not ours to work out —
-        maternity leave above all, where the state calculates and pays it. Those months
-        produce no salary and no tax filing, and the person is listed on
-        the payroll page as deliberately absent rather than simply missing.
+        Za zaposlenog koji je i dalje u radnom odnosu, ali čiju naknadu ne obračunava ova
+        firma — pre svega porodiljsko odsustvo, kada naknadu obračunava i isplaćuje država.
+        Za te mesece nema zarade ni poreske prijave, a zaposleni se na strani Zarade vodi
+        kao namerno izostavljen, a ne kao neko ko nedostaje.
         <div style={{ marginTop: '6px' }}>
-          This is <b>not</b> the same as leaving. The contract, the department and every
-          deduction stay exactly where they are, ready for the month they come back.
+          To <b>nije</b> isto što i odlazak. Ugovor, sektor i sve obustave ostaju tačno gde
+          jesu, spremni za mesec kada se zaposleni vrati.
         </div>
       </div>
 
-      {rows.length === 0 && <div style={s.empty}>On the payroll every month.</div>}
+      {rows.length === 0 && <div style={s.empty}>U obračunu svakog meseca.</div>}
       {rows.map(r => (
         <div key={r.id} style={{ ...s.card, ...(r.valid_to === null ? s.cardOpen : {}) }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <div style={s.cardTitle}>
-              {r.valid_from} &rarr; {r.valid_to || 'not back yet'}
+              {srDate(r.valid_from)} &rarr; {r.valid_to ? srDate(r.valid_to) : 'bez datuma povratka'}
             </div>
             <div style={{ display: 'flex', gap: '6px' }}>
               <button style={s.ghostSmall} onClick={() => setDraft({
                 id: r.id, reason: r.reason, valid_from: r.valid_from,
                 valid_to: r.valid_to || '', note: r.note || '',
-              })}>Edit</button>
-              <button className="mf-trash" title="Delete" aria-label="Delete" style={s.deleteBtn} onClick={() => remove(r)}>&#128465;</button>
+              })}>Izmeni</button>
+              <button className="mf-trash" title="Obriši" aria-label="Obriši" style={s.deleteBtn} onClick={() => remove(r)}>&#128465;</button>
             </div>
           </div>
           <div style={s.cardRow}>
@@ -1311,25 +1312,25 @@ function AbsenceTab({ employee, rows, onChanged }: {
         </div>
       ))}
 
-      <div style={s.sectionLabel}>{draft.id ? 'Editing a period' : 'Take them off the payroll'}</div>
+      <div style={s.sectionLabel}>{draft.id ? 'Izmena perioda' : 'Isključi iz obračuna'}</div>
       <div style={s.grid}>
-        <Field label="Reason">
+        <Field label="Razlog">
           <select style={s.input} value={draft.reason}
             onChange={e => setDraft({ ...draft, reason: e.target.value as AbsenceRow['reason'] })}>
             {ABSENCE_REASONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </Field>
-        <Field label="From">
+        <Field label="Od">
           <input type="date" style={s.input} value={draft.valid_from}
             onChange={e => setDraft({ ...draft, valid_from: e.target.value })} />
         </Field>
-        <Field label="Back on"
-          hint="Leave empty while they are still away">
+        <Field label="Vraća se"
+          hint="Ostavite prazno dok je zaposleni i dalje odsutan">
           <input type="date" style={s.input} value={draft.valid_to}
             onChange={e => setDraft({ ...draft, valid_to: e.target.value })} />
         </Field>
         <div style={{ gridColumn: '1 / -1' }}>
-          <Field label="Note">
+          <Field label="Napomena">
             <input style={s.input} value={draft.note}
               onChange={e => setDraft({ ...draft, note: e.target.value })} />
           </Field>
@@ -1337,11 +1338,11 @@ function AbsenceTab({ employee, rows, onChanged }: {
       </div>
       <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
         <button style={s.primary} onClick={save} disabled={busy}>
-          {busy ? 'Saving...' : draft.id ? 'Save changes' : 'Add period'}
+          {busy ? 'Čuvanje…' : draft.id ? 'Sačuvaj izmene' : 'Dodaj period'}
         </button>
         {draft.id && (
           <button style={s.ghost} onClick={() => { setDraft(blank); setError(null) }}>
-            Cancel
+            Otkaži
           </button>
         )}
       </div>

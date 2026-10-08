@@ -260,8 +260,11 @@ const monthHeaders = (): string[] => {
 }
 
 /** The label the table gives the month we are in. */
-const thisMonthLabel = (): string =>
-  new Date().toLocaleString('en-GB', { month: 'short', year: 'numeric' })
+const thisMonthLabel = (): string => {
+  const SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Maj', 'Jun', 'Jul', 'Avg', 'Sep', 'Okt', 'Nov', 'Dec']
+  const now = new Date()
+  return `${SHORT[now.getMonth()]} ${now.getFullYear()}`
+}
 
 /**
  * Render and pick one company from the selector.
@@ -272,7 +275,7 @@ const thisMonthLabel = (): string =>
  */
 const renderForCompany = async (id: string) => {
   render(<Budgeting />)
-  const select = await screen.findByRole('combobox', { name: 'Companies' })
+  const select = await screen.findByRole('combobox', { name: 'Firme' })
   await waitFor(() => expect(within(select).getByText('Alpha d.o.o.')).toBeInTheDocument())
   fireEvent.change(select, { target: { value: id } })
 }
@@ -287,7 +290,7 @@ const renderForCompany = async (id: string) => {
  */
 const renderConsolidated = async () => {
   render(<Budgeting />)
-  await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
 }
 
 /**
@@ -382,7 +385,7 @@ describe('the credit schedule on its own rows', () => {
   it('DRAWS NO COMMITTED ROW AT ALL any more', async () => {
     oneInstalment()
     render(<Budgeting />)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
     expect(screen.queryByText(/Committed/i)).not.toBeInTheDocument()
   })
 
@@ -390,7 +393,7 @@ describe('the credit schedule on its own rows', () => {
     // Paid or unpaid, due when it likes — none of it is a budgeting question.
     oneInstalment()
     render(<Budgeting />)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
     expect(mockDb.requests.filter(r => r.table === 'v_invoice_status')).toHaveLength(0)
   })
 
@@ -418,13 +421,13 @@ describe('the Budgeting page when a query fails', () => {
     // A figure from the last good load, sitting under an error message, is
     // read as the current one.
     await renderForCompany(COMPANY_A)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
 
     mockDb.errors['v_pl_entries'] = 'statement timeout'
-    fireEvent.click(screen.getByText(/Refresh/i))
+    fireEvent.click(screen.getByText(/Osveži/i))
 
     await waitFor(() => expect(screen.getByText(/statement timeout/i)).toBeInTheDocument())
-    expect(screen.queryByText(/Total expenses/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Ukupni troškovi/i)).not.toBeInTheDocument()
   })
 })
 
@@ -438,8 +441,8 @@ describe('the Budgeting page in its default consolidated view', () => {
     // Refresh.
     render(<Budgeting />)
 
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
-    expect(screen.queryByText(/No expense data yet/i)).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
+    expect(screen.queryByText(/Još nema podataka o troškovima/i)).not.toBeInTheDocument()
   })
 
   it('loads once and then stops, rather than re-triggering itself', async () => {
@@ -449,7 +452,7 @@ describe('the Budgeting page in its default consolidated view', () => {
     const reads = () => mockDb.requests.filter(r => r.table === 'v_pl_entries').length
 
     render(<Budgeting />)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
 
     const settled = reads()
     await act(async () => { await new Promise(r => setTimeout(r, 200)) })
@@ -465,7 +468,7 @@ describe('the horizon', () => {
 
   it('shows three months by default, starting with the one we are in', async () => {
     render(<Budgeting />)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
 
     expect(monthHeaders()).toHaveLength(3)
     expect(monthHeaders()[0]).toContain(thisMonthLabel())
@@ -475,18 +478,18 @@ describe('the horizon', () => {
     // "Which column is now" must not be something a reader works out by
     // counting. It is the first column, and it says so.
     render(<Budgeting />)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
 
-    const marker = screen.getByText('THIS MONTH')
+    const marker = screen.getByText('OVAJ MESEC')
     expect(marker).toBeInTheDocument()
-    expect(monthHeaders()[0]).toContain('THIS MONTH')
+    expect(monthHeaders()[0]).toContain('OVAJ MESEC')
     // One column, not several.
-    expect(screen.getAllByText('THIS MONTH')).toHaveLength(1)
+    expect(screen.getAllByText('OVAJ MESEC')).toHaveLength(1)
   })
 
   it('shows twelve months when asked for twelve', async () => {
     render(<Budgeting />)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '12m' }))
     await waitFor(() => expect(monthHeaders()).toHaveLength(12))
@@ -501,7 +504,7 @@ describe('the horizon', () => {
     // to compare must not read identically when there is room for the digits.
     seedDb({ v_pl_entries: [expenseRow({ amount_rsd: 26432 })] })
     render(<Budgeting />)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
 
     expect(screen.getAllByText('26.432 RSD').length).toBeGreaterThan(0)
     expect(screen.queryByText('26,4 hilj. RSD')).not.toBeInTheDocument()
@@ -536,7 +539,7 @@ describe('the horizon', () => {
     await waitFor(() => expect(yearTotalOf(CREDIT_DEPARTMENT)).toBe('351 RSD'))
 
     // The header says which twelve months it is, so nobody has to guess.
-    expect(screen.getByText('all 12 months')).toBeInTheDocument()
+    expect(screen.getByText('svih 12 meseci')).toBeInTheDocument()
 
     // And widening the horizon does not change the Year figure — it was
     // always all twelve months.
@@ -553,7 +556,7 @@ describe('the horizon', () => {
     const reads = () => mockDb.requests.filter(r => r.table === 'v_pl_entries').length
 
     render(<Budgeting />)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
     const settled = reads()
 
     fireEvent.click(screen.getByRole('button', { name: '12m' }))
@@ -566,20 +569,20 @@ describe('the horizon', () => {
     // The benchmark sits BEFORE the horizon and is not part of it. It is one
     // column at three months and the same column at twelve.
     render(<Budgeting />)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
 
     const benchLabel = () => {
       const head = document.querySelector('thead tr')
       return ((head as HTMLElement).querySelectorAll('th')[1].textContent || '').trim()
     }
     const before = benchLabel()
-    expect(before).toContain('actual')
-    expect(screen.getAllByText('BENCHMARK')).toHaveLength(1)
+    expect(before).toContain('ostvareno')
+    expect(screen.getAllByText('REFERENCA')).toHaveLength(1)
 
     fireEvent.click(screen.getByRole('button', { name: '12m' }))
     await waitFor(() => expect(monthHeaders()).toHaveLength(12))
     expect(benchLabel()).toBe(before)
-    expect(screen.getAllByText('BENCHMARK')).toHaveLength(1)
+    expect(screen.getAllByText('REFERENCA')).toHaveLength(1)
   })
 })
 
@@ -590,8 +593,8 @@ describe('adding a budget line nothing has been spent on', () => {
 
   /** Open the add-a-line dialog and wait for the classifications to arrive. */
   const openAddLine = async () => {
-    fireEvent.click(screen.getByText('+ Add budget line'))
-    await screen.findByText('Add a budget line')
+    fireEvent.click(screen.getByText('+ Dodaj budžetsku stavku'))
+    await screen.findByText('Dodaj budžetsku stavku')
   }
 
   const ledgerWrites = () => mockDb.writes.filter(w => w.table === 'budget_adjustments')
@@ -604,14 +607,14 @@ describe('adding a budget line nothing has been spent on', () => {
     await renderConsolidated()
 
     await openAddLine()
-    fireEvent.change(await screen.findByLabelText('Department'), { target: { value: 'dep-2' } })
-    fireEvent.change(screen.getByLabelText('Dept. sub-category'), { target: { value: 'dsc-2' } })
-    fireEvent.change(screen.getByLabelText('Month'), { target: { value: horizonMonth(2) } })
-    fireEvent.click(screen.getByText('Continue'))
+    fireEvent.change(await screen.findByLabelText('Sektor'), { target: { value: 'dep-2' } })
+    fireEvent.change(screen.getByLabelText('Podsektor'), { target: { value: 'dsc-2' } })
+    fireEvent.change(screen.getByLabelText('Mesec'), { target: { value: horizonMonth(2) } })
+    fireEvent.click(screen.getByText('Dalje'))
 
-    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: '4000' } })
-    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Autumn campaign' } })
-    fireEvent.click(screen.getByText('Record change'))
+    fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '4000' } })
+    fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Autumn campaign' } })
+    fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 
     await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
     expect(ledgerWrites()[0].row).toMatchObject({
@@ -642,19 +645,19 @@ describe('adding a budget line nothing has been spent on', () => {
     await renderConsolidated()
 
     await openAddLine()
-    await screen.findByLabelText('Department')
+    await screen.findByLabelText('Sektor')
 
-    expect(screen.queryByLabelText('Company')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Firma')).not.toBeInTheDocument()
     expect(screen.queryByText(/pick one in the selector/i)).not.toBeInTheDocument()
     // Nothing is waiting on an answer that is no longer asked for.
-    expect(screen.getByLabelText('Department')).not.toBeDisabled()
-    expect(screen.getByLabelText('Month')).not.toBeDisabled()
+    expect(screen.getByLabelText('Sektor')).not.toBeDisabled()
+    expect(screen.getByLabelText('Mesec')).not.toBeDisabled()
     // Continue waits on the line being NAMED, which is the one thing a budget
     // line cannot do without — and on nothing else.
-    fireEvent.change(screen.getByLabelText('Department'), { target: { value: 'dep-2' } })
-    expect(screen.getByText('Continue')).not.toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Sektor'), { target: { value: 'dep-2' } })
+    expect(screen.getByText('Dalje')).not.toBeDisabled()
     // And it says who the line is for, which is the group.
-    expect(screen.getByText(/Recorded for/i).textContent).toMatch(/the group/i)
+    expect(screen.getByText(/Beleži se za/i).textContent).toMatch(/grupu/i)
   })
 
   it('lets a line that is already budgeted be changed, against the group figure', async () => {
@@ -666,13 +669,13 @@ describe('adding a budget line nothing has been spent on', () => {
     await renderConsolidated()
 
     await openAddLine()
-    fireEvent.change(await screen.findByLabelText('Department'), { target: { value: 'dep-1' } })
-    fireEvent.change(screen.getByLabelText('Dept. sub-category'), { target: { value: 'dsc-1' } })
+    fireEvent.change(await screen.findByLabelText('Sektor'), { target: { value: 'dep-1' } })
+    fireEvent.change(screen.getByLabelText('Podsektor'), { target: { value: 'dsc-1' } })
 
     expect(screen.queryByText(/already budgeted/i)).not.toBeInTheDocument()
-    expect(screen.getByText('Continue')).not.toBeDisabled()
+    expect(screen.getByText('Dalje')).not.toBeDisabled()
 
-    fireEvent.click(screen.getByText('Continue'))
+    fireEvent.click(screen.getByText('Dalje'))
     // The seeded figure the line already carries this month, not a zero.
     expect(await screen.findByText('1.000,00 RSD')).toBeInTheDocument()
   })
@@ -687,15 +690,15 @@ describe('adding a budget line nothing has been spent on', () => {
     await renderConsolidated()
 
     await openAddLine()
-    fireEvent.change(await screen.findByLabelText('Department'), { target: { value: 'dep-2' } })
-    fireEvent.change(screen.getByLabelText('Dept. sub-category'), { target: { value: 'dsc-2' } })
+    fireEvent.change(await screen.findByLabelText('Sektor'), { target: { value: 'dep-2' } })
+    fireEvent.change(screen.getByLabelText('Podsektor'), { target: { value: 'dsc-2' } })
 
     // The `+` beside the description — the level with no existing value to pick.
-    const adders = screen.getAllByTitle('Add a new category')
+    const adders = screen.getAllByTitle('Dodaj novu kategoriju')
     fireEvent.click(adders[adders.length - 1])
-    fireEvent.change(screen.getByPlaceholderText(/New expense description/i),
+    fireEvent.change(screen.getByPlaceholderText(/Novi opis troška/i),
       { target: { value: 'Conference sponsorship' } })
-    fireEvent.click(screen.getByText('✓ Add'))
+    fireEvent.click(screen.getByText('✓ Dodaj'))
 
     await waitFor(() =>
       expect(mockDb.writes.filter(w => w.table === 'expense_descriptions')).toHaveLength(1))
@@ -706,10 +709,10 @@ describe('adding a budget line nothing has been spent on', () => {
       dept_subcategory_id: 'dsc-2',
     })
 
-    fireEvent.click(screen.getByText('Continue'))
-    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: '4000' } })
-    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Conference sponsorship booked' } })
-    fireEvent.click(screen.getByText('Record change'))
+    fireEvent.click(screen.getByText('Dalje'))
+    fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '4000' } })
+    fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Conference sponsorship booked' } })
+    fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 
     await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
     expect(ledgerWrites()[0].row).toMatchObject({
@@ -732,13 +735,13 @@ describe('adding a budget line nothing has been spent on', () => {
     expect(screen.queryByText('Marketing')).not.toBeInTheDocument()
 
     await openAddLine()
-    fireEvent.change(await screen.findByLabelText('Department'), { target: { value: 'dep-2' } })
-    fireEvent.change(screen.getByLabelText('Dept. sub-category'), { target: { value: 'dsc-2' } })
-    fireEvent.click(screen.getByText('Continue'))
+    fireEvent.change(await screen.findByLabelText('Sektor'), { target: { value: 'dep-2' } })
+    fireEvent.change(screen.getByLabelText('Podsektor'), { target: { value: 'dsc-2' } })
+    fireEvent.click(screen.getByText('Dalje'))
 
-    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: '4000' } })
-    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Autumn campaign' } })
-    fireEvent.click(screen.getByText('Record change'))
+    fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '4000' } })
+    fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Autumn campaign' } })
+    fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 
     await waitFor(() => expect(screen.getByText('Marketing')).toBeInTheDocument())
     expect(screen.getByText('Events')).toBeInTheDocument()
@@ -752,18 +755,18 @@ describe('adding a budget line nothing has been spent on', () => {
     // the `+` is not there — rather than writing a lookup row with no parent.
     await renderConsolidated()
     fireEvent.click(screen.getByRole('button', { name: 'P&L' }))
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
 
     await openAddLine()
-    fireEvent.change(await screen.findByLabelText('P&L category'), { target: { value: 'plc-1' } })
-    fireEvent.change(screen.getByLabelText('P&L sub-category'), { target: { value: 'pls-1' } })
+    fireEvent.change(await screen.findByLabelText('P&L kategorija'), { target: { value: 'plc-1' } })
+    fireEvent.change(screen.getByLabelText('P&L potkategorija'), { target: { value: 'pls-1' } })
 
     // Two `+` controls, not three: the category and the sub-category can take
     // a new name here; the description cannot.
-    expect(screen.getAllByTitle('Add a new category')).toHaveLength(2)
-    expect(screen.getByText(/Switch to the Department branch/i)).toBeInTheDocument()
+    expect(screen.getAllByTitle('Dodaj novu kategoriju')).toHaveLength(2)
+    expect(screen.getByText(/Pređite na granu Sektor/i)).toBeInTheDocument()
     // The descriptions that do exist are still pickable.
-    expect(within(screen.getByLabelText('Expense description') as HTMLElement)
+    expect(within(screen.getByLabelText('Opis troška') as HTMLElement)
       .getByText('Telekom')).toBeInTheDocument()
   })
 })
@@ -782,12 +785,12 @@ describe('a budget line belongs to the group', () => {
     await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
 
     const figure = budgetFigure('Administration', 0)
-    expect(figure.getAttribute('title')).toMatch(/Click to change this figure/i)
+    expect(figure.getAttribute('title')).toMatch(/Kliknite da izmenite ovaj iznos/i)
     // The refusal that used to live in the title is gone with the guard.
     expect(figure.getAttribute('title')).not.toMatch(/pick one in the selector/i)
 
     fireEvent.click(figure)
-    expect(await screen.findByLabelText('Change to')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Novi iznos')).toBeInTheDocument()
   })
 
   it('records a change made there against the group, with no company on it', async () => {
@@ -795,9 +798,9 @@ describe('a budget line belongs to the group', () => {
     await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
 
     fireEvent.click(budgetFigure('Administration', 0))
-    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: '1500' } })
-    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Group plan for the quarter' } })
-    fireEvent.click(screen.getByText('Record change'))
+    fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '1500' } })
+    fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Group plan for the quarter' } })
+    fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 
     await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
     expect(ledgerWrites()[0].row).toMatchObject({
@@ -874,7 +877,7 @@ describe('how much of the table is open when it loads', () => {
     const openBefore = screen.queryAllByText('▼').length
     expect(openBefore).toBeGreaterThan(0)
 
-    await act(async () => { fireEvent.click(screen.getAllByText(/Total expenses/i)[0]) })
+    await act(async () => { fireEvent.click(screen.getAllByText(/Ukupni troškovi/i)[0]) })
     await waitFor(() => expect(screen.queryAllByText('▼').length).toBe(openBefore))
   })
 })
@@ -896,9 +899,9 @@ describe('which row a budget change is about to land on', () => {
   const ledgerWrites = () => mockDb.writes.filter(w => w.table === 'budget_adjustments')
 
   const record = async (to: string) => {
-    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: to } })
-    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Seat added' } })
-    fireEvent.click(screen.getByText('Record change'))
+    fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: to } })
+    fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Seat added' } })
+    fireEvent.click(screen.getByText('Sačuvaj izmenu'))
   }
 
   it('shows the same figure on a parent with one child as on the child itself', async () => {
@@ -918,14 +921,14 @@ describe('which row a budget change is about to land on', () => {
     await waitFor(() => expect(screen.getByText('Office')).toBeInTheDocument())
 
     fireEvent.click(budgetFigure('Office', 0))
-    await screen.findByLabelText('Change to')
+    await screen.findByLabelText('Novi iznos')
 
-    const notice = screen.getByText(/This change sits on Office itself/i)
+    const notice = screen.getByText(/Ova izmena se beleži na samoj stavci Office/i)
     expect(notice).toBeInTheDocument()
     // The child is NAMED. "this row has sub-lines" would leave the owner to
     // work out which of the two identical figures he was looking at.
     expect(notice.textContent).toMatch(/Telekom/)
-    expect(notice.textContent).toMatch(/one line under it/i)
+    expect(notice.textContent).toMatch(/ima jednu stavku ispod sebe/i)
   })
 
   it('says nothing of the kind on a leaf, which is the common case', async () => {
@@ -934,12 +937,12 @@ describe('which row a budget change is about to land on', () => {
     await waitFor(() => expect(screen.getByText('Telekom')).toBeInTheDocument())
 
     fireEvent.click(budgetFigure('Telekom', 0))
-    await screen.findByLabelText('Change to')
+    await screen.findByLabelText('Novi iznos')
 
-    expect(screen.queryByText(/This change sits on/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Ova izmena se beleži/i)).not.toBeInTheDocument()
     // It reads differently rather than merely reading less: an absent notice
     // is not a statement, and the two cases have to be told apart at a glance.
-    expect(screen.getByText(/Telekom has no lines under it/i)).toBeInTheDocument()
+    expect(screen.getByText(/Telekom nema stavki ispod sebe/i)).toBeInTheDocument()
   })
 
   it('counts the lines instead of naming them once there are too many to name', async () => {
@@ -953,10 +956,10 @@ describe('which row a budget change is about to land on', () => {
     await waitFor(() => expect(screen.getByText('Office')).toBeInTheDocument())
 
     fireEvent.click(budgetFigure('Office', 0))
-    await screen.findByLabelText('Change to')
+    await screen.findByLabelText('Novi iznos')
 
-    const notice = screen.getByText(/This change sits on Office itself/i)
-    expect(notice.textContent).toMatch(/has 5 lines under it, including/i)
+    const notice = screen.getByText(/Ova izmena se beleži na samoj stavci Office/i)
+    expect(notice.textContent).toMatch(/ima 5 stavki ispod sebe, između ostalih/i)
   })
 
   it('still writes the leaf change against the description, exactly as before', async () => {
@@ -1004,9 +1007,9 @@ describe('which row a budget change is about to land on', () => {
     await waitFor(() => expect(screen.getByText('Telekom')).toBeInTheDocument())
 
     expect(budgetFigure('Office', 0).getAttribute('title'))
-      .toMatch(/sits on Office itself, not on the line under it/i)
+      .toMatch(/beleži na samoj stavci Office, ne na stavci ispod nje/i)
     expect(budgetFigure('Telekom', 0).getAttribute('title'))
-      .not.toMatch(/sits on/i)
+      .not.toMatch(/samoj stavci/i)
   })
 })
 
@@ -1033,10 +1036,10 @@ describe("the row for a parent's own budget", () => {
     await renderConsolidated()
     await expandAll()
 
-    const label = await screen.findByText(/on Office itself/i)
+    const label = await screen.findByText(/na samoj stavci Office/i)
     // The meaning is in the opening words, which is the part that survives the
     // ellipsis. The old label spent them on `direct — not attributed to a`.
-    expect((label.textContent || '').slice(0, 16)).toBe('on Office itself')
+    expect((label.textContent || '').slice(0, 22)).toBe('na samoj stavci Office')
     expect(label.textContent).not.toMatch(/^direct/)
   })
 
@@ -1045,10 +1048,10 @@ describe("the row for a parent's own budget", () => {
     await renderConsolidated()
     await expandAll()
 
-    const label = await screen.findByText(/on Office itself/i)
+    const label = await screen.findByText(/na samoj stavci Office/i)
     const title = label.getAttribute('title') || ''
-    expect(title).toMatch(/Budgeted on Office itself/i)
-    expect(title).toMatch(/Not uncategorised and not an error/i)
+    expect(title).toMatch(/Budžetirano na samoj stavci Office/i)
+    expect(title).toMatch(/Nije nerazvrstano i nije greška/i)
   })
 })
 
@@ -1063,49 +1066,49 @@ describe('the Budgeting page on a single company', () => {
     await renderConsolidated()
     await expandAll()
     // Everything the budget draws is here on the group view.
-    expect(screen.getAllByText('ESTIMATE').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('VAR').length).toBeGreaterThan(0)
-    expect(screen.getByText('BUDGET')).toBeInTheDocument()
-    expect(screen.getByText('all 12 months')).toBeInTheDocument()
-    expect(screen.getByText('+ Add budget line')).toBeInTheDocument()
+    expect(screen.getAllByText('PROCENA').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('ODST.').length).toBeGreaterThan(0)
+    expect(screen.getByText('BUDŽET')).toBeInTheDocument()
+    expect(screen.getByText('svih 12 meseci')).toBeInTheDocument()
+    expect(screen.getByText('+ Dodaj budžetsku stavku')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Companies' }), { target: { value: COMPANY_A } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Firme' }), { target: { value: COMPANY_A } })
     // The switch re-queries, so the table is rebuilt before any of this is on
     // screen — the sub-header naming the company is what says it has landed.
     await waitFor(() => expect(screen.getByText('Alpha d.o.o.', { selector: 'th' })).toBeInTheDocument())
 
     // The budget, the variance and the Year column are gone, and so is the way
     // in to a group-level line.
-    expect(screen.queryByText('ESTIMATE')).not.toBeInTheDocument()
-    expect(screen.queryByText('VAR')).not.toBeInTheDocument()
-    expect(screen.queryByText('BUDGET')).not.toBeInTheDocument()
-    expect(screen.queryByText('all 12 months')).not.toBeInTheDocument()
-    expect(screen.queryByText('+ Add budget line')).not.toBeInTheDocument()
+    expect(screen.queryByText('PROCENA')).not.toBeInTheDocument()
+    expect(screen.queryByText('ODST.')).not.toBeInTheDocument()
+    expect(screen.queryByText('BUDŽET')).not.toBeInTheDocument()
+    expect(screen.queryByText('svih 12 meseci')).not.toBeInTheDocument()
+    expect(screen.queryByText('+ Dodaj budžetsku stavku')).not.toBeInTheDocument()
 
     // What is left is the actuals, benchmarked — the months are still there,
     // one column apiece instead of three.
-    expect(screen.getAllByText('ACTUAL').length).toBe(3)
-    expect(screen.getByText('BENCHMARK')).toBeInTheDocument()
-    expect(within(headerRow()).getByText(/THIS MONTH/)).toBeInTheDocument()
+    expect(screen.getAllByText('OSTVARENO').length).toBe(3)
+    expect(screen.getByText('REFERENCA')).toBeInTheDocument()
+    expect(within(headerRow()).getByText(/OVAJ MESEC/)).toBeInTheDocument()
     expect(screen.getAllByText('1.000 RSD').length).toBeGreaterThan(0)
     expect(screen.getByText('Administration')).toBeInTheDocument()
 
     // And one line saying why, rather than a silently shorter table.
-    expect(screen.getByText(/Budgets are set for the group/i)).toBeInTheDocument()
-    expect(screen.getByText(/Expense Analysis/i)).toBeInTheDocument()
+    expect(screen.getByText(/Budžeti se postavljaju za grupu/i)).toBeInTheDocument()
+    expect(screen.getByText(/P&L analiza/i)).toBeInTheDocument()
   })
 
   it('brings the budget back when the group is selected again', async () => {
     await renderConsolidated()
     await expandAll()
-    fireEvent.change(screen.getByRole('combobox', { name: 'Companies' }), { target: { value: COMPANY_A } })
-    await waitFor(() => expect(screen.queryByText('BUDGET')).not.toBeInTheDocument())
+    fireEvent.change(screen.getByRole('combobox', { name: 'Firme' }), { target: { value: COMPANY_A } })
+    await waitFor(() => expect(screen.queryByText('BUDŽET')).not.toBeInTheDocument())
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Companies' }), { target: { value: '' } })
-    await waitFor(() => expect(screen.getByText('BUDGET')).toBeInTheDocument())
-    expect(screen.getByText('all 12 months')).toBeInTheDocument()
-    expect(screen.getByText('+ Add budget line')).toBeInTheDocument()
-    expect(screen.queryByText(/Budgets are set for the group/i)).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Firme' }), { target: { value: '' } })
+    await waitFor(() => expect(screen.getByText('BUDŽET')).toBeInTheDocument())
+    expect(screen.getByText('svih 12 meseci')).toBeInTheDocument()
+    expect(screen.getByText('+ Dodaj budžetsku stavku')).toBeInTheDocument()
+    expect(screen.queryByText(/Budžeti se postavljaju za grupu/i)).not.toBeInTheDocument()
   })
 })
 
@@ -1120,9 +1123,9 @@ describe('the page without tabs', () => {
   it('opens on the budget table, with its own controls', async () => {
     await renderConsolidated()
     await expandAll()
-    expect(screen.getByText(/Total expenses/i)).toBeInTheDocument()
+    expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'P&L' })).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Companies' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Firme' })).toBeInTheDocument()
   })
 
   it('offers no revenue forecast or simulation', async () => {
@@ -1139,7 +1142,7 @@ describe('adding a line from the row it belongs under', () => {
   // sub-category row is the same dialog with those two answers already given.
 
   const plusUnder = (label: string) =>
-    screen.queryByRole('button', { name: `Add a budget line under ${label}` })
+    screen.queryByRole('button', { name: `Dodaj budžetsku stavku pod ${label}` })
 
   /**
    * An expense description belongs to a dept. sub-category in the database, so
@@ -1161,12 +1164,12 @@ describe('adding a line from the row it belongs under', () => {
     await expandAll()
 
     fireEvent.click(plusUnder('Office')!)
-    await screen.findByText('Add a budget line')
+    await screen.findByText('Dodaj budžetsku stavku')
 
-    expect((await screen.findByLabelText('Department') as HTMLSelectElement).value).toBe('dep-1')
-    expect((screen.getByLabelText('Dept. sub-category') as HTMLSelectElement).value).toBe('dsc-1')
+    expect((await screen.findByLabelText('Sektor') as HTMLSelectElement).value).toBe('dep-1')
+    expect((screen.getByLabelText('Podsektor') as HTMLSelectElement).value).toBe('dsc-1')
     // The one thing it was opened to say is the one thing left to say.
-    expect((screen.getByLabelText('Expense description') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByLabelText('Opis troška') as HTMLSelectElement).value).toBe('')
   })
 
   /** The cell folds the row. A button that folds what it just opened is a
@@ -1176,16 +1179,16 @@ describe('adding a line from the row it belongs under', () => {
     await expandAll()
 
     fireEvent.click(plusUnder('Office')!)
-    await screen.findByText('Add a budget line')
+    await screen.findByText('Dodaj budžetsku stavku')
     expect(screen.getByText('Telekom')).toBeInTheDocument()
   })
 
   it('leaves the page button opening an empty dialog', async () => {
     await renderConsolidated()
 
-    fireEvent.click(screen.getByText('+ Add budget line'))
-    await screen.findByText('Add a budget line')
-    expect((await screen.findByLabelText('Department') as HTMLSelectElement).value).toBe('')
+    fireEvent.click(screen.getByText('+ Dodaj budžetsku stavku'))
+    await screen.findByText('Dodaj budžetsku stavku')
+    expect((await screen.findByLabelText('Sektor') as HTMLSelectElement).value).toBe('')
   })
 
   it('records the line under the sub-category it was opened from', async () => {
@@ -1193,14 +1196,14 @@ describe('adding a line from the row it belongs under', () => {
     await expandAll()
 
     fireEvent.click(plusUnder('Office')!)
-    await screen.findByText('Add a budget line')
-    fireEvent.change(await screen.findByLabelText('Expense description'), { target: { value: 'exd-1' } })
-    fireEvent.change(screen.getByLabelText('Month'), { target: { value: horizonMonth(2) } })
-    fireEvent.click(screen.getByText('Continue'))
+    await screen.findByText('Dodaj budžetsku stavku')
+    fireEvent.change(await screen.findByLabelText('Opis troška'), { target: { value: 'exd-1' } })
+    fireEvent.change(screen.getByLabelText('Mesec'), { target: { value: horizonMonth(2) } })
+    fireEvent.click(screen.getByText('Dalje'))
 
-    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: '750' } })
-    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'New retainer' } })
-    fireEvent.click(screen.getByText('Record change'))
+    fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '750' } })
+    fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'New retainer' } })
+    fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 
     await waitFor(() =>
       expect(mockDb.writes.filter(w => w.table === 'budget_adjustments')).toHaveLength(1))
@@ -1231,7 +1234,7 @@ describe('the budget read in EUR', () => {
   const { DisplayCurrencyProvider } = jest.requireActual('../contexts/DisplayCurrencyContext')
   const renderIn = async (currency: 'RSD' | 'EUR') => {
     render(<DisplayCurrencyProvider initial={currency}><Budgeting /></DisplayCurrencyProvider>)
-    await waitFor(() => expect(screen.getByText(/Total expenses/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
   }
   const adjustment = (over: Record<string, any>) => ({
     id: 'adj-1', company_id: null,
@@ -1252,7 +1255,7 @@ describe('the budget read in EUR', () => {
     // 1,000 EUR seeded on the Telekom line under it + 500 EUR recorded on
     // Administration itself (whose own seed, recorded with the entry, is 0).
     await waitFor(() => expect(budgetFigure('Administration', 1).textContent).toContain('1.500 EUR'))
-    expect(screen.queryByText(/cannot be read in EUR/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/ne može da se prikaže u EUR/)).not.toBeInTheDocument()
   })
 
   it('stays in RSD, and says why, when an entry was recorded in dinars only', async () => {
@@ -1263,7 +1266,7 @@ describe('the budget read in EUR', () => {
     await renderIn('EUR')
     await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
     await waitFor(() => expect(budgetFigure('Administration', 1).textContent).toContain('175.500 RSD'))
-    expect(screen.getByText(/recorded in RSD only/)).toBeInTheDocument()
+    expect(screen.getByText(/samo u RSD/)).toBeInTheDocument()
   })
 })
 
@@ -1282,7 +1285,7 @@ describe('a budget for one project, or for overhead', () => {
   })
 
   const pickProject = async (value: string) => {
-    const select = await screen.findByRole('combobox', { name: 'Project' })
+    const select = await screen.findByRole('combobox', { name: 'Projekat' })
     await waitFor(() => expect(within(select).getByText('Zgrada A')).toBeInTheDocument())
     fireEvent.change(select, { target: { value } })
   }
@@ -1290,7 +1293,7 @@ describe('a budget for one project, or for overhead', () => {
   it('reads every project together by default, as the page always did', async () => {
     await renderConsolidated()
     await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
-    expect((screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement).value).toBe('')
+    expect((screen.getByRole('combobox', { name: 'Projekat' }) as HTMLSelectElement).value).toBe('')
     expect(budgetFigure('Administration', 0).textContent).toMatch(/1[.,]?400/)
     const scoped = mockDb.requests.filter(r => r.filters.some(f => f.col === 'project_id'))
     expect(scoped).toEqual([])
@@ -1323,9 +1326,9 @@ describe('a budget for one project, or for overhead', () => {
 
     // The leaf, where the seed sits: a row pins its OWN seed, not its children's.
     fireEvent.click(budgetFigure('Telekom', 0))
-    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: '1000' } })
-    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Site plan' } })
-    fireEvent.click(screen.getByText('Record change'))
+    fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '1000' } })
+    fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Site plan' } })
+    fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 
     await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
     expect(ledgerWrites()[0].row).toMatchObject({
@@ -1340,9 +1343,9 @@ describe('a budget for one project, or for overhead', () => {
     await expandAll()
 
     fireEvent.click(budgetFigure('Telekom', 0))
-    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: '2000' } })
-    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Group plan' } })
-    fireEvent.click(screen.getByText('Record change'))
+    fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '2000' } })
+    fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Group plan' } })
+    fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 
     await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
     expect(ledgerWrites()[0].row).toMatchObject({ project_id: null, amount_rsd: 600, seed_rsd: 1000 })

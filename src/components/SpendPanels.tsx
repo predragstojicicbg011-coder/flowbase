@@ -2,6 +2,7 @@ import React from 'react'
 import { C, Empty, TipHead, TipRow, type Tip } from './chartChrome'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
+import { countOf } from '../utils/plural'
 import { niceMax, shortMoney, monthLabel, OTHER } from '../services/expenseCharts'
 import {
   moverBars, moverScale, heatGrid, binOf, rowBin,
@@ -66,7 +67,7 @@ export function MoversChart({ compared, depth, limit, w, onTip, onSelect, priorL
   const { money, signed } = useMoney()
   const bars = moverBars(compared, depth, limit)
   if (bars.length === 0) {
-    return <Empty h={280} text={`Nothing moved between ${priorLabel} and ${periodLabel} at this level.`} />
+    return <Empty h={280} text={`Na ovom nivou ništa se nije promenilo između perioda ${priorLabel} i ${periodLabel}.`} />
   }
 
   const ROW = 30
@@ -107,10 +108,10 @@ export function MoversChart({ compared, depth, limit, w, onTip, onSelect, priorL
       {/* A caption only where there is something to caption. "spent less" over
           an empty strip reads as a finding, and it is the absence of one. */}
       {axis.down > 0 && (
-        <text x={x(-axis.down)} y={h - 8} textAnchor="start" fontSize="10" fill={C.down}>◀ spent less</text>
+        <text x={x(-axis.down)} y={h - 8} textAnchor="start" fontSize="10" fill={C.down}>◀ manje potrošeno</text>
       )}
       {axis.up > 0 && (
-        <text x={x(axis.up)} y={h - 8} textAnchor="end" fontSize="10" fill={C.up}>spent more ▶</text>
+        <text x={x(axis.up)} y={h - 8} textAnchor="end" fontSize="10" fill={C.up}>više potrošeno ▶</text>
       )}
 
       {bars.map((b, i) => {
@@ -128,9 +129,9 @@ export function MoversChart({ compared, depth, limit, w, onTip, onSelect, priorL
               {b.parent.length > 0 && <TipRow label="" value={b.parent.join(' › ')} dim />}
               <TipRow label={priorLabel} value={money(b.prior)} dim />
               <TipRow label={periodLabel} value={money(b.current)} />
-              <TipRow label={rising ? 'more' : 'less'} value={money(Math.abs(b.delta))} />
-              <TipRow label="change"
-                value={b.deltaPct === null ? 'new line' : `${b.deltaPct > 0 ? '+' : ''}${b.deltaPct.toFixed(1)}%`} dim />
+              <TipRow label={rising ? 'više' : 'manje'} value={money(Math.abs(b.delta))} />
+              <TipRow label="promena"
+                value={b.deltaPct === null ? 'nova stavka' : `${b.deltaPct > 0 ? '+' : ''}${b.deltaPct.toFixed(1).replace('.', ',')}%`} dim />
             </>
           ),
         })
@@ -187,7 +188,7 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
   const { money } = useMoney()
   const grid = heatGrid(tree, months, depth, limit)
   if (grid.rows.length === 0 || months.length === 0) {
-    return <Empty h={240} text="No spend in this period." />
+    return <Empty h={240} text="Nema troškova u ovom periodu." />
   }
 
   const ROW = 26
@@ -212,7 +213,7 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
           {monthLabel(m, crossesYear)}
         </text>
       ))}
-      <text x={w - 4} y={PAD.t - 10} textAnchor="end" fontSize="9.5" fill={C.faint}>TOTAL</text>
+      <text x={w - 4} y={PAD.t - 10} textAnchor="end" fontSize="9.5" fill={C.faint}>UKUPNO</text>
 
       {grid.rows.map((r, ri) => {
         const y = PAD.t + ri * ROW
@@ -249,11 +250,11 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
                         <TipHead>{r.label}</TipHead>
                         {r.parent.length > 0 && <TipRow label="" value={r.parent.join(' › ')} dim />}
                         <TipRow label={monthLabel(months[i], true)} value={money(v)} />
-                        <TipRow label="share of month"
-                          value={monthTotals[i] > 0 ? `${(v / monthTotals[i] * 100).toFixed(1)}%` : '—'} dim />
-                        <TipRow label="of this line's year"
-                          value={r.total > 0 ? `${(v / r.total * 100).toFixed(1)}%` : '—'} dim />
-                        <TipRow label="its biggest month" value={money(r.max)} dim />
+                        <TipRow label="udeo u mesecu"
+                          value={monthTotals[i] > 0 ? `${(v / monthTotals[i] * 100).toFixed(1).replace('.', ',')}%` : '—'} dim />
+                        <TipRow label="od godišnjeg iznosa stavke"
+                          value={r.total > 0 ? `${(v / r.total * 100).toFixed(1).replace('.', ',')}%` : '—'} dim />
+                        <TipRow label="njen najveći mesec" value={money(r.max)} dim />
                       </>
                     ),
                   })} />
@@ -265,7 +266,7 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
               {shortMoney(r.total)}
             </text>
             <text x={w - 4} y={y + ROW / 2 + 11} textAnchor="end" fontSize="8.5" fill={C.faint}>
-              {grandTotal > 0 ? `${(r.total / grandTotal * 100).toFixed(1)}%` : ''}
+              {grandTotal > 0 ? `${(r.total / grandTotal * 100).toFixed(1).replace('.', ',')}%` : ''}
             </text>
           </g>
         )
@@ -289,7 +290,7 @@ export function HeatLegend({ tree, months, depth, limit, byRow }: {
     if (byRow) {
       const lo = (i / HEAT.length) * 100
       const hi = ((i + 1) / HEAT.length) * 100
-      return i === HEAT.length - 1 ? `top ${(100 - lo).toFixed(0)}%` : `${lo.toFixed(0)}–${hi.toFixed(0)}%`
+      return i === HEAT.length - 1 ? `gornjih ${(100 - lo).toFixed(0)}%` : `${lo.toFixed(0)}–${hi.toFixed(0)}%`
     }
     if (edges.length === 0) return '—'
     if (i === 0) return `< ${shortMoney(edges[0])}`
@@ -300,14 +301,14 @@ export function HeatLegend({ tree, months, depth, limit, byRow }: {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
       <span style={{ fontSize: '10px', color: C.faint }}>
-        {byRow ? 'SHARE OF THE LINE’S BIGGEST MONTH' : 'MONTHLY SPEND PER LINE'}
+        {byRow ? 'UDEO U NAJVEĆEM MESECU STAVKE' : 'MESEČNI TROŠAK PO STAVCI'}
       </span>
       <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
         <span style={{
           width: '13px', height: '13px', borderRadius: '3px', background: HEAT_EMPTY,
           display: 'inline-block', marginRight: '5px',
         }} />
-        <span style={{ fontSize: '10px', color: C.dim, marginRight: '10px' }}>nothing</span>
+        <span style={{ fontSize: '10px', color: C.dim, marginRight: '10px' }}>ništa</span>
         {HEAT.map((c, i) => (
           <span key={c} style={{ display: 'flex', alignItems: 'center', gap: '5px', marginRight: '10px' }}>
             <i style={{ width: '13px', height: '13px', borderRadius: '3px', background: c, display: 'inline-block' }} />
@@ -317,7 +318,7 @@ export function HeatLegend({ tree, months, depth, limit, byRow }: {
       </span>
       {!byRow && grid.folded > 0 && (
         <span style={{ fontSize: '10px', color: C.faint }}>
-          {grid.folded} smaller line{grid.folded === 1 ? '' : 's'} folded into Other
+          {countOf(grid.folded, 'manja stavka je spojena', 'manje stavke su spojene', 'manjih stavki je spojeno')} u Ostalo
         </span>
       )}
     </div>

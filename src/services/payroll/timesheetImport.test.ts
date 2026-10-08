@@ -135,18 +135,18 @@ describe('parseSheet', () => {
     // edited, and the hours behind a payroll are not the place to find that
     // out later.
     const p = parseSheet(sheet({ difference: '8:00:00' }))!
-    expect(p.problems[0]).toContain('difference of 8')
-    expect(p.problems[0]).toContain('edited')
+    expect(p.problems[0]).toContain('razliku od 8')
+    expect(p.problems[0]).toContain('ručno menjan')
   })
 
   it('refuses a sheet with no difference row at all', () => {
     const p = parseSheet(sheet({ difference: null }))!
-    expect(p.problems[0]).toContain('no Difference row')
+    expect(p.problems[0]).toContain('nema red Difference')
   })
 
   it('refuses a sheet whose categories do not reach its own total', () => {
     const p = parseSheet(sheet({ worked: '144:00' }))!
-    expect(p.problems.some(x => x.includes('was not read'))).toBe(true)
+    expect(p.problems.some(x => x.includes('nije pročitano'))).toBe(true)
   })
 
   it('NAMES a leave category it has no column for, rather than bucketing it', () => {
@@ -159,7 +159,7 @@ describe('parseSheet', () => {
     }))!
     expect(p.unmapped).toEqual([{ label: 'Maternity leave', hours: 176 }])
     expect(p.problems.some(x => x.includes('Maternity leave'))).toBe(true)
-    expect(p.problems.some(x => x.includes('wrong rate'))).toBe(true)
+    expect(p.problems.some(x => x.includes('pogrešnoj stopi'))).toBe(true)
   })
 
   it('returns nothing for a sheet that is not a timesheet', () => {

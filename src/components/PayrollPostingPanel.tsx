@@ -16,6 +16,7 @@ import {
   matchEmployeesToPartners, unmatchedEmployees, matchEmployeeToPartner,
   matchPayeeToPartner, matchDeductionPartners, findTaxAuthority,
   classifyPostedNote, payrollMonthFromNote, personKey, TAX_AUTHORITY_NAME,
+  POSTED_NOTE_FILTER,
   type PartnerLike,
 } from '../services/payroll/partnerMatch'
 import type { PayrollRun } from '../services/payroll/runs'
@@ -23,6 +24,8 @@ import type { EmployeeForMonth } from '../services/payroll/employees'
 import type { LedgerNames } from '../services/payroll/booking'
 import type { SavedRun } from '../services/payroll/savedRuns'
 import { fmtNum } from '../utils/formatters'
+import { countOf, plural } from '../utils/plural'
+import { srDate } from '../utils/months'
 import { getBookRates } from '../services/bookAmounts'
 import { fetchAllPartners } from '../services/allPartners'
 /** Two names for one person, compared the way the matcher compares them. */
@@ -119,10 +122,14 @@ export default function PayrollPostingPanel({
       // the posting tag their note carries, so nothing else is touched: an
       // invoice typed by hand that happens to have no partner is somebody's
       // decision, not a gap to fill.
+      //
+      // Both spellings of the tag: `[posting …]` on rows written before the
+      // interface was Serbian, `[knjiženje …]` since. The two `or` filters are
+      // separate query parameters, which PostgREST ANDs together.
       const { data: gaps } = await supabase.from('invoices')
         .select('id, note, parent_invoice_id, partner_id, due_date, invoice_number')
         .eq('company_id', companyId)
-        .like('note', '%[posting %')
+        .or(POSTED_NOTE_FILTER)
         .or('partner_id.is.null,due_date.is.null,invoice_number.is.null')
       setOrphaned((gaps || []) as Posted[])
       setLedger({
@@ -194,12 +201,12 @@ export default function PayrollPostingPanel({
     for (const d of allDeductions) {
       if (d.goes_to !== 'third_party') continue
       const payee = (d.payee || '').trim()
-      if (!payee) { seen.set(d.label, `${d.label} — the deduction names no payee at all`); continue }
+      if (!payee) { seen.set(d.label, `${d.label} — obustava nema navedenog primaoca`); continue }
       const m = matchPayeeToPartner(payee, partners)
       if (m.partnerId) continue
       seen.set(payee, m.reason === 'ambiguous'
-        ? `${payee} — more than one partner answers to that, so choosing would be a coin toss`
-        : `${payee} — nobody of that name is in Partners`)
+        ? `${payee} — tom nazivu odgovara više partnera, pa izbor ne bi bio pouzdan`
+        : `${payee} — u Partnerima nema nikoga sa tim nazivom`)
     }
     return [...seen.values()]
   }, [allDeductions, partners])
@@ -227,12 +234,12 @@ export default function PayrollPostingPanel({
       // versions of the month.
       const kept = savedRuns.find(r => r.run_key === run.key)
       const notKept = !kept
-        ? 'This run has not been calculated and kept yet. Press Recalculate above — what '
-          + 'is posted has to be a record, not something worked out on the way past.'
+        ? 'Ovaj obračun još nije izračunat i sačuvan. Kliknite „Ponovo obračunaj“ iznad — '
+          + 'knjiži se sačuvani obračun, a ne iznos izračunat usput.'
         : Math.abs(Number(kept.total_cost) - run.totals.totalCost) > 0.02
-          ? `What is kept for this run says ${Number(kept.total_cost).toFixed(2)} and it now `
-            + `comes to ${run.totals.totalCost.toFixed(2)}. Something behind it has changed; `
-            + 'recalculate before posting so the ledger and the record agree.'
+          ? `Sačuvani obračun iznosi ${fmtNum(Number(kept.total_cost))}, a sada iznosi `
+            + `${fmtNum(run.totals.totalCost)}. Nešto se u međuvremenu promenilo; ponovo `
+            + 'obračunajte pre knjiženja da bi se knjiga i obračun slagali.'
           : null
 
       out[run.key] = {
@@ -257,7 +264,7 @@ export default function PayrollPostingPanel({
   const fillable = useMemo(() => {
     // The obligation legs carry the sub-category in their note rather than
     // anything nameable, so they are recognised by their PARENT: the row that
-    // says "Tax and contributions" is the parent, and its children are the
+    // says "Porez i doprinosi" (or "Tax and contributions") is the parent, and its children are the
     // tax and the two contribution lines.
     const taxParents = new Set(
       orphaned.filter(r => classifyPostedNote(r.note).kind === 'tax').map(r => r.id))
@@ -312,16 +319,16 @@ export default function PayrollPostingPanel({
         .update(row.patch).eq('id', row.id).select('id')
       if (err) {
         setFilling(false)
-        setError(`Filled ${filled} before stopping: ${err.message}`)
+        setError(`Dopunjeno ${filled} pre prekida: ${err.message}`)
         reload()
         return
       }
       filled += 1
     }
     setFilling(false)
-    setDone(`${filled} posted row${filled === 1 ? '' : 's'} completed — partner, due date `
-      + 'and invoice number, only where they were empty. No amount or classification '
-      + 'was touched.')
+    setDone(`Dopunjeno: ${countOf(filled, 'proknjižena stavka', 'proknjižene stavke', 'proknjiženih stavki')} — `
+      + 'partner, datum dospeća i broj fakture, samo tamo gde su bili prazni. Nijedan iznos '
+      + 'ni klasifikacija nisu menjani.')
     reload()
   }
 
@@ -340,9 +347,9 @@ export default function PayrollPostingPanel({
     try {
       eurRate = (await getBookRates(paymentDate)).eurRate
     } catch (e: any) {
-      setError(`The NBS euro rate for ${paymentDate} could not be read, so nothing was posted. `
-        + `(${e?.message || String(e)}) Every entry would go in without its EUR figure and `
-        + 'would be missing from the reports read in euros.')
+      setError(`Kurs NBS za EUR na dan ${srDate(paymentDate)} nije dostupan, pa ništa nije `
+        + `proknjiženo. (${e?.message || String(e)}) Pokušajte ponovo ili izaberite drugi `
+        + 'datum isplate.')
       setBusy(null)
       return
     }
@@ -358,12 +365,14 @@ export default function PayrollPostingPanel({
       // Posting freezes this run, so a recalculation cannot move underneath
       // the invoices it just wrote.
       runId: entry.runId,
-      note: `Payroll ${month} — ${run.label}`,
+      note: `Zarade ${month} — ${run.label}`,
     }
     try {
       await postPlan(supabase, entry.plan, context, run.label)
-      setDone(`${run.label} posted — ${entry.plan.invoices.length} invoices`
-        + (entry.plan.transactions.length ? ` and ${entry.plan.transactions.length} storno entries` : ''))
+      setDone(`Proknjiženo: ${run.label} — ${countOf(entry.plan.invoices.length, 'faktura', 'fakture', 'faktura')}`
+        + (entry.plan.transactions.length
+          ? ` i ${countOf(entry.plan.transactions.length, 'storno stavka', 'storno stavke', 'storno stavki')}`
+          : ''))
       await reload()
       onPosted()
     } catch (e: any) {
@@ -377,12 +386,12 @@ export default function PayrollPostingPanel({
     if (!posting) return
     const n = (posting.created_invoice_ids?.length || 0) + (posting.created_transaction_ids?.length || 0)
     if (!window.confirm(
-      `Remove the ${n} entries ${run.label} created for ${month}? Any of them already `
-      + 'matched to a bank payment will lose that link.')) return
+      `Obrisati ${countOf(n, 'stavku', 'stavke', 'stavki')} koje je obračun „${run.label}“ `
+      + `upisao za ${month}? Stavke već uparene sa plaćanjem iz izvoda izgubiće to uparivanje.`)) return
     setBusy(run.key); setError(null); setDone(null)
     try {
       await undoPosting(supabase, posting)
-      setDone(`${run.label} was undone — ${n} entries removed`)
+      setDone(`Knjiženje „${run.label}“ je poništeno — ${plural(n, 'obrisana je', 'obrisane su', 'obrisano je')} ${countOf(n, 'stavka', 'stavke', 'stavki')}`)
       await reload()
       onPosted()
     } catch (e: any) {
@@ -402,10 +411,10 @@ export default function PayrollPostingPanel({
   if (!companyId) {
     return (
       <div style={s.panel}>
-        <div style={s.title}>Post to the ledger</div>
+        <div style={s.title}>Knjiženje u glavnu knjigu</div>
         <div style={s.hint}>
-          Choose a single company above. A posting belongs to one set of books, and
-          "all companies" does not say which.
+          Izaberite jednu firmu iznad. Knjiženje pripada jednoj knjizi, a „Sve firme“ ne
+          kaže kojoj.
         </div>
       </div>
     )
@@ -415,14 +424,14 @@ export default function PayrollPostingPanel({
     <div style={s.panel}>
       <div style={s.head}>
         <div>
-          <div style={s.title}>Post to the ledger</div>
+          <div style={s.title}>Knjiženje u glavnu knjigu</div>
           <div style={s.hint}>
-            Each run posts once. What is listed below is exactly what will be written —
-            built by the same function that writes it.
+            Svaki obračun se knjiži jednom. Ispod je tačno ono što će biti upisano —
+            napravila ga je ista funkcija koja ga upisuje.
           </div>
         </div>
         <label style={s.dateLabel}>
-          <span style={s.dateCaption}>Payment date</span>
+          <span style={s.dateCaption}>Datum isplate</span>
           <input type="date" style={s.input} value={paymentDate}
             onChange={e => setPaymentDate(e.target.value)} />
         </label>
@@ -433,12 +442,12 @@ export default function PayrollPostingPanel({
 
       {allMissing.length > 0 && (
         <div style={s.warn}>
-          <b>{allMissing.length} organisational {allMissing.length === 1 ? 'unit has' : 'units have'} no
-          department.</b> Nothing can be posted until they do — every entry would fall into
-          Unassigned, where a salary looks like an ordinary cost of nobody.
+          <b>Organizacione jedinice bez sektora: {allMissing.length}.</b> Ništa ne može da se
+          proknjiži dok ne dobiju sektor — sve stavke bi završile u „Nedodeljeno“, gde zarada
+          izgleda kao običan trošak bez nosioca.
           <button style={{ ...s.ghostSmall, marginLeft: '8px' }}
             onClick={() => setShowMapping(v => !v)}>
-            {showMapping ? 'Hide' : 'Map them now'}
+            {showMapping ? 'Sakrij' : 'Poveži ih sada'}
           </button>
         </div>
       )}
@@ -457,19 +466,19 @@ export default function PayrollPostingPanel({
           figures on the posting with an empty Partner column. */}
       {!taxPartner.partnerId && (
         <div style={s.warn}>
-          <b>The tax authority is not in Partners.</b> The tax and contribution rows will
-          post without one. Add a partner named <i>{TAX_AUTHORITY_NAME}</i>
+          <b>Poreska uprava nije u Partnerima.</b> Stavke poreza i doprinosa biće
+          proknjižene bez partnera. Dodajte partnera <i>{TAX_AUTHORITY_NAME}</i>
           {taxPartner.reason === 'ambiguous'
-            ? ' — more than one partner answers to that name, so choosing would be a coin toss.'
-            : ' and it will be found by name from then on.'}
+            ? ' — tom nazivu odgovara više partnera, pa izbor ne bi bio pouzdan. Spojite ili preimenujte duplikate.'
+            : ' i od tada će se pronalaziti po nazivu.'}
         </div>
       )}
 
       {unmatchedPayees.length > 0 && (
         <div style={s.warn}>
-          <b>{unmatchedPayees.length} deduction {unmatchedPayees.length === 1 ? 'payee' : 'payees'}</b>
-          {' '}could not be placed, so those forwarded amounts post without a partner. The payee is
-          read off the administrative deduction in HR Administration.
+          <b>Primaoci obustava koji nisu pronađeni: {unmatchedPayees.length}.</b>
+          {' '}Ti prosleđeni iznosi biće proknjiženi bez partnera. Primalac se čita iz
+          administrativne obustave u Kadrovskoj evidenciji.
           <div style={{ marginTop: '6px', fontWeight: 400 }}>
             {unmatchedPayees.map(line => <div key={line}>{line}</div>)}
           </div>
@@ -478,20 +487,19 @@ export default function PayrollPostingPanel({
 
       {unmatched.length > 0 && (
         <div style={s.warn}>
-          <b>{unmatched.length} {unmatched.length === 1 ? 'person has' : 'people have'} no
-          partner record</b>, so their rows will be written without one. Everything else
-          about them posts normally.
+          <b>Zaposleni bez partnera: {unmatched.length}.</b> Njihove stavke biće upisane bez
+          partnera. Sve ostalo se knjiži normalno.
           <div style={{ marginTop: '6px', fontWeight: 400 }}>
             {unmatched.map(u => (
               <div key={u.id}>
                 {u.name} — {
                   u.reason === 'not_individual'
-                    ? 'a partner of that name exists but is filed as a company. '
-                      + 'Tick “Individual” on it in Partners and it will match.'
+                    ? 'partner sa tim imenom postoji, ali je upisan kao firma. '
+                      + 'Označite „Fizičko lice“ u Partnerima i biće uparen.'
                   : u.reason === 'ambiguous'
-                    ? 'two individuals carry that name, so choosing between them '
-                      + 'would be a coin toss. Merge or rename one of them.'
-                    : 'nobody of that name is in Partners. Add them as an individual.'
+                    ? 'dva fizička lica imaju to ime, pa izbor ne bi bio pouzdan. '
+                      + 'Spojite ili preimenujte jedno od njih.'
+                    : 'u Partnerima nema nikoga sa tim imenom. Dodajte ga kao fizičko lice.'
                 }
               </div>
             ))}
@@ -504,19 +512,18 @@ export default function PayrollPostingPanel({
           edits posted rows on arrival is a page nobody can trust. */}
       {fillable.length > 0 && (
         <div style={s.warn}>
-          <b>{fillable.length} posted {fillable.length === 1 ? 'row' : 'rows'}</b> can be
-          completed — the partner (salaries to the person, tax to the tax authority, forwarded
-          deductions to their payee), the due date, and the invoice number. Each is written only
-          where it is empty, and no amount or classification is touched.
+          <b>Proknjižene stavke koje mogu da se dopune: {fillable.length}</b> — partner (zarade
+          zaposlenom, porez Poreskoj upravi, prosleđene obustave primaocu), datum dospeća i broj
+          fakture. Upisuje se samo tamo gde je prazno; nijedan iznos ni klasifikacija se ne menjaju.
           <button style={{ ...s.ghostSmall, marginLeft: '8px' }}
             onClick={fillPartners} disabled={filling}>
-            {filling ? 'Filling…' : 'Fill them in'}
+            {filling ? 'Dopunjavanje…' : 'Dopuni'}
           </button>
         </div>
       )}
 
       {Object.keys(plans).length === 0 && (
-        <div style={s.hint}>Nothing to post for this month.</div>
+        <div style={s.hint}>Za ovaj mesec nema ničega za knjiženje.</div>
       )}
 
       {runs.map(run => {
@@ -529,18 +536,18 @@ export default function PayrollPostingPanel({
             <div style={{ flex: 1 }}>
               <div style={s.runName}>
                 {run.label}
-                {posting && <span style={s.postedBadge}>Posted {posting.posted_on}</span>}
+                {posting && <span style={s.postedBadge}>Proknjiženo {srDate(posting.posted_on)}</span>}
               </div>
               <div style={s.runDetail}>
-                {entry.plan.invoices.filter(i => i.kind === 'net').length} net salary,{' '}
-                {entry.plan.invoices.filter(i => i.kind === 'third_party').length} forwarded,{' '}
-                {entry.plan.invoices.filter(i => i.kind === 'other_income').length} other income,{' '}
-                {entry.plan.invoices.filter(i => i.kind === 'obligation_child').length} tax rows
-                {entry.plan.transactions.length > 0 && `, ${entry.plan.transactions.length} storno`}
+                Neto zarade: {entry.plan.invoices.filter(i => i.kind === 'net').length},{' '}
+                prosleđene obustave: {entry.plan.invoices.filter(i => i.kind === 'third_party').length},{' '}
+                ostala primanja: {entry.plan.invoices.filter(i => i.kind === 'other_income').length},{' '}
+                stavke poreza: {entry.plan.invoices.filter(i => i.kind === 'obligation_child').length}
+                {entry.plan.transactions.length > 0 && `, storno: ${entry.plan.transactions.length}`}
                 {' · '}<b style={{ color: '#DCE9F6' }}>{money(planTotal(entry.plan))}</b>
                 {storno !== 0 && (
                   <span style={{ color: '#7A9BB8' }}>
-                    {' '}and {money(storno)} cancelled elsewhere
+                    {' '}i {money(storno)} storniranih na drugim troškovima
                   </span>
                 )}
               </div>
@@ -552,14 +559,14 @@ export default function PayrollPostingPanel({
             <div>
               {posting ? (
                 <button style={s.ghost} disabled={busy === run.key} onClick={() => undo(run)}>
-                  {busy === run.key ? 'Removing…' : 'Undo'}
+                  {busy === run.key ? 'Brisanje…' : 'Poništi'}
                 </button>
               ) : (
                 <button style={entry.why ? s.disabled : s.primary}
                   disabled={!!entry.why || busy === run.key}
                   title={entry.why || undefined}
                   onClick={() => post(run)}>
-                  {busy === run.key ? 'Posting…' : 'Post'}
+                  {busy === run.key ? 'Knjiženje…' : 'Proknjiži'}
                 </button>
               )}
             </div>
@@ -636,17 +643,17 @@ function UnitMappingEditor({ companyId, units, existing, onChanged }: {
         dept_subcategory: r.sub.trim() || null,
         updated_at: new Date().toISOString(),
       }))
-    if (rows.length === 0) { setBusy(false); setError('Give at least one unit a department.'); return }
+    if (rows.length === 0) { setBusy(false); setError('Unesite sektor za bar jednu jedinicu.'); return }
 
     const { data, error: err } = await supabase
       .from('payroll_unit_mapping')
       .upsert(rows, { onConflict: 'company_id,organisational_unit' })
       .select('id')
-    if (err) { setBusy(false); setError(`The mapping could not be saved: ${err.message}`); return }
+    if (err) { setBusy(false); setError(`Povezivanje nije sačuvano: ${err.message}`); return }
     if (!data || data.length === 0) {
       setBusy(false)
-      setError('Nothing was saved and the database reported no error, which usually '
-        + 'means the write was refused.')
+      setError('Ništa nije sačuvano, a baza nije prijavila grešku — upis je verovatno '
+        + 'odbijen. Proverite prava pristupa i pokušajte ponovo.')
       return
     }
 
@@ -681,8 +688,8 @@ function UnitMappingEditor({ companyId, units, existing, onChanged }: {
           department: m.department,
           dept_subcategory: m.dept_subcategory,
           valid_from: p.hired_on || '2026-01-01',
-          note: 'From the organisational unit mapping. Change it on the employee '
-            + 'if this person costs a different department than their unit does.',
+          note: 'Iz povezivanja organizacione jedinice sa sektorom. Izmenite je na zaposlenom '
+            + 'ako njegov trošak pripada drugom sektoru od jedinice.',
         }
       })
 
@@ -691,9 +698,8 @@ function UnitMappingEditor({ companyId, units, existing, onChanged }: {
         .from('employee_cost_allocation').insert(toCreate).select('id')
       if (allocErr) {
         setBusy(false)
-        setError(`The mapping was saved, but ${toCreate.length} employees did not get an `
-          + `allocation from it (${allocErr.message}). Set theirs on the employee, or `
-          + 'save this again.')
+        setError(`Povezivanje je sačuvano, ali zaposleni (${toCreate.length}) nisu dobili `
+          + `raspodelu (${allocErr.message}). Unesite je na zaposlenom ili sačuvajte ponovo.`)
         onChanged()
         return
       }
@@ -706,22 +712,22 @@ function UnitMappingEditor({ companyId, units, existing, onChanged }: {
 
   return (
     <div style={s.mapBox}>
-      <div style={s.mapHead}>Organisational unit → department</div>
+      <div style={s.mapHead}>Organizaciona jedinica → sektor</div>
       {all.map(unit => {
         const v = valueFor(unit)
         return (
           <div key={unit} style={s.mapRow}>
             <div style={s.mapUnit}>{unit}</div>
-            <input style={s.input} placeholder="Department" value={v.department}
+            <input style={s.input} placeholder="Sektor" value={v.department}
               onChange={e => setDraft(d => ({ ...d, [unit]: { ...v, department: e.target.value } }))} />
-            <input style={s.input} placeholder="Sub-category" value={v.sub}
+            <input style={s.input} placeholder="Podsektor" value={v.sub}
               onChange={e => setDraft(d => ({ ...d, [unit]: { ...v, sub: e.target.value } }))} />
           </div>
         )
       })}
       {error && <div style={s.error}>{error}</div>}
       <button style={s.primary} onClick={save} disabled={busy}>
-        {busy ? 'Saving…' : 'Save the mapping'}
+        {busy ? 'Čuvanje…' : 'Sačuvaj povezivanje'}
       </button>
     </div>
   )

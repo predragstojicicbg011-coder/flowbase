@@ -13,7 +13,11 @@ export default function Login() {
     setLoading(true)
     setError('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setError(error.message)
+    if (error) setError(
+      /invalid login credentials/i.test(error.message)
+        ? 'Pogrešan email ili lozinka. Proverite podatke i pokušajte ponovo.'
+        : `Prijava nije uspela: ${error.message}`,
+    )
     setLoading(false)
   }
 
@@ -33,8 +37,8 @@ export default function Login() {
           </div>
         </div>
         <div style={styles.heroWrap}>
-          <div style={styles.heroTitle}>See your<br/>finances <span style={styles.heroAccent}>flow</span><br/>clearly.</div>
-          <div style={styles.heroDesc}>Cash, invoices, credits and payroll for Milinković Company — in one place.</div>
+          <div style={styles.heroTitle}>Pratite<br/>finansije <span style={styles.heroAccent}>jasno</span><br/>i na vreme.</div>
+          <div style={styles.heroDesc}>Novac, fakture, krediti i zarade za Milinković Company — na jednom mestu.</div>
         </div>
       </div>
 
@@ -43,25 +47,25 @@ export default function Login() {
           <div style={styles.badgeDot}/>
           Milinković Company
         </div>
-        <div style={styles.formTitle}>Welcome back</div>
-        <div style={styles.formSub}>Sign in to your MCFlow account</div>
+        <div style={styles.formTitle}>Dobro došli</div>
+        <div style={styles.formSub}>Prijavite se na svoj MCFlow nalog</div>
 
         {error && <div style={styles.errorBox}>{error}</div>}
 
         <form onSubmit={handleLogin}>
           <div style={styles.fieldGroup}>
-            <label style={styles.label}>Email address</label>
+            <label style={styles.label}>Email adresa</label>
             <input
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder="your@email.com"
+              placeholder="vas@email.com"
               style={styles.input}
               required
             />
           </div>
           <div style={styles.fieldGroup}>
-            <label style={styles.label}>Password</label>
+            <label style={styles.label}>Lozinka</label>
             <div style={styles.pwWrap}>
               <input
                 type={showPw ? 'text' : 'password'}
@@ -72,12 +76,12 @@ export default function Login() {
                 required
               />
               <button type="button" onClick={() => setShowPw(!showPw)} style={styles.pwBtn}>
-                {showPw ? 'hide' : 'show'}
+                {showPw ? 'sakrij' : 'prikaži'}
               </button>
             </div>
           </div>
           <button type="submit" style={styles.submitBtn} disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign in to MCFlow'}
+            {loading ? 'Prijavljivanje…' : 'Prijavi se'}
           </button>
         </form>
 
@@ -88,7 +92,7 @@ export default function Login() {
               <path d="M6 1L10 3V6.5C10 8.5 8 10.5 6 11C4 10.5 2 8.5 2 6.5V3L6 1Z" stroke="#1D9E75" strokeWidth="1" fill="none"/>
               <path d="M4 6L5.5 7.5L8 4.5" stroke="#1D9E75" strokeWidth="1" strokeLinecap="round"/>
             </svg>
-            Secured connection
+            Zaštićena veza
           </span>
         </div>
       </div>

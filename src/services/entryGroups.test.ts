@@ -34,13 +34,13 @@ describe('the month a row belongs to', () => {
     // The regression this guards: `new Date('2026-09')` is UTC midnight, and
     // printing it in a negative-offset zone gives 31 August — so September's
     // heading read "August 2026" for every user west of Greenwich.
-    expect(monthLabel('2026-09')).toBe('September 2026')
-    expect(monthLabel('2026-01')).toBe('January 2026')
-    expect(monthLabel('2026-12')).toBe('December 2026')
+    expect(monthLabel('2026-09')).toBe('Septembar 2026')
+    expect(monthLabel('2026-01')).toBe('Januar 2026')
+    expect(monthLabel('2026-12')).toBe('Decembar 2026')
   })
 
   it('calls a month it cannot parse Undated', () => {
-    expect(monthLabel('')).toBe('Undated')
+    expect(monthLabel('')).toBe('Bez datuma')
   })
 })
 
@@ -59,7 +59,7 @@ describe('grouping a drill-down into months', () => {
 
   it('labels, counts and totals each month', () => {
     const [sep] = groupByMonth(rows, 'RSD')
-    expect(sep.label).toBe('September 2026')
+    expect(sep.label).toBe('Septembar 2026')
     expect(sep.count).toBe(3)
     expect(sep.total).toBe(325)
   })
@@ -89,7 +89,7 @@ describe('grouping a drill-down into months', () => {
   it('keeps undated rows in a trailing group rather than dropping them', () => {
     const groups = groupByMonth([...rows, row('x', '', 999)], 'RSD')
     expect(groups[groups.length - 1].key).toBe('')
-    expect(groups[groups.length - 1].label).toBe('Undated')
+    expect(groups[groups.length - 1].label).toBe('Bez datuma')
     expect(groups.reduce((s, g) => s + g.count, 0)).toBe(6)
   })
 

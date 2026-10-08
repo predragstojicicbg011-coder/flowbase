@@ -90,8 +90,8 @@ describe('bridgeSteps', () => {
   const steps = bridgeSteps(withComparison(cur, prior))
 
   it('opens on the prior total and closes on the current one', () => {
-    expect(steps[0]).toMatchObject({ label: 'Prior', kind: 'start', end: 180 })
-    expect(steps[steps.length - 1]).toMatchObject({ label: 'Current', kind: 'end', end: 200 })
+    expect(steps[0]).toMatchObject({ label: 'Prethodno', kind: 'start', end: 180 })
+    expect(steps[steps.length - 1]).toMatchObject({ label: 'Tekuće', kind: 'end', end: 200 })
   })
 
   it('the bars walk from one anchor to the other without a gap', () => {
@@ -204,8 +204,8 @@ describe('axis helpers', () => {
   })
 
   it('names months, with the year only when asked', () => {
-    expect(monthLabel('2026-08')).toBe('Aug')
-    expect(monthLabel('2026-08', true)).toBe('Aug ’26')
+    expect(monthLabel('2026-08')).toBe('avg')
+    expect(monthLabel('2026-08', true)).toBe('avg ’26')
   })
 })
 
@@ -444,7 +444,7 @@ describe('heatGrid', () => {
   /** Folding, not dropping — the columns still add to the month. */
   it('sums the lines past the cap into one Other row', () => {
     const g = heatGrid(tree, months, 1, 1)
-    expect(g.rows.map(r => r.label)).toEqual(['Rent', 'Other'])
+    expect(g.rows.map(r => r.label)).toEqual(['Rent', 'Ostalo'])
     expect(g.folded).toBe(2)
     const total = g.rows.reduce((s, r) => s + r.total, 0)
     expect(total).toBe(1350)

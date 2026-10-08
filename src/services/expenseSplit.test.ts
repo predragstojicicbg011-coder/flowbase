@@ -65,7 +65,7 @@ describe('why a split cannot be saved', () => {
 
   it('refuses a split of one, which is not a split', () => {
     expect(whySplitNotSavable(parent, [line({ amount: 1000 })]))
-      .toMatch(/at least two lines/)
+      .toMatch(/najmanje dve stavke/)
   })
 
   /**
@@ -78,19 +78,19 @@ describe('why a split cannot be saved', () => {
       line({ amount: 400 }),
       { ...emptyLine('b'), amount: 100, pl_category: '' },
     ])
-    expect(why).toMatch(/Line 2 has no P&L category/)
+    expect(why).toMatch(/Stavka 2 nema P&L kategoriju/)
   })
 
   it('names a line with no amount', () => {
     expect(whySplitNotSavable(parent, [line({ amount: 1000 }), line({ amount: 0 })]))
-      .toMatch(/Line 2 has no amount/)
+      .toMatch(/Stavka 2 nema iznos/)
   })
 
   it('says how much is missing, and which way', () => {
     expect(whySplitNotSavable(parent, [line({ amount: 400 }), line({ amount: 500 })]))
-      .toMatch(/100\.00 is not accounted for/)
+      .toMatch(/100,00 nije raspoređeno/)
     expect(whySplitNotSavable(parent, [line({ amount: 600 }), line({ amount: 500 })]))
-      .toMatch(/100\.00 MORE/)
+      .toMatch(/100,00 VIŠE/)
   })
 
   it('passes a split that balances', () => {

@@ -10,6 +10,11 @@ import UserManagement from '../components/UserManagement'
 import ClosedPeriodsTab from '../components/ClosedPeriodsTab'
 import BanksTab from '../components/BanksTab'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
+import { countOf } from '../utils/plural'
+
+/** The alert for a classification row that records still point at. */
+const inUse = (name: string, n: number, one: string, few: string, many: string) =>
+  `„${name}“ ne može da se obriše — koristi se u ${countOf(n, one, few, many)}.`
 
 type SettingsTab = 'companies' | 'banks' | 'pl' | 'departments' | 'descriptions' | 'users' | 'periods' | 'templates' | 'payroll'
 
@@ -37,22 +42,22 @@ export default function Settings() {
       <div style={s.body}>
         <div style={s.pageHeader}>
           <div>
-            <div style={s.pageTitle}>Settings</div>
-            <div style={s.pageSub}>Company profiles, P&L categories, departments and users</div>
+            <div style={s.pageTitle}>Podešavanja</div>
+            <div style={s.pageSub}>Profili firmi, P&L kategorije, sektori i korisnici</div>
           </div>
         </div>
 
         <div style={s.tabBar}>
           {([
-            { id: 'companies',    label: '🏢 Company profiles',    show: true },
-            { id: 'banks',        label: '🏦 Banks',                show: true },
-            { id: 'pl',           label: '📊 P&L Categories',      show: true },
-            { id: 'departments',  label: '🏗 Departments',          show: true },
-            { id: 'descriptions', label: '🏷 Expense descriptions', show: true },
-            { id: 'templates',    label: '⚡ Quick fill templates', show: true },
-            { id: 'payroll',      label: '💼 Payroll settings',     show: true },
-            { id: 'periods',      label: '🔒 Closed periods',       show: true },
-            { id: 'users',        label: '👥 Users',                show: canManageUsers },
+            { id: 'companies',    label: '🏢 Profili firmi',        show: true },
+            { id: 'banks',        label: '🏦 Banke',                show: true },
+            { id: 'pl',           label: '📊 P&L kategorije',       show: true },
+            { id: 'departments',  label: '🏗 Sektori',              show: true },
+            { id: 'descriptions', label: '🏷 Opisi troškova',       show: true },
+            { id: 'templates',    label: '⚡ Šabloni brze popune',  show: true },
+            { id: 'payroll',      label: '💼 Podešavanja zarada',   show: true },
+            { id: 'periods',      label: '🔒 Zaključani periodi',   show: true },
+            { id: 'users',        label: '👥 Korisnici',            show: canManageUsers },
           ] as { id: SettingsTab; label: string; show: boolean }[]).filter(t => t.show).map(tab => (
             <button key={tab.id}
               style={{ ...s.tab, ...(activeTab === tab.id ? s.tabActive : {}) }}
@@ -151,23 +156,23 @@ function CompanyProfilesTab({ canEdit }: { canEdit: boolean }) {
     if (!newBankName.trim() || !newAccountNum.trim() || !selectedCompany || !canEdit) return
     const payload = { company_id: selectedCompany.id, bank_name: newBankName.trim(), account_number: newAccountNum.trim(), currency: newCurrency, is_primary: newIsPrimary, swift: newSwift || null, iban: newIban || null }
     if (newIsPrimary) await supabase.from('company_bank_accounts').update({ is_primary: false }).eq('company_id', selectedCompany.id).eq('currency', newCurrency)
-    if (!(await reportWrite('Add the bank account', supabase.from('company_bank_accounts').insert(payload)))) return
+    if (!(await reportWrite('Dodavanje tekućeg računa', supabase.from('company_bank_accounts').insert(payload)))) return
     const { data } = await supabase.from('company_bank_accounts').select('*').eq('company_id', selectedCompany.id).order('is_primary', { ascending: false })
     setCompanyBanks(data || []); setBankAccounts(prev => ({ ...prev, [selectedCompany.id]: data || [] }))
     setNewBankName(''); setNewAccountNum(''); setNewCurrency('RSD'); setNewSwift(''); setNewIban(''); setNewIsPrimary(false)
   }
 
   const deleteBankAccount = async (id: string) => {
-    if (!canEdit || !window.confirm('Delete this bank account?')) return
-    if (!(await reportWrite('Remove the bank account', supabase.from('company_bank_accounts').delete().eq('id', id)))) return
+    if (!canEdit || !window.confirm('Obrisati ovaj tekući račun?')) return
+    if (!(await reportWrite('Brisanje tekućeg računa', supabase.from('company_bank_accounts').delete().eq('id', id)))) return
     const updated = companyBanks.filter(b => b.id !== id)
     setCompanyBanks(updated); setBankAccounts(prev => ({ ...prev, [selectedCompany.id]: updated }))
   }
 
   const setPrimaryAccount = async (id: string, currency: string) => {
     if (!canEdit) return
-    if (!(await reportWrite('Set the primary account', supabase.from('company_bank_accounts').update({ is_primary: false }).eq('company_id', selectedCompany.id).eq('currency', currency)))) return
-    if (!(await reportWrite('Set the primary account', supabase.from('company_bank_accounts').update({ is_primary: true }).eq('id', id)))) return
+    if (!(await reportWrite('Postavljanje glavnog računa', supabase.from('company_bank_accounts').update({ is_primary: false }).eq('company_id', selectedCompany.id).eq('currency', currency)))) return
+    if (!(await reportWrite('Postavljanje glavnog računa', supabase.from('company_bank_accounts').update({ is_primary: true }).eq('id', id)))) return
     const { data } = await supabase.from('company_bank_accounts').select('*').eq('company_id', selectedCompany.id).order('is_primary', { ascending: false })
     setCompanyBanks(data || []); setBankAccounts(prev => ({ ...prev, [selectedCompany.id]: data || [] }))
   }
@@ -187,17 +192,17 @@ function CompanyProfilesTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <>
-      {!canEdit && <div style={s.readOnlyBanner}>👁 Read only — only administrators can modify company profiles.</div>}
+      {!canEdit && <div style={s.readOnlyBanner}>👁 Samo pregled — profile firmi mogu da menjaju samo administratori.</div>}
       <div style={{ display: 'grid', gridTemplateColumns: showPicker ? '220px 1fr' : '1fr', gap: '16px', alignItems: 'start' }}>
         {/* The list is a way to choose a company; with one there is no choice. */}
         {showPicker && <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>Companies</div><span style={s.colCount}>{companies.length}</span></div>
+          <div style={s.colHeader}><div style={s.colTitle}>Firme</div><span style={s.colCount}>{companies.length}</span></div>
           <div style={s.itemList}>
             {companies.map(c => (
               <div key={c.id} style={{ ...s.itemRow, ...(selectedCompany?.id === c.id ? s.itemRowActive : {}), cursor: 'pointer' }} onClick={() => setSelectedCompany(c)}>
                 <div>
                   <div style={s.itemName}>{c.name}</div>
-                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.30)', marginTop: '2px' }}>{profiles[c.id] ? '✓ Profile set' : 'No profile yet'}</div>
+                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.30)', marginTop: '2px' }}>{profiles[c.id] ? '✓ Profil je unet' : 'Profil još nije unet'}</div>
                 </div>
               </div>
             ))}
@@ -208,25 +213,25 @@ function CompanyProfilesTab({ canEdit }: { canEdit: boolean }) {
           <div>
             <div style={{ ...s.colPanel, marginBottom: '16px' }}>
               <div style={s.colHeader}>
-                <div style={s.colTitle}>🏢 {selectedCompany.name} — Legal information</div>
+                <div style={s.colTitle}>🏢 {selectedCompany.name} — Pravni podaci</div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  {saved && <span style={{ fontSize: '12px', color: '#00D47E', fontWeight: '500' }}>✓ Saved!</span>}
-                  {canEdit && <button style={s.addBtn} onClick={saveProfile} disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</button>}
+                  {saved && <span style={{ fontSize: '12px', color: '#00D47E', fontWeight: '500' }}>✓ Sačuvano</span>}
+                  {canEdit && <button style={s.addBtn} onClick={saveProfile} disabled={saving}>{saving ? 'Čuvanje…' : 'Sačuvaj izmene'}</button>}
                 </div>
               </div>
               <div style={{ padding: '16px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
                   {[
-                    ['Full legal name', fullLegalName, setFullLegalName, 'e.g. Company d.o.o. Beograd'],
-                    ['PIB (Tax ID)', pib, setPib, 'e.g. 109876543'],
-                    ['Registration number (MB)', mb, setMb, 'e.g. 21234567'],
-                    ['PDV broj', pdvNumber, setPdvNumber, 'e.g. RS109876543'],
-                    ['Address', address, setAddress, 'e.g. Bulevar oslobođenja 1'],
-                    ['City', city, setCity, 'e.g. Beograd'],
-                    ['Country', country, setCountry, 'e.g. Srbija'],
-                    ['Phone', phone, setPhone, 'e.g. +381 11 123 4567'],
-                    ['Email', email, setEmail, 'e.g. office@company.rs'],
-                    ['Website', website, setWebsite, 'e.g. https://company.rs'],
+                    ['Pun poslovni naziv', fullLegalName, setFullLegalName, 'npr. Firma d.o.o. Beograd'],
+                    ['PIB', pib, setPib, 'npr. 109876543'],
+                    ['Matični broj (MB)', mb, setMb, 'npr. 21234567'],
+                    ['PDV broj', pdvNumber, setPdvNumber, 'npr. RS109876543'],
+                    ['Adresa', address, setAddress, 'npr. Bulevar oslobođenja 1'],
+                    ['Grad', city, setCity, 'npr. Beograd'],
+                    ['Država', country, setCountry, 'npr. Srbija'],
+                    ['Telefon', phone, setPhone, 'npr. +381 11 123 4567'],
+                    ['Email', email, setEmail, 'npr. office@firma.rs'],
+                    ['Veb-sajt', website, setWebsite, 'npr. https://firma.rs'],
                   ].map(([label, value, setter, placeholder]: any) => (
                     <div key={label} style={s.formField}>
                       <label style={s.formLabel}>{label}</label>
@@ -239,11 +244,11 @@ function CompanyProfilesTab({ canEdit }: { canEdit: boolean }) {
 
             <div style={s.colPanel}>
               <div style={s.colHeader}>
-                <div style={s.colTitle}>🏦 Bank accounts</div>
-                <span style={s.colCount}>{companyBanks.length} account{companyBanks.length !== 1 ? 's' : ''}</span>
+                <div style={s.colTitle}>🏦 Tekući računi</div>
+                <span style={s.colCount}>{countOf(companyBanks.length, 'račun', 'računa', 'računa')}</span>
               </div>
               {companyBanks.length === 0
-                ? <div style={{ padding: '20px', textAlign: 'center' as const, color: 'rgba(255,255,255,0.30)', fontSize: '13px' }}>No bank accounts yet. Add one below.</div>
+                ? <div style={{ padding: '20px', textAlign: 'center' as const, color: 'rgba(255,255,255,0.30)', fontSize: '13px' }}>Još nema tekućih računa. Dodajte prvi ispod.</div>
                 : (
                   <div style={{ padding: '8px 16px' }}>
                     {companyBanks.map(bank => {
@@ -254,15 +259,15 @@ function CompanyProfilesTab({ canEdit }: { canEdit: boolean }) {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
                               <span style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6' }}>{bank.bank_name}</span>
                               <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: cc.bg, color: cc.color }}>{bank.currency}</span>
-                              {bank.is_primary && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: 'rgba(0,212,126,0.12)', color: '#00D47E' }}>★ Primary</span>}
+                              {bank.is_primary && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: 'rgba(0,212,126,0.12)', color: '#00D47E' }}>★ Glavni</span>}
                             </div>
                             <div style={{ fontSize: '12px', color: '#7A9BB8', fontFamily: 'monospace' }}>{bank.account_number}</div>
                             {(bank.swift || bank.iban) && <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.30)', marginTop: '2px' }}>{bank.swift && `SWIFT: ${bank.swift}`}{bank.swift && bank.iban && ' · '}{bank.iban && `IBAN: ${bank.iban}`}</div>}
                           </div>
                           {canEdit && (
                             <div style={{ display: 'flex', gap: '6px' }}>
-                              {!bank.is_primary && <button style={{ ...s.iconBtn, fontSize: '11px', padding: '3px 8px', border: '0.5px solid rgba(255,255,255,0.10)', borderRadius: '6px' }} onClick={() => setPrimaryAccount(bank.id, bank.currency)}>Set primary</button>}
-                              <button style={s.iconBtn} onClick={() => deleteBankAccount(bank.id)}>Delete</button>
+                              {!bank.is_primary && <button style={{ ...s.iconBtn, fontSize: '11px', padding: '3px 8px', border: '0.5px solid rgba(255,255,255,0.10)', borderRadius: '6px' }} onClick={() => setPrimaryAccount(bank.id, bank.currency)}>Postavi kao glavni</button>}
+                              <button style={s.iconBtn} onClick={() => deleteBankAccount(bank.id)}>Obriši</button>
                             </div>
                           )}
                         </div>
@@ -273,18 +278,18 @@ function CompanyProfilesTab({ canEdit }: { canEdit: boolean }) {
               }
               {canEdit && (
                 <div style={{ padding: '14px 16px', borderTop: '0.5px solid rgba(255,255,255,0.075)', background: '#111F30' }}>
-                  <div style={{ fontSize: '11px', fontWeight: '500', color: '#7A9BB8', textTransform: 'uppercase' as const, letterSpacing: '0.08em', marginBottom: '10px' }}>Add bank account</div>
+                  <div style={{ fontSize: '11px', fontWeight: '500', color: '#7A9BB8', textTransform: 'uppercase' as const, letterSpacing: '0.08em', marginBottom: '10px' }}>Dodaj tekući račun</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px', gap: '8px', marginBottom: '8px' }}>
-                    <div style={s.formField}><label style={s.formLabel}>Bank name</label><input style={s.formInput} value={newBankName} onChange={e => setNewBankName(e.target.value)} placeholder="e.g. Raiffeisen Bank" /></div>
-                    <div style={s.formField}><label style={s.formLabel}>Account number</label><input style={s.formInput} value={newAccountNum} onChange={e => setNewAccountNum(e.target.value)} placeholder="e.g. 265-1234567890-12" /></div>
-                    <div style={s.formField}><label style={s.formLabel}>Currency</label><select style={s.formInput} value={newCurrency} onChange={e => setNewCurrency(e.target.value)}>{DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}</select></div>
+                    <div style={s.formField}><label style={s.formLabel}>Naziv banke</label><input style={s.formInput} value={newBankName} onChange={e => setNewBankName(e.target.value)} placeholder="npr. Raiffeisen Bank" /></div>
+                    <div style={s.formField}><label style={s.formLabel}>Broj računa</label><input style={s.formInput} value={newAccountNum} onChange={e => setNewAccountNum(e.target.value)} placeholder="npr. 265-1234567890-12" /></div>
+                    <div style={s.formField}><label style={s.formLabel}>Valuta</label><select style={s.formInput} value={newCurrency} onChange={e => setNewCurrency(e.target.value)}>{DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}</select></div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '8px', alignItems: 'flex-end' }}>
-                    <div style={s.formField}><label style={s.formLabel}>SWIFT (optional)</label><input style={s.formInput} value={newSwift} onChange={e => setNewSwift(e.target.value)} placeholder="e.g. RZBSRSBG" /></div>
-                    <div style={s.formField}><label style={s.formLabel}>IBAN (optional)</label><input style={s.formInput} value={newIban} onChange={e => setNewIban(e.target.value)} placeholder="e.g. RS35265..." /></div>
+                    <div style={s.formField}><label style={s.formLabel}>SWIFT (opciono)</label><input style={s.formInput} value={newSwift} onChange={e => setNewSwift(e.target.value)} placeholder="npr. RZBSRSBG" /></div>
+                    <div style={s.formField}><label style={s.formLabel}>IBAN (opciono)</label><input style={s.formInput} value={newIban} onChange={e => setNewIban(e.target.value)} placeholder="npr. RS35265…" /></div>
                     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '6px' }}>
-                      <label style={{ ...s.formLabel, display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}><input type="checkbox" checked={newIsPrimary} onChange={e => setNewIsPrimary(e.target.checked)} />Primary</label>
-                      <button style={s.addBtn} onClick={addBankAccount}>+ Add account</button>
+                      <label style={{ ...s.formLabel, display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}><input type="checkbox" checked={newIsPrimary} onChange={e => setNewIsPrimary(e.target.checked)} />Glavni</label>
+                      <button style={s.addBtn} onClick={addBankAccount}>+ Dodaj račun</button>
                     </div>
                   </div>
                 </div>
@@ -325,19 +330,19 @@ function PLCategoriesTab({ canEdit }: { canEdit: boolean }) {
 
   const addCategory = async () => {
     if (!newCatName.trim() || !canEdit) return
-    if (!(await reportWrite('Add the category', supabase.from('pl_categories').insert({ name: newCatName.trim(), sort_order: categories.length + 1 })))) return
+    if (!(await reportWrite('Dodavanje kategorije', supabase.from('pl_categories').insert({ name: newCatName.trim(), sort_order: categories.length + 1 })))) return
     setNewCatName(''); fetchCategories()
   }
 
   const addSubcategory = async () => {
     if (!newSubName.trim() || !selectedCat || !canEdit) return
-    if (!(await reportWrite('Add the sub-category', supabase.from('pl_subcategories').insert({ category_id: selectedCat.id, name: newSubName.trim(), sort_order: subcategories.length + 1 })))) return
+    if (!(await reportWrite('Dodavanje potkategorije', supabase.from('pl_subcategories').insert({ category_id: selectedCat.id, name: newSubName.trim(), sort_order: subcategories.length + 1 })))) return
     setNewSubName(''); fetchSubcategories(selectedCat.id)
   }
 
   const updateName = async (table: string, id: string) => {
     if (!editingName.trim() || !canEdit) return
-    if (!(await reportWrite('Rename it', supabase.from(table).update({ name: editingName.trim() }).eq('id', id)))) return
+    if (!(await reportWrite('Preimenovanje', supabase.from(table).update({ name: editingName.trim() }).eq('id', id)))) return
     setEditingId(null); setEditingName('')
     if (table === 'pl_categories') fetchCategories()
     else if (selectedCat) fetchSubcategories(selectedCat.id)
@@ -349,21 +354,21 @@ function PLCategoriesTab({ canEdit }: { canEdit: boolean }) {
     if (table === 'pl_categories') {
       // Proveri transakcije i fakture
       const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('pl_category', name)
-      if (txCount && txCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${txCount} transaction(s).`); return }
+      if (txCount && txCount > 0) { window.alert(inUse(name, txCount, 'transakciji', 'transakcije', 'transakcija')); return }
       const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('pl_category', name)
-      if (invCount && invCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${invCount} invoice(s).`); return }
+      if (invCount && invCount > 0) { window.alert(inUse(name, invCount, 'fakturi', 'fakture', 'faktura')); return }
       if (!window.confirm(`Obrisati kategoriju "${name}" i sve njene potkategorije?`)) return
       // Kaskadno brisanje potkategorija
-      if (!(await reportWrite('Delete the sub-categories', supabase.from('pl_subcategories').delete().eq('category_id', id)))) return
-      if (!(await reportWrite('Delete the category', supabase.from('pl_categories').delete().eq('id', id)))) return
+      if (!(await reportWrite('Brisanje potkategorija', supabase.from('pl_subcategories').delete().eq('category_id', id)))) return
+      if (!(await reportWrite('Brisanje kategorije', supabase.from('pl_categories').delete().eq('id', id)))) return
       fetchCategories(); setSelectedCat(null); setSubcategories([])
     } else if (table === 'pl_subcategories') {
       const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('pl_subcategory', name)
-      if (txCount && txCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${txCount} transaction(s).`); return }
+      if (txCount && txCount > 0) { window.alert(inUse(name, txCount, 'transakciji', 'transakcije', 'transakcija')); return }
       const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('pl_subcategory', name)
-      if (invCount && invCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${invCount} invoice(s).`); return }
+      if (invCount && invCount > 0) { window.alert(inUse(name, invCount, 'fakturi', 'fakture', 'faktura')); return }
       if (!window.confirm(`Obrisati potkategoriju "${name}"?`)) return
-      if (!(await reportWrite('Delete the sub-category', supabase.from('pl_subcategories').delete().eq('id', id)))) return
+      if (!(await reportWrite('Brisanje potkategorije', supabase.from('pl_subcategories').delete().eq('id', id)))) return
       if (selectedCat) fetchSubcategories(selectedCat.id)
     }
   }
@@ -376,10 +381,10 @@ function PLCategoriesTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <>
-      {!canEdit && <div style={s.readOnlyBanner}>👁 Read only — only administrators can modify categories.</div>}
+      {!canEdit && <div style={s.readOnlyBanner}>👁 Samo pregled — kategorije mogu da menjaju samo administratori.</div>}
       <div style={s.twoCol}>
         <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>P&L Categories</div><span style={s.colCount}>{categories.length}</span></div>
+          <div style={s.colHeader}><div style={s.colTitle}>P&L kategorije</div><span style={s.colCount}>{categories.length}</span></div>
           <div style={s.itemList}>
             {categories.map(cat => (
               <div key={cat.id} style={{ ...s.itemRow, ...(selectedCat?.id === cat.id ? s.itemRowActive : {}) }} onClick={() => setSelectedCat(cat)}>
@@ -389,27 +394,27 @@ function PLCategoriesTab({ canEdit }: { canEdit: boolean }) {
                 {canEdit && (
                   <div style={s.itemActions} onClick={e => e.stopPropagation()}>
                     {editingId === cat.id ? <button style={s.saveBtn} onClick={() => updateName('pl_categories', cat.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(cat.id); setEditingName(cat.name) }}>✏️</button>}
-                    <button style={s.deleteBtn} onClick={() => deleteItem('pl_categories', cat.id, cat.name)}>Delete</button>
+                    <button style={s.deleteBtn} onClick={() => deleteItem('pl_categories', cat.id, cat.name)}>Obriši</button>
                   </div>
                 )}
               </div>
             ))}
           </div>
-          {canEdit && <div style={s.addRow}><input style={s.addInput} value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="New category..." onKeyDown={e => { if (e.key === 'Enter') addCategory() }} /><button style={s.addBtn} onClick={addCategory}>+ Add</button></div>}
+          {canEdit && <div style={s.addRow}><input style={s.addInput} value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Nova kategorija…" onKeyDown={e => { if (e.key === 'Enter') addCategory() }} /><button style={s.addBtn} onClick={addCategory}>+ Dodaj</button></div>}
         </div>
         <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>{selectedCat ? `Subcategories — ${selectedCat.name}` : 'Select a category'}</div>{selectedCat && <span style={s.colCount}>{subcategories.length}</span>}</div>
-          {!selectedCat ? <div style={s.emptyHint}>← Select a P&L category to manage its subcategories</div> : (
+          <div style={s.colHeader}><div style={s.colTitle}>{selectedCat ? `Potkategorije — ${selectedCat.name}` : 'Izaberite kategoriju'}</div>{selectedCat && <span style={s.colCount}>{subcategories.length}</span>}</div>
+          {!selectedCat ? <div style={s.emptyHint}>← Izaberite P&L kategoriju da biste uređivali njene potkategorije</div> : (
             <>
               <div style={s.itemList}>
                 {subcategories.map(sub => (
                   <div key={sub.id} style={s.itemRow}>
                     {editingId === sub.id ? <input style={s.inlineInput} value={editingName} onChange={e => setEditingName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') updateName('pl_subcategories', sub.id) }} autoFocus /> : <span style={s.itemName}>{sub.name}</span>}
-                    {canEdit && <div style={s.itemActions}>{editingId === sub.id ? <button style={s.saveBtn} onClick={() => updateName('pl_subcategories', sub.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(sub.id); setEditingName(sub.name) }}>✏️</button>}<button style={s.deleteBtn} onClick={() => deleteItem('pl_subcategories', sub.id, sub.name)}>Delete</button></div>}
+                    {canEdit && <div style={s.itemActions}>{editingId === sub.id ? <button style={s.saveBtn} onClick={() => updateName('pl_subcategories', sub.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(sub.id); setEditingName(sub.name) }}>✏️</button>}<button style={s.deleteBtn} onClick={() => deleteItem('pl_subcategories', sub.id, sub.name)}>Obriši</button></div>}
                   </div>
                 ))}
               </div>
-              {canEdit && <div style={s.addRow}><input style={s.addInput} value={newSubName} onChange={e => setNewSubName(e.target.value)} placeholder="New subcategory..." onKeyDown={e => { if (e.key === 'Enter') addSubcategory() }} /><button style={s.addBtn} onClick={addSubcategory}>+ Add</button></div>}
+              {canEdit && <div style={s.addRow}><input style={s.addInput} value={newSubName} onChange={e => setNewSubName(e.target.value)} placeholder="Nova potkategorija…" onKeyDown={e => { if (e.key === 'Enter') addSubcategory() }} /><button style={s.addBtn} onClick={addSubcategory}>+ Dodaj</button></div>}
             </>
           )}
         </div>
@@ -446,19 +451,19 @@ function DepartmentsTab({ canEdit }: { canEdit: boolean }) {
 
   const addDepartment = async () => {
     if (!newDeptName.trim() || !canEdit) return
-    if (!(await reportWrite('Add the department', supabase.from('departments').insert({ name: newDeptName.trim(), sort_order: departments.length + 1 })))) return
+    if (!(await reportWrite('Dodavanje sektora', supabase.from('departments').insert({ name: newDeptName.trim(), sort_order: departments.length + 1 })))) return
     setNewDeptName(''); fetchDepartments()
   }
 
   const addSubcategory = async () => {
     if (!newSubName.trim() || !selectedDept || !canEdit) return
-    if (!(await reportWrite('Add the sub-category', supabase.from('dept_subcategories').insert({ department_id: selectedDept.id, name: newSubName.trim(), sort_order: subcategories.length + 1 })))) return
+    if (!(await reportWrite('Dodavanje podsektora', supabase.from('dept_subcategories').insert({ department_id: selectedDept.id, name: newSubName.trim(), sort_order: subcategories.length + 1 })))) return
     setNewSubName(''); fetchSubcategories(selectedDept.id)
   }
 
   const updateName = async (table: string, id: string) => {
     if (!editingName.trim() || !canEdit) return
-    if (!(await reportWrite('Rename it', supabase.from(table).update({ name: editingName.trim() }).eq('id', id)))) return
+    if (!(await reportWrite('Preimenovanje', supabase.from(table).update({ name: editingName.trim() }).eq('id', id)))) return
     setEditingId(null); setEditingName('')
     if (table === 'departments') fetchDepartments()
     else if (selectedDept) fetchSubcategories(selectedDept.id)
@@ -469,28 +474,28 @@ function DepartmentsTab({ canEdit }: { canEdit: boolean }) {
 
     if (table === 'departments') {
       const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('department', name)
-      if (txCount && txCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${txCount} transaction(s).`); return }
+      if (txCount && txCount > 0) { window.alert(inUse(name, txCount, 'transakciji', 'transakcije', 'transakcija')); return }
       const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('department', name)
-      if (invCount && invCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${invCount} invoice(s).`); return }
-      if (!window.confirm(`Obrisati odeljenje "${name}" i sve njegove potkategorije?`)) return
+      if (invCount && invCount > 0) { window.alert(inUse(name, invCount, 'fakturi', 'fakture', 'faktura')); return }
+      if (!window.confirm(`Obrisati sektor „${name}“ i sve njegove podsektore?`)) return
       // Kaskadno: brisanje expense_descriptions → dept_subcategories → departments
       const { data: subs } = await supabase.from('dept_subcategories').select('id').eq('department_id', id)
       if (subs && subs.length > 0) {
         const subIds = subs.map((s: any) => s.id)
-        if (!(await reportWrite('Delete the expense descriptions', supabase.from('expense_descriptions').delete().in('dept_subcategory_id', subIds)))) return
-        if (!(await reportWrite('Delete the sub-categories', supabase.from('dept_subcategories').delete().eq('department_id', id)))) return
+        if (!(await reportWrite('Brisanje opisa troškova', supabase.from('expense_descriptions').delete().in('dept_subcategory_id', subIds)))) return
+        if (!(await reportWrite('Brisanje podsektora', supabase.from('dept_subcategories').delete().eq('department_id', id)))) return
       }
-      if (!(await reportWrite('Delete the department', supabase.from('departments').delete().eq('id', id)))) return
+      if (!(await reportWrite('Brisanje sektora', supabase.from('departments').delete().eq('id', id)))) return
       fetchDepartments(); setSelectedDept(null); setSubcategories([])
     } else if (table === 'dept_subcategories') {
       const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('dept_subcategory', name)
-      if (txCount && txCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${txCount} transaction(s).`); return }
+      if (txCount && txCount > 0) { window.alert(inUse(name, txCount, 'transakciji', 'transakcije', 'transakcija')); return }
       const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('dept_subcategory', name)
-      if (invCount && invCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${invCount} invoice(s).`); return }
-      if (!window.confirm(`Obrisati potkategoriju "${name}" i sve njene opise?`)) return
+      if (invCount && invCount > 0) { window.alert(inUse(name, invCount, 'fakturi', 'fakture', 'faktura')); return }
+      if (!window.confirm(`Obrisati podsektor „${name}“ i sve njegove opise troškova?`)) return
       // Kaskadno: brisanje expense_descriptions → dept_subcategories
-      if (!(await reportWrite('Delete the expense descriptions', supabase.from('expense_descriptions').delete().eq('dept_subcategory_id', id)))) return
-      if (!(await reportWrite('Delete the sub-category', supabase.from('dept_subcategories').delete().eq('id', id)))) return
+      if (!(await reportWrite('Brisanje opisa troškova', supabase.from('expense_descriptions').delete().eq('dept_subcategory_id', id)))) return
+      if (!(await reportWrite('Brisanje podsektora', supabase.from('dept_subcategories').delete().eq('id', id)))) return
       if (selectedDept) fetchSubcategories(selectedDept.id)
     }
   }
@@ -503,10 +508,10 @@ function DepartmentsTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <>
-      {!canEdit && <div style={s.readOnlyBanner}>👁 Read only — only administrators can modify departments.</div>}
+      {!canEdit && <div style={s.readOnlyBanner}>👁 Samo pregled — sektore mogu da menjaju samo administratori.</div>}
       <div style={s.twoCol}>
         <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>Departments</div><span style={s.colCount}>{departments.length}</span></div>
+          <div style={s.colHeader}><div style={s.colTitle}>Sektori</div><span style={s.colCount}>{departments.length}</span></div>
           <div style={s.itemList}>
             {departments.map(dept => (
               <div key={dept.id} style={{ ...s.itemRow, ...(selectedDept?.id === dept.id ? s.itemRowActive : {}) }} onClick={() => setSelectedDept(dept)}>
@@ -514,27 +519,27 @@ function DepartmentsTab({ canEdit }: { canEdit: boolean }) {
                 {canEdit && (
                   <div style={s.itemActions} onClick={e => e.stopPropagation()}>
                     {editingId === dept.id ? <button style={s.saveBtn} onClick={() => updateName('departments', dept.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(dept.id); setEditingName(dept.name) }}>✏️</button>}
-                    <button style={s.deleteBtn} onClick={() => deleteItem('departments', dept.id, dept.name)}>Delete</button>
+                    <button style={s.deleteBtn} onClick={() => deleteItem('departments', dept.id, dept.name)}>Obriši</button>
                   </div>
                 )}
               </div>
             ))}
           </div>
-          {canEdit && <div style={s.addRow}><input style={s.addInput} value={newDeptName} onChange={e => setNewDeptName(e.target.value)} placeholder="New department..." onKeyDown={e => { if (e.key === 'Enter') addDepartment() }} /><button style={s.addBtn} onClick={addDepartment}>+ Add</button></div>}
+          {canEdit && <div style={s.addRow}><input style={s.addInput} value={newDeptName} onChange={e => setNewDeptName(e.target.value)} placeholder="Novi sektor…" onKeyDown={e => { if (e.key === 'Enter') addDepartment() }} /><button style={s.addBtn} onClick={addDepartment}>+ Dodaj</button></div>}
         </div>
         <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>{selectedDept ? `Subcategories — ${selectedDept.name}` : 'Select a department'}</div>{selectedDept && <span style={s.colCount}>{subcategories.length}</span>}</div>
-          {!selectedDept ? <div style={s.emptyHint}>← Select a department to manage its subcategories</div> : (
+          <div style={s.colHeader}><div style={s.colTitle}>{selectedDept ? `Podsektori — ${selectedDept.name}` : 'Izaberite sektor'}</div>{selectedDept && <span style={s.colCount}>{subcategories.length}</span>}</div>
+          {!selectedDept ? <div style={s.emptyHint}>← Izaberite sektor da biste uređivali njegove podsektore</div> : (
             <>
               <div style={s.itemList}>
                 {subcategories.map(sub => (
                   <div key={sub.id} style={s.itemRow}>
                     {editingId === sub.id ? <input style={s.inlineInput} value={editingName} onChange={e => setEditingName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') updateName('dept_subcategories', sub.id) }} autoFocus /> : <span style={s.itemName}>{sub.name}</span>}
-                    {canEdit && <div style={s.itemActions}>{editingId === sub.id ? <button style={s.saveBtn} onClick={() => updateName('dept_subcategories', sub.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(sub.id); setEditingName(sub.name) }}>✏️</button>}<button style={s.deleteBtn} onClick={() => deleteItem('dept_subcategories', sub.id, sub.name)}>Delete</button></div>}
+                    {canEdit && <div style={s.itemActions}>{editingId === sub.id ? <button style={s.saveBtn} onClick={() => updateName('dept_subcategories', sub.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(sub.id); setEditingName(sub.name) }}>✏️</button>}<button style={s.deleteBtn} onClick={() => deleteItem('dept_subcategories', sub.id, sub.name)}>Obriši</button></div>}
                   </div>
                 ))}
               </div>
-              {canEdit && <div style={s.addRow}><input style={s.addInput} value={newSubName} onChange={e => setNewSubName(e.target.value)} placeholder="New subcategory..." onKeyDown={e => { if (e.key === 'Enter') addSubcategory() }} /><button style={s.addBtn} onClick={addSubcategory}>+ Add</button></div>}
+              {canEdit && <div style={s.addRow}><input style={s.addInput} value={newSubName} onChange={e => setNewSubName(e.target.value)} placeholder="Novi podsektor…" onKeyDown={e => { if (e.key === 'Enter') addSubcategory() }} /><button style={s.addBtn} onClick={addSubcategory}>+ Dodaj</button></div>}
             </>
           )}
         </div>
@@ -571,13 +576,13 @@ function DescriptionsTab({ canEdit }: { canEdit: boolean }) {
 
   const addDescription = async () => {
     if (!newDescName.trim() || !selectedSub || !canEdit) return
-    if (!(await reportWrite('Add the expense description', supabase.from('expense_descriptions').insert({ dept_subcategory_id: selectedSub.id, name: newDescName.trim(), sort_order: descriptions.length + 1 })))) return
+    if (!(await reportWrite('Dodavanje opisa troška', supabase.from('expense_descriptions').insert({ dept_subcategory_id: selectedSub.id, name: newDescName.trim(), sort_order: descriptions.length + 1 })))) return
     setNewDescName(''); fetchDescriptions(selectedSub.id)
   }
 
   const updateName = async (id: string) => {
     if (!editingName.trim() || !canEdit) return
-    if (!(await reportWrite('Rename it', supabase.from('expense_descriptions').update({ name: editingName.trim() }).eq('id', id)))) return
+    if (!(await reportWrite('Preimenovanje', supabase.from('expense_descriptions').update({ name: editingName.trim() }).eq('id', id)))) return
     setEditingId(null); setEditingName('')
     if (selectedSub) fetchDescriptions(selectedSub.id)
   }
@@ -585,11 +590,11 @@ function DescriptionsTab({ canEdit }: { canEdit: boolean }) {
   const deleteDesc = async (id: string, name: string) => {
     if (!canEdit) return
     const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('expense_description', name)
-    if (txCount && txCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${txCount} transaction(s).`); return }
+    if (txCount && txCount > 0) { window.alert(inUse(name, txCount, 'transakciji', 'transakcije', 'transakcija')); return }
     const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('expense_description', name)
-    if (invCount && invCount > 0) { window.alert(`Cannot delete "${name}" — it is used by ${invCount} invoice(s).`); return }
+    if (invCount && invCount > 0) { window.alert(inUse(name, invCount, 'fakturi', 'fakture', 'faktura')); return }
     if (!window.confirm(`Obrisati opis "${name}"?`)) return
-    if (!(await reportWrite('Delete the expense description', supabase.from('expense_descriptions').delete().eq('id', id)))) return
+    if (!(await reportWrite('Brisanje opisa troška', supabase.from('expense_descriptions').delete().eq('id', id)))) return
     if (selectedSub) fetchDescriptions(selectedSub.id)
   }
 
@@ -598,16 +603,16 @@ function DescriptionsTab({ canEdit }: { canEdit: boolean }) {
     (sub.departments?.name || '').toLowerCase().includes(searchSub.toLowerCase())
   )
 
-  if (loading) return <div style={s.loading}>Loading...</div>
+  if (loading) return <div style={s.loading}>Učitavanje…</div>
 
   return (
     <>
-      {!canEdit && <div style={s.readOnlyBanner}>👁 Read only — only administrators can modify descriptions.</div>}
+      {!canEdit && <div style={s.readOnlyBanner}>👁 Samo pregled — opise mogu da menjaju samo administratori.</div>}
       <div style={s.twoCol}>
         <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>Dept. subcategories</div><span style={s.colCount}>{subcategories.length}</span></div>
+          <div style={s.colHeader}><div style={s.colTitle}>Podsektori</div><span style={s.colCount}>{subcategories.length}</span></div>
           <div style={{ padding: '8px 12px', borderBottom: '0.5px solid rgba(255,255,255,0.05)' }}>
-            <input style={{ ...s.addInput, width: '100%', boxSizing: 'border-box' as const }} value={searchSub} onChange={e => setSearchSub(e.target.value)} placeholder="Search subcategories..." />
+            <input style={{ ...s.addInput, width: '100%', boxSizing: 'border-box' as const }} value={searchSub} onChange={e => setSearchSub(e.target.value)} placeholder="Pretraga podsektora…" />
           </div>
           <div style={s.itemList}>
             {filteredSubs.map(sub => (
@@ -618,18 +623,18 @@ function DescriptionsTab({ canEdit }: { canEdit: boolean }) {
           </div>
         </div>
         <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>{selectedSub ? `Descriptions — ${selectedSub.name}` : 'Select a subcategory'}</div>{selectedSub && <span style={s.colCount}>{descriptions.length}</span>}</div>
-          {!selectedSub ? <div style={s.emptyHint}>← Select a subcategory to manage its expense descriptions</div> : (
+          <div style={s.colHeader}><div style={s.colTitle}>{selectedSub ? `Opisi troškova — ${selectedSub.name}` : 'Izaberite podsektor'}</div>{selectedSub && <span style={s.colCount}>{descriptions.length}</span>}</div>
+          {!selectedSub ? <div style={s.emptyHint}>← Izaberite podsektor da biste uređivali njegove opise troškova</div> : (
             <>
               <div style={s.itemList}>
                 {descriptions.map(desc => (
                   <div key={desc.id} style={s.itemRow}>
                     {editingId === desc.id ? <input style={s.inlineInput} value={editingName} onChange={e => setEditingName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') updateName(desc.id) }} autoFocus /> : <span style={s.itemName}>{desc.name}</span>}
-                    {canEdit && <div style={s.itemActions}>{editingId === desc.id ? <button style={s.saveBtn} onClick={() => updateName(desc.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(desc.id); setEditingName(desc.name) }}>✏️</button>}<button style={s.deleteBtn} onClick={() => deleteDesc(desc.id, desc.name)}>Delete</button></div>}
+                    {canEdit && <div style={s.itemActions}>{editingId === desc.id ? <button style={s.saveBtn} onClick={() => updateName(desc.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(desc.id); setEditingName(desc.name) }}>✏️</button>}<button style={s.deleteBtn} onClick={() => deleteDesc(desc.id, desc.name)}>Obriši</button></div>}
                   </div>
                 ))}
               </div>
-              {canEdit && <div style={s.addRow}><input style={s.addInput} value={newDescName} onChange={e => setNewDescName(e.target.value)} placeholder="New description..." onKeyDown={e => { if (e.key === 'Enter') addDescription() }} /><button style={s.addBtn} onClick={addDescription}>+ Add</button></div>}
+              {canEdit && <div style={s.addRow}><input style={s.addInput} value={newDescName} onChange={e => setNewDescName(e.target.value)} placeholder="Novi opis…" onKeyDown={e => { if (e.key === 'Enter') addDescription() }} /><button style={s.addBtn} onClick={addDescription}>+ Dodaj</button></div>}
             </>
           )}
         </div>

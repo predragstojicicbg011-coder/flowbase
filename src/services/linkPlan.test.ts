@@ -110,21 +110,21 @@ describe('isNoChange', () => {
 describe('describeChanges', () => {
   it('says what was closed and what was released', () => {
     expect(describeChanges(planLinkChanges(['a'], [at('b')])))
-      .toBe('1 invoice closed, 1 released back to unpaid.')
+      .toBe('Zatvorena 1 faktura, 1 vraćena u neplaćene.')
   })
 
   it('pluralises the closed count', () => {
     expect(describeChanges(planLinkChanges([], [at('a'), at('b')])))
-      .toBe('2 invoices closed.')
+      .toBe('Zatvorene 2 fakture.')
   })
 
   it('mentions the release even when nothing replaced it', () => {
     expect(describeChanges(planLinkChanges(['a'], [])))
-      .toBe('1 released back to unpaid.')
+      .toBe('1 vraćena u neplaćene.')
   })
 
   it('says so plainly when a payment closes nothing', () => {
     expect(describeChanges(planLinkChanges([], [])))
-      .toBe('No invoices are linked to this payment.')
+      .toBe('Nijedna faktura nije povezana sa ovim plaćanjem.')
   })
 })

@@ -37,28 +37,28 @@ export interface AdditionRow {
 
 export const KINDS: { value: AdditionRow['kind']; label: string }[] = [
   { value: 'bonus', label: 'Bonus' },
-  { value: 'stimulation', label: 'Stimulation' },
-  { value: 'damages', label: 'Compensation for damage' },
-  { value: 'other', label: 'Something else' },
+  { value: 'stimulation', label: 'Stimulacija' },
+  { value: 'damages', label: 'Naknada štete' },
+  { value: 'other', label: 'Drugo' },
 ]
 
 export const TREATMENTS: { value: Treatment; label: string; detail: string }[] = [
   {
     value: 'salary',
-    label: 'Part of the salary',
-    detail: 'Joins the gross-up: income tax and both sides of the contributions apply. '
-      + 'A bonus and stimulation are this.',
+    label: 'Deo zarade',
+    detail: 'Ulazi u bruto zaradu: plaćaju se porez na zarade i doprinosi na teret '
+      + 'zaposlenog i na teret poslodavca. Ovde spadaju bonus i stimulacija.',
   },
   {
     value: 'other_income',
-    label: 'Other income',
-    detail: 'Income tax alone, no contributions — the same treatment the travel '
-      + 'allowance gets.',
+    label: 'Ostala primanja',
+    detail: 'Samo porez, bez doprinosa — isto kao naknada '
+      + 'putnih troškova.',
   },
   {
     value: 'non_taxable',
-    label: 'Not taxed',
-    detail: 'Paid as it stands. Nothing is withheld and nothing is owed on it.',
+    label: 'Neoporezivo',
+    detail: 'Isplaćuje se u punom iznosu. Ništa se ne zadržava i ništa se ne duguje po tom osnovu.',
   },
 ]
 
@@ -129,7 +129,7 @@ export async function fetchAdditions(client: any, month?: string): Promise<Addit
     if (month) q = q.eq('month', firstOfMonth(month))
     return q
   }).catch((e: any) => {
-    throw new Error(`The salary additions could not be read: ${e.message || e}`)
+    throw new Error(`Dodaci na zaradu nisu učitani: ${e.message || e}. Osvežite stranu.`)
   })
 }
 

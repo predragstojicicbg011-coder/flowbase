@@ -246,8 +246,8 @@ describe('placing a ledger entry in a branch', () => {
     // real row carrying a real figure — and never nowhere.
     const e = entry({ level: 'pl_subcategory', pl_category: 'Payroll', pl_subcategory: 'Salaries' })
     const placed = placeEntry(e, DEPT)
-    expect(placed.key).toBe('Unassigned')
-    expect(placed.pathLabels).toEqual(['Unassigned'])
+    expect(placed.key).toBe('Nedodeljeno')
+    expect(placed.pathLabels).toEqual(['Nedodeljeno'])
     expect(placed.level).toBe('department')
   })
 
@@ -255,7 +255,7 @@ describe('placing a ledger entry in a branch', () => {
     // Exactly what `valueAt` does for a source row, so the entry lands on the
     // same node the tree already built for keys with that hole in them.
     const e = entry({ level: 'expense_description', expense_description: 'Laptops' })
-    expect(placeEntry(e, DEPT).pathLabels).toEqual(['Unassigned', 'Unassigned', 'Laptops'])
+    expect(placeEntry(e, DEPT).pathLabels).toEqual(['Nedodeljeno', 'Nedodeljeno', 'Laptops'])
   })
 
   it('never returns an empty placement, whatever the entry carries', () => {
@@ -310,7 +310,7 @@ describe('the classification a change is filed under', () => {
   })
 
   it('stores Unassigned as the null it stands for', () => {
-    const c = classificationFor(['Unassigned'], 'department', [], DEPT)
+    const c = classificationFor(['Nedodeljeno'], 'department', [], DEPT)
     expect(c.department).toBeNull()
   })
 
@@ -533,7 +533,7 @@ describe('the invariant: the two branches total the same', () => {
     // branch, and under `Unassigned` in the department branch — truthfully,
     // because no single department is paying it.
     expect(nodeKeyForEntry(e, PL)).toBe('Payroll|Salaries')
-    expect(nodeKeyForEntry(e, DEPT)).toBe('Unassigned')
+    expect(nodeKeyForEntry(e, DEPT)).toBe('Nedodeljeno')
 
     expect(branchTotal('pl', [e])).toBe(3920)
     expect(branchTotal('department', [e])).toBe(3920)

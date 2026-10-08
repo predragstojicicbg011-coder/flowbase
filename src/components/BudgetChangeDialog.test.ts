@@ -17,14 +17,14 @@ describe('what the change dialog refuses to record', () => {
   })
 
   it('refuses a change with no stated reason', () => {
-    expect(whyNotRecordable(change({ reason: '' }))).toMatch(/why this is changing/i)
+    expect(whyNotRecordable(change({ reason: '' }))).toMatch(/Navedite razlog izmene/)
   })
 
   it('refuses a reason that is only whitespace', () => {
     // The point of the ledger is the reason. A figure moved by 200 RSD with a
     // space typed into the box is exactly the record it exists to prevent, and
     // ' ' is truthy, so a plain falsiness check lets it straight through.
-    expect(whyNotRecordable(change({ reason: '   \n\t ' }))).toMatch(/why this is changing/i)
+    expect(whyNotRecordable(change({ reason: '   \n\t ' }))).toMatch(/Navedite razlog izmene/)
   })
 
   it('asks nothing about a company — the line belongs to the group', () => {
@@ -35,11 +35,11 @@ describe('what the change dialog refuses to record', () => {
     // a change being recorded.
     expect(whyNotRecordable(change())).toBeNull()
     expect(JSON.stringify(whyNotRecordable({ reason: '', delta: 200 })))
-      .not.toMatch(/company/i)
+      .not.toMatch(/company|firm/i)
   })
 
   it('refuses a change to the figure already there', () => {
-    expect(whyNotRecordable(change({ delta: 0 }))).toMatch(/already there/i)
+    expect(whyNotRecordable(change({ delta: 0 }))).toMatch(/već postojeći iznos/)
   })
 })
 
@@ -77,12 +77,12 @@ describe('the figure typed into the amount box', () => {
 describe('what the change dialog refuses when no figure is typed', () => {
   it('refuses a change with an empty amount box, and says an empty box is not zero', () => {
     const refusal = whyNotRecordable(change({ delta: null }))
-    expect(refusal).toMatch(/empty box is not zero/i)
+    expect(refusal).toMatch(/Prazno polje nije nula/)
   })
 
   it('still asks for the reason first, so a blank form is not merely missing a figure', () => {
     expect(whyNotRecordable({ reason: '', delta: null }))
-      .toMatch(/why this is changing/i)
+      .toMatch(/Navedite razlog izmene/)
   })
 
   it('keeps a typed zero recordable — it is a deliberate figure', () => {
@@ -104,21 +104,21 @@ describe('what the dialog says the change is about to land on', () => {
   it('names the parent and the single line the change will not touch', () => {
     const scope = scopeOfChange('SaaS expenses', ['Figma'])
     expect(scope?.tone).toBe('parent')
-    expect(scope?.text).toMatch(/SaaS expenses has one line under it — Figma/)
-    expect(scope?.text).toMatch(/sits on SaaS expenses itself, not on Figma/)
+    expect(scope?.text).toMatch(/SaaS expenses ima jednu stavku ispod sebe — Figma/)
+    expect(scope?.text).toMatch(/beleži na samoj stavci SaaS expenses, ne na Figma/)
   })
 
   it('names the children while there are few enough to name', () => {
     const scope = scopeOfChange('SaaS expenses', ['Figma', 'Linear', 'Notion'])
-    expect(scope?.text).toMatch(/has 3 lines under it — Figma, Linear, Notion/)
-    expect(scope?.text).toMatch(/not on any of them/)
+    expect(scope?.text).toMatch(/ima 3 stavke ispod sebe — Figma, Linear, Notion/)
+    expect(scope?.text).toMatch(/ne na stavkama ispod nje/)
   })
 
   it('counts them once naming sixty of them would be worse than counting', () => {
     // "Marketing: 8.000.000 RSD without itemising sixty lines" is a supported thing
     // to do. Sixty names in a notice is a wall, and a wall is not read.
     const scope = scopeOfChange('Marketing', Array.from({ length: 60 }, (_, i) => `Line ${i + 1}`))
-    expect(scope?.text).toMatch(/has 60 lines under it, including Line 1, Line 2, Line 3\./)
+    expect(scope?.text).toMatch(/ima 60 stavki ispod sebe, između ostalih Line 1, Line 2, Line 3\./)
     expect(scope?.text).not.toMatch(/Line 4/)
   })
 
@@ -128,8 +128,8 @@ describe('what the dialog says the change is about to land on', () => {
     // seen the parent case has nothing to compare against.
     const scope = scopeOfChange('Figma', [])
     expect(scope?.tone).toBe('leaf')
-    expect(scope?.text).toMatch(/Figma has no lines under it/)
-    expect(scope?.text).not.toMatch(/sits on/)
+    expect(scope?.text).toMatch(/Figma nema stavki ispod sebe/)
+    expect(scope?.text).not.toMatch(/samoj stavci/)
   })
 
   it('says nothing at all when the caller has no tree to answer from', () => {

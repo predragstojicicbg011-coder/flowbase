@@ -3,6 +3,7 @@ import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { settingsStyles as s } from '../pages/Settings'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
+import { countOf } from '../utils/plural'
 
 // ── Banks and payment methods ───────────────────────────────────────────────
 // Until this tab existed the banks table was only ever read — adding one meant
@@ -23,8 +24,8 @@ interface Bank {
 }
 
 const TYPES = [
-  { value: 'bank', label: 'Bank account' },
-  { value: 'payment_method', label: 'Payment method' },
+  { value: 'bank', label: 'Tekući račun' },
+  { value: 'payment_method', label: 'Način plaćanja' },
 ]
 const CURRENCIES = DOCUMENT_CURRENCIES
 
@@ -89,14 +90,14 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
   const save = async () => {
     if (!draft || !canEdit) return
     const name = draft.name.trim()
-    if (!name) { setError('Name is required.'); return }
-    if (!draft.company_id) { setError('Company is required.'); return }
+    if (!name) { setError('Unesite naziv.'); return }
+    if (!draft.company_id) { setError('Izaberite firmu.'); return }
 
     const clash = banks.find(b =>
       b.company_id === draft.company_id &&
       b.name.trim().toLowerCase() === name.toLowerCase() &&
       b.id !== selected?.id)
-    if (clash) { setError(`${name} already exists for this company.`); return }
+    if (clash) { setError(`${name} već postoji za ovu firmu.`); return }
 
     setSaving(true); setError(''); setNotice('')
     const payload = {
@@ -111,7 +112,7 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
       : await supabase.from('banks').insert(payload)
 
     if (err) setError(err.message)
-    else { setNotice(selected ? 'Saved.' : `${name} added.`); setDraft(null); setSelected(null); load() }
+    else { setNotice(selected ? 'Sačuvano.' : `${name} je dodata.`); setDraft(null); setSelected(null); load() }
     setSaving(false)
   }
 
@@ -119,14 +120,14 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
     if (!selected || !canEdit) return
     const used = usage[selected.id] || 0
     if (used > 0) {
-      setError(`${selected.name} is used by ${used} record${used === 1 ? '' : 's'} and cannot be deleted. Deactivate it instead.`)
+      setError(`${selected.name} se koristi u ${countOf(used, 'zapisu', 'zapisa', 'zapisa')} i ne može da se obriše. Umesto toga je deaktivirajte.`)
       return
     }
-    if (!window.confirm(`Delete ${selected.name}? It is not referenced by any record.`)) return
+    if (!window.confirm(`Obrisati ${selected.name}? Nijedan zapis je ne koristi.`)) return
     setSaving(true); setError('')
     const { error: err } = await supabase.from('banks').delete().eq('id', selected.id)
     if (err) setError(err.message)
-    else { setNotice(`${selected.name} deleted.`); setDraft(null); setSelected(null); load() }
+    else { setNotice(`${selected.name} je obrisana.`); setDraft(null); setSelected(null); load() }
     setSaving(false)
   }
 
@@ -138,7 +139,7 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <>
-      {!canEdit && <div style={s.readOnlyBanner}>👁 Read only — only administrators can manage banks.</div>}
+      {!canEdit && <div style={s.readOnlyBanner}>👁 Samo pregled — banke mogu da uređuju samo administratori.</div>}
 
       {error && (
         <div style={{ ...s.readOnlyBanner, background: 'rgba(255,91,90,0.10)', border: '1px solid rgba(255,91,90,0.3)', color: '#FF5B5A' }}>
@@ -154,11 +155,11 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
       <div style={s.twoCol}>
         <div style={s.colPanel}>
           <div style={s.colHeader}>
-            <div style={s.colTitle}>Banks &amp; payment methods</div>
+            <div style={s.colTitle}>Banke i načini plaćanja</div>
             <span style={s.colCount}>{banks.length}</span>
           </div>
 
-          {loading ? <div style={s.loading}>Loading…</div> : (
+          {loading ? <div style={s.loading}>Učitavanje…</div> : (
             <div style={s.itemList}>
               {byCompany.map(({ company, items }) => (
                 <div key={company.id}>
@@ -171,7 +172,7 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
                   </div>
                   {items.length === 0 ? (
                     <div style={{ ...s.itemRow, cursor: 'default', color: 'rgba(255,255,255,0.30)', fontSize: '12px' }}>
-                      none yet
+                      još nijedna
                     </div>
                   ) : items.map(b => (
                     <div key={b.id}
@@ -179,12 +180,12 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
                       onClick={() => select(b)}>
                       <div>
                         <div style={{ ...s.itemName, opacity: b.is_active ? 1 : 0.45 }}>
-                          {b.name}{b.is_active ? '' : ' · inactive'}
+                          {b.name}{b.is_active ? '' : ' · neaktivna'}
                         </div>
                         <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.30)' }}>
                           {TYPES.find(t => t.value === b.type)?.label || b.type || '—'}
                           {b.currencies?.length ? ` · ${b.currencies.join('/')}` : ''}
-                          {usage[b.id] ? ` · ${usage[b.id]} records` : ' · unused'}
+                          {usage[b.id] ? ` · ${countOf(usage[b.id], 'zapis', 'zapisa', 'zapisa')}` : ' · ne koristi se'}
                         </div>
                       </div>
                     </div>
@@ -193,7 +194,7 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
               ))}
               {orphans.length > 0 && (
                 <div style={{ ...s.itemRow, cursor: 'default', color: '#F5A623', fontSize: '11px' }}>
-                  ⚠ {orphans.length} bank{orphans.length === 1 ? '' : 's'} point at a company that no longer exists
+                  ⚠ {countOf(orphans.length, 'banka pripada', 'banke pripadaju', 'banaka pripada')} firmi koja više ne postoji
                 </div>
               )}
             </div>
@@ -201,7 +202,7 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
 
           {canEdit && (
             <div style={s.addRow}>
-              <button style={s.addBtn} onClick={startNew}>+ New bank</button>
+              <button style={s.addBtn} onClick={startNew}>+ Nova banka</button>
             </div>
           )}
         </div>
@@ -209,24 +210,24 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
         <div style={s.colPanel}>
           <div style={s.colHeader}>
             <div style={s.colTitle}>
-              {draft ? (selected ? `Edit — ${selected.name}` : 'New bank') : 'Select a bank'}
+              {draft ? (selected ? `Izmena — ${selected.name}` : 'Nova banka') : 'Izaberite banku'}
             </div>
           </div>
 
           {!draft ? (
-            <div style={s.emptyHint}>← Select a bank to edit it, or add a new one</div>
+            <div style={s.emptyHint}>← Izaberite banku za izmenu ili dodajte novu</div>
           ) : (
             <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={s.formField}>
-                <label style={s.formLabel}>Name</label>
+                <label style={s.formLabel}>Naziv</label>
                 <input style={s.formInput} value={draft.name} disabled={!canEdit}
-                  placeholder="e.g. Banca Intesa"
+                  placeholder="npr. Banca Intesa"
                   onChange={e => patch({ name: e.target.value })} />
               </div>
 
               {showPicker && (
                 <div style={s.formField}>
-                  <label style={s.formLabel}>Company</label>
+                  <label style={s.formLabel}>Firma</label>
                   <select style={s.formInput} value={draft.company_id} disabled={!canEdit}
                     onChange={e => patch({ company_id: e.target.value })}>
                     {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -235,7 +236,7 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
               )}
 
               <div style={s.formField}>
-                <label style={s.formLabel}>Type</label>
+                <label style={s.formLabel}>Tip</label>
                 <select style={s.formInput} value={draft.type || 'bank'} disabled={!canEdit}
                   onChange={e => patch({ type: e.target.value })}>
                   {TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -243,7 +244,7 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
               </div>
 
               <div style={s.formField}>
-                <label style={s.formLabel}>Currencies</label>
+                <label style={s.formLabel}>Valute</label>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   {CURRENCIES.map(c => {
                     const on = (draft.currencies || []).includes(c)
@@ -276,27 +277,27 @@ export default function BanksTab({ canEdit }: { canEdit: boolean }) {
                     cursor: canEdit ? 'pointer' : 'default',
                     fontFamily: "'Inter', system-ui, sans-serif",
                   }}>
-                  {draft.is_active ? 'Active' : 'Inactive'}
+                  {draft.is_active ? 'Aktivna' : 'Neaktivna'}
                 </button>
                 <div style={{ fontSize: '11px', color: '#7A9BB8', marginTop: '5px', lineHeight: 1.5 }}>
-                  An inactive bank stays on every existing record but is hidden from the pickers.
+                  Neaktivna banka ostaje na svim postojećim zapisima, ali se ne nudi u izboru.
                 </div>
               </div>
 
               {canEdit && (
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', paddingTop: '4px' }}>
                   <button style={{ ...s.addBtn, opacity: saving ? 0.5 : 1 }} disabled={saving} onClick={save}>
-                    {saving ? 'Saving…' : selected ? 'Save changes' : 'Add bank'}
+                    {saving ? 'Čuvanje…' : selected ? 'Sačuvaj izmene' : 'Dodaj banku'}
                   </button>
                   <button style={{ ...s.addBtn, background: 'transparent', color: '#7A9BB8', border: '1px solid rgba(255,255,255,0.14)' }}
                     onClick={() => { setDraft(null); setSelected(null); setError(''); setNotice('') }}>
-                    Cancel
+                    Otkaži
                   </button>
                   {selected && (
                     <button style={{ ...s.deleteBtn, marginLeft: 'auto', padding: '7px 14px', fontSize: '12px' }}
                       disabled={saving} onClick={remove}
-                      title={usage[selected.id] ? 'Used by existing records — deactivate instead' : 'Not referenced anywhere'}>
-                      Delete
+                      title={usage[selected.id] ? 'Koriste je postojeći zapisi — deaktivirajte je' : 'Nigde se ne koristi'}>
+                      Obriši
                     </button>
                   )}
                 </div>

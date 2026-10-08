@@ -4,6 +4,7 @@ import type { SalaryRunLine } from '../services/payroll/runs'
 import type { EmployeeForMonth } from '../services/payroll/employees'
 import type { PayrollRates } from '../services/payroll/engine'
 import { fmtNum } from '../utils/formatters'
+import { monthLongLabel, srDate } from '../utils/months'
 
 /**
  * One person's payslip, in the order MPP prints it.
@@ -46,12 +47,12 @@ export default function PayslipDialog({
       <div style={s.dialog} onClick={e => e.stopPropagation()}>
         <div style={s.header}>
           <div>
-            <div style={s.title}>Payroll and allowance calculation</div>
+            <div style={s.title}>Obračun zarade i naknade zarade</div>
             <div style={s.sub}>
-              {companyName} · {runLabel} {month}
+              {companyName} · {runLabel} · {monthLongLabel(month)}
             </div>
           </div>
-          <button style={s.close} onClick={onClose}>✕</button>
+          <button style={s.close} onClick={onClose} aria-label="Zatvori" title="Zatvori">✕</button>
         </div>
 
         <div style={s.body}>
@@ -65,38 +66,38 @@ export default function PayslipDialog({
           </div>
 
           {/* ── општи подаци ─────────────────────────────────────────── */}
-          <Section title="General">
-            <Row n={1} label="Contracted monthly net, total" value={money(p.contractedNet)} />
+          <Section title="Opšti podaci">
+            <Row n={1} label="Ugovorena mesečna neto zarada, ukupno" value={money(p.contractedNet)} />
             {contract && (
               <Note>
                 {money(contract.net_amount)} {contract.currency}
                 {contract.currency !== 'RSD' && currencyRates[contract.currency]
-                  ? `, at ${money(currencyRates[contract.currency])}`
+                  ? `, po kursu ${money(currencyRates[contract.currency])}`
                   : ''}
-                {' '}from {contract.valid_from}
-                {contract.valid_to ? ` to ${contract.valid_to}` : ' onwards'}
+                {' '}od {srDate(contract.valid_from)}
+                {contract.valid_to ? ` do ${srDate(contract.valid_to)}` : ' nadalje'}
               </Note>
             )}
-            <Row n={2} label="Seniority, monthly net, inside the contracted amount"
+            <Row n={2} label="Minuli rad, mesečno neto, sadržan u ugovorenom iznosu"
               value={money(p.seniorityNet)} />
-            <Row n={3} label="Base net for working time" value={money(p.baseNet)} />
-            <Row n={4} label="Seniority coefficient"
+            <Row n={3} label="Osnovna neto zarada za radno vreme" value={money(p.baseNet)} />
+            <Row n={4} label="Koeficijent minulog rada"
               value={p.seniorityPercent === null ? '—'
                 : `${hours(p.serviceYears)}   ${percent(p.seniorityPercent)}`} />
-            <Row n={5} label="Hours in this calculation" value={hours(p.hours)} />
-            <Row n={6} label="Hours in the month" value={hours(p.monthHours)} />
+            <Row n={5} label="Sati u obračunu" value={hours(p.hours)} />
+            <Row n={6} label="Fond sati u mesecu" value={hours(p.monthHours)} />
           </Section>
 
           {/* ── цена сати ────────────────────────────────────────────── */}
-          <Section title="Price per hour" columns={['Net', 'Gross']}>
-            <TwoRow n={1} label="Work, per hour"
+          <Section title="Cena rada po satu" columns={['Neto', 'Bruto']}>
+            <TwoRow n={1} label="Rad, po satu"
               a={money(p.workPerHourNet)} b={money(p.workPerHourGross)} />
-            <TwoRow n={2} label="Allowance, per hour"
+            <TwoRow n={2} label="Naknada, po satu"
               a={money(p.allowancePerHourNet)} b={money(p.allowancePerHourGross)} />
           </Section>
 
           {/* ── делови зараде ────────────────────────────────────────── */}
-          <Section title="Parts of the salary" columns={['Hours', 'Net', 'Gross']}>
+          <Section title="Delovi zarade" columns={['Sati', 'Neto', 'Bruto']}>
             {p.parts.map((part, i) => (
               <ThreeRow key={part.label} n={i + 1} label={part.label}
                 a={hours(part.hours)} b={money(part.net)} c={money(part.gross)} />
@@ -104,37 +105,37 @@ export default function PayslipDialog({
           </Section>
 
           {/* ── зарада, порез и доприноси ────────────────────────────── */}
-          <Section title="Salary, tax and contributions"
-            columns={['Rate', 'Total']}>
-            <ThreeRow n={1} label="Gross amount" a="" b={money(p.gross)} c="" bold />
-            <ThreeRow n={2} label="Contribution base" a="" b={money(p.contributionBase)} c=""
+          <Section title="Zarada, porez i doprinosi"
+            columns={['Stopa', 'Ukupno']}>
+            <ThreeRow n={1} label="Bruto zarada" a="" b={money(p.gross)} c="" bold />
+            <ThreeRow n={2} label="Osnovica za doprinose" a="" b={money(p.contributionBase)} c=""
               highlight={Math.abs(p.contributionBase - p.gross) > 0.005} />
-            <ThreeRow n={3} label="Tax-free amount" a="" b={money(p.taxFree)} c="" />
-            <ThreeRow n={4} label="Tax base" a="" b={money(p.taxBase)} c="" />
-            <ThreeRow n={5} label="Tax and contributions, the employee" a=""
+            <ThreeRow n={3} label="Neoporezivi iznos" a="" b={money(p.taxFree)} c="" />
+            <ThreeRow n={4} label="Poreska osnovica" a="" b={money(p.taxBase)} c="" />
+            <ThreeRow n={5} label="Porez i doprinosi na teret zaposlenog" a=""
               b={money(p.employeeTotal)} c="" bold />
             {p.employeeCharges.map(c => (
               <ThreeRow key={c.label} label={c.label} indent
                 a={percent(c.percent)} b={money(c.amount)} c="" />
             ))}
-            <ThreeRow n={6} label="Net amount" a="" b={money(p.net)} c="" bold />
+            <ThreeRow n={6} label="Neto zarada" a="" b={money(p.net)} c="" bold />
             {p.deductionsTotal > 0 && (
               <>
-                <ThreeRow n={7} label="Deductions" a="" b={money(p.deductionsTotal)} c="" bold />
+                <ThreeRow n={7} label="Obustave" a="" b={money(p.deductionsTotal)} c="" bold />
                 {p.deductions.map(d => (
                   <ThreeRow key={d.label} label={d.label} indent a=""
                     b={money(d.amount)}
-                    c={d.goesTo === 'third_party' ? 'to a third party' : ''} />
+                    c={d.goesTo === 'third_party' ? 'trećem licu' : ''} />
                 ))}
-                <ThreeRow n={8} label="Net paid" a="" b={money(p.netPaid)} c="" bold />
+                <ThreeRow n={8} label="Za isplatu" a="" b={money(p.netPaid)} c="" bold />
               </>
             )}
           </Section>
 
           {/* ── доприноси на терет послодавца ────────────────────────── */}
-          <Section title="Contributions, the employer"
-            columns={['Rate', 'Total']}>
-            <ThreeRow n={1} label="Contributions on the employer" a=""
+          <Section title="Doprinosi na teret poslodavca"
+            columns={['Stopa', 'Ukupno']}>
+            <ThreeRow n={1} label="Doprinosi na teret poslodavca" a=""
               b={money(p.employerTotal)} c="" bold />
             {p.employerCharges.map(c => (
               <ThreeRow key={c.label} label={c.label} indent
@@ -143,14 +144,14 @@ export default function PayslipDialog({
           </Section>
 
           <div style={s.costBox}>
-            <span>What this person costs the company this month</span>
+            <span>Ukupan trošak poslodavca za ovog zaposlenog u mesecu</span>
             <b>{money(p.totalCost)}</b>
           </div>
 
           <div style={s.footnote}>
-            This is a calculation to be held against the accountant's, not a document to be
-            issued. It deliberately shows neither a home address nor an identification
-            number: neither helps anybody compare two totals.
+            Ovo je obračun za poređenje sa obračunom knjigovođe, a ne dokument koji se
+            izdaje zaposlenom. Namerno ne prikazuje adresu ni JMBG: nijedno ne pomaže da se
+            uporede dva zbira.
           </div>
         </div>
       </div>

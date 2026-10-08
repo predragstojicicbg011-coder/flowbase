@@ -169,8 +169,8 @@ describe('sick leave is paid at the coefficient the settings state', () => {
       timesheets: { e1: sheet({ regular_hours: 136, sick_hours: 40 }) },
       coefficients: {},
     }))
-    expect(r.problems[0].why).toContain('do not price')
-    expect(r.problems[0].why).toContain('sick leave, 65%')
+    expect(r.problems[0].why).toContain('ne određuju koeficijent')
+    expect(r.problems[0].why).toContain('bolovanje do 30 dana, 65%')
     expect(run(r, 'regular').salaries[0].hours).toBe(136)
   })
 })
@@ -373,10 +373,10 @@ describe('Milosavljević Đuro — under the ceiling, with a large one-off', () 
       run(r, 'regular').salaries[0], djuro, RATES_2026, 0.004, { EUR: RATE })
     const part = (label: string) => slip.parts.find(x => x.label === label)!
 
-    expect(part('Regular work').gross).toBeCloseTo(201104.48, 1)
+    expect(part('Redovan rad').gross).toBeCloseTo(201104.48, 1)
     expect(part('Compensation for damage').net).toBeCloseTo(DAMAGES, 2)
     expect(part('Compensation for damage').gross).toBeCloseTo(365432.71, 1)
-    expect(part('Seniority').net).toBeCloseTo(1708.49, 1)
+    expect(part('Minuli rad').net).toBeCloseTo(1708.49, 1)
     expect(slip.workPerHourGross).toBeCloseTo(2793.12, 1)
 
     // 7 обуставе 12.448,00 · 8 нето за исплату 387.884,83

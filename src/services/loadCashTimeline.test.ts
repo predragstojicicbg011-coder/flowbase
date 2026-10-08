@@ -46,7 +46,7 @@ describe('loadCashTimeline — the budget is read in the timeline\'s currency', 
     const { timeline } = await loadCashTimeline(client, req('EUR'))
     const nov = timeline.months.find(m => m.month === '2026-11')!
     expect(nov.outflow).toBe(10)
-    expect(timeline.problems.join(' ')).not.toMatch(/budget could not be read/)
+    expect(timeline.problems.join(' ')).not.toMatch(/Budžet ne može da se prikaže/)
   })
 
   it('uses the RSD budget on an RSD timeline', async () => {
@@ -54,7 +54,7 @@ describe('loadCashTimeline — the budget is read in the timeline\'s currency', 
     const { timeline } = await loadCashTimeline(client, req('RSD'))
     const nov = timeline.months.find(m => m.month === '2026-11')!
     expect(nov.outflow).toBe(1170)
-    expect(timeline.problems.join(' ')).not.toMatch(/budget could not be read/)
+    expect(timeline.problems.join(' ')).not.toMatch(/Budžet ne može da se prikaže/)
   })
 
   it('never puts dinars on a EUR line: the projected outflow is left out, and said', async () => {
@@ -62,7 +62,7 @@ describe('loadCashTimeline — the budget is read in the timeline\'s currency', 
     const { timeline } = await loadCashTimeline(client, req('EUR'))
     const nov = timeline.months.find(m => m.month === '2026-11')!
     expect(nov.outflow).toBe(0)
-    const note = timeline.problems.find(p => /budget could not be read in EUR/.test(p))
+    const note = timeline.problems.find(p => /Budžet ne može da se prikaže u EUR/.test(p))
     expect(note).toBeDefined()
     expect(note).toContain('recorded in RSD only')
     expect(note).not.toContain('It is shown in RSD')

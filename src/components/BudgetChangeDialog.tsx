@@ -4,6 +4,7 @@ import { DIALOG, chrome } from './dialogTheme'
 import { deltaForTarget } from '../services/budgetForecast'
 import { getBookRates, rsdToEur } from '../services/bookAmounts'
 import { fmtRSD } from '../utils/formatters'
+import { countOf } from '../utils/plural'
 import ProjectSelect from './ProjectSelect'
 import { useProjects } from '../contexts/ProjectsContext'
 import { projectLabelById } from '../services/projects'
@@ -99,12 +100,12 @@ export function whyNotRecordable(
   // Whitespace is not a reason. The database agrees (`btrim(reason) <> ''`),
   // but a figure that reaches the database before being refused has already
   // cost the user the form they typed.
-  if (!reason.trim()) return 'Say why this is changing. It is the point of the record.'
+  if (!reason.trim()) return 'Navedite razlog izmene. Zbog toga se izmena i beleži.'
   // An empty box is not a target of zero. Reading it as one would record a
   // delta of minus the whole current figure, which is the opposite of what
   // clearing a field means.
-  if (delta === null) return 'Type the figure this line should read. An empty box is not zero — type 0 if zero is what you mean.'
-  if (delta === 0) return 'That is the figure already there. Nothing to record.'
+  if (delta === null) return 'Unesite iznos koji ova stavka treba da ima. Prazno polje nije nula — unesite 0 ako želite nulu.'
+  if (delta === 0) return 'To je već postojeći iznos. Nema šta da se sačuva.'
   return null
 }
 
@@ -146,20 +147,21 @@ export function scopeOfChange(rowLabel: string, childLabels?: string[] | null): 
   if (!childLabels) return null
   const n = childLabels.length
   if (n === 0) {
-    return { tone: 'leaf', text: `${rowLabel} has no lines under it — the change lands on ${rowLabel}.` }
+    return { tone: 'leaf', text: `${rowLabel} nema stavki ispod sebe — izmena se beleži na ${rowLabel}.` }
   }
   const named = childLabels.slice(0, NAME_AT_MOST).join(', ')
+  const lines = countOf(n, 'stavku', 'stavke', 'stavki')
   const has = n === 1
-    ? `has one line under it — ${named}`
+    ? `ima jednu stavku ispod sebe — ${named}`
     : n <= NAME_AT_MOST
-      ? `has ${n} lines under it — ${named}`
-      : `has ${n} lines under it, including ${named}`
-  const notOn = n === 1 ? named : 'any of them'
-  const toChange = n === 1 ? named : 'one of them'
+      ? `ima ${lines} ispod sebe — ${named}`
+      : `ima ${lines} ispod sebe, između ostalih ${named}`
+  const notOn = n === 1 ? named : 'stavkama ispod nje'
+  const toChange = n === 1 ? named : 'neku od njih'
   return {
     tone: 'parent',
-    text: `${rowLabel} ${has}. This change sits on ${rowLabel} itself, not on ${notOn}`
-      + `, and shows as its own row under it. To change ${toChange}, close this and click that row's own figure.`,
+    text: `${rowLabel} ${has}. Ova izmena se beleži na samoj stavci ${rowLabel}, ne na ${notOn}`
+      + `, i prikazuje se kao zaseban red ispod nje. Da biste izmenili ${toChange}, zatvorite ovaj prozor i kliknite iznos u tom redu.`,
   }
 }
 
@@ -269,7 +271,7 @@ export default function BudgetChangeDialog({
       ...eur,
       reason: reason.trim(),
     })
-    if (insErr) { setError(`Could not save: ${insErr.message}`); setSaving(false); return }
+    if (insErr) { setError(`Izmena nije sačuvana: ${insErr.message}. Pokušajte ponovo.`); setSaving(false); return }
     onSaved()
     onClose()
   }
@@ -279,10 +281,10 @@ export default function BudgetChangeDialog({
       <div style={{ ...s.dialog }}>
         <div style={chrome.header}>
           <div>
-            <div style={chrome.headerTitle}>Change budget — {rowLabel}</div>
+            <div style={chrome.headerTitle}>Izmena budžeta — {rowLabel}</div>
             <div style={chrome.headerSub}>{monthLabel}</div>
           </div>
-          <button style={chrome.closeBtn} onClick={onClose} aria-label="Close">×</button>
+          <button style={chrome.closeBtn} onClick={onClose} aria-label="Zatvori">×</button>
         </div>
 
         <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -299,21 +301,21 @@ export default function BudgetChangeDialog({
             ))}
 
           <div>
-            <div style={s.lbl}>Project</div>
+            <div style={s.lbl}>Projekat</div>
             {projectLocked
               ? <div style={{ fontSize: '13px', color: DIALOG.text }} data-testid="budget-change-project">{projectLabelById(projects, project)}</div>
-              : <ProjectSelect value={project} onChange={setProject} title="Project" />}
+              : <ProjectSelect value={project} onChange={setProject} title="Projekat" />}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <div style={s.lbl}>Currently</div>
+              <div style={s.lbl}>Trenutno</div>
               <div style={{ fontSize: '18px', color: DIALOG.dim }}>{fmtRSD(current)}</div>
             </div>
             <div>
-              <div style={s.lbl}>Change to (RSD)</div>
+              <div style={s.lbl}>Novi iznos (RSD)</div>
               <input style={s.input} type="number" value={target} autoFocus
-                aria-label="Change to"
+                aria-label="Novi iznos"
                 onChange={e => setTarget(e.target.value)} />
             </div>
           </div>
@@ -322,27 +324,27 @@ export default function BudgetChangeDialog({
               cannot land. */}
           <div style={{ fontSize: '13px', color: delta === null ? DIALOG.amber : delta > 0 ? DIALOG.red : DIALOG.accent }}>
             {delta === null
-              ? 'No figure typed. An empty box is not zero — type 0 if zero is what you mean.'
+              ? 'Iznos nije unet. Prazno polje nije nula — unesite 0 ako želite nulu.'
               : delta === 0
-                ? 'No change yet.'
-                : delta > 0 ? `+${fmtRSD(delta)} more` : `-${fmtRSD(Math.abs(delta))} less`}
+                ? 'Još nema izmene.'
+                : delta > 0 ? `+${fmtRSD(delta)} više` : `-${fmtRSD(Math.abs(delta))} manje`}
           </div>
 
           <div>
-            <div style={s.lbl}>Why <span style={{ color: DIALOG.red }}>*</span></div>
+            <div style={s.lbl}>Razlog <span style={{ color: DIALOG.red }}>*</span></div>
             <textarea style={{ ...s.input, minHeight: '70px', resize: 'vertical' }}
               value={reason} onChange={e => setReason(e.target.value)}
-              aria-label="Why"
-              placeholder="New contract from October, rate up 8%" />
+              aria-label="Razlog"
+              placeholder="Novi ugovor od oktobra, cena veća za 8%" />
           </div>
 
           {/* What the ledger promises, said once where the change is made: this
               is an entry, not an overwrite, and the way back is another entry.
               The second sentence is the contract that used not to hold. */}
           <div style={{ fontSize: '11px', color: DIALOG.faint, lineHeight: 1.5 }}>
-            Recorded as a dated entry with your reason. The figure is not overwritten —
-            to undo this, record the change back. Once recorded it stays as typed:
-            next month's benchmark will not move it.
+            Beleži se kao datirani unos sa vašim razlogom. Iznos se ne prepisuje —
+            da poništite izmenu, unesite izmenu u suprotnom smeru. Jednom sačuvan, iznos
+            ostaje kako je unet: promena referentnog meseca ga neće pomeriti.
           </div>
 
           {error && (
@@ -354,16 +356,16 @@ export default function BudgetChangeDialog({
 
         <div style={{ padding: '1rem 1.5rem', borderTop: '0.5px solid ' + DIALOG.border, display: 'flex', alignItems: 'center', gap: '8px', background: DIALOG.raised }}>
           {onExplain && (
-            <button style={s.link} onClick={onExplain}>How this figure was arrived at</button>
+            <button style={s.link} onClick={onExplain}>Kako je dobijen ovaj iznos</button>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-            <button style={s.ghost} onClick={onClose}>Cancel</button>
+            <button style={s.ghost} onClick={onClose}>Otkaži</button>
             {/* Disabled while the amount box holds nothing readable: there is
                 no figure to record, and the one thing this must never do is
                 read an empty box as a target of zero. */}
             <button style={{ ...s.primary, opacity: saving || delta === null ? 0.5 : 1 }}
               disabled={saving || delta === null} onClick={save}>
-              {saving ? 'Saving...' : 'Record change'}
+              {saving ? 'Čuvanje…' : 'Sačuvaj izmenu'}
             </button>
           </div>
         </div>

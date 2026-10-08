@@ -74,21 +74,21 @@ export interface AbsenceCategory {
 }
 
 export const ABSENCES: AbsenceCategory[] = [
-  { field: 'holiday_hours', label: 'Public holiday', settingKey: 'drzavni_i_verski_praznik', common: true },
-  { field: 'vacation_hours', label: 'Annual leave', settingKey: 'godisnji_odmor', common: true },
-  { field: 'sick_hours', label: 'Sick leave, 65%', settingKey: 'bolovanje_na_teret_poslodavca', common: true },
-  { field: 'sick_full_hours', label: 'Sick leave, full', settingKey: 'bolovanje_na_teret_poslodavca_pun_fond', common: true },
-  { field: 'sick_maternity_hours', label: 'Maternity sick leave', settingKey: 'trudnicko_bolovanje_na_teret_poslodavca', common: false },
-  { field: 'sick_fund_hours', label: 'Sick leave, the fund pays', settingKey: null, common: false },
-  { field: 'paid_leave_hours', label: 'Paid leave', settingKey: 'placeno_odsustvo', common: true },
-  { field: 'religious_holiday_hours', label: 'Religious holiday', settingKey: 'verski_praznik', common: false },
-  { field: 'military_court_hours', label: 'Military or court summons', settingKey: 'vojni_ili_sudski_poziv', common: false },
-  { field: 'work_stoppage_hours', label: 'Work stoppage', settingKey: 'prekid_rada', common: false },
-  { field: 'absence_hours', label: 'Absence from work', settingKey: 'izostanak_sa_rada', common: false },
-  { field: 'undocumented_hours', label: 'Undocumented', settingKey: 'nedokumentovani_sati', common: false },
-  { field: 'suspension_single_hours', label: 'Suspended, living alone', settingKey: 'udaljenje_sa_posla_samac', common: false },
-  { field: 'suspension_family_hours', label: 'Suspended, supporting a family', settingKey: 'udaljenje_sa_posla_izdrzava_porodicu', common: false },
-  { field: 'unpaid_hours', label: 'Unpaid leave', settingKey: null, common: true },
+  { field: 'holiday_hours', label: 'Državni praznik', settingKey: 'drzavni_i_verski_praznik', common: true },
+  { field: 'vacation_hours', label: 'Godišnji odmor', settingKey: 'godisnji_odmor', common: true },
+  { field: 'sick_hours', label: 'Bolovanje do 30 dana, 65%', settingKey: 'bolovanje_na_teret_poslodavca', common: true },
+  { field: 'sick_full_hours', label: 'Bolovanje do 30 dana, 100%', settingKey: 'bolovanje_na_teret_poslodavca_pun_fond', common: true },
+  { field: 'sick_maternity_hours', label: 'Bolovanje zbog održavanja trudnoće', settingKey: 'trudnicko_bolovanje_na_teret_poslodavca', common: false },
+  { field: 'sick_fund_hours', label: 'Bolovanje na teret fonda', settingKey: null, common: false },
+  { field: 'paid_leave_hours', label: 'Plaćeno odsustvo', settingKey: 'placeno_odsustvo', common: true },
+  { field: 'religious_holiday_hours', label: 'Verski praznik', settingKey: 'verski_praznik', common: false },
+  { field: 'military_court_hours', label: 'Vojni ili sudski poziv', settingKey: 'vojni_ili_sudski_poziv', common: false },
+  { field: 'work_stoppage_hours', label: 'Prekid rada', settingKey: 'prekid_rada', common: false },
+  { field: 'absence_hours', label: 'Izostanak sa rada', settingKey: 'izostanak_sa_rada', common: false },
+  { field: 'undocumented_hours', label: 'Nedokumentovani sati', settingKey: 'nedokumentovani_sati', common: false },
+  { field: 'suspension_single_hours', label: 'Udaljenje sa rada, samac', settingKey: 'udaljenje_sa_posla_samac', common: false },
+  { field: 'suspension_family_hours', label: 'Udaljenje sa rada, izdržava porodicu', settingKey: 'udaljenje_sa_posla_izdrzava_porodicu', common: false },
+  { field: 'unpaid_hours', label: 'Neplaćeno odsustvo', settingKey: null, common: true },
 ]
 
 export type AbsenceField =
@@ -167,7 +167,7 @@ export function hoursByCategory(
     const hours = num(t[field])
     if (hours === 0) continue
     out.push({
-      field, hours, coefficient: 1, effective: hours, priced: true, label: 'Work',
+      field, hours, coefficient: 1, effective: hours, priced: true, label: 'Redovan rad',
     })
   }
 
@@ -269,15 +269,15 @@ export function checkTimesheet(t: TimesheetRow, monthHours: number | null): Time
 
   for (const f of HOUR_FIELDS) {
     if (num(t[f]) < 0) {
-      problems.push({ level: 'error', message: `${label(f)} cannot be negative.` })
+      problems.push({ level: 'error', message: `${label(f)}: sati ne mogu biti negativni.` })
     }
   }
 
   if (monthHours === null) {
     problems.push({
       level: 'warning',
-      message: 'The hour fund for this month is not in the payroll settings, so these '
-        + 'hours cannot be reconciled against anything.',
+      message: 'Fond sati za ovaj mesec nije unet u podešavanja zarada, pa ovi sati '
+        + 'ne mogu da se usklade ni sa čim. Unesite fond sati u podešavanjima.',
     })
     return problems
   }
@@ -287,18 +287,18 @@ export function checkTimesheet(t: TimesheetRow, monthHours: number | null): Time
   if (total > monthHours) {
     problems.push({
       level: 'error',
-      message: `${fmt(total)} hours against a fund of ${fmt(monthHours)} — `
-        + `${fmt(total - monthHours)} over. Hours above the fund are overtime, and the `
-        + 'engine refuses to calculate overtime because no export has ever shown it. '
-        + 'Either the hours are wrong or this month needs a rule that has been proved.',
+      message: `${fmt(total)} sati prema fondu od ${fmt(monthHours)} — `
+        + `${fmt(total - monthHours)} preko fonda. Sati preko fonda su prekovremeni rad, a `
+        + 'obračun ne računa prekovremeni rad jer ga nijedan izvoz još nije pokazao. '
+        + 'Ili su sati pogrešni, ili ovom mesecu treba pravilo koje je provereno.',
     })
   } else {
     problems.push({
       level: 'error',
-      message: `${fmt(total)} hours against a fund of ${fmt(monthHours)} — `
-        + `${fmt(monthHours - total)} unaccounted for. Every hour of the month has to be `
-        + 'somewhere, even if it is unpaid leave; hours that are simply missing become a '
-        + 'smaller salary that looks deliberate.',
+      message: `${fmt(total)} sati prema fondu od ${fmt(monthHours)} — `
+        + `${fmt(monthHours - total)} nije raspoređeno. Svaki sat u mesecu mora negde da se upiše, `
+        + 'makar kao neplaćeno odsustvo; sati koji prosto nedostaju postaju manja zarada '
+        + 'koja izgleda namerno.',
     })
   }
   return problems
@@ -363,7 +363,7 @@ export async function fetchTimesheets(client: any, month: string): Promise<Times
   return fetchAllPages<TimesheetRow>((from, to) =>
     client.from('payroll_timesheets').select('*')
       .eq('month', first).order('employee_id').range(from, to),
-  ).catch((e: any) => { throw new Error(`The timesheets could not be read: ${e.message || e}`) })
+  ).catch((e: any) => { throw new Error(`Evidencija radnog vremena nije učitana: ${e.message || e}. Osvežite stranu.`) })
 }
 
 /**
@@ -387,19 +387,19 @@ export async function saveTimesheet(client: any, t: TimesheetRow): Promise<void>
     .from('payroll_timesheets')
     .upsert(row, { onConflict: 'employee_id,month' })
     .select('id')
-  if (error) throw new Error(`The hours could not be saved: ${error.message}`)
+  if (error) throw new Error(`Sati nisu sačuvani: ${error.message}`)
   // A zero-row upsert is a PostgREST success and would leave the page showing
   // figures nothing has stored — almost always RLS declining the write.
   if (!data || data.length === 0) {
-    throw new Error('The hours were not saved and the database reported no error. '
-      + 'This usually means the write was refused; check you are signed in as an '
-      + 'administrator or owner.')
+    throw new Error('Sati nisu sačuvani, a baza nije javila grešku. '
+      + 'To obično znači da je upis odbijen; proverite da ste prijavljeni kao '
+      + 'administrator ili vlasnik.')
   }
 }
 
 export async function deleteTimesheet(client: any, id: string): Promise<void> {
   const { error } = await client.from('payroll_timesheets').delete().eq('id', id).select('id')
-  if (error) throw new Error(`The timesheet could not be deleted: ${error.message}`)
+  if (error) throw new Error(`Evidencija nije obrisana: ${error.message}`)
 }
 
 // ─── Small things ───────────────────────────────────────────────────────────
@@ -410,9 +410,9 @@ function num(v: unknown): number {
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100
-const fmt = (n: number): string => (Math.round(n * 100) / 100).toString()
+const fmt = (n: number): string => (Math.round(n * 100) / 100).toString().replace('.', ',')
 
 export function label(f: HourField): string {
-  if (f === 'regular_hours') return 'Work'
+  if (f === 'regular_hours') return 'Redovan rad'
   return ABSENCES.find(a => a.field === f)?.label ?? f
 }

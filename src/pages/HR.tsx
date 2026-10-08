@@ -19,6 +19,8 @@ import EmployeeDialog from '../components/EmployeeDialog'
 import TimesheetGrid from '../components/TimesheetGrid'
 import AdditionsTab from '../components/AdditionsTab'
 import { fmtLocal, fmtNum } from '../utils/formatters'
+import { countOf } from '../utils/plural'
+import { monthLongLabel, srDate } from '../utils/months'
 
 /**
  * HR administration.
@@ -185,17 +187,17 @@ export default function HR() {
       <div style={s.body}>
         <div style={s.pageHeader}>
           <div>
-            <div style={s.pageTitle}>HR administration</div>
+            <div style={s.pageTitle}>Kadrovska evidencija</div>
             <div style={s.pageSub}>
-              Employees, their contracts and their deductions, as they stood in the month shown
+              Zaposleni, njihovi ugovori i obustave, onako kako su stajali u izabranom mesecu
             </div>
           </div>
-          <button style={s.newBtn} onClick={() => setDialogFor(null)}>+ New employee</button>
+          <button style={s.newBtn} onClick={() => setDialogFor(null)}>+ Novi zaposleni</button>
         </div>
 
         <div style={s.tabs}>
-          {([['people', 'Employees'], ['hours', 'Timesheets'],
-             ['additions', 'Additions']] as const).map(([k, lbl]) => (
+          {([['people', 'Zaposleni'], ['hours', 'Evidencija radnog vremena'],
+             ['additions', 'Dodaci']] as const).map(([k, lbl]) => (
             <button key={k} style={{ ...s.tab, ...(tab === k ? s.tabOn : {}) }}
               onClick={() => setTab(k)}>{lbl}</button>
           ))}
@@ -206,18 +208,18 @@ export default function HR() {
             onChange={e => setMonth(e.target.value)} />
           {showPicker && (
             <select style={s.filterSelect} value={companyId} onChange={e => setCompanyId(e.target.value)}>
-              <option value="">All companies</option>
+              <option value="">Sve firme</option>
               {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
           {tab === 'people' && (
-            <input style={s.searchInput} placeholder="Search by name, code or unit"
+            <input style={s.searchInput} placeholder="Pretraga po imenu, šifri ili jedinici"
               value={search} onChange={e => setSearch(e.target.value)} />
           )}
           <div style={s.totalBadge}>
             {rate
-              ? `1 EUR = ${money(rate.eur)} RSD on ${rate.date}`
-              : rateError ? 'No rate' : 'Loading the rate…'}
+              ? `1 EUR = ${money(rate.eur)} RSD na dan ${srDate(rate.date)}`
+              : rateError ? 'Nema kursa' : 'Učitavanje kursa…'}
           </div>
         </div>
 
@@ -225,31 +227,31 @@ export default function HR() {
 
         {rateError && (
           <div style={s.error}>
-            The exchange rate for {rateDateFor(month)} could not be read ({rateError}).
-            Euro contracts cannot be shown in dinars until it is — a salary converted at a
-            guessed rate would look exactly like a checked one.
+            Kurs za {srDate(rateDateFor(month))} nije učitan ({rateError}).
+            Ugovori u evrima ne mogu da se prikažu u dinarima dok se kurs ne učita — zarada
+            preračunata po pretpostavljenom kursu izgledala bi kao proverena. Osvežite stranu.
           </div>
         )}
 
         {seniorityCoefficient === null && tab === 'people' && (
           <div style={s.warn}>
-            The payroll settings have no seniority coefficient for {date}, so the split
-            between base pay and seniority is not shown. Set it on the Payroll tab in
-            Settings; until then the contracted totals below are still correct, but the
-            figures a run would compare against MPP are not available.
+            U podešavanjima zarada nema koeficijenta minulog rada za {monthLongLabel(date)}, pa
+            podela na osnovnu zaradu i minuli rad nije prikazana. Unesite ga na kartici Zarade u
+            Podešavanjima; do tada su ugovoreni iznosi ispod tačni, ali iznosi koje bi obračun
+            poredio sa MPP nisu dostupni.
           </div>
         )}
 
         {roster.problems.length > 0 && (
           <div style={s.problems}>
             <div style={s.problemsTitle}>
-              {roster.problems.length} {roster.problems.length === 1 ? 'person is' : 'people are'} missing
-              from this month
+              {countOf(roster.problems.length, 'zaposleni nedostaje', 'zaposlena nedostaju', 'zaposlenih nedostaje')}{' '}
+              u ovom mesecu
             </div>
             <div style={s.problemsHint}>
-              A payroll run must not be posted while this list has anything in it — somebody
-              silently left out is exactly the error a check against the accountant is meant
-              to catch, and the check would agree with itself.
+              Obračun zarade ne sme da se proknjiži dok je bilo ko na ovom spisku — neko ko je
+              tiho izostavljen upravo je greška koju provera prema knjigovođi treba da uhvati,
+              a provera bi se složila sama sa sobom.
             </div>
             {roster.problems.map(p => (
               <div key={p.employee.id} style={s.problemRow}>
@@ -264,24 +266,24 @@ export default function HR() {
 
         {outsideMonth.length > 0 && tab === 'people' && (
           <div style={s.offNote}>
-            {outsideMonth.length} {outsideMonth.length === 1 ? 'employee is' : 'employees are'}
-            {' '}outside {month} altogether — hired later, or already gone:{' '}
+            {countOf(outsideMonth.length, 'zaposleni je', 'zaposlena su', 'zaposlenih je')}
+            {' '}potpuno van meseca {monthLongLabel(month)} — primljeni kasnije ili su već otišli:{' '}
             {outsideMonth.map(e => (
               <button key={e.id} style={s.linkName} onClick={() => setDialogFor(e)}>
                 {e.full_name}
               </button>
             ))}
-            . Change the month above to see them in place.
+            . Promenite mesec gore da biste ih videli na spisku.
           </div>
         )}
 
         {roster.offPayroll.length > 0 && tab === 'people' && (
           <div style={s.offNote}>
             {roster.offPayroll.length === 1
-              ? `${roster.offPayroll[0].employee.full_name} is`
-              : `${roster.offPayroll.length} people are`} employed this month and
-            deliberately not on the payroll — their salary is not this company&rsquo;s to
-            work out. They are in the list below, marked, and open like anybody else.
+              ? `${roster.offPayroll[0].employee.full_name} je`
+              : countOf(roster.offPayroll.length, 'zaposleni je', 'zaposlena su', 'zaposlenih je')} u
+            radnom odnosu ovog meseca, ali namerno van obračuna zarade — tu naknadu ne
+            obračunava ova firma. Nalaze se na spisku ispod, označeni, i otvaraju se kao i svi ostali.
           </div>
         )}
 
@@ -293,12 +295,12 @@ export default function HR() {
         ) : (
         <>
         <div style={s.summaryRow} className="mf-stagger">
-          <Card label="On the payroll" value={String(roster.people.length)}
+          <Card label="U obračunu" value={String(roster.people.length)}
             note={roster.offPayroll.length > 0
-              ? `+ ${roster.offPayroll.length} off payroll` : undefined} />
-          <Card label="Contracted net, RSD" value={money(totals.net)} />
-          <Card label="Deducted to third parties" value={money(totals.thirdParty)} />
-          <Card label="Deducted, kept by employer" value={money(totals.employerHeld)} />
+              ? `+ ${roster.offPayroll.length} van obračuna` : undefined} />
+          <Card label="Ugovoreni neto, RSD" value={money(totals.net)} />
+          <Card label="Prosleđene obustave" value={money(totals.thirdParty)} />
+          <Card label="Zadržane obustave" value={money(totals.employerHeld)} />
         </div>
 
         <div style={s.tableWrap}>
@@ -310,20 +312,20 @@ export default function HR() {
           ) : shown.length === 0 ? (
             <div style={s.emptyState}>
               {employees.length === 0
-                ? 'No employees yet. Add the first one with the button above.'
-                : 'Nobody matches this month and these filters.'}
+                ? 'Još nema zaposlenih. Dodajte prvog dugmetom iznad.'
+                : 'Nijedan zaposleni ne odgovara ovom mesecu i filterima.'}
             </div>
           ) : (
             <table style={s.table}>
               <thead>
                 <tr style={s.thead}>
-                  <th style={s.th}>Employee</th>
-                  <th style={s.th}>Unit</th>
-                  <th style={s.th}>Contract</th>
-                  <th style={s.thRight}>Contracted net, RSD</th>
-                  <th style={s.thRight}>Base</th>
-                  <th style={s.thRight}>Seniority</th>
-                  <th style={s.thRight}>Deductions</th>
+                  <th style={s.th}>Zaposleni</th>
+                  <th style={s.th}>Jedinica</th>
+                  <th style={s.th}>Ugovor</th>
+                  <th style={s.thRight}>Ugovoreni neto, RSD</th>
+                  <th style={s.thRight}>Osnovna</th>
+                  <th style={s.thRight}>Minuli rad</th>
+                  <th style={s.thRight}>Obustave</th>
                   <th style={s.th}></th>
                 </tr>
               </thead>
@@ -346,13 +348,13 @@ export default function HR() {
                           {r.employee.full_name}
                         </div>
                         <div style={s.smallCell}>
-                          {r.employee.code ? `#${r.employee.code}` : 'no code'}
+                          {r.employee.code ? `#${r.employee.code}` : 'bez šifre'}
                           {r.absence && (
                             <span style={s.offBadge} title={absenceLabel(r.absence.reason)}>
                               {absenceLabel(r.absence.reason).split(' —')[0]}
                             </span>
                           )}
-                          {r.why && <span style={s.needsBadge}>Nothing to calculate</span>}
+                          {r.why && <span style={s.needsBadge}>Nema šta da se obračuna</span>}
                         </div>
                       </td>
                       <td style={s.td}>
@@ -365,14 +367,13 @@ export default function HR() {
                               {fmtLocal(p.contract.net_amount, p.contract.currency)}
                             </div>
                             <div style={{ ...s.smallCell, color: '#5C7894' }}>
-                              from {p.contract.valid_from} · {p.serviceYears}
-                              {p.serviceYears === 1 ? ' year' : ' years'}
-                              {!p.serviceYearsDerived && <span title="Entered by hand on the contract"> ✎</span>}
+                              od {srDate(p.contract.valid_from)} · {countOf(p.serviceYears, 'godina', 'godine', 'godina')} staža
+                              {!p.serviceYearsDerived && <span title="Uneto ručno na ugovoru"> ✎</span>}
                             </div>
                           </>
                         ) : r.absence ? (
                           <div style={{ ...s.smallCell, color: '#B79A57' }}>
-                            {r.absence.valid_from} → {r.absence.valid_to || 'not back yet'}
+                            {srDate(r.absence.valid_from)} → {r.absence.valid_to ? srDate(r.absence.valid_to) : 'bez datuma povratka'}
                           </div>
                         ) : (
                           <div style={{ ...s.smallCell, color: '#C98C8B', maxWidth: '340px' }}>
@@ -395,7 +396,7 @@ export default function HR() {
                             <div>{money(ded.total)}</div>
                             {ded.thirdParty > 0 && (
                               <div style={{ ...s.smallCell, color: '#FF5B5A' }}>
-                                {money(ded.thirdParty)} out
+                                {money(ded.thirdParty)} prosleđeno
                               </div>
                             )}
                           </>

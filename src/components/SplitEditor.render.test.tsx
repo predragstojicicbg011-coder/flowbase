@@ -49,22 +49,22 @@ const amounts = () =>
 describe('before anything is split', () => {
   it('offers one button and says what it is for', () => {
     render(<Host />)
-    expect(screen.getByText(/Split across several costs/)).toBeInTheDocument()
-    expect(screen.getByText(/each with its own classification/)).toBeInTheDocument()
+    expect(screen.getByText(/Podeli na više troškova/)).toBeInTheDocument()
+    expect(screen.getByText(/svaki sa svojom klasifikacijom/)).toBeInTheDocument()
   })
 
   /** Opening on two halves means the first thing a person does is classify,
    *  not divide — and the control starts balanced rather than complaining. */
   it('opens on two halves that already add up', () => {
     render(<Host />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
     expect(amounts()).toEqual(['60000', '60000'])
-    expect(screen.getByText('✓ balanced')).toBeInTheDocument()
+    expect(screen.getByText('✓ usklađeno')).toBeInTheDocument()
   })
 
   it('gives the odd para to the second half', () => {
     render(<Host amount={1000.01} />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
     expect(amounts()).toEqual(['500.01', '500'])
   })
 })
@@ -72,7 +72,7 @@ describe('before anything is split', () => {
 describe('the sum control', () => {
   const open = () => {
     render(<Host />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
   }
 
   /**
@@ -85,15 +85,15 @@ describe('the sum control', () => {
     open()
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[0], { target: { value: '40000' } })
     expect(amounts()).toEqual(['40000', '80000'])
-    expect(screen.getByText('✓ balanced')).toBeInTheDocument()
+    expect(screen.getByText('✓ usklađeno')).toBeInTheDocument()
   })
 
   it('rebalances across three lines too', () => {
     open()
-    fireEvent.click(screen.getByText(/Add a line/))
+    fireEvent.click(screen.getByText(/Dodaj stavku/))
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[0], { target: { value: '20000' } })
     expect(amounts()).toEqual(['20000', '60000', '40000'])
-    expect(screen.getByText('✓ balanced')).toBeInTheDocument()
+    expect(screen.getByText('✓ usklađeno')).toBeInTheDocument()
   })
 
   /**
@@ -106,83 +106,83 @@ describe('the sum control', () => {
     open()
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '50000' } })
     expect(amounts()).toEqual(['60000', '50000'])
-    expect(screen.getByText(/10\.000,00 RSD left/)).toBeInTheDocument()
+    expect(screen.getByText(/preostalo 10\.000,00 RSD/)).toBeInTheDocument()
   })
 
   it('says when the lines have gone over', () => {
     open()
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '100000' } })
-    expect(screen.getByText(/40\.000,00 RSD over/)).toBeInTheDocument()
+    expect(screen.getByText(/višak 40\.000,00 RSD/)).toBeInTheDocument()
   })
 
   it('puts the difference on the last line when asked', () => {
     open()
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '50000' } })
-    fireEvent.click(screen.getByText(/Put it on line 2/))
+    fireEvent.click(screen.getByText(/Prebaci na stavku 2/))
     expect(amounts()).toEqual(['60000', '60000'])
-    expect(screen.getByText('✓ balanced')).toBeInTheDocument()
+    expect(screen.getByText('✓ usklađeno')).toBeInTheDocument()
   })
 
   it('offers nothing to absorb once it balances', () => {
     open()
-    expect(screen.queryByText(/Put it on line/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Prebaci na stavku/)).not.toBeInTheDocument()
   })
 
   it('names the line that takes the balance, rather than leaving it to be found', () => {
     open()
-    expect(screen.getByText('takes the balance')).toBeInTheDocument()
+    expect(screen.getByText('preuzima ostatak')).toBeInTheDocument()
   })
 
   /** A sentence as well as a colour: a reader who has not noticed the amber
    *  figure has still been told what is wrong and where. */
   it('names a line with no category before it mentions the total', () => {
     open()
-    expect(screen.getByText(/Line 1 has no P&L category/)).toBeInTheDocument()
+    expect(screen.getByText(/Stavka 1 nema P&L kategoriju/)).toBeInTheDocument()
   })
 })
 
 describe('adding and removing lines', () => {
   const open = () => {
     render(<Host />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
   }
 
   it('adds a line holding whatever is unaccounted for', () => {
     open()
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '20000' } })
-    fireEvent.click(screen.getByText(/Add a line/))
+    fireEvent.click(screen.getByText(/Dodaj stavku/))
     expect(amounts()).toEqual(['60000', '20000', '40000'])
-    expect(screen.getByText('✓ balanced')).toBeInTheDocument()
+    expect(screen.getByText('✓ usklađeno')).toBeInTheDocument()
   })
 
   it('removes a line', () => {
     open()
-    fireEvent.click(screen.getByText(/Add a line/))
+    fireEvent.click(screen.getByText(/Dodaj stavku/))
     expect(amounts()).toHaveLength(3)
-    fireEvent.click(screen.getAllByTitle('Remove this line')[0])
+    fireEvent.click(screen.getAllByTitle('Ukloni ovu stavku')[0])
     expect(amounts()).toHaveLength(2)
   })
 
   /** A split of one is not a split. The way back is the explicit button. */
   it('will not let the last line be removed one at a time', () => {
     open()
-    fireEvent.click(screen.getAllByTitle('Remove this line')[0])
-    const last = screen.getByTitle(/A split of one is not a split/)
+    fireEvent.click(screen.getAllByTitle('Ukloni ovu stavku')[0])
+    const last = screen.getByTitle(/Podela na jednu stavku nije podela/)
     expect(last).toBeDisabled()
   })
 
   it('goes back to an ordinary single expense', () => {
     open()
-    fireEvent.click(screen.getByText(/Remove the split/))
-    expect(screen.getByText(/Split across several costs/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText(/Ukloni podelu/))
+    expect(screen.getByText(/Podeli na više troškova/)).toBeInTheDocument()
   })
 })
 
 describe('a line is a template and a figure', () => {
   it('shows what the line will be filed as, not just the template name', () => {
     render(<Host />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
-    fireEvent.click(screen.getAllByText(/pick what this part is for/)[0])
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
+    fireEvent.click(screen.getAllByText(/izaberite namenu ovog dela/)[0])
     fireEvent.click(screen.getByText(/💻 Laptops/))
     expect(screen.getByText(/Capital expenditures › Hardware › Product › Laptop/))
       .toBeInTheDocument()
@@ -190,8 +190,8 @@ describe('a line is a template and a figure', () => {
 
   it('keeps the amount when the template is picked', () => {
     render(<Host />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
-    fireEvent.click(screen.getAllByText(/pick what this part is for/)[0])
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
+    fireEvent.click(screen.getAllByText(/izaberite namenu ovog dela/)[0])
     fireEvent.click(screen.getByText(/💻 Laptops/))
     expect(amounts()[0]).toBe('60000')
   })
@@ -201,7 +201,7 @@ describe('a line is on a project', () => {
   const open = () => {
     let latest: SplitLine[] = []
     render(<Host seen={l => { latest = l }} />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
     return () => latest
   }
 
@@ -224,7 +224,7 @@ describe('a line is on a project', () => {
     const lines = open()
     fireEvent.click(screen.getAllByTitle('Projekat ovog dela')[0])
     fireEvent.click(screen.getByText('Zgrada Vračar'))
-    fireEvent.click(screen.getAllByText(/pick what this part is for/)[0])
+    fireEvent.click(screen.getAllByText(/izaberite namenu ovog dela/)[0])
     fireEvent.click(screen.getByText(/💻 Laptops/))
     expect(lines()[0]).toMatchObject({ project_id: 'p1', pl_category: 'Capital expenditures' })
   })
@@ -233,7 +233,7 @@ describe('a line is on a project', () => {
 describe('typing an amount', () => {
   const open = () => {
     render(<Host />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
   }
 
   /**
@@ -254,10 +254,10 @@ describe('typing an amount', () => {
 
   it('counts the decimal in the balance', () => {
     render(<Host amount={713850.49} />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[0], { target: { value: '653400.49' } })
     expect(amounts()).toEqual(['653400.49', '60450'])
-    expect(screen.getByText('✓ balanced')).toBeInTheDocument()
+    expect(screen.getByText('✓ usklađeno')).toBeInTheDocument()
   })
 
   it('takes a comma as a decimal point, the way the keyboard gives it', () => {
@@ -295,7 +295,7 @@ describe('making a template from inside the split', () => {
 
   const open = () => {
     render(<Full />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
   }
 
   /**
@@ -304,30 +304,30 @@ describe('making a template from inside the split', () => {
    */
   it('offers a plus on every line', () => {
     open()
-    expect(screen.getAllByTitle('Make a template for this cost')).toHaveLength(2)
+    expect(screen.getAllByTitle('Napravi šablon za ovaj trošak')).toHaveLength(2)
   })
 
   it('opens the builder on the line that asked for it', () => {
     open()
-    fireEvent.click(screen.getAllByTitle('Make a template for this cost')[0])
-    expect(screen.getByText('New template')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/Lease — garage spaces/)).toBeInTheDocument()
+    fireEvent.click(screen.getAllByTitle('Napravi šablon za ovaj trošak')[0])
+    expect(screen.getByText('Novi šablon')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/Zakup — garažna mesta/)).toBeInTheDocument()
   })
 
   /** Two half-filled template forms on one screen is two chances to save the
    *  wrong one. */
   it('opens one at a time', () => {
     open()
-    fireEvent.click(screen.getAllByTitle('Make a template for this cost')[0])
-    fireEvent.click(screen.getAllByTitle('Make a template for this cost')[1])
-    expect(screen.getAllByText('New template')).toHaveLength(1)
+    fireEvent.click(screen.getAllByTitle('Napravi šablon za ovaj trošak')[0])
+    fireEvent.click(screen.getAllByTitle('Napravi šablon za ovaj trošak')[1])
+    expect(screen.getAllByText('Novi šablon')).toHaveLength(1)
   })
 
   it('closes on cancel without changing the line', () => {
     open()
-    fireEvent.click(screen.getAllByTitle('Make a template for this cost')[0])
-    fireEvent.click(screen.getByText('Cancel'))
-    expect(screen.queryByText('New template')).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByTitle('Napravi šablon za ovaj trošak')[0])
+    fireEvent.click(screen.getByText('Otkaži'))
+    expect(screen.queryByText('Novi šablon')).not.toBeInTheDocument()
     expect(amounts()).toEqual(['60000', '60000'])
   })
 
@@ -338,25 +338,25 @@ describe('making a template from inside the split', () => {
    */
   it('refuses a template with no name and says so', () => {
     open()
-    fireEvent.click(screen.getAllByTitle('Make a template for this cost')[0])
-    const save = screen.getByText(/Save and use it/)
+    fireEvent.click(screen.getAllByTitle('Napravi šablon za ovaj trošak')[0])
+    const save = screen.getByText(/Sačuvaj i primeni/)
     expect(save).toBeDisabled()
-    expect(save.getAttribute('title')).toMatch(/Give the template a name/)
+    expect(save.getAttribute('title')).toMatch(/Dajte šablonu naziv/)
   })
 
   it('still asks for a category once it has a name', () => {
     open()
-    fireEvent.click(screen.getAllByTitle('Make a template for this cost')[0])
-    fireEvent.change(screen.getByPlaceholderText(/Lease — garage spaces/), { target: { value: 'Garage' } })
-    expect(screen.getByText(/Save and use it/).getAttribute('title'))
-      .toMatch(/Pick a P&L category/)
+    fireEvent.click(screen.getAllByTitle('Napravi šablon za ovaj trošak')[0])
+    fireEvent.change(screen.getByPlaceholderText(/Zakup — garažna mesta/), { target: { value: 'Garage' } })
+    expect(screen.getByText(/Sačuvaj i primeni/).getAttribute('title'))
+      .toMatch(/Izaberite P&L kategoriju/)
   })
 
   /** Where a dialog has not passed the lists, the line stays template-only —
    *  which is how this shipped and is still a working control. */
   it('shows no plus where the dialog gave it nothing to build from', () => {
     render(<Host />)
-    fireEvent.click(screen.getByText(/Split across several costs/))
-    expect(screen.queryByTitle('Make a template for this cost')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
+    expect(screen.queryByTitle('Napravi šablon za ovaj trošak')).not.toBeInTheDocument()
   })
 })

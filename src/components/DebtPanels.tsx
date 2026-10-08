@@ -1,5 +1,6 @@
 import React, { useState, useMemo, createContext, useContext } from 'react'
 import { fmtMoney } from '../utils/formatters'
+import { countOf, plural } from '../utils/plural'
 import { C, deck, useWidth, Empty, TipHead, TipRow, type Tip } from './chartChrome'
 import { niceMax, axisTicks, shortMoney, monthLabel } from '../services/expenseCharts'
 import {
@@ -63,9 +64,9 @@ type Tab = 'due' | 'balance' | 'credits'
 type Horizon = 12 | 24 | 0
 
 const TABS: { id: Tab; label: string; hint: string }[] = [
-  { id: 'due', label: 'Due by month', hint: 'What has to be paid, and how much of it only carries the debt' },
-  { id: 'balance', label: 'Debt balance', hint: 'What is still owed at each month end — and where it falls away' },
-  { id: 'credits', label: 'By credit', hint: 'Which line the money is owed on' },
+  { id: 'due', label: 'Dospeće po mesecima', hint: 'Šta treba platiti i koliko od toga je samo trošak duga' },
+  { id: 'balance', label: 'Stanje duga', hint: 'Koliko se još duguje na kraju svakog meseca — i kada dug nestaje' },
+  { id: 'credits', label: 'Po kreditu', hint: 'Po kom kreditu se novac duguje' },
 ]
 
 export interface DebtPanelsProps {
@@ -140,7 +141,7 @@ export default function DebtPanels(p: DebtPanelsProps) {
                 {([12, 24, 0] as Horizon[]).map(h => (
                   <button key={h} onClick={() => setHorizon(h)}
                     style={{ ...deck.segBtn, ...(horizon === h ? deck.segOn : {}) }}>
-                    {h === 0 ? `All ${span > 0 ? `(${span}m)` : ''}` : `${h}m`}
+                    {h === 0 ? `Sve ${span > 0 ? `(${span} mes.)` : ''}` : `${h} mes.`}
                   </button>
                 ))}
               </span>
@@ -151,7 +152,7 @@ export default function DebtPanels(p: DebtPanelsProps) {
 
         <div ref={ref} style={{ position: 'relative' }} onMouseLeave={() => setTip(null)}>
           {!hasAnything ? (
-            <Empty h={260} text="Nothing is owed — no outstanding instalments and no revolving principal." />
+            <Empty h={260} text="Nema duga — nema neplaćenih rata ni glavnice revolving kredita." />
           ) : tab === 'due' ? (
             <DueChart rows={due} w={w} onTip={setTip} />
           ) : tab === 'balance' ? (
@@ -171,8 +172,8 @@ export default function DebtPanels(p: DebtPanelsProps) {
 
         <div style={deck.legend}>
           {(tab === 'due'
-            ? [['Principal', PRINCIPAL], ['Interest', INTEREST]]
-            : [['Annuity', ANNUITY], ['Revolving', REVOLVING]]
+            ? [['Glavnica', PRINCIPAL], ['Kamata', INTEREST]]
+            : [['Anuitetni', ANNUITY], ['Revolving', REVOLVING]]
           ).map(([label, colour]) => (
             <span key={label} style={deck.legendItem}>
               <i style={{ ...deck.swatch, background: colour }} />{label}
@@ -180,7 +181,7 @@ export default function DebtPanels(p: DebtPanelsProps) {
           ))}
           {p.unpriced > 0 && (
             <span style={{ fontSize: '10.5px', color: '#F5A623' }}>
-              {p.unpriced} revolving line{p.unpriced === 1 ? '' : 's'} carry no rate yet, so their interest is missing from these charts
+              {countOf(p.unpriced, 'revolving kredit', 'revolving kredita', 'revolving kredita')} još {plural(p.unpriced, 'nema', 'nemaju', 'nema')} kamatnu stopu, pa {plural(p.unpriced, 'njegova', 'njihova', 'njihova')} kamata nije u ovim grafikonima
             </span>
           )}
         </div>
@@ -202,30 +203,30 @@ function Figures({ f, balance, unpriced, span }: {
   const now = balance.length > 0 ? f.openingBalance : 0
   const cards = [
     {
-      label: 'Owed now', value: money(now), accent: '#4EA8FF',
-      sub: 'principal outstanding',
+      label: 'Dug sada', value: money(now), accent: '#4EA8FF',
+      sub: 'preostala glavnica',
     },
     {
-      label: 'Falls due in the window', value: money(f.total), accent: '#F5A623',
-      sub: `${money(f.principal)} principal · ${money(f.interest)} interest`,
+      label: 'Dospeva u periodu', value: money(f.total), accent: '#F5A623',
+      sub: `${money(f.principal)} glavnica · ${money(f.interest)} kamata`,
     },
     {
-      label: 'Next 12 months', value: money(f.next12), accent: '#4EA8FF',
-      sub: 'principal and interest together',
+      label: 'Narednih 12 meseci', value: money(f.next12), accent: '#4EA8FF',
+      sub: 'glavnica i kamata zajedno',
     },
     {
-      label: 'Heaviest month',
+      label: 'Najteži mesec',
       value: f.peak ? money(f.peak.amount) : '—',
       accent: f.peak && f.peak.amount > f.next12 / 6 ? '#FF5B5A' : '#00D47E',
-      sub: f.peak ? monthLabel(f.peak.month, true) : 'nothing scheduled',
+      sub: f.peak ? monthLabel(f.peak.month, true) : 'ništa nije zakazano',
     },
     {
-      label: 'Debt clear in',
-      value: f.clearsIn ? `${f.clearsIn} mo` : '—',
+      label: 'Dug otplaćen za',
+      value: f.clearsIn ? `${f.clearsIn} mes.` : '—',
       accent: '#00D47E',
       sub: f.clearsIn
         ? monthLabel(balance[f.clearsIn - 1].month, true)
-        : span > 0 ? `not inside this window` : 'nothing owed',
+        : span > 0 ? `ne u ovom periodu` : 'nema duga',
     },
   ]
 
@@ -240,8 +241,8 @@ function Figures({ f, balance, unpriced, span }: {
       ))}
       {unpriced > 0 && (
         <div style={{ gridColumn: '1 / -1', fontSize: '11px', color: '#F5A623' }}>
-          Interest on {unpriced} revolving line{unpriced === 1 ? '' : 's'} is not in these figures — record the
-          benchmark rate on the tranche to price it.
+          Kamata za {countOf(unpriced, 'revolving kredit', 'revolving kredita', 'revolving kredita')} nije u ovim
+          iznosima — unesite referentnu stopu na tranši da biste je obračunali.
         </div>
       )}
     </div>
@@ -259,7 +260,7 @@ function DueChart({ rows, w, onTip }: {
   const iw = Math.max(w - PAD.l - PAD.r, 10)
   const ih = Math.max(H - PAD.t - PAD.b, 10)
   const max = Math.max(...rows.map(r => r.total), 0)
-  if (rows.length === 0 || max <= 0) return <Empty h={H} text="Nothing falls due in this window." />
+  if (rows.length === 0 || max <= 0) return <Empty h={H} text="Ništa ne dospeva u ovom periodu." />
 
   const top = niceMax(max)
   const ticks = axisTicks(max, 4)
@@ -290,13 +291,13 @@ function DueChart({ rows, w, onTip }: {
           body: (
             <>
               <TipHead>{monthLabel(r.month, true)}</TipHead>
-              <TipRow label="Principal" value={money2(r.principal)} />
-              <TipRow label="Interest" value={money2(r.interest)} />
-              <TipRow label="Total" value={money2(r.total)} />
+              <TipRow label="Glavnica" value={money2(r.principal)} />
+              <TipRow label="Kamata" value={money2(r.interest)} />
+              <TipRow label="Ukupno" value={money2(r.total)} />
               {r.revolvingPrincipal > 0 && (
-                <TipRow label="of which revolving" value={money2(r.revolvingPrincipal)} dim />
+                <TipRow label="od toga revolving" value={money2(r.revolvingPrincipal)} dim />
               )}
-              {r.total === 0 && <TipRow label="" value="nothing due" dim />}
+              {r.total === 0 && <TipRow label="" value="ništa ne dospeva" dim />}
             </>
           ),
         })
@@ -337,7 +338,7 @@ function BalanceChart({ points, w, onTip }: {
   const iw = Math.max(w - PAD.l - PAD.r, 10)
   const ih = Math.max(H - PAD.t - PAD.b, 10)
   const max = Math.max(...points.map(p => p.total), 0)
-  if (points.length === 0 || max <= 0) return <Empty h={H} text="No principal outstanding." />
+  if (points.length === 0 || max <= 0) return <Empty h={H} text="Nema preostale glavnice." />
 
   const top = niceMax(max)
   const ticks = axisTicks(max, 4)
@@ -384,11 +385,11 @@ function BalanceChart({ points, w, onTip }: {
               body: (
                 <>
                   <TipHead>{monthLabel(p.month, true)}</TipHead>
-                  <TipRow label="Annuity" value={money2(p.annuity)} />
+                  <TipRow label="Anuitetni" value={money2(p.annuity)} />
                   <TipRow label="Revolving" value={money2(p.revolving)} />
-                  <TipRow label="Owed" value={money2(p.total)} />
+                  <TipRow label="Dug" value={money2(p.total)} />
                   {i > 0 && (
-                    <TipRow label="repaid this month"
+                    <TipRow label="otplaćeno ovog meseca"
                       value={money2(points[i - 1].total - p.total)} dim />
                   )}
                 </>
@@ -411,7 +412,7 @@ function CreditsChart({ rows, w, onTip }: {
   rows: ReturnType<typeof byCredit>; w: number; onTip: (t: Tip) => void
 }) {
   const { money, money2 } = useMoney()
-  if (rows.length === 0) return <Empty h={240} text="No credits to compare." />
+  if (rows.length === 0) return <Empty h={240} text="Nema kredita za poređenje." />
 
   const ROW = 34
   const BAR = 16
@@ -438,12 +439,12 @@ function CreditsChart({ rows, w, onTip }: {
               body: (
                 <>
                   <TipHead>{r.name}</TipHead>
-                  <TipRow label="" value={r.kind === 'revolving' ? 'Revolving' : 'Annuity'} dim />
-                  <TipRow label="Principal" value={money2(r.principal)} />
-                  <TipRow label="Interest"
-                    value={r.interest === null ? 'not priced yet' : money2(r.interest)}
+                  <TipRow label="" value={r.kind === 'revolving' ? 'Revolving' : 'Anuitetni'} dim />
+                  <TipRow label="Glavnica" value={money2(r.principal)} />
+                  <TipRow label="Kamata"
+                    value={r.interest === null ? 'još bez kamatne stope' : money2(r.interest)}
                     dim={r.interest === null} />
-                  <TipRow label="Still owed"
+                  <TipRow label="Još se duguje"
                     value={r.interest === null ? `${money2(r.total)} +` : money2(r.total)} />
                 </>
               ),
@@ -454,7 +455,7 @@ function CreditsChart({ rows, w, onTip }: {
               {r.name.length <= chars ? r.name : r.name.slice(0, chars - 1) + '…'}
             </text>
             <text x={PAD.l + 2} y={PAD.t + i * ROW + ROW / 2 + 12} fontSize="9" fill={C.faint}>
-              {r.kind === 'revolving' ? 'revolving' : 'annuity'}
+              {r.kind === 'revolving' ? 'revolving' : 'anuitetni'}
             </text>
 
             <rect x={x0} y={yTop} width={Math.max(pw, 2)} height={BAR} rx="3" fill={colour} opacity="0.92" />

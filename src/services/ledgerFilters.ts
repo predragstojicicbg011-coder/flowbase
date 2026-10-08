@@ -68,7 +68,7 @@ export function matchesProjectFilter(projectId: string | null | undefined, filte
 /** How the project filter reads in a chip or a subtitle. */
 export function projectFilterLabel(filter: string, nameOf?: (id: string) => string): string {
   const f = (filter || '').trim()
-  if (!f) return 'All projects'
+  if (!f) return 'Svi projekti'
   if (f === PROJECT_FILTER_OVERHEAD) return OVERHEAD_LABEL
   return (nameOf ? nameOf(f) : '') || f
 }
@@ -264,11 +264,11 @@ export function presetRange(preset: DatePreset, today: string): { from: string; 
 }
 
 export const PRESET_LABELS: Record<DatePreset, string> = {
-  custom: 'Custom',
-  this_month: 'This month',
-  last_month: 'Last month',
-  this_quarter: 'This quarter',
-  ytd: 'Year to date',
+  custom: 'Proizvoljno',
+  this_month: 'Ovaj mesec',
+  last_month: 'Prošli mesec',
+  this_quarter: 'Ovaj kvartal',
+  ytd: 'Od početka godine',
 }
 
 // ── Predicates ──────────────────────────────────────────────────────────────
@@ -430,20 +430,20 @@ const money = (n: number, currency: DisplayCurrency) =>
   fmtMoney(n, currency, Number.isInteger(n) ? 0 : 2)
 
 const TITLE: Record<string, string> = {
-  expense: 'Expense', revenue: 'Revenue',
-  direct: 'Direct', invoice_payment: 'Invoice payment', credit_payment: 'Credit payment',
-  transfer: 'Transfer', intercompany: 'Intercompany',
-  unpaid: 'Unpaid', partial: 'Partial', paid: 'Paid', overpaid: 'Overpaid', reconciled: 'Reconciled',
-  unpaired: 'Unpaired', paired: 'Paired', balanced: 'Balanced',
-  in: 'In', out: 'Out',
+  expense: 'Trošak', revenue: 'Prihod',
+  direct: 'Direktna', invoice_payment: 'Plaćanje fakture', credit_payment: 'Otplata kredita',
+  transfer: 'Prenos', intercompany: 'Između firmi',
+  unpaid: 'Neplaćeno', partial: 'Delimično', paid: 'Plaćeno', overpaid: 'Preplaćeno', reconciled: 'Usaglašeno',
+  unpaired: 'Neupareno', paired: 'Upareno', balanced: 'Usklađeno',
+  in: 'Uplata', out: 'Isplata',
 }
 
 const pretty = (v: string) => TITLE[v] || v
 
 function rangeLabel(prefix: string, from: string, to: string): string {
   if (isSet(from) && isSet(to)) return `${prefix}: ${from} → ${to}`
-  if (isSet(from)) return `${prefix}: from ${from}`
-  return `${prefix}: until ${to}`
+  if (isSet(from)) return `${prefix}: od ${from}`
+  return `${prefix}: do ${to}`
 }
 
 /**
@@ -462,90 +462,90 @@ export function activeChips(
   const on = (field: FilterField) => appliesTo(tab, field)
 
   if (on('companyId') && isSet(f.companyId)) {
-    out.push({ id: 'company', label: `Company: ${nameOr(names.company, f.companyId)}`, clears: ['companyId'] })
+    out.push({ id: 'company', label: `Firma: ${nameOr(names.company, f.companyId)}`, clears: ['companyId'] })
   }
 
   if (on('dateFrom') && (isSet(f.dateFrom) || isSet(f.dateTo))) {
     const label = f.datePreset !== 'custom'
-      ? `Date: ${PRESET_LABELS[f.datePreset]}`
-      : rangeLabel('Date', f.dateFrom, f.dateTo)
+      ? `Datum: ${PRESET_LABELS[f.datePreset]}`
+      : rangeLabel('Datum', f.dateFrom, f.dateTo)
     out.push({ id: 'date', label, clears: ['dateFrom', 'dateTo', 'datePreset'] })
   }
 
   const lo = on('amountFrom') ? parseAmount(f.amountFrom) : null
   const hi = on('amountTo') ? parseAmount(f.amountTo) : null
   if (lo !== null || hi !== null) {
-    const label = lo !== null && hi !== null ? `Amount: ${money(lo, currency)} – ${money(hi, currency)}`
-      : lo !== null ? `Amount: ≥ ${money(lo, currency)}`
-        : `Amount: ≤ ${money(hi as number, currency)}`
+    const label = lo !== null && hi !== null ? `Iznos: ${money(lo, currency)} – ${money(hi, currency)}`
+      : lo !== null ? `Iznos: ≥ ${money(lo, currency)}`
+        : `Iznos: ≤ ${money(hi as number, currency)}`
     out.push({ id: 'amount', label, clears: ['amountFrom', 'amountTo'] })
   }
 
   if (on('currency') && isSet(f.currency)) {
-    out.push({ id: 'currency', label: `Currency: ${f.currency}`, clears: ['currency'] })
+    out.push({ id: 'currency', label: `Valuta: ${f.currency}`, clears: ['currency'] })
   }
 
   if (on('direction') && isSet(f.direction)) {
-    out.push({ id: 'direction', label: `Direction: ${pretty(f.direction)}`, clears: ['direction'] })
+    out.push({ id: 'direction', label: `Smer: ${pretty(f.direction)}`, clears: ['direction'] })
   }
   if (on('txType') && isSet(f.txType)) {
-    out.push({ id: 'txType', label: `Type: ${pretty(f.txType)}`, clears: ['txType'] })
+    out.push({ id: 'txType', label: `Tip: ${pretty(f.txType)}`, clears: ['txType'] })
   }
 
   if (on('expenseDescription') && isSet(f.expenseDescription)) {
-    out.push({ id: 'expenseDescription', label: `Expense: ${f.expenseDescription}`, clears: ['expenseDescription'] })
+    out.push({ id: 'expenseDescription', label: `Opis troška: ${f.expenseDescription}`, clears: ['expenseDescription'] })
   }
   if (on('department') && isSet(f.department)) {
-    out.push({ id: 'department', label: `Department: ${f.department}`, clears: ['department', 'deptSubcategory'] })
+    out.push({ id: 'department', label: `Sektor: ${f.department}`, clears: ['department', 'deptSubcategory'] })
   }
   if (on('deptSubcategory') && isSet(f.deptSubcategory)) {
-    out.push({ id: 'deptSubcategory', label: `Dept. sub: ${f.deptSubcategory}`, clears: ['deptSubcategory'] })
+    out.push({ id: 'deptSubcategory', label: `Podsektor: ${f.deptSubcategory}`, clears: ['deptSubcategory'] })
   }
   if (on('plCategory') && isSet(f.plCategory)) {
-    const prefix = plCategoryColumn(tab, f) === 'revenue_stream' ? 'Revenue stream' : 'P&L'
+    const prefix = plCategoryColumn(tab, f) === 'revenue_stream' ? 'Vrsta prihoda' : 'P&L'
     out.push({ id: 'plCategory', label: `${prefix}: ${f.plCategory}`, clears: ['plCategory', 'plSubcategory'] })
   }
   if (on('plSubcategory') && isSet(f.plSubcategory) && plCategoryColumn(tab, f) === 'pl_category') {
-    out.push({ id: 'plSubcategory', label: `P&L sub: ${f.plSubcategory}`, clears: ['plSubcategory'] })
+    out.push({ id: 'plSubcategory', label: `P&L potkategorija: ${f.plSubcategory}`, clears: ['plSubcategory'] })
   }
 
   if (on('projectId') && isSet(f.projectId)) {
-    out.push({ id: 'project', label: `Project: ${projectFilterLabel(f.projectId, names.project)}`, clears: ['projectId'] })
+    out.push({ id: 'project', label: `Projekat: ${projectFilterLabel(f.projectId, names.project)}`, clears: ['projectId'] })
   }
 
   if (on('unclassified') && f.unclassified) {
-    out.push({ id: 'unclassified', label: 'Unclassified only', clears: ['unclassified'] })
+    out.push({ id: 'unclassified', label: 'Samo neklasifikovano', clears: ['unclassified'] })
   }
 
   if (on('invoiceStatus') && isSet(f.invoiceStatus)) {
     out.push({ id: 'invoiceStatus', label: `Status: ${pretty(f.invoiceStatus)}`, clears: ['invoiceStatus'] })
   }
   if (on('overdue') && f.overdue) {
-    out.push({ id: 'overdue', label: 'Overdue only', clears: ['overdue'] })
+    out.push({ id: 'overdue', label: 'Samo u kašnjenju', clears: ['overdue'] })
   }
   if (on('dueFrom') && (isSet(f.dueFrom) || isSet(f.dueTo))) {
-    out.push({ id: 'due', label: rangeLabel('Due', f.dueFrom, f.dueTo), clears: ['dueFrom', 'dueTo'] })
+    out.push({ id: 'due', label: rangeLabel('Dospeće', f.dueFrom, f.dueTo), clears: ['dueFrom', 'dueTo'] })
   }
 
   if (on('partnerId') && isSet(f.partnerId)) {
     out.push({ id: 'partner', label: `Partner: ${nameOr(names.partner, f.partnerId)}`, clears: ['partnerId'] })
   }
   if (on('bankId') && isSet(f.bankId)) {
-    out.push({ id: 'bank', label: `Bank: ${nameOr(names.bank, f.bankId)}`, clears: ['bankId'] })
+    out.push({ id: 'bank', label: `Banka: ${nameOr(names.bank, f.bankId)}`, clears: ['bankId'] })
   }
 
   if (on('ptStatus') && isSet(f.ptStatus)) {
     out.push({ id: 'ptStatus', label: `Status: ${pretty(f.ptStatus)}`, clears: ['ptStatus'] })
   }
   if (on('ptDirection') && isSet(f.ptDirection)) {
-    out.push({ id: 'ptDirection', label: `Direction: ${pretty(f.ptDirection)}`, clears: ['ptDirection'] })
+    out.push({ id: 'ptDirection', label: `Smer: ${pretty(f.ptDirection)}`, clears: ['ptDirection'] })
   }
   if (on('periodFrom') && (isSet(f.periodFrom) || isSet(f.periodTo))) {
     out.push({ id: 'period', label: rangeLabel('Period', f.periodFrom, f.periodTo), clears: ['periodFrom', 'periodTo'] })
   }
 
   if (on('search') && isSet(f.search)) {
-    out.push({ id: 'search', label: `Text: “${f.search.trim()}”`, clears: ['search'] })
+    out.push({ id: 'search', label: `Tekst: „${f.search.trim()}“`, clears: ['search'] })
   }
 
   return out
@@ -599,9 +599,9 @@ export function pageRange(page: number, pageSize: number, count: number): { from
 
 /** `"51–100 of 142"`, or `"0 of 0"` when there is nothing to show. */
 export function pageLabel(page: number, pageSize: number, count: number): string {
-  if (count <= 0) return '0 of 0'
+  if (count <= 0) return '0 od 0'
   const { from, to } = pageRange(page, pageSize, count)
-  return `${from}–${to} of ${count}`
+  return `${from}–${to} od ${count}`
 }
 
 /** Whether Previous has anywhere to go. */

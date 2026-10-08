@@ -116,7 +116,7 @@ describe('plannedRevenueByMonth', () => {
   it('leaves rent out, and says so, when no rate is given for it', () => {
     const r = plannedRevenueByMonth(projects, [], [lease()], months, { currency: 'RSD' })
     expect(r.lines).toEqual([])
-    expect(r.notes[0]).toMatch(/3 rent month/)
+    expect(r.notes[0]).toMatch(/3 meseca zakupa u drugoj valuti nisu uračunata/)
   })
 
   it('never counts a rental month twice: an invoice drops the lease-month, a plan row replaces the rent', () => {
@@ -131,7 +131,7 @@ describe('plannedRevenueByMonth', () => {
   it('reports plan rows with no figure in the display currency', () => {
     const r = plannedRevenueByMonth(projects, [planRow({ amount_eur: null })], [], months, { currency: 'EUR' })
     expect(r.lines).toEqual([])
-    expect(r.notes[0]).toMatch(/1 plan row/)
+    expect(r.notes[0]).toMatch(/1 stavka plana nema iznos u/)
   })
 
   it('ignores months outside the horizon', () => {

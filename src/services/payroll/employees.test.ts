@@ -147,15 +147,15 @@ describe('employeesForMonth', () => {
     expect(people).toEqual([])
     expect(problems).toHaveLength(1)
     expect(problems[0].employee.full_name).toBe('Petrović Ana')
-    expect(problems[0].why).toContain('No contract')
+    expect(problems[0].why).toContain('Nijedan ugovor ne pokriva')
   })
 
   it('refuses a euro contract with no rate for the month, and says why', () => {
     const { people, problems } = employeesForMonth(
       [employee()], [contract()], [], { ...input, rates: {} })
     expect(people).toEqual([])
-    expect(problems[0].why).toContain('No EUR rate')
-    expect(problems[0].why).toContain('guessed rate')
+    expect(problems[0].why).toContain('Nema kursa za EUR')
+    expect(problems[0].why).toContain('pretpostavljenom kursu')
   })
 
   it('does not complain about somebody who had already left', () => {
@@ -185,8 +185,8 @@ describe('whyContractNotSavable', () => {
   it('refuses a period already covered, and names it', () => {
     const why = whyContractNotSavable(
       { valid_from: '2026-06-01', valid_to: null, net_amount: 3200 }, existing)
-    expect(why).toContain('2026-01-01')
-    expect(why).toContain('two salaries')
+    expect(why).toContain('01.01.2026.')
+    expect(why).toContain('dve zarade')
   })
 
   it('lets a contract be edited without clashing with itself', () => {
@@ -197,13 +197,13 @@ describe('whyContractNotSavable', () => {
   it('refuses a contract with no amount', () => {
     expect(whyContractNotSavable(
       { valid_from: '2027-01-01', valid_to: null, net_amount: '' }, existing))
-      .toMatch(/contracted net amount/)
+      .toMatch(/ugovoreni neto iznos/)
   })
 
   it('refuses a range that ends before it starts', () => {
     expect(whyContractNotSavable(
       { valid_from: '2027-06-01', valid_to: '2027-01-01', net_amount: 3000 }, []))
-      .toMatch(/after the start/)
+      .toMatch(/posle datuma početka/)
   })
 })
 
@@ -352,7 +352,7 @@ describe('absenceOn', () => {
 })
 
 describe('the reasons', () => {
-  it('names every one of them in English', () => {
+  it('names every one of them in Latin script', () => {
     for (const r of ABSENCE_REASONS) {
       expect(absenceLabel(r.value)).toBe(r.label)
       expect(r.label).not.toMatch(/[Ѐ-ӿ]/)
@@ -360,7 +360,7 @@ describe('the reasons', () => {
   })
 
   it('says plainly that maternity leave is the state paying', () => {
-    expect(absenceLabel('maternity')).toContain('paid by the state')
+    expect(absenceLabel('maternity')).toContain('isplaćuje država')
   })
 })
 
@@ -480,8 +480,8 @@ describe('somebody who joined or left mid-month', () => {
       contract({ id: 'b', valid_from: '2026-09-15', valid_to: null }),
     ], [], input)
     expect(r.people).toEqual([])
-    expect(r.problems[0].why).toContain('2 contracts')
-    expect(r.problems[0].why).toContain('two salaries')
+    expect(r.problems[0].why).toContain('2 ugovora')
+    expect(r.problems[0].why).toContain('dve zarade')
   })
 })
 
@@ -538,27 +538,27 @@ describe('what is wrong with a deduction', () => {
     // `goes_to` decides whether the amount becomes a payable. One owed to
     // nobody is a figure in the ledger with no creditor.
     const w = deductionWarning(deduction({ amount: 2500, goes_to: 'third_party', payee: null }))
-    expect(w).toMatch(/names nobody/)
+    expect(w).toMatch(/primalac nije naveden/)
   })
 
   it('counts an empty payee as no payee', () => {
     expect(deductionWarning(deduction({
       amount: 2500, goes_to: 'third_party', payee: '   ',
-    }))).toMatch(/names nobody/)
+    }))).toMatch(/primalac nije naveden/)
   })
 
   it('says a row with neither an amount nor a percentage deducts nothing', () => {
     // It does not refuse — `deductionAmount` returns 0 and the person is
     // simply paid more, with nothing anywhere saying why.
     const w = deductionWarning(deduction({ amount: null, percent_of_net: null }))
-    expect(w).toMatch(/deducts nothing/)
+    expect(w).toMatch(/ništa ne obustavlja/)
   })
 
   it('says which one wins when both are set', () => {
     // The amount does. That is fine until somebody edits the percentage and
     // nothing changes.
     const w = deductionWarning(deduction({ amount: 1000, percent_of_net: 0.02 }))
-    expect(w).toMatch(/percentage is ignored/)
+    expect(w).toMatch(/procenat se zanemaruje/)
     // And it is the truth about the engine, not a guess at it.
     expect(deductionAmount(deduction({ amount: 1000, percent_of_net: 0.02 }), 100000)).toBe(1000)
   })
@@ -569,7 +569,7 @@ describe('what is wrong with a deduction', () => {
     const w = deductionWarning(deduction({
       amount: null, percent_of_net: null, goes_to: 'third_party', payee: null,
     }))
-    expect(w).toMatch(/deducts nothing/)
+    expect(w).toMatch(/ništa ne obustavlja/)
   })
 })
 
@@ -609,7 +609,7 @@ describe('a deduction forwarded to the company paying it', () => {
     // KALEMAR, because the register records who PAYS. Reclassified as
     // forwarded on, the payee has to become whoever receives the money.
     expect(deductionWarning(policy(), 'Kalemar LLC'))
-      .toMatch(/the company paying it/)
+      .toMatch(/firma koja je isplaćuje/)
   })
 
   it('has nothing to say once a real recipient is named', () => {
@@ -706,24 +706,24 @@ describe('what editing a contract leaves behind', () => {
   it('warns that ending the current contract drops the person from payroll', () => {
     const notes = editingContractLeaves(
       book, { id: 'b', valid_from: '2026-08-01', valid_to: '2026-09-01' }, '2026-09-29')
-    expect(notes.some(n => /drops out of/.test(n))).toBe(true)
+    expect(notes.some(n => /ispada iz/.test(n))).toBe(true)
   })
 
   it('names the days a moved start date leaves uncovered', () => {
     const notes = editingContractLeaves(
       book, { id: 'b', valid_from: '2026-10-01', valid_to: null }, '2026-09-29')
-    expect(notes.some(n => /2026-08-01 up to 2026-10-01/.test(n))).toBe(true)
+    expect(notes.some(n => /od 01\.08\.2026\. do 01\.10\.2026\./.test(n))).toBe(true)
   })
 
   it('says a moved contract will not reproduce the months already run', () => {
     const notes = editingContractLeaves(
       book, { id: 'b', valid_from: '2026-07-01', valid_to: null }, '2026-09-29')
-    expect(notes.some(n => /no longer reproduce/.test(n))).toBe(true)
+    expect(notes.some(n => /više neće dati isti rezultat/.test(n))).toBe(true)
   })
 
   it('does not claim a move when the dates are untouched', () => {
     const notes = editingContractLeaves(
       book, { id: 'a', valid_from: '2025-01-01', valid_to: '2026-08-01' }, '2026-09-29')
-    expect(notes.some(n => /no longer reproduce/.test(n))).toBe(false)
+    expect(notes.some(n => /više neće dati isti rezultat/.test(n))).toBe(false)
   })
 })

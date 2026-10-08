@@ -127,9 +127,9 @@ export function planDelete(ctx: DeleteContext): DeletePlan {
   if (locked) {
     return {
       kind: 'refuse',
-      reason: `Period ${month(ctx.transactionDate as string)} is locked for this company — nothing was deleted. `
-        + 'The transaction, its invoice allocations and its credit instalments are all exactly as they were. '
-        + 'Unlock the period in Settings and try again.',
+      reason: `Period ${month(ctx.transactionDate as string)} je zaključan za ovu firmu — ništa nije obrisano. `
+        + 'Transakcija, njena raspodela na fakture i rate kredita su ostali kakvi su bili. '
+        + 'Otključajte period u Podešavanjima i pokušajte ponovo.',
     }
   }
 
@@ -148,17 +148,17 @@ export function planDelete(ctx: DeleteContext): DeletePlan {
 export function reportStepFailure(step: DeleteStep, message: string): string {
   switch (step) {
     case 'transaction':
-      return `The transaction was not deleted (${message}). `
-        + 'Its invoice allocations and credit instalments are untouched — nothing was lost.'
+      return `Transakcija nije obrisana (${message}). `
+        + 'Raspodela na fakture i rate kredita su netaknuti — ništa nije izgubljeno.'
     case 'invoiceLinks':
-      return 'The transaction was deleted, but its invoice allocations could not be removed '
-        + `(${message}). Those invoices still count it towards being paid, and their status will `
-        + 'read too high until the allocation is removed by hand. Nothing else was changed — the '
-        + 'credit instalments were left alone.'
+      return 'Transakcija je obrisana, ali njena raspodela na fakture nije mogla da se ukloni '
+        + `(${message}). Te fakture je i dalje računaju kao plaćanje, pa će im status `
+        + 'biti previsok dok se raspodela ručno ne ukloni. Ništa drugo nije menjano — '
+        + 'rate kredita nisu dirane.'
     case 'installments':
-      return 'The transaction was deleted and its invoice allocations removed, but the credit '
-        + `instalments it settled could not be reopened (${message}). They still point at a deleted `
-        + 'transaction and still read as paid. Reopen them from Bank Credits.'
+      return 'Transakcija je obrisana i raspodela na fakture uklonjena, ali rate kredita '
+        + `koje je zatvorila nisu mogle ponovo da se otvore (${message}). I dalje upućuju na obrisanu `
+        + 'transakciju i vode se kao plaćene. Ponovo ih otvorite u Kreditima.'
   }
 }
 
@@ -243,7 +243,7 @@ export async function deleteTransactionInSteps(
   if (!row) {
     return nothingDone(reportStepFailure(
       'transaction',
-      `no transaction with id ${id} is visible — it may already have been deleted`,
+      `transakcija ${id} nije vidljiva — možda je već obrisana`,
     ))
   }
 
@@ -294,7 +294,7 @@ export async function deleteTransactionInSteps(
   if (!confirmErr && stillThere) {
     return nothingDone(reportStepFailure(
       'transaction',
-      `the update reported success but transaction ${id} is still there — nothing was deleted`,
+      `izmena je prijavila uspeh, ali transakcija ${id} i dalje postoji — ništa nije obrisano`,
     ))
   }
   done.push('transaction')
@@ -344,11 +344,11 @@ export const LINK_STEP_ORDER: readonly LinkStep[] = ['insertReplacement', 'remov
 export function reportLinkFailure(step: LinkStep, message: string): string {
   switch (step) {
     case 'insertReplacement':
-      return `The invoice could not be linked to that transaction (${message}). `
-        + 'Nothing was removed — whatever this invoice was allocated to before is still allocated to it.'
+      return `Faktura nije mogla da se poveže sa tom transakcijom (${message}). `
+        + 'Ništa nije uklonjeno — raspodela ove fakture je ista kao pre.'
     case 'removeSuperseded':
-      return `The invoice was linked to that transaction, but the allocation it replaces could not be removed (${message}). `
-        + 'The invoice now counts both, so it will read as more paid than it is until the old link is removed.'
+      return `Faktura je povezana sa tom transakcijom, ali raspodela koju zamenjuje nije mogla da se ukloni (${message}). `
+        + 'Faktura sada računa obe, pa će izgledati više plaćena nego što jeste dok se stara veza ne ukloni.'
   }
 }
 
@@ -435,13 +435,13 @@ export function reportPostFailure(
   message: string,
   completed: CompletedWrite[],
 ): string {
-  const head = `${what} was not posted. It failed writing ${failedAt} (${message}).`
+  const head = `Nije proknjiženo: ${what}. Upis nije uspeo — ${failedAt} (${message}).`
   if (completed.length === 0) {
-    return `${head} Nothing was written — retrying is safe.`
+    return `${head} Ništa nije upisano — možete bezbedno pokušati ponovo.`
   }
   const landed = completed.map(phrase).join(', ')
-  return `${head} Already written: ${landed}. Remove those before retrying, `
-    + 'or this post will be duplicated.'
+  return `${head} Već upisano: ${landed}. Uklonite to pre ponovnog pokušaja, `
+    + 'inače će knjiženje biti duplirano.'
 }
 
 /**
@@ -491,7 +491,7 @@ export async function softDeleteRow(
   if (error) return { ok: false, message: error.message }
   // The function returns false when the row was already gone. Saying so beats
   // reporting a delete that deleted nothing.
-  if (data === false) return { ok: false, message: 'That record was already deleted.' }
+  if (data === false) return { ok: false, message: 'Taj zapis je već obrisan.' }
   return { ok: true, message: '' }
 }
 
@@ -511,6 +511,6 @@ export async function runWrite(
   q: PromiseLike<{ error: WriteError | null }>,
 ): Promise<{ ok: boolean; message: string }> {
   const { error } = await q
-  if (error) return { ok: false, message: `${label} failed: ${error.message}` }
+  if (error) return { ok: false, message: `${label} nije uspelo: ${error.message}` }
   return { ok: true, message: '' }
 }

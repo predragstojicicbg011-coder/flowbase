@@ -121,9 +121,9 @@ export function payslipFor(
   }
 
   // Everything except regular work, which takes what is left.
-  add('Meal allowance', l.mealAllowance, line.hours || null)
-  add('Holiday allowance', l.holidayAllowance, null)
-  add('Seniority', seniorityForPeriod, null)
+  add('Topli obrok', l.mealAllowance, line.hours || null)
+  add('Regres', l.holidayAllowance, null)
+  add('Minuli rad', seniorityForPeriod, null)
   for (const a of line.additions) {
     // In dinars, by the same function the run used, so the parts cannot
     // disagree with the total they have to add up to.
@@ -134,23 +134,23 @@ export function payslipFor(
   // to the gross exactly — and is also how MPP arrives at its own figure,
   // since the whole tax-free relief lands on this line.
   parts.unshift({
-    label: 'Regular work',
+    label: 'Redovan rad',
     hours: line.hours || null,
     net: round2(baseForPeriod),
     gross: round2(l.gross - accountedGross),
   })
 
   const employeeCharges: PayslipRate[] = [
-    { label: 'Income tax', percent: pct(rates.incomeTax), amount: l.incomeTax },
-    { label: 'Pension, from gross', percent: pct(rates.pensionEmployee), amount: l.pensionEmployee },
-    { label: 'Health, from gross', percent: pct(rates.healthEmployee), amount: l.healthEmployee },
-    { label: 'Unemployment, from gross', percent: pct(rates.unemploymentEmployee), amount: l.unemploymentEmployee },
+    { label: 'Porez na zarade', percent: pct(rates.incomeTax), amount: l.incomeTax },
+    { label: 'Doprinos za PIO', percent: pct(rates.pensionEmployee), amount: l.pensionEmployee },
+    { label: 'Doprinos za zdravstveno osiguranje', percent: pct(rates.healthEmployee), amount: l.healthEmployee },
+    { label: 'Doprinos za slučaj nezaposlenosti', percent: pct(rates.unemploymentEmployee), amount: l.unemploymentEmployee },
   ]
 
   const employerCharges: PayslipRate[] = [
-    { label: 'Pension, on gross', percent: pct(rates.pensionEmployer), amount: l.pensionEmployer },
-    { label: 'Health, on gross', percent: pct(rates.healthEmployer), amount: l.healthEmployer },
-    { label: 'Unemployment, on gross', percent: pct(rates.unemploymentEmployer), amount: l.unemploymentEmployer },
+    { label: 'Doprinos za PIO', percent: pct(rates.pensionEmployer), amount: l.pensionEmployer },
+    { label: 'Doprinos za zdravstveno osiguranje', percent: pct(rates.healthEmployer), amount: l.healthEmployer },
+    { label: 'Doprinos za slučaj nezaposlenosti', percent: pct(rates.unemploymentEmployer), amount: l.unemploymentEmployer },
   ]
 
   // Each one worked out by the same function the run used, on the same net

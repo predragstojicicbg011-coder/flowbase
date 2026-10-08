@@ -103,9 +103,9 @@ export function ratesFor(rows: SettingRow[], date: string): PayrollRates {
   const missing = missingFor(rows, date)
   if (missing.length > 0) {
     throw new Error(
-      `No payroll settings cover ${date}. Missing: ${missing.join(', ')}. `
-      + 'A run cannot be produced for a month whose rates are unknown — the figures '
-      + 'would look exactly like verified ones.')
+      `Podešavanja zarada ne pokrivaju ${date}. Nedostaje: ${missing.join(', ')}. `
+      + 'Obračun ne može da se napravi za mesec čije stope nisu poznate. Unesite ih '
+      + 'u Podešavanjima zarada.')
   }
   const n = (k: string) => numberFor(rows, k, date) as number
   return {
@@ -151,19 +151,18 @@ export function whyNotSavable(
   draft: { setting_key: string; valid_from: string; valid_to: string | null; id?: string },
   existing: (SettingRow & { id: string })[],
 ): string | null {
-  if (!draft.valid_from) return 'Say which date this value takes effect from.'
+  if (!draft.valid_from) return 'Unesite datum od kog vrednost važi.'
   if (draft.valid_to && draft.valid_to <= draft.valid_from) {
-    return 'The end date has to be after the start date.'
+    return 'Datum završetka mora biti posle datuma početka.'
   }
   const clash = existing.find(r =>
     r.setting_key === draft.setting_key
     && (r as any).id !== draft.id
     && overlaps(r.valid_from, r.valid_to, draft.valid_from, draft.valid_to))
   if (clash) {
-    return `Another value for this setting already covers that period `
-      + `(${clash.valid_from} → ${clash.valid_to || 'still in force'}). `
-      + 'Two values for one month would give two answers, and whichever a run '
-      + 'picked up would look perfectly ordinary. End the old one first.'
+    return `Za ovo podešavanje već postoji vrednost u tom periodu `
+      + `(${clash.valid_from} → ${clash.valid_to || 'i dalje važi'}). `
+      + 'Dve vrednosti za isti mesec dale bi dva odgovora. Prvo zaključite staru vrednost.'
   }
   return null
 }
@@ -199,6 +198,6 @@ export async function fetchSettings(client: any): Promise<(SettingRow & { id: st
     .order('group_key')
     .order('label')
     .order('valid_from', { ascending: false })
-  if (error) throw new Error(`The payroll settings could not be read: ${error.message}`)
+  if (error) throw new Error(`Podešavanja zarada nisu učitana: ${error.message}`)
   return (data || []) as (SettingRow & { id: string })[]
 }

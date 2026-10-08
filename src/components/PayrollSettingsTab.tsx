@@ -5,6 +5,9 @@ import {
   fetchSettings, missingFor, monthStart, whyNotSavable,
   type SettingRow,
 } from '../services/payroll/settings'
+import { toLatin } from '../services/payroll/holidays'
+import { srDate } from '../utils/months'
+import { countOf } from '../utils/plural'
 
 // ── Payroll settings ────────────────────────────────────────────────────────
 //
@@ -18,12 +21,12 @@ import {
 // editing in place would rewrite what last year cost and nothing would say so.
 // Correcting a typo is a separate, explicit action, and it says what it is.
 //
-// EVERY SETTING IS SHOWN IN ENGLISH, with MPP's own Cyrillic wording under it.
-// Both, because they answer different questions: the English says what the
-// setting DOES, and the Cyrillic is what somebody types into the accountant's
-// search box while holding the two screens side by side. Showing only the
-// Cyrillic made the rest of the application bilingual for no gain; showing only
-// the English would take away the one string that matches MPP.
+// EVERY SETTING IS SHOWN IN SERBIAN LATIN, with MPP's own Cyrillic wording
+// under it. The title is MPP's wording transliterated, so it reads in the
+// interface's script and still says exactly what MPP calls it; the Cyrillic is
+// what somebody types into the accountant's search box while holding the two
+// screens side by side. `label_en` stays in the table and in the search, but
+// is no longer what the page calls a setting.
 //
 // TEN OF THEM ARE CHOICES, NOT AMOUNTS, and those get a dropdown. Typed into a
 // text box they are a spelling test — "сати редовног рада" and "сати редовног
@@ -49,16 +52,23 @@ function safeParse(text: string): unknown {
   try { return JSON.parse(text) } catch { return null }
 }
 
-/** What to call a setting. English where there is any, MPP wording otherwise. */
+/** What to call a setting: MPP's wording, in Latin script, capitalised. */
 function titleOf(row: Row): string {
-  return row.label_en || row.label
+  const latin = toLatin(row.label || '')
+  return latin.charAt(0).toUpperCase() + latin.slice(1)
+}
+
+/** What to show for one of a choice's alternatives: its stored MPP value, in Latin. */
+function optionLabel(o: Option): string {
+  const latin = toLatin(o.value)
+  return latin.charAt(0).toUpperCase() + latin.slice(1)
 }
 
 /**
  * The value as it is STORED, which is what the editor must start from.
  *
- * Not `displayValue`: for a choice that returns the English wording, and a
- * dropdown handed "Yes" where its options are "да" and "не" matches nothing,
+ * Not `displayValue`: for a choice that returns the Latin wording, and a
+ * dropdown handed "Da" where its options are "да" and "не" matches nothing,
  * quietly falls back to the first option, and saves that instead. The setting
  * would change because somebody opened the editor.
  */
@@ -67,20 +77,20 @@ function storedValue(row: Row): string {
   return row.value_text || ''
 }
 
-/** The English for a stored value, where the setting is a choice. */
+/** The Latin wording for a stored value, where the setting is a choice. */
 function displayValue(row: Row): string {
   if (row.value_numeric !== null) return String(row.value_numeric)
   const text = row.value_text || ''
   const found = optionsOf(row)?.find(o => o.value === text)
-  return found ? found.label : (text || '—')
+  return found ? optionLabel(found) : (text ? toLatin(text) : '—')
 }
 
 const GROUP_TITLES: Record<string, string> = {
-  hours: 'Hour fund',
-  configuration: 'How a salary is composed',
-  coefficients: 'Coefficients',
-  rates: 'Tax and contribution rates',
-  bases: 'Bases and thresholds',
+  hours: 'Fond sati',
+  configuration: 'Kako se sastavlja zarada',
+  coefficients: 'Koeficijenti',
+  rates: 'Stope poreza i doprinosa',
+  bases: 'Osnovice i pragovi',
 }
 
 const GROUP_ORDER = ['rates', 'bases', 'hours', 'coefficients', 'configuration']
@@ -127,6 +137,7 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
     return Array.from(byKey.values())
       .filter(r => !q
         || titleOf(r).toLowerCase().includes(q)
+        || (r.label_en || '').toLowerCase().includes(q)
         || r.label.toLowerCase().includes(q)
         || r.setting_key.includes(q))
       .sort((a, b) =>
@@ -147,7 +158,7 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
     const isNumeric = row.value_numeric !== null
 
     if (isNumeric && !Number.isFinite(parseFloat(value))) {
-      setError('That is not a number.'); return
+      setError('Unesite broj.'); return
     }
     const why = whyNotSavable(
       { setting_key: row.setting_key, valid_from: from, valid_to: null }, rows)
@@ -157,13 +168,13 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
 
     // The old value is ENDED, not edited. Rewriting it in place would change
     // what an already-calculated month cost, silently.
-    const closed = await runWrite('End the current value',
+    const closed = await runWrite('Zaključivanje važeće vrednosti',
       supabase.from('payroll_settings')
         .update({ valid_to: from, updated_at: new Date().toISOString() })
         .eq('id', row.id).select('id'))
     if (!closed.ok) { window.alert(closed.message); return }
 
-    const added = await runWrite('Add the new value',
+    const added = await runWrite('Dodavanje nove vrednosti',
       supabase.from('payroll_settings').insert({
         group_key: row.group_key,
         setting_key: row.setting_key,
@@ -172,20 +183,20 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
         value_text: isNumeric ? null : value,
         valid_from: from,
         valid_to: null,
-        note: `Replaces the value in force from ${row.valid_from}.`,
+        note: `Zamenjuje vrednost koja važi od ${srDate(row.valid_from)}.`,
       }).select('id'))
     if (!added.ok) {
       // The close landed and the insert did not, which leaves the setting with
       // no value from that date. Say exactly that rather than "failed".
       window.alert(
-        `${added.message}\n\nThe previous value was ended on ${from} but the new one was `
-        + 'not saved, so this setting now has no value from that date. Add it, or reopen '
-        + 'the old one by clearing its end date.')
+        `${added.message}\n\nPrethodna vrednost je zaključena ${srDate(from)}, ali nova nije `
+        + 'sačuvana, pa ovo podešavanje od tog datuma nema vrednost. Dodajte je ponovo ili '
+        + 'obrišite datum završetka stare vrednosti.')
       await load()
       return
     }
 
-    setNotice(`${row.label} — new value in force from ${from}. The previous one keeps its dates.`)
+    setNotice(`${titleOf(row)} — nova vrednost važi od ${srDate(from)}. Prethodna zadržava svoje datume.`)
     setChanging(null)
     await load()
   }
@@ -196,15 +207,15 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
     <div style={s.wrap}>
       <div style={s.head}>
         <div>
-          <div style={s.title}>Payroll settings</div>
+          <div style={s.title}>Podešavanja zarada</div>
           <div style={s.sub}>
-            Every figure a payroll run needs, and the dates it was in force. A run for an
-            earlier month uses that month's figures, not today's — so a new value never
-            replaces an old one, it succeeds it.
+            Svaki iznos potreban za obračun zarade, sa datumima važenja. Obračun za raniji
+            mesec koristi iznose tog meseca, a ne današnje — zato nova vrednost ne menja
+            staru, već je nasleđuje.
           </div>
         </div>
         <div style={s.field}>
-          <label style={s.label}>Showing figures for</label>
+          <label style={s.label}>Prikaz za mesec</label>
           <input type="month" style={s.input} value={month}
             onChange={e => setMonth(e.target.value)} />
         </div>
@@ -215,31 +226,30 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
 
       {!loading && missing.length > 0 && (
         <div style={s.error}>
-          No value covers {asOf} for: {missing.join(', ')}. A payroll run for this month
-          will be refused rather than calculated from whatever figures are nearest —
-          a plausible total for a month whose rates nobody knows is worse than none.
+          Nema vrednosti za {srDate(asOf)} za: {missing.join(', ')}. Obračun zarade za ovaj
+          mesec neće biti napravljen dok se ne unesu. Dodajte nedostajuće vrednosti.
         </div>
       )}
 
       {changing && (
         <div style={s.editor}>
           <div style={s.editorTitle}>{titleOf(changing.row)}</div>
-          {changing.row.label_en && (
+          {changing.row.label && (
             <div style={s.original}>{changing.row.label}</div>
           )}
           <div style={s.editorNote}>
-            In force since {changing.row.valid_from}: <strong>{show(changing.row)}</strong>.
-            Saving ends that on the date below and starts the new value there. Months
-            already calculated keep the old figure.
+            Važi od {srDate(changing.row.valid_from)}: <strong>{show(changing.row)}</strong>.
+            Čuvanjem se ta vrednost zaključuje na datum ispod i od njega počinje nova.
+            Već obračunati meseci zadržavaju staru vrednost.
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginTop: '10px', flexWrap: 'wrap' }}>
             <div style={s.field}>
-              <label style={s.label}>New value</label>
+              <label style={s.label}>Nova vrednost</label>
               {optionsOf(changing.row) ? (
                 <select style={s.input} autoFocus value={changing.value}
                   onChange={e => setChanging({ ...changing, value: e.target.value })}>
                   {optionsOf(changing.row)!.map(o => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
+                    <option key={o.value} value={o.value}>{optionLabel(o)}</option>
                   ))}
                 </select>
               ) : (
@@ -248,24 +258,24 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
               )}
             </div>
             <div style={s.field}>
-              <label style={s.label}>In force from</label>
+              <label style={s.label}>Važi od</label>
               <input type="date" style={s.input} value={changing.from}
                 onChange={e => setChanging(c => c ? { ...c, from: e.target.value } : c)} />
             </div>
-            <button style={s.primary} onClick={saveChange}>Save</button>
-            <button style={s.ghost} onClick={() => { setChanging(null); setError('') }}>Cancel</button>
+            <button style={s.primary} onClick={saveChange}>Sačuvaj</button>
+            <button style={s.ghost} onClick={() => { setChanging(null); setError('') }}>Otkaži</button>
           </div>
         </div>
       )}
 
-      <input style={{ ...s.input, marginBottom: '10px' }} placeholder="Search settings…"
+      <input style={{ ...s.input, marginBottom: '10px' }} placeholder="Pretraga podešavanja…"
         value={search} onChange={e => setSearch(e.target.value)} />
 
       {loading ? (
-        <div style={s.empty}>Loading…</div>
+        <div style={s.empty}>Učitavanje…</div>
       ) : current.length === 0 ? (
         <div style={s.empty}>
-          {rows.length === 0 ? 'No payroll settings yet.' : `Nothing matches that, or nothing was in force in ${month}.`}
+          {rows.length === 0 ? 'Još nema podešavanja zarada.' : `Ništa ne odgovara pretrazi ili ništa nije važilo u mesecu ${month}.`}
         </div>
       ) : (
         GROUP_ORDER.filter(g => current.some(r => r.group_key === g)).map(group => (
@@ -278,19 +288,19 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
                 <div key={r.id} style={s.row}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={s.name}>{titleOf(r)}</div>
-                    {r.label_en && (
-                      <div style={s.original} title="MPP wording, for searching their screen">
+                    {r.label && (
+                      <div style={s.original} title="Naziv u MPP-u, za pretragu u njihovom programu">
                         {r.label}
                       </div>
                     )}
                     <div style={s.meta}>
                       <code style={s.key}>{r.setting_key}</code>
-                      {' · in force from '}{r.valid_from}
-                      {r.valid_to ? ` to ${r.valid_to}` : ''}
+                      {' · važi od '}{srDate(r.valid_from)}
+                      {r.valid_to ? ` do ${srDate(r.valid_to)}` : ''}
                       {history.length > 1 && (
                         <button style={s.linkBtn}
                           onClick={() => setShowHistory(open ? null : r.setting_key)}>
-                          {open ? 'hide' : `${history.length} values over time`}
+                          {open ? 'Sakrij' : `Istorija: ${countOf(history.length, 'vrednost', 'vrednosti', 'vrednosti')}`}
                         </button>
                       )}
                     </div>
@@ -299,8 +309,8 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
                         {history.map(h => (
                           <div key={h.id} style={{ ...s.historyRow, opacity: h.id === r.id ? 1 : 0.65 }}>
                             <span style={s.historyValue}>{show(h)}</span>
-                            <span>{h.valid_from} → {h.valid_to || 'still in force'}</span>
-                            {h.id === r.id && <span style={s.inForce}>shown above</span>}
+                            <span>{srDate(h.valid_from)} → {h.valid_to ? srDate(h.valid_to) : 'i dalje važi'}</span>
+                            {h.id === r.id && <span style={s.inForce}>prikazano iznad</span>}
                           </div>
                         ))}
                       </div>
@@ -310,12 +320,12 @@ export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
                   <div style={s.value}>{show(r)}</div>
                   {canEdit && (
                     <button style={s.ghost}
-                      title="Give this setting a new value from a date. The current one keeps its own."
+                      title="Unesite novu vrednost od određenog datuma. Važeća vrednost zadržava svoje datume."
                       onClick={() => {
                         setError('')
                         setChanging({ row: r, value: storedValue(r), from: asOf })
                       }}>
-                      New value
+                      Nova vrednost
                     </button>
                   )}
                 </div>

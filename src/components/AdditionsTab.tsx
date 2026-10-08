@@ -7,6 +7,7 @@ import {
 import { firstOfMonth } from '../services/payroll/timesheets'
 import type { EmployeeForMonth } from '../services/payroll/employees'
 import { fmtNum } from '../utils/formatters'
+import { monthLongLabel } from '../utils/months'
 
 /**
  * Bonuses and the rest, for one month.
@@ -55,19 +56,19 @@ export default function AdditionsTab({ month, people, eurRate }: {
   const totals = useMemo(() => totalsFor(rows, rates), [rows, rates])
 
   const nameOf = (id: string) =>
-    people.find(p => p.employee.id === id)?.employee.full_name ?? '(not on this month)'
+    people.find(p => p.employee.id === id)?.employee.full_name ?? '(nije u ovom mesecu)'
 
   const save = async () => {
-    if (!draft.employee_id) { setError('Choose who it is for.'); return }
-    if (!draft.label.trim()) { setError('Give it a name — it appears on the payslip.'); return }
+    if (!draft.employee_id) { setError('Izaberite zaposlenog.'); return }
+    if (!draft.label.trim()) { setError('Unesite naziv — on se vidi na platnom listiću.'); return }
     if (!draft.treatment) {
-      setError('Choose how it is taxed. There is no default on purpose: the three '
-        + 'treatments cost noticeably different amounts and the line looks the same '
-        + 'whichever one is wrong.')
+      setError('Izaberite kako se oporezuje. Podrazumevanog izbora namerno nema: tri '
+        + 'načina koštaju primetno različito, a red izgleda isto '
+        + 'koji god da je pogrešan.')
       return
     }
     const amount = Number(draft.amount)
-    if (!Number.isFinite(amount) || amount <= 0) { setError('Enter the amount.'); return }
+    if (!Number.isFinite(amount) || amount <= 0) { setError('Unesite iznos.'); return }
 
     setBusy(true); setError(null)
     const row = {
@@ -84,17 +85,17 @@ export default function AdditionsTab({ month, people, eurRate }: {
       ? await supabase.from('payroll_additions').update(row).eq('id', draft.id).select('id')
       : await supabase.from('payroll_additions').insert(row).select('id')
     setBusy(false)
-    if (err) { setError(`It could not be saved: ${err.message}`); return }
-    if (!data || data.length === 0) { setError('The write was refused.'); return }
+    if (err) { setError(`Dodatak nije sačuvan: ${err.message}`); return }
+    if (!data || data.length === 0) { setError('Upis je odbijen. Proverite da ste prijavljeni kao administrator ili vlasnik.'); return }
     setDraft(blank)
     load()
   }
 
   const remove = async (a: AdditionRow) => {
-    if (!window.confirm(`Delete "${a.label}" for ${nameOf(a.employee_id)}?`)) return
+    if (!window.confirm(`Obrisati „${a.label}“ za ${nameOf(a.employee_id)}?`)) return
     const { error: err } = await supabase.from('payroll_additions')
       .delete().eq('id', a.id).select('id')
-    if (err) { setError(`It could not be deleted: ${err.message}`); return }
+    if (err) { setError(`Dodatak nije obrisan: ${err.message}`); return }
     load()
   }
 
@@ -102,40 +103,40 @@ export default function AdditionsTab({ month, people, eurRate }: {
 
   const chosen = TREATMENTS.find(t => t.value === draft.treatment)
 
-  if (loading) return <div style={s.empty}>Loading…</div>
+  if (loading) return <div style={s.empty}>Učitavanje…</div>
 
   return (
     <div>
       {error && <div style={s.error}>{error}</div>}
 
       <div style={s.note}>
-        Additions belong to <b>{month}</b> and to no other month. A bonus entered here is
-        paid once; nothing carries it into the next one.
+        Dodaci pripadaju mesecu <b>{monthLongLabel(month)}</b> i nijednom drugom. Bonus unet ovde
+        isplaćuje se jednom; ništa ga ne prenosi u sledeći mesec.
       </div>
 
       <div style={s.bar}>
-        <div style={s.stat}>Part of the salary <b>{money(totals.salary)}</b></div>
-        <div style={s.stat}>Other income <b>{money(totals.otherIncome)}</b></div>
-        <div style={s.stat}>Not taxed <b>{money(totals.nonTaxable)}</b></div>
+        <div style={s.stat}>Deo zarade <b>{money(totals.salary)}</b></div>
+        <div style={s.stat}>Ostala primanja <b>{money(totals.otherIncome)}</b></div>
+        <div style={s.stat}>Neoporezivo <b>{money(totals.nonTaxable)}</b></div>
         {!eurRate && rows.some(a => a.currency !== 'RSD') && (
           <div style={{ ...s.stat, color: '#FF8E8D' }}>
-            A euro addition cannot be converted — no rate for this month
+            Dodatak u evrima ne može da se preračuna — nema kursa za ovaj mesec
           </div>
         )}
       </div>
 
       <div style={s.tableWrap}>
         {rows.length === 0 ? (
-          <div style={s.empty}>Nothing added to any salary this month.</div>
+          <div style={s.empty}>Ovog meseca nema dodataka ni na jednu zaradu.</div>
         ) : (
           <table style={s.table}>
             <thead>
               <tr style={s.thead}>
-                <th style={s.th}>Employee</th>
-                <th style={s.th}>What</th>
-                <th style={s.th}>How it is taxed</th>
-                <th style={s.thRight}>Amount</th>
-                <th style={s.thRight}>In dinars</th>
+                <th style={s.th}>Zaposleni</th>
+                <th style={s.th}>Naziv</th>
+                <th style={s.th}>Oporezivanje</th>
+                <th style={s.thRight}>Iznos</th>
+                <th style={s.thRight}>U dinarima</th>
                 <th style={s.th}></th>
               </tr>
             </thead>
@@ -165,7 +166,7 @@ export default function AdditionsTab({ month, people, eurRate }: {
                   <td style={s.tdRight}>
                     {a.currency === 'RSD' ? '—'
                       : amountInDinars(a, rates) > 0 ? money(amountInDinars(a, rates))
-                      : <span style={{ color: '#FF8E8D' }}>no rate</span>}
+                      : <span style={{ color: '#FF8E8D' }}>nema kursa</span>}
                   </td>
                   <td style={s.td}>
                     <div style={{ display: 'flex', gap: '6px' }}>
@@ -173,8 +174,8 @@ export default function AdditionsTab({ month, people, eurRate }: {
                         id: a.id, employee_id: a.employee_id, kind: a.kind, label: a.label,
                         treatment: a.treatment, amount: String(a.amount),
                         currency: a.currency, note: a.note || '',
-                      })}>Edit</button>
-                      <button style={s.deleteBtn} onClick={() => remove(a)}>🗑</button>
+                      })}>Izmeni</button>
+                      <button style={s.deleteBtn} onClick={() => remove(a)} title="Obriši" aria-label="Obriši">🗑</button>
                     </div>
                   </td>
                 </tr>
@@ -184,28 +185,28 @@ export default function AdditionsTab({ month, people, eurRate }: {
         )}
       </div>
 
-      <div style={s.sectionLabel}>{draft.id ? 'Editing an addition' : `Add to a salary in ${month}`}</div>
+      <div style={s.sectionLabel}>{draft.id ? 'Izmena dodatka' : `Dodaj na zaradu za ${monthLongLabel(month)}`}</div>
       <div style={s.grid}>
-        <Field label="Employee">
+        <Field label="Zaposleni">
           <select style={s.input} value={draft.employee_id}
             onChange={e => setDraft({ ...draft, employee_id: e.target.value })}>
-            <option value="">— choose —</option>
+            <option value="">— izaberite —</option>
             {people.map(p => (
               <option key={p.employee.id} value={p.employee.id}>{p.employee.full_name}</option>
             ))}
           </select>
         </Field>
-        <Field label="Kind">
+        <Field label="Vrsta">
           <select style={s.input} value={draft.kind}
             onChange={e => setDraft({ ...draft, kind: e.target.value as AdditionRow['kind'] })}>
             {KINDS.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}
           </select>
         </Field>
-        <Field label="Name" hint="This is the line on the payslip">
+        <Field label="Naziv" hint="Ovo je red na platnom listiću">
           <input style={s.input} value={draft.label}
             onChange={e => setDraft({ ...draft, label: e.target.value })} />
         </Field>
-        <Field label="Amount">
+        <Field label="Iznos">
           <div style={{ display: 'flex', gap: '6px' }}>
             <input style={s.input} inputMode="decimal" value={draft.amount}
               onChange={e => setDraft({ ...draft, amount: e.target.value })} />
@@ -220,17 +221,17 @@ export default function AdditionsTab({ month, people, eurRate }: {
           </div>
         </Field>
         <div style={{ gridColumn: '1 / -1' }}>
-          <Field label="How it is taxed">
+          <Field label="Oporezivanje">
             <select style={s.input} value={draft.treatment}
               onChange={e => setDraft({ ...draft, treatment: e.target.value as any })}>
-              <option value="">— choose, there is no default —</option>
+              <option value="">— izaberite, podrazumevanog nema —</option>
               {TREATMENTS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
             {chosen && <div style={s.treatmentDetail}>{chosen.detail}</div>}
           </Field>
         </div>
         <div style={{ gridColumn: '1 / -1' }}>
-          <Field label="Note">
+          <Field label="Napomena">
             <input style={s.input} value={draft.note}
               onChange={e => setDraft({ ...draft, note: e.target.value })} />
           </Field>
@@ -238,10 +239,10 @@ export default function AdditionsTab({ month, people, eurRate }: {
       </div>
       <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
         <button style={s.primary} onClick={save} disabled={busy}>
-          {busy ? 'Saving…' : draft.id ? 'Save changes' : 'Add'}
+          {busy ? 'Čuvanje…' : draft.id ? 'Sačuvaj izmene' : 'Dodaj'}
         </button>
         {draft.id && (
-          <button style={s.ghost} onClick={() => { setDraft(blank); setError(null) }}>Cancel</button>
+          <button style={s.ghost} onClick={() => { setDraft(blank); setError(null) }}>Otkaži</button>
         )}
       </div>
     </div>

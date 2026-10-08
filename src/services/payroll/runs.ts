@@ -54,14 +54,14 @@ import {
 export type RunKey = 'regular' | 'other'
 
 export const RUN_LABELS: Record<RunKey, string> = {
-  regular: 'Salaries',
-  other: 'Other income',
+  regular: 'Zarade',
+  other: 'Ostala primanja',
 }
 
 export const RUN_DESCRIPTIONS: Record<RunKey, string> = {
-  regular: 'Everybody on the payroll, on every paid hour of the month.',
-  other: 'Additions that are not part of a salary: other income, taxed once and with no '
-    + 'contributions, and anything paid without tax at all.',
+  regular: 'Svi zaposleni na obračunu, za svaki plaćeni sat u mesecu.',
+  other: 'Dodaci koji nisu deo zarade: ostala primanja, oporezovana jednom i bez '
+    + 'doprinosa, i sve što se isplaćuje bez poreza.',
 }
 
 export interface SalaryRunLine {
@@ -189,8 +189,8 @@ export function runsFor(input: RunInput): MonthRuns {
     if (!t) {
       problems.push({
         employeeId: p.employee.id, name,
-        why: 'No timesheet for this month. Calculating them as zero hours would be a '
-          + 'full month of nothing dressed up as a figure, so they are left out.',
+        why: 'Nema evidencije radnog vremena za ovaj mesec, pa zaposleni nije obračunat. '
+          + 'Unesite evidenciju i ponovo obračunajte.',
       })
       continue
     }
@@ -204,10 +204,10 @@ export function runsFor(input: RunInput): MonthRuns {
     if (unpriced.length > 0) {
       problems.push({
         employeeId: p.employee.id, name,
-        why: `The settings do not price ${unpriced.map(u => `${u.label.toLowerCase()} `
-          + `(${u.hours}h)`).join(', ')} for this month. Those hours are worth nothing in `
-          + 'the figures below rather than being paid at a guessed rate — set the '
-          + 'coefficient on the Payroll tab in Settings and recalculate.',
+        why: `Podešavanja ne određuju koeficijent za ${unpriced.map(u => `${u.label.toLowerCase()} `
+          + `(${u.hours} h)`).join(', ')} u ovom mesecu. Ti sati su u iznosima ispod obračunati `
+          + 'kao nula, umesto po pretpostavljenoj stopi. Unesite koeficijent na kartici Zarade '
+          + 'u Podešavanjima i ponovo obračunajte.',
       })
     }
 
@@ -225,9 +225,9 @@ export function runsFor(input: RunInput): MonthRuns {
     if (cannotConvert.length > 0) {
       problems.push({
         employeeId: p.employee.id, name,
-        why: `${cannotConvert.length} addition(s) are in a currency with no rate for `
-          + 'this month, so they are left out of the figures below rather than converted '
-          + 'at a guess. What they are owed is more than what is shown.',
+        why: `Dodaci u valuti bez kursa za ovaj mesec (${cannotConvert.length}) nisu uračunati `
+          + 'u iznose ispod. Stvarno dugovanje je veće '
+          + 'od prikazanog. Unesite kurs i ponovo obračunajte.',
       })
     }
     const extra = totalsFor(mine, currencyRates)
@@ -277,9 +277,9 @@ export function runsFor(input: RunInput): MonthRuns {
     if (deductions.unconvertible.length > 0) {
       problems.push({
         employeeId: p.employee.id, name,
-        why: `${deductions.unconvertible.length} deduction(s) are in a currency with no `
-          + 'rate for this month, so they have been left out of the totals rather than '
-          + 'converted at a guess. The salary above is right; what is withheld is not.',
+        why: `Obustave u valuti bez kursa za ovaj mesec (${deductions.unconvertible.length}) `
+          + 'nisu uračunate u zbirove. Zarada je tačna, '
+          + 'ali zadržani iznos nije. Unesite kurs i ponovo obračunajte.',
       })
     }
 

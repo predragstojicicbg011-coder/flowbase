@@ -403,42 +403,42 @@ describe('the chips', () => {
 
   it('names a company, a partner and a bank rather than showing their ids', () => {
     expect(activeChips('invoices', f({ companyId: 'c-1', partnerId: 'p-1' }), names).map(c => c.label))
-      .toEqual(['Company: Beta d.o.o.', 'Partner: Figma Inc'])
-    expect(activeChips('passthrough', f({ bankId: 'b-1' }), names)[0].label).toBe('Bank: Raiffeisen')
+      .toEqual(['Firma: Beta d.o.o.', 'Partner: Figma Inc'])
+    expect(activeChips('passthrough', f({ bankId: 'b-1' }), names)[0].label).toBe('Banka: Raiffeisen')
   })
 
   it('falls back to the id when the lookup has not loaded', () => {
-    expect(activeChips('invoices', f({ companyId: 'c-9' }), names)[0].label).toBe('Company: c-9')
-    expect(activeChips('invoices', f({ companyId: 'c-9' }))[0].label).toBe('Company: c-9')
+    expect(activeChips('invoices', f({ companyId: 'c-9' }), names)[0].label).toBe('Firma: c-9')
+    expect(activeChips('invoices', f({ companyId: 'c-9' }))[0].label).toBe('Firma: c-9')
   })
 
   it('shows a preset by its name and a custom range by its dates', () => {
     expect(activeChips('transactions', f({ datePreset: 'ytd', dateFrom: '2026-01-01', dateTo: TODAY }))[0].label)
-      .toBe('Date: Year to date')
+      .toBe('Datum: Od početka godine')
     expect(activeChips('transactions', f({ dateFrom: '2026-01-01', dateTo: '2026-03-31' }))[0].label)
-      .toBe('Date: 2026-01-01 → 2026-03-31')
+      .toBe('Datum: 2026-01-01 → 2026-03-31')
     expect(activeChips('transactions', f({ dateFrom: '2026-01-01' }))[0].label)
-      .toBe('Date: from 2026-01-01')
+      .toBe('Datum: od 2026-01-01')
     expect(activeChips('transactions', f({ dateTo: '2026-03-31' }))[0].label)
-      .toBe('Date: until 2026-03-31')
+      .toBe('Datum: do 2026-03-31')
   })
 
   it('reads an amount range in both one-sided forms', () => {
     expect(activeChips('transactions', f({ amountFrom: '100', amountTo: '500' }))[0].label)
-      .toBe('Amount: 100 RSD – 500 RSD')
-    expect(activeChips('transactions', f({ amountFrom: '1250' }))[0].label).toBe('Amount: ≥ 1.250 RSD')
-    expect(activeChips('transactions', f({ amountTo: '500' }), {}, 'EUR')[0].label).toBe('Amount: ≤ 500 EUR')
+      .toBe('Iznos: 100 RSD – 500 RSD')
+    expect(activeChips('transactions', f({ amountFrom: '1250' }))[0].label).toBe('Iznos: ≥ 1.250 RSD')
+    expect(activeChips('transactions', f({ amountTo: '500' }), {}, 'EUR')[0].label).toBe('Iznos: ≤ 500 EUR')
   })
 
   it('spells the enum values out instead of showing the database token', () => {
-    expect(activeChips('transactions', f({ txType: 'invoice_payment' }))[0].label).toBe('Type: Invoice payment')
-    expect(activeChips('passthrough', f({ ptDirection: 'in' }))[0].label).toBe('Direction: In')
-    expect(activeChips('invoices', f({ invoiceStatus: 'unpaid' }))[0].label).toBe('Status: Unpaid')
+    expect(activeChips('transactions', f({ txType: 'invoice_payment' }))[0].label).toBe('Tip: Plaćanje fakture')
+    expect(activeChips('passthrough', f({ ptDirection: 'in' }))[0].label).toBe('Smer: Uplata')
+    expect(activeChips('invoices', f({ invoiceStatus: 'unpaid' }))[0].label).toBe('Status: Neplaćeno')
   })
 
   it('labels the P&L chip as a revenue stream when that is what it filters', () => {
     expect(activeChips('transactions', f({ plCategory: 'Građevinske situacije', direction: 'revenue' })).map(c => c.label))
-      .toContain('Revenue stream: Građevinske situacije')
+      .toContain('Vrsta prihoda: Građevinske situacije')
     expect(activeChips('transactions', f({ plCategory: 'Payroll' })).map(c => c.label))
       .toContain('P&L: Payroll')
   })
@@ -521,7 +521,7 @@ describe('paging', () => {
   it('has one (empty) page when there are no results', () => {
     expect(lastPageIndex(0, PAGE_SIZE)).toBe(0)
     expect(pageRange(0, PAGE_SIZE, 0)).toEqual({ from: 0, to: 0 })
-    expect(pageLabel(0, PAGE_SIZE, 0)).toBe('0 of 0')
+    expect(pageLabel(0, PAGE_SIZE, 0)).toBe('0 od 0')
     expect(hasPrevPage(0)).toBe(false)
     expect(hasNextPage(0, PAGE_SIZE, 0)).toBe(false)
   })
@@ -529,7 +529,7 @@ describe('paging', () => {
   it('is a single page when the count exactly fills one page', () => {
     expect(lastPageIndex(PAGE_SIZE, PAGE_SIZE)).toBe(0)
     expect(pageRange(0, PAGE_SIZE, PAGE_SIZE)).toEqual({ from: 1, to: 50 })
-    expect(pageLabel(0, PAGE_SIZE, PAGE_SIZE)).toBe('1–50 of 50')
+    expect(pageLabel(0, PAGE_SIZE, PAGE_SIZE)).toBe('1–50 od 50')
     expect(hasPrevPage(0)).toBe(false)
     expect(hasNextPage(0, PAGE_SIZE, PAGE_SIZE)).toBe(false)
   })
@@ -538,7 +538,7 @@ describe('paging', () => {
     // 142 rows over pages of 50: 50, 50, 42 — page index 1 is the second page.
     expect(lastPageIndex(142, PAGE_SIZE)).toBe(2)
     expect(pageRange(1, PAGE_SIZE, 142)).toEqual({ from: 51, to: 100 })
-    expect(pageLabel(1, PAGE_SIZE, 142)).toBe('51–100 of 142')
+    expect(pageLabel(1, PAGE_SIZE, 142)).toBe('51–100 od 142')
     expect(hasPrevPage(1)).toBe(true)
     expect(hasNextPage(1, PAGE_SIZE, 142)).toBe(true)
   })
@@ -547,7 +547,7 @@ describe('paging', () => {
     // 151 rows: pages of 50, 50, 50, 1.
     expect(lastPageIndex(151, PAGE_SIZE)).toBe(3)
     expect(pageRange(3, PAGE_SIZE, 151)).toEqual({ from: 151, to: 151 })
-    expect(pageLabel(3, PAGE_SIZE, 151)).toBe('151–151 of 151')
+    expect(pageLabel(3, PAGE_SIZE, 151)).toBe('151–151 od 151')
     expect(hasPrevPage(3)).toBe(true)
     expect(hasNextPage(3, PAGE_SIZE, 151)).toBe(false)
   })
@@ -585,9 +585,9 @@ describe('the project filter', () => {
 
   it('names the project in its chip, and overhead by its label', () => {
     const names = { project: (id: string) => (id === 'p1' ? 'Zgrada A' : '') }
-    expect(activeChips('invoices', f({ projectId: 'p1' }), names).map(c => c.label)).toContain('Project: Zgrada A')
+    expect(activeChips('invoices', f({ projectId: 'p1' }), names).map(c => c.label)).toContain('Projekat: Zgrada A')
     expect(activeChips('invoices', f({ projectId: PROJECT_FILTER_OVERHEAD }), names).map(c => c.label))
-      .toContain('Project: Opšti troškovi')
+      .toContain('Projekat: Opšti troškovi')
     const chip = activeChips('invoices', f({ projectId: 'p1' })).find(c => c.id === 'project')!
     expect(clearFields(f({ projectId: 'p1' }), chip.clears).projectId).toBe('')
   })
@@ -604,7 +604,7 @@ describe('the project filter', () => {
   })
 
   it('reads "all projects" when unset', () => {
-    expect(projectFilterLabel('')).toBe('All projects')
+    expect(projectFilterLabel('')).toBe('Svi projekti')
     expect(projectFilterLabel('p9')).toBe('p9')
   })
 })

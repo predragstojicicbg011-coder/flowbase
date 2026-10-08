@@ -37,16 +37,16 @@ const classification = {
 
 const open = (over: { current?: number; seed?: number; seedEur?: number | null } = {}) => render(
   <BudgetChangeDialog
-    month="2026-11" monthLabel="November 2026"
+    month="2026-11" monthLabel="Novembar 2026"
     level="department" classification={classification}
     rowLabel="Sales" current={over.current ?? 11900} seed={over.seed ?? 11900}
     seedEur={over.seedEur === undefined ? 101.54 : over.seedEur}
     onClose={() => {}} onSaved={() => {}} />)
 
 const typeFigure = (value: string) => {
-  fireEvent.change(screen.getByLabelText('Change to'), { target: { value } })
-  fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Budget for November' } })
-  fireEvent.click(screen.getByText('Record change'))
+  fireEvent.change(screen.getByLabelText('Novi iznos'), { target: { value } })
+  fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Budget for November' } })
+  fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 }
 
 describe('what a budget change records', () => {
@@ -143,14 +143,14 @@ describe('what a budget change records', () => {
    *  thing the owner was burnt by. */
   it('says the figure will stay as typed', () => {
     open()
-    expect(screen.getByText(/next month's benchmark will not move it/i)).toBeTruthy()
+    expect(screen.getByText(/promena referentnog meseca ga neće pomeriti/i)).toBeTruthy()
   })
 })
 
 describe('which project a budget change is for', () => {
   const openFor = (props: Record<string, any>) => render(
     <BudgetChangeDialog
-      month="2026-11" monthLabel="November 2026"
+      month="2026-11" monthLabel="Novembar 2026"
       level="department" classification={classification}
       rowLabel="Sales" current={1400} seed={1400} seedEur={null}
       onClose={() => {}} onSaved={() => {}} {...props} />)

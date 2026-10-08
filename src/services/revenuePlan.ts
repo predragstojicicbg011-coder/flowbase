@@ -43,6 +43,7 @@
 import { bookAmounts, getBookRates, round2, type BookRates } from './bookAmounts'
 import { DEFAULT_PAYMENT_DAYS, type Project } from './projects'
 import { REVENUE_STREAM } from './revenueStreams'
+import { countOf, plural } from '../utils/plural'
 import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 export type LeaseCurrency = 'RSD' | 'EUR'
@@ -321,7 +322,7 @@ export function plannedRevenueByMonth(
     })
   }
   if (planUnconverted) {
-    notes.push(`${planUnconverted} plan row(s) have no ${cur} figure and are left out.`)
+    notes.push(`${countOf(planUnconverted, 'stavka plana', 'stavke plana', 'stavki plana')} ${plural(planUnconverted, 'nema', 'nemaju', 'nema')} iznos u ${cur} i ${plural(planUnconverted, 'nije uračunata', 'nisu uračunate', 'nije uračunato')}.`)
   }
 
   // Rent, where no plan row speaks for the project and month.
@@ -340,7 +341,7 @@ export function plannedRevenueByMonth(
     })
   }
   if (rentUnconverted) {
-    notes.push(`${rentUnconverted} rent month(s) in the other currency are left out: no exchange rate was given.`)
+    notes.push(`${countOf(rentUnconverted, 'mesec', 'meseca', 'meseci')} zakupa u drugoj valuti ${plural(rentUnconverted, 'nije uračunat', 'nisu uračunata', 'nije uračunato')}: kurs nije dostupan.`)
   }
 
   const byMonth: Record<string, number> = Object.fromEntries(keys.map(k => [k, 0]))

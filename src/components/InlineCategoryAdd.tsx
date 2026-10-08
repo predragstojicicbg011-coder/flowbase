@@ -118,7 +118,7 @@ export default function InlineCategoryAdd({
       // unique index instead; the message it raises names an index, which
       // says nothing to whoever is typing.
       setError(/duplicate key|unique constraint/i.test(err.message)
-        ? 'Somebody has just added that name. Close this and pick it from the list.'
+        ? 'Neko je upravo dodao taj naziv. Zatvorite ovo i izaberite ga sa liste.'
         : err.message)
       setSaving(false)
       return
@@ -142,7 +142,7 @@ export default function InlineCategoryAdd({
       <button
         onClick={handleOpen}
         disabled={disabled}
-        title={disabled ? 'Select the parent category first' : 'Add a new category'}
+        title={disabled ? 'Prvo izaberite nadređenu kategoriju' : 'Dodaj novu kategoriju'}
         style={{
           background: 'none',
           border: `1px solid ${disabled ? 'rgba(255,255,255,0.10)' : DIALOG.accentSoft}`,
@@ -178,7 +178,7 @@ export default function InlineCategoryAdd({
       marginTop: '4px',
     }}>
       <div style={{ fontSize: '10px', fontWeight: '500', color: DIALOG.accent, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-        New category
+        Nova kategorija
       </div>
       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
         <input
@@ -186,7 +186,7 @@ export default function InlineCategoryAdd({
           value={value}
           onChange={e => { setValue(e.target.value); setError('') }}
           onKeyDown={handleKey}
-          placeholder={placeholder || 'Enter a name…'}
+          placeholder={placeholder || 'Unesite naziv…'}
           style={{
             flex: 1,
             fontFamily: 'system-ui,sans-serif',
@@ -216,7 +216,7 @@ export default function InlineCategoryAdd({
             fontWeight: '500',
           }}
         >
-          {saving ? '...' : '✓ Add'}
+          {saving ? '...' : '✓ Dodaj'}
         </button>
         <button
           onClick={handleCancel}

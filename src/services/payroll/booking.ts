@@ -116,13 +116,13 @@ export function unknownNames(
 
   for (const u of used) {
     if (!has(known.plSubcategories, u.pl_subcategory)) {
-      missing.add(`P&L sub-category "${u.pl_subcategory}"`)
+      missing.add(`P&L potkategorija "${u.pl_subcategory}"`)
     }
     if (!has(known.departments, u.department)) {
-      missing.add(`department "${u.department}"`)
+      missing.add(`sektor "${u.department}"`)
     }
     if (!has(known.deptSubcategories, u.dept_subcategory)) {
-      missing.add(`department sub-category "${u.dept_subcategory}"`)
+      missing.add(`podsektor "${u.dept_subcategory}"`)
     }
   }
   return [...missing].sort()

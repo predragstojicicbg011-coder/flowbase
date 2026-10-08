@@ -80,8 +80,8 @@ describe('describeMismatches', () => {
   it('names the invoice, because opening it is the next thing to do', () => {
     const text = describeMismatches(mismatches([exp()], { i1: 'partial' }))
     expect(text).toContain('R23/59-2026')
-    expect(text).toContain('expected to be paid and is partial')
-    expect(text).toContain('Everything was written')
+    expect(text).toContain('očekivan status „plaćeno“, a stvarni je „delimično“')
+    expect(text).toContain('Sve je upisano')
   })
 
   it('falls back to the id when the invoice has no number', () => {

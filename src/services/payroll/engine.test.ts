@@ -207,8 +207,8 @@ describe('what the engine refuses to invent', () => {
     // absences. None has appeared in an export, so none has been checked
     // against MPP — and a guessed figure would be indistinguishable from a
     // verified one in a module whose whole job is checking.
-    expect(() => unprovenRule('Overtime')).toThrow(/no payroll export has exercised it/)
-    expect(() => unprovenRule('Overtime')).toThrow(/Guessing here/)
+    expect(() => unprovenRule('Overtime')).toThrow(/nije pojavilo ni u jednom izvozu obračuna/)
+    expect(() => unprovenRule('Overtime')).toThrow(/Nagađanje bi dalo iznos/)
   })
 })
 

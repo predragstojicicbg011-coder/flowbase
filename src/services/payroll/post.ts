@@ -20,6 +20,8 @@ import { bookAmountsAtRate, type BookAmounts } from '../bookAmounts'
 import { saveSplits } from '../saveSplits'
 import type { SplitLine } from '../expenseSplit'
 import { firstOfMonth } from './timesheets'
+import { postingTag } from './partnerMatch'
+import { countOf } from '../../utils/plural'
 
 export interface PostContext {
   companyId: string
@@ -73,16 +75,16 @@ export interface PostResult {
  */
 export class PostStepFailure extends Error {
   constructor(public step: string, public reason: string) {
-    super(`It failed writing ${step}: ${reason}`)
+    super(`Upis nije uspeo (${step}): ${reason}`)
     this.name = 'PostStepFailure'
   }
 }
 
 export function alreadyPostedMessage(month: string, runLabel: string): string {
-  return `${runLabel} for ${month} has already been posted. Nothing was written. `
-    + 'A payroll posted twice is not a wrong figure — it is a second complete set of '
-    + 'invoices that reconciles against nothing and has to be unpicked by hand from a '
-    + 'bank statement months later. Undo the existing posting first if it was wrong.'
+  return `Obračun „${runLabel}“ za ${month} je već proknjižen. Ništa nije upisano. `
+    + 'Dvaput proknjižene zarade su drugi kompletan skup faktura koji se ni sa čim ne '
+    + 'uparuje i koji se kasnije ručno razdvaja iz izvoda. Ako je postojeće knjiženje '
+    + 'pogrešno, prvo ga poništite.'
 }
 
 /**
@@ -129,10 +131,10 @@ export async function postPlan(
     if (isUniqueViolation(claimErr)) {
       throw new Error(alreadyPostedMessage(plan.month, runLabel))
     }
-    throw new PostStepFailure('the posting record', claimErr.message)
+    throw new PostStepFailure('zapis o knjiženju', claimErr.message)
   }
   const postingId = posting?.id
-  if (!postingId) throw new PostStepFailure('the posting record', 'it returned no id')
+  if (!postingId) throw new PostStepFailure('zapis o knjiženju', 'nije vraćen ID')
 
   const invoiceIds: string[] = []
   const transactionIds: string[] = []
@@ -176,7 +178,7 @@ export async function postPlan(
       status: 'posted',
       note: t.note,
     }).select('id').single()
-    if (error) throw new PostStepFailure('the retained-deduction entries', error.message)
+    if (error) throw new PostStepFailure('stavke zadržanih obustava', error.message)
     if (data?.id) transactionIds.push(data.id)
   }
 
@@ -193,9 +195,9 @@ export async function postPlan(
     .select('id')
   if (linkErr) {
     throw new PostStepFailure(
-      'the record of what was created',
-      `${linkErr.message}. Everything was posted correctly, but this posting cannot be `
-      + 'undone from the page — the entries would have to be removed by hand.')
+      'zapis o upisanim stavkama',
+      `${linkErr.message}. Sve je ispravno proknjiženo, ali ovo knjiženje ne može da se `
+      + 'poništi sa ove strane — stavke bi morale da se uklone ručno.')
   }
 
   // 4. Freeze the run these entries were written from.
@@ -212,11 +214,11 @@ export async function postPlan(
       .select('id')
     if (freezeErr || !data || data.length === 0) {
       throw new PostStepFailure(
-        'the lock on the calculated run',
-        `${freezeErr?.message ?? 'the update matched no run'}. Everything was posted `
-        + 'correctly, but the run is still marked as a draft — so it can be recalculated '
-        + 'and would then disagree with the entries just written. Post it again, or '
-        + 'delete this posting and start over.')
+        'zaključavanje obračuna',
+        `${freezeErr?.message ?? 'nijedan obračun nije pronađen'}. Sve je ispravno `
+        + 'proknjiženo, ali je obračun i dalje nacrt, pa bi ponovni obračun mogao da se '
+        + 'razlikuje od upravo upisanih stavki. Proknjižite ponovo ili obrišite ovo '
+        + 'knjiženje i počnite iz početka.')
     }
   }
 
@@ -281,11 +283,11 @@ async function insertInvoice(
     pl_impact: invoice.pl_impact,
     status: 'unpaid',
     parent_invoice_id: parentId,
-    note: `${invoice.note} [posting ${postingId}]`,
+    note: `${invoice.note} ${postingTag(postingId)}`,
   }).select('id').single()
 
   if (error) throw new PostStepFailure(labelFor(invoice), error.message)
-  if (!data?.id) throw new PostStepFailure(labelFor(invoice), 'it returned no id')
+  if (!data?.id) throw new PostStepFailure(labelFor(invoice), 'nije vraćen ID')
 
   // Shared over several projects: the invoice once, its lines one per
   // project and one for overhead. The dinars and euros of the lines are
@@ -302,8 +304,8 @@ async function insertInvoice(
       amount_eur: booked.amount_eur,
     }, lines)
     if (!saved.ok) {
-      throw new PostStepFailure(`the project split of ${labelFor(invoice)}`,
-        `${saved.message} The invoice ${data.id} is written and booked to overhead.`)
+      throw new PostStepFailure(`podela po projektima: ${labelFor(invoice)}`,
+        `${saved.message} Faktura ${data.id} je upisana i proknjižena na opšte troškove.`)
     }
   }
   return data.id
@@ -311,11 +313,11 @@ async function insertInvoice(
 
 function labelFor(invoice: PlannedInvoice): string {
   return {
-    net: 'the net salary invoices',
-    third_party: 'the forwarded-deduction invoices',
-    other_income: 'the other-income invoices',
-    obligation_parent: 'the tax and contributions invoice',
-    obligation_child: 'the per-employee tax rows',
+    net: 'fakture za neto zarade',
+    third_party: 'fakture za prosleđene obustave',
+    other_income: 'fakture za ostala primanja',
+    obligation_parent: 'faktura za porez i doprinose',
+    obligation_child: 'stavke poreza po zaposlenom',
   }[invoice.kind]
 }
 
@@ -338,9 +340,9 @@ export async function linkedInvoices(
     .select('invoice_id, transaction_id, allocated_amount')
     .in('invoice_id', invoiceIds)
   if (error) {
-    throw new Error(`Whether these invoices are matched to any payment could not be `
-      + `checked (${error.message}). Nothing was deleted: removing an invoice that a `
-      + 'payment is allocated to would leave that payment against nothing.')
+    throw new Error(`Nije moguće proveriti da li su ove fakture uparene sa plaćanjem `
+      + `(${error.message}). Ništa nije obrisano: brisanje uparene fakture ostavilo bi `
+      + 'plaćanje bez pokrića. Pokušajte ponovo.')
   }
   return (data || []).map((l: any) => ({
     invoiceId: l.invoice_id,
@@ -350,12 +352,10 @@ export async function linkedInvoices(
 }
 
 export function stillLinkedMessage(n: number): string {
-  return `${n} of these invoices ${n === 1 ? 'is' : 'are'} matched to a bank payment. `
-    + 'Nothing was deleted. Removing them would take the allocation with them and leave '
-    + `${n === 1 ? 'that payment' : 'those payments'} sitting in the ledger against `
-    + 'nothing — reconciled yesterday and unexplained today. Detach them on the '
-    + 'transaction first; that is a decision about real money and not one an undo '
-    + 'button should make.'
+  return `${countOf(n, 'faktura je uparena', 'fakture su uparene', 'faktura je upareno')} `
+    + 'sa plaćanjem iz izvoda. Ništa nije obrisano. Brisanje bi uklonilo i uparivanje, '
+    + 'pa bi plaćanje ostalo u knjizi bez pokrića. Prvo raskinite uparivanje na '
+    + 'transakciji, pa ponovo poništite knjiženje.'
 }
 
 /**
@@ -394,30 +394,30 @@ export async function undoPosting(
     const { error: splitErr } = await client.from('pl_splits')
       .delete().eq('source', 'invoice').in('source_id', posting.created_invoice_ids).select('id')
     if (splitErr) {
-      throw new Error(`The project split of these invoices could not be removed `
-        + `(${splitErr.message}). Nothing else was deleted and the month is still posted.`)
+      throw new Error(`Podela ovih faktura po projektima nije obrisana `
+        + `(${splitErr.message}). Ništa drugo nije obrisano i mesec je i dalje proknjižen.`)
     }
     const { error } = await client.from('invoices')
       .delete().in('id', posting.created_invoice_ids).select('id')
     if (error) {
-      throw new Error(`The invoices could not be removed (${error.message}). `
-        + 'The month is still marked as posted, which is deliberate — freeing it now '
-        + 'would let a second payroll land on top of the first.')
+      throw new Error(`Fakture nisu obrisane (${error.message}). `
+        + 'Mesec je namerno i dalje označen kao proknjižen, da se preko njega ne bi '
+        + 'proknjižio drugi obračun. Pokušajte ponovo.')
     }
   }
   if (posting.created_transaction_ids?.length) {
     const { error } = await client.from('transactions')
       .delete().in('id', posting.created_transaction_ids).select('id')
     if (error) {
-      throw new Error(`The invoices were removed but the retained-deduction entries `
-        + `were not (${error.message}). The month is still marked as posted.`)
+      throw new Error(`Fakture su obrisane, ali stavke zadržanih obustava nisu `
+        + `(${error.message}). Mesec je i dalje označen kao proknjižen.`)
     }
   }
   const { error } = await client.from('payroll_postings')
     .delete().eq('id', posting.id).select('id')
   if (error) {
-    throw new Error(`Everything was removed, but the month is still marked as posted `
-      + `(${error.message}). It will refuse a new posting until that row is gone.`)
+    throw new Error(`Sve je obrisano, ali je mesec i dalje označen kao proknjižen `
+      + `(${error.message}). Novo knjiženje neće biti moguće dok se taj zapis ne ukloni.`)
   }
 
   if (posting.run_id) {
@@ -427,9 +427,9 @@ export async function undoPosting(
       .eq('id', posting.run_id)
       .select('id')
     if (thawErr) {
-      throw new Error(`The entries were removed, but the calculated run is still locked `
-        + `(${thawErr.message}). It will refuse to recalculate until it is set back to `
-        + 'draft — nothing is lost, but the month cannot be changed yet.')
+      throw new Error(`Stavke su obrisane, ali je obračun i dalje zaključan `
+        + `(${thawErr.message}). Ponovni obračun neće biti moguć dok se ne vrati u `
+        + 'nacrt — ništa nije izgubljeno, ali mesec još ne može da se menja.')
     }
   }
 }
@@ -440,7 +440,7 @@ export async function fetchPostings(client: any, companyId: string, month: strin
     .select('*')
     .eq('company_id', companyId)
     .eq('period_month', firstOfMonth(month))
-  if (error) throw new Error(`The postings for this month could not be read: ${error.message}`)
+  if (error) throw new Error(`Knjiženja za ovaj mesec nisu učitana: ${error.message}`)
   return data || []
 }
 

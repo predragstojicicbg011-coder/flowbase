@@ -2,6 +2,7 @@ import {
   personKey, matchEmployeeToPartner, matchEmployeesToPartners, unmatchedEmployees,
   employeeNameFromNote, matchPayeeToPartner, findTaxAuthority,
   matchDeductionPartners, classifyPostedNote, payrollMonthFromNote,
+  postingTag, hasPostingTag, POSTED_NOTE_FILTER,
   type PartnerLike,
 } from './partnerMatch'
 
@@ -307,5 +308,77 @@ describe('the month a posted row belongs to', () => {
   it('says nothing about a row payroll did not write', () => {
     expect(payrollMonthFromNote('Office rent September')).toBeNull()
     expect(payrollMonthFromNote(null)).toBeNull()
+  })
+})
+
+
+// ── Notes written since the interface went Serbian ──────────────────────────
+//
+// The rows posted in English stay in the ledger, so every reader has to
+// understand both spellings. The English cases above are the legacy rows;
+// these are the ones written from now on.
+
+describe('reading a note written in Serbian', () => {
+  it('finds the name on a net salary row', () => {
+    expect(employeeNameFromNote('Zarade 2026-09 — Zarade — Neto zarada — Gavrilov Dejan [knjiženje 4f2]'))
+      .toBe('Gavrilov Dejan')
+  })
+
+  it('stops at the forwarding clause rather than swallowing it', () => {
+    expect(employeeNameFromNote('Zarade 2026-09 — Zarade — Neto zarada — Gavrilov Dejan, nakon prosleđenih 3000 [knjiženje 4f2]'))
+      .toBe('Gavrilov Dejan')
+  })
+
+  it('reads a row that was written without a posting tag', () => {
+    expect(employeeNameFromNote('Zarade 2026-09 — Neto zarada — Ana Marija Petrović'))
+      .toBe('Ana Marija Petrović')
+  })
+
+  it('says nothing about a row that is not somebody’s salary', () => {
+    expect(employeeNameFromNote('Zarade 2026-09 — Zarade — Porez i doprinosi [knjiženje 4f2]')).toBeNull()
+    expect(employeeNameFromNote('Zarade 2026-09 — Zadržana obustava (storno): Kredit — Gavrilov Dejan')).toBeNull()
+  })
+
+  it('knows a salary from a tax obligation from a deduction', () => {
+    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Neto zarada — Gavrilov Dejan [knjiženje 1]'))
+      .toEqual({ kind: 'employee', name: 'Gavrilov Dejan' })
+    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Porez i doprinosi [knjiženje 1]'))
+      .toEqual({ kind: 'tax' })
+    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Prosleđena obustava: Generali — Gavrilov Dejan [knjiženje 1]'))
+      .toEqual({ kind: 'deduction', label: 'Generali', employee: 'Gavrilov Dejan' })
+  })
+
+  it('leaves a retained-deduction storno alone', () => {
+    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Zadržana obustava (storno): Laptop — Ana'))
+      .toEqual({ kind: 'other' })
+  })
+
+  it('reads the month off the note', () => {
+    expect(payrollMonthFromNote('Zarade 2026-09 — Zarade — Neto zarada — Ana [knjiženje 1]'))
+      .toBe('2026-09')
+    expect(payrollMonthFromNote('Zarade 2026-08 — Ostala primanja — Porez i doprinosi [knjiženje 2]'))
+      .toBe('2026-08')
+  })
+})
+
+describe('the posting tag', () => {
+  it('is written in Serbian', () => {
+    expect(postingTag('post-1')).toBe('[knjiženje post-1]')
+  })
+
+  it('is recognised in both spellings, and nowhere else', () => {
+    expect(hasPostingTag('Zarade 2026-09 — Zarade — Neto zarada — Ana [knjiženje 1]')).toBe(true)
+    expect(hasPostingTag('Payroll 2026-08 — Salaries — Net salary — Ana [posting 1]')).toBe(true)
+    expect(hasPostingTag('Kancelarijski materijal')).toBe(false)
+    expect(hasPostingTag(null)).toBe(false)
+  })
+
+  /**
+   * The ledger query that finds already-posted rows. One `or` with both
+   * spellings, each value quoted so the bracket and the space are read as
+   * part of the pattern rather than as filter syntax.
+   */
+  it('is looked for in the ledger in both spellings', () => {
+    expect(POSTED_NOTE_FILTER).toBe('note.like."%[posting %",note.like."%[knjiženje %"')
   })
 })

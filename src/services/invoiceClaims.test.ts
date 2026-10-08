@@ -123,17 +123,17 @@ describe('claimNotice', () => {
 
   it('names who covered it, so the row is findable', () => {
     expect(claimNotice({ remaining: 0, exhausted: true, claimedBy: ['r1'] }, label))
-      .toBe('Already fully covered by line 1 in this batch')
+      .toBe('Već u celosti pokriveno u ovom uvozu: line 1')
   })
 
   it('says how much is left when the claim is partial', () => {
     expect(claimNotice({ remaining: 300, exhausted: false, claimedBy: ['r2'] }, label))
-      .toBe('300,00 RSD left — the rest is claimed by line 2')
+      .toBe('Preostalo 300,00 RSD — ostatak već koristi: line 2')
   })
 
   it('lists every claimant rather than just the first', () => {
     expect(claimNotice({ remaining: 0, exhausted: true, claimedBy: ['r1', 'r2'] }, label))
-      .toBe('Already fully covered by line 1, line 2 in this batch')
+      .toBe('Već u celosti pokriveno u ovom uvozu: line 1, line 2')
   })
 })
 
@@ -145,12 +145,12 @@ describe('claimNotice in a unit that is not dinars', () => {
     // The bank statement dialog reasons in the invoice's own currency, so a
     // dinar code here would be a lie about what the number is.
     expect(claimNotice({ remaining: 120000, exhausted: false, claimedBy: ['r2'] }, label, eur))
-      .toBe('120000.00 EUR left — the rest is claimed by line 2')
+      .toBe('Preostalo 120000.00 EUR — ostatak već koristi: line 2')
   })
 
   it('needs no formatter for the exhausted case, which names no amount', () => {
     expect(claimNotice({ remaining: 0, exhausted: true, claimedBy: ['r1'] }, label, eur))
-      .toBe('Already fully covered by line 1 in this batch')
+      .toBe('Već u celosti pokriveno u ovom uvozu: line 1')
   })
 })
 

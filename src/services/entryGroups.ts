@@ -19,6 +19,7 @@
 // and read that one. A row with no figure in it counts as zero.
 
 import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { MONTHS_LONG_SR, capitalize } from '../utils/months'
 
 /**
  * The shape both a `v_pl_entries` row and a built `EntryItem` satisfy, so one
@@ -44,10 +45,7 @@ export interface MonthGroup<T> {
   rows: T[]
 }
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-]
+const MONTHS = MONTHS_LONG_SR.map(capitalize)
 
 /** 'YYYY-MM' for a row, or '' when it carries no usable date. */
 export function monthKeyOf(row: DatedRow): string {
@@ -64,7 +62,7 @@ export function monthKeyOf(row: DatedRow): string {
  */
 export function monthLabel(key: string): string {
   const m = /^(\d{4})-(\d{2})$/.exec(key)
-  if (!m) return 'Undated'
+  if (!m) return 'Bez datuma'
   return `${MONTHS[Number(m[2]) - 1] || m[2]} ${m[1]}`
 }
 

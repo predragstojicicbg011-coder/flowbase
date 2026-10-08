@@ -4,6 +4,7 @@ import { niceMax, shortMoney } from '../services/expenseCharts'
 import type { CashMonth, CashTimeline, DatedInflow, DatedOutflow } from '../services/cashTimeline'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
+import { MONTHS_SHORT_SR, srDate } from '../utils/months'
 
 // ── The cash line ───────────────────────────────────────────────────────────
 //
@@ -42,7 +43,7 @@ const PAD = { l: 62, r: 16, t: 16, b: 46 }
 // scale without the code.
 const moneyIn = (currency: string, dp: number) => (n: number) => fmtMoney(n, currency, dp)
 
-const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTH_SHORT = MONTHS_SHORT_SR
 
 function monthTick(m: string): string {
   const [y, mm] = m.split('-').map(Number)
@@ -51,9 +52,9 @@ function monthTick(m: string): string {
 }
 
 const BASIS_WORD: Record<CashMonth['basis'], string> = {
-  actual: 'posted',
-  partial: 'part posted, part expected',
-  projected: 'expected',
+  actual: 'proknjiženo',
+  partial: 'delom proknjiženo, delom očekivano',
+  projected: 'očekivano',
 }
 
 export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPickMonth }: {
@@ -120,10 +121,10 @@ export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPick
     <div style={deck.wrap} ref={ref}>
       <div style={deck.head}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
-          <span style={st.title}>Cash, twelve months</span>
+          <span style={st.title}>Novac, dvanaest meseci</span>
           {timeline.position && (
             <span style={deck.hint}>
-              anchored on {money(timeline.position.amount)} read {timeline.position.asOf}
+              polazi od stanja {money(timeline.position.amount)} na dan {srDate(timeline.position.asOf)}
             </span>
           )}
         </div>
@@ -133,7 +134,7 @@ export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPick
             color: timeline.trough.amount < 0 ? OUT
               : timeline.trough.amount < timeline.position!.amount * 0.3 ? '#F5A623' : C.dim,
           }}>
-            lowest {money(timeline.trough.amount)} in {monthTick(timeline.trough.month)}
+            najniže {money(timeline.trough.amount)} u {monthTick(timeline.trough.month)}
           </span>
         )}
       </div>
@@ -146,7 +147,7 @@ export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPick
 
       <div style={{ position: 'relative' }} onMouseLeave={() => setTip(null)}>
         <svg width="100%" viewBox={`0 0 ${w} ${H}`} role="img"
-          aria-label="Cash in, cash out and the balance, twelve months">
+          aria-label="Prilivi, odlivi i stanje novca, dvanaest meseci">
           <defs>
             {/* The month in progress. Hatching rather than a third hue: it is
                 not a third kind of thing, it is both of the other two. */}
@@ -187,15 +188,15 @@ export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPick
                 onMouseMove={e => show(e, (
                   <>
                     <div style={st.tipHead}>{monthTick(r.month)} · {BASIS_WORD[r.basis]}</div>
-                    <div style={st.tipRow}><span>In</span><b style={{ color: IN }}>+{money2(r.inflow)}</b></div>
-                    <div style={st.tipRow}><span>Out</span><b style={{ color: OUT }}>−{money2(r.outflow)}</b></div>
+                    <div style={st.tipRow}><span>Priliv</span><b style={{ color: IN }}>+{money2(r.inflow)}</b></div>
+                    <div style={st.tipRow}><span>Odliv</span><b style={{ color: OUT }}>−{money2(r.outflow)}</b></div>
                     <div style={st.tipRow}>
-                      <span>{r.net >= 0 ? 'Kept' : 'Lost'}</span>
+                      <span>{r.net >= 0 ? 'Višak' : 'Manjak'}</span>
                       <b>{money2(Math.abs(r.net))}</b>
                     </div>
                     {r.closing !== null && (
                       <div style={st.tipRow}>
-                        <span>Balance at month end</span>
+                        <span>Stanje na kraju meseca</span>
                         <b style={{ color: r.closing < 0 ? OUT : BALANCE }}>{money2(r.closing)}</b>
                       </div>
                     )}
@@ -215,9 +216,9 @@ export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPick
                     )}
                     {dated1 && (
                       <div style={st.tipNote}>
-                        {money(dated1.total)} of it is dated: {dated1.items.slice(0, 3)
+                        Od toga sa datumom: {money(dated1.total)} — {dated1.items.slice(0, 3)
                           .map(x => x.label).join(', ')}
-                        {dated1.items.length > 3 && ` and ${dated1.items.length - 3} more`}.
+                        {dated1.items.length > 3 && ` i još ${dated1.items.length - 3}`}.
                       </div>
                     )}
                   </>
@@ -268,22 +269,21 @@ export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPick
       </div>
 
       <div style={deck.legend}>
-        <span style={deck.legendItem}><span style={{ ...deck.swatch, background: IN }} />In — above the line</span>
-        <span style={deck.legendItem}><span style={{ ...deck.swatch, background: OUT }} />Out — below it</span>
+        <span style={deck.legendItem}><span style={{ ...deck.swatch, background: IN }} />Prilivi — iznad linije</span>
+        <span style={deck.legendItem}><span style={{ ...deck.swatch, background: OUT }} />Odlivi — ispod nje</span>
         <span style={deck.legendItem}>
           <span style={{ ...deck.swatch, background: BALANCE, borderRadius: '50%' }} />
-          Balance at month end
+          Stanje na kraju meseca
         </span>
         <span style={deck.legendItem}>
           <span style={{ ...deck.swatch, background: 'rgba(255,255,255,0.22)' }} />
-          Hatched — the month in progress · Pale — expected
+          Šrafirano — tekući mesec · Bledo — očekivano
         </span>
       </div>
       <div style={st.note}>
-        Everything is on one scale because everything is in one currency; a balance given an axis
-        of its own is how a chart invents a crossing that is not in the data. The balance
-        is walked outward from the cash reading in both directions — it is the only
-        measured figure on the line, so it anchors rather than terminates it.
+        Sve je na jednoj skali jer je sve u jednoj valuti; stanje sa sopstvenom osom
+        dalo bi presek kojeg u podacima nema. Stanje se računa od unetog stanja novca
+        u oba smera — to je jedini izmereni iznos na liniji, pa je ono polazna tačka, a ne kraj.
         Očekivani prilivi: otvorene izlazne fakture na dan dospeća (dospele — u tekućem mesecu),
         zatim plan prihoda i zakupi koji još nisu fakturisani, na kraj meseca plus rok plaćanja.
       </div>

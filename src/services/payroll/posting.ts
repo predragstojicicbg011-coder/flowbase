@@ -36,6 +36,7 @@ import type { PayrollRun, RunKey } from './runs'
 import type { HoursAtRate } from './timesheets'
 import type { EmployeeForMonth } from './employees'
 import { deductionAmount } from './employees'
+import { countOf } from '../../utils/plural'
 import { obligationRows, obligationTotal } from '../payrollAllocation'
 import {
   projectShares, distributeAmount, totalsByProject,
@@ -247,7 +248,7 @@ export function unmappedUnits(run: PayrollRun, people: Record<string, EmployeeFo
     // Somebody with their own allocation needs no mapping at all.
     if (p?.allocation) return
     const unit = p?.employee.organisational_unit
-    if (!unit) { missing.add('(no organisational unit)'); return }
+    if (!unit) { missing.add('(bez organizacione jedinice)'); return }
     if (!departmentFor(unit, mapping)) missing.add(unit)
   }
   for (const line of run.salaries) consider(line.employeeId)
@@ -270,7 +271,7 @@ export function planFor(input: PlanInput): PostingPlan {
   /** Every retained deduction in this run, for the expected total below. */
   let retainedAcrossRun = 0
 
-  const tag = `Payroll ${month} — ${run.label}`
+  const tag = `Zarade ${month} — ${run.label}`
 
   // ── Projects, by hours ───────────────────────────────────────────────
   // One set of shares per person, measured once and applied to every
@@ -343,7 +344,7 @@ export function planFor(input: PlanInput): PostingPlan {
           amount: round2(amount),
           projects: spread(line.employeeId, line.name, amount),
           pl_impact: true,
-          note: `${tag} — Deduction forwarded: ${d.label} — ${line.name}`,
+          note: `${tag} — Prosleđena obustava: ${d.label} — ${line.name}`,
         })
       } else {
         // Taken off the salary AND cancelling part of an expense the company
@@ -366,7 +367,7 @@ export function planFor(input: PlanInput): PostingPlan {
           cf_type: cf,
           expense_description: d.label,
           amount: round2(-amount),
-          note: `${tag} — Retained deduction (storno): ${d.label} — ${line.name}`,
+          note: `${tag} — Zadržana obustava (storno): ${d.label} — ${line.name}`,
         })
       }
     }
@@ -388,8 +389,8 @@ export function planFor(input: PlanInput): PostingPlan {
         amount: toEmployee,
         projects: spread(line.employeeId, line.name, toEmployee),
         pl_impact: true,
-        note: `${tag} — Net salary — ${line.name}`
-          + (thirdPartyTotal > 0 ? `, after ${round2(thirdPartyTotal)} forwarded` : ''),
+        note: `${tag} — Neto zarada — ${line.name}`
+          + (thirdPartyTotal > 0 ? `, nakon prosleđenih ${round2(thirdPartyTotal)}` : ''),
       })
     }
 
@@ -424,7 +425,7 @@ export function planFor(input: PlanInput): PostingPlan {
       amount: round2(line.line.net),
       projects: spread(line.employeeId, line.name, line.line.net),
       pl_impact: true,
-      note: `${tag} — Other income — ${line.name}`,
+      note: `${tag} — Ostala primanja — ${line.name}`,
     })
     obligations.push({
       employee_id: line.employeeId,
@@ -457,13 +458,13 @@ export function planFor(input: PlanInput): PostingPlan {
       pl_subcategory: SUBCATEGORY.tax,
       department: null, dept_subcategory: null,
       cf_type: 'recurring',
-      expense_description: `Tax & contributions — ${month} ${run.label}`,
+      expense_description: `Porez i doprinosi — ${month} ${run.label}`,
       amount: owed,
       projects: [],
       // The payable the bank payment matches. Its children carry the P&L, so
       // counting it too would double every filing.
       pl_impact: false,
-      note: `${tag} — Tax and contributions`,
+      note: `${tag} — Porez i doprinosi`,
     })
     for (const r of children) {
       invoices.push({
@@ -589,15 +590,15 @@ export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null
       })),
     ], known)
     if (unknown.length > 0) {
-      return `The ledger has no ${unknown.join(', no ')}. Nothing was written. `
-        + 'Posting to a name that does not exist creates a second heading one character '
-        + 'from the real one, and the P&L then shows both with part of the payroll in '
-        + 'each. Add them under Settings, or correct the allocation.'
+      return `Glavna knjiga nema: ${unknown.join(', ')}. Ništa nije upisano. `
+        + 'Knjiženje na naziv koji ne postoji napravilo bi drugi naslov pored pravog, '
+        + 'pa bi P&L prikazao oba sa delom zarada u svakom. Dodajte ih u Podešavanjima '
+        + 'ili ispravite raspodelu.'
     }
   }
 
   if (plan.projectErrors.length > 0) {
-    return `Sati po projektima ne odgovaraju mesecu. Nothing was written. `
+    return `Sati po projektima ne odgovaraju mesecu. Ništa nije upisano. `
       + plan.projectErrors.join(' ')
   }
 
@@ -606,17 +607,17 @@ export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null
   // whose actual problem is a named employee with no department.
   const negative = plan.invoices.find(i => i.amount < 0)
   if (negative) {
-    return `"${negative.expense_description}" would be posted as a negative invoice `
-      + `(${negative.amount.toFixed(2)}). A negative payable is not a thing; this is a `
-      + 'sign the deductions exceed the salary they come out of.'
+    return `„${negative.expense_description}“ bi bila proknjižena kao negativna faktura `
+      + `(${negative.amount.toFixed(2)}). Negativna obaveza ne postoji; to znači da su `
+      + 'obustave veće od zarade iz koje se odbijaju. Proverite obustave zaposlenog.'
   }
 
   const undept = plan.invoices.filter(i => i.pl_impact && !i.department)
   if (undept.length > 0) {
     const names = [...new Set(undept.map(i => i.expense_description))].slice(0, 5)
-    return `${undept.length} entries would land with no department (${names.join(', ')}). `
-      + 'They would all fall into Unassigned, where a salary looks like an ordinary '
-      + 'cost of nobody. Map the organisational units first.'
+    return `${countOf(undept.length, 'stavka bi ostala', 'stavke bi ostale', 'stavki bi ostalo')} `
+      + `bez sektora (${names.join(', ')}). Sve bi završile u „Nedodeljeno“, gde zarada `
+      + 'izgleda kao običan trošak bez nosioca. Prvo povežite organizacione jedinice sa sektorima.'
   }
 
   // Every invoice's project lines must come to the invoice, to the para:
@@ -625,18 +626,17 @@ export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null
   const unbalanced = plan.invoices.find(i => i.pl_impact && Math.round(
     i.projects.reduce((s, l) => s + l.amount, 0) * 100) !== Math.round(i.amount * 100))
   if (unbalanced) {
-    return `"${unbalanced.expense_description}" (${unbalanced.amount.toFixed(2)}) does not `
-      + 'add up over its projects. Nothing was written.'
+    return `„${unbalanced.expense_description}“ (${unbalanced.amount.toFixed(2)}) se ne `
+      + 'slaže sa zbirom po projektima. Ništa nije upisano.'
   }
 
   const total = planTotal(plan)
   const expected = round2(plan.expectedTotalCost)
   if (Math.abs(total - expected) > 0.02) {
-    return `The entries come to ${total.toFixed(2)} and the run says the month costs `
-      + `${expected.toFixed(2)} — a difference of ${(total - expected).toFixed(2)}. `
-      + 'Nothing has been written. A payroll that does not add up to itself will not '
-      + 'reconcile against the accountant either, and unpicking it afterwards is far '
-      + 'worse than not posting it now.'
+    return `Stavke iznose ${total.toFixed(2)}, a prema obračunu mesec košta `
+      + `${expected.toFixed(2)} — razlika je ${(total - expected).toFixed(2)}. `
+      + 'Ništa nije upisano. Obračun koji se ne slaže sam sa sobom neće se složiti ni '
+      + 'sa knjigovođom. Ponovo obračunajte mesec pa proknjižite.'
   }
   return null
 }

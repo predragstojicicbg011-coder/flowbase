@@ -72,7 +72,7 @@ export interface Difference {
 
 const NOTHING: Difference = {
   kind: 'none', amount: 0, direction: null, linksToInvoice: false,
-  note: 'The payment and the invoice agree — there is no difference to book.',
+  note: 'Plaćanje i faktura se slažu — nema razlike za knjiženje.',
 }
 
 export interface DifferenceInput {
@@ -116,8 +116,8 @@ export function differenceFor(input: DifferenceInput): Difference {
       amount: 0,
       direction: null,
       linksToInvoice: false,
-      note: `This payment still has ${money(spare, cur)} unallocated and the invoice is `
-        + `${money(short, cur)} short. Allocate what is left before booking a difference.`,
+      note: `Ovom plaćanju je ostalo ${money(spare, cur)} neraspoređeno, a fakturi nedostaje `
+        + `${money(short, cur)}. Rasporedite ostatak pre knjiženja razlike.`,
     }
   }
 
@@ -130,8 +130,8 @@ export function differenceFor(input: DifferenceInput): Difference {
         amount: short,
         direction: 'expense',
         linksToInvoice: true,
-        note: `Less was received than was invoiced, by ${money(short, cur)}. Booking it as a loss `
-          + `closes the invoice; nothing else will.`,
+        note: `Naplaćeno je manje nego što je fakturisano, za ${money(short, cur)}. Knjiženje negativne `
+          + `kursne razlike zatvara fakturu; ništa drugo je neće zatvoriti.`,
       }
     }
     return {
@@ -139,8 +139,8 @@ export function differenceFor(input: DifferenceInput): Difference {
       amount: short,
       direction: 'revenue',
       linksToInvoice: true,
-      note: `Less was paid than was invoiced, by ${money(short, cur)}. Booking it as a gain `
-        + `closes the invoice; nothing else will.`,
+      note: `Plaćeno je manje nego što je fakturisano, za ${money(short, cur)}. Knjiženje pozitivne `
+        + `kursne razlike zatvara fakturu; ništa drugo je neće zatvoriti.`,
     }
   }
 
@@ -151,8 +151,8 @@ export function differenceFor(input: DifferenceInput): Difference {
         amount: spare,
         direction: 'revenue',
         linksToInvoice: false,
-        note: `More was received than was invoiced, by ${money(spare, cur)}. The invoice is already `
-          + `closed, so this splits the surplus off the same bank line as a gain.`,
+        note: `Naplaćeno je više nego što je fakturisano, za ${money(spare, cur)}. Faktura je već `
+          + `zatvorena, pa se višak izdvaja iz iste stavke izvoda kao pozitivna kursna razlika.`,
       }
     }
     return {
@@ -160,8 +160,8 @@ export function differenceFor(input: DifferenceInput): Difference {
       amount: spare,
       direction: 'expense',
       linksToInvoice: false,
-      note: `More was paid than was invoiced, by ${money(spare, cur)}. The invoice is already `
-        + `closed, so this splits the surplus off the same bank line as a loss.`,
+      note: `Plaćeno je više nego što je fakturisano, za ${money(spare, cur)}. Faktura je već `
+        + `zatvorena, pa se višak izdvaja iz iste stavke izvoda kao negativna kursna razlika.`,
     }
   }
 
@@ -178,11 +178,11 @@ export function isBookable(d: Difference): boolean {
  * from now without anyone having to reconstruct which invoice it came from.
  */
 export function entryNote(invoiceNumber: string | null | undefined, d: Difference): string {
-  const which = invoiceNumber ? ` on ${invoiceNumber}` : ''
+  const which = invoiceNumber ? ` po fakturi ${invoiceNumber}` : ''
   // The shape, not the economics: short is "less than invoiced" whichever
   // side of the bill the company is on.
-  const verb = d.direction === (d.linksToInvoice ? 'expense' : 'revenue') ? 'received' : 'paid'
+  const verb = d.direction === (d.linksToInvoice ? 'expense' : 'revenue') ? 'naplaćeno' : 'plaćeno'
   return d.linksToInvoice
-    ? `Currency difference${which} — ${verb} less than invoiced`
-    : `Currency difference${which} — ${verb} more than invoiced`
+    ? `Kursna razlika${which} — ${verb} manje nego što je fakturisano`
+    : `Kursna razlika${which} — ${verb} više nego što je fakturisano`
 }

@@ -76,7 +76,7 @@ describe('the deck on every branch', () => {
 
   it.each(ALL)('survives a period with nothing in it on the %s branch', branch => {
     render(deckFor(branch, [], []))
-    expect(screen.getByText(/Trend & mix/)).toBeInTheDocument()
+    expect(screen.getByText(/Trend i struktura/)).toBeInTheDocument()
   })
 })
 
@@ -84,7 +84,7 @@ describe('which panels a branch offers', () => {
   it('offers the same six panels on every branch, and no two-sided split', () => {
     for (const b of ALL) {
       const { unmount } = render(deckFor(b))
-      for (const t of ['Trend & mix', 'What moved', 'Every line', 'Bridge', 'Composition', 'Concentration']) {
+      for (const t of ['Trend i struktura', 'Šta se promenilo', 'Sve stavke', 'Most', 'Sastav', 'Koncentracija']) {
         expect(screen.getByText(t)).toBeInTheDocument()
       }
       expect(screen.queryByText('The split')).not.toBeInTheDocument()
@@ -94,36 +94,36 @@ describe('which panels a branch offers', () => {
 
   it('says what the trend means on the project branch', () => {
     render(deckFor('project'))
-    expect(screen.getByText(/which projects carry the cost/)).toBeInTheDocument()
+    expect(screen.getByText(/koji projekti nose trošak/)).toBeInTheDocument()
   })
 
   it('bands the trend by project, overhead included, in the legend', () => {
     render(deckFor('project'))
-    expect(screen.getByTitle(/Open the transactions behind Zgrada A/)).toBeInTheDocument()
-    expect(screen.getByTitle(new RegExp(`Open the transactions behind ${OVERHEAD_LABEL}`))).toBeInTheDocument()
+    expect(screen.getByTitle(/Otvori transakcije za: Zgrada A/)).toBeInTheDocument()
+    expect(screen.getByTitle(new RegExp(`Otvori transakcije za: ${OVERHEAD_LABEL}`))).toBeInTheDocument()
   })
 
   it('keeps a panel open across a branch change', () => {
     const { rerender } = render(deckFor('project'))
-    fireEvent.click(screen.getByText('Bridge'))
+    fireEvent.click(screen.getByText('Most'))
     rerender(deckFor('department'))
-    expect(screen.getByText(/What turned the prior total/)).toBeInTheDocument()
+    expect(screen.getByText(/Šta je prethodni ukupan iznos/)).toBeInTheDocument()
   })
 })
 
 describe('the panels that read a level', () => {
   it('names the depth buttons after the branch rather than "level 2"', () => {
     render(deckFor('department'))
-    fireEvent.click(screen.getByText('What moved'))
-    for (const level of ['Department', 'Sub-category', 'Description']) {
+    fireEvent.click(screen.getByText('Šta se promenilo'))
+    for (const level of ['Sektor', 'Podsektor', 'Opis']) {
       expect(screen.getByText(level)).toBeInTheDocument()
     }
   })
 
   it('names the project branch its own levels, not a generic "Detail"', () => {
     render(deckFor('project'))
-    fireEvent.click(screen.getByText('What moved'))
-    for (const level of ['Project', 'Category', 'Sub-category']) {
+    fireEvent.click(screen.getByText('Šta se promenilo'))
+    for (const level of ['Projekat', 'Kategorija', 'Potkategorija']) {
       expect(screen.getByText(level)).toBeInTheDocument()
     }
     expect(screen.queryByText('Detail')).not.toBeInTheDocument()
@@ -132,31 +132,31 @@ describe('the panels that read a level', () => {
   /** A two-level branch must not keep a third-level choice made on another. */
   it('clamps the open level when the new branch is shallower', () => {
     const { rerender } = render(deckFor('department'))
-    fireEvent.click(screen.getByText('What moved'))
-    fireEvent.click(screen.getByText('Description'))
+    fireEvent.click(screen.getByText('Šta se promenilo'))
+    fireEvent.click(screen.getByText('Opis'))
     rerender(deckFor('pl'))
-    expect(screen.queryByText('Description')).not.toBeInTheDocument()
-    expect(screen.getByText('Sub-category')).toBeInTheDocument()
+    expect(screen.queryByText('Opis')).not.toBeInTheDocument()
+    expect(screen.getByText('Potkategorija')).toBeInTheDocument()
   })
 
   it('offers the heatmap a per-line scale', () => {
     render(deckFor('pl'))
-    fireEvent.click(screen.getByText('Every line'))
-    expect(screen.getByText(/Scale each line to itself/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Sve stavke'))
+    expect(screen.getByText(/Svaka stavka u sopstvenoj razmeri/)).toBeInTheDocument()
   })
 
   it('prices the heatmap shades instead of leaving them as decoration', () => {
     render(deckFor('pl'))
-    fireEvent.click(screen.getByText('Every line'))
-    expect(screen.getByText(/MONTHLY SPEND PER LINE/)).toBeInTheDocument()
-    expect(screen.getByText('nothing')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Sve stavke'))
+    expect(screen.getByText(/MESEČNI TROŠAK PO STAVCI/)).toBeInTheDocument()
+    expect(screen.getByText('ništa')).toBeInTheDocument()
   })
 
   it('switches the heatmap legend to shares when scaled per line', () => {
     render(deckFor('pl'))
-    fireEvent.click(screen.getByText('Every line'))
-    fireEvent.click(screen.getByLabelText(/Scale each line to itself/, { selector: 'input' }))
-    expect(screen.getByText(/BIGGEST MONTH/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Sve stavke'))
+    fireEvent.click(screen.getByLabelText(/Svaka stavka u sopstvenoj razmeri/, { selector: 'input' }))
+    expect(screen.getByText(/NAJVEĆEM MESECU/)).toBeInTheDocument()
   })
 })
 
@@ -169,34 +169,34 @@ describe('composition is the branch tree, folded', () => {
    */
   it('arrives with nothing opened', () => {
     render(deckFor('pl'))
-    fireEvent.click(screen.getByText('Composition'))
+    fireEvent.click(screen.getByText('Sastav'))
     expect(screen.getByText(/Marketing/)).toBeInTheDocument()
     expect(screen.queryByText(/^▾/)).not.toBeInTheDocument()
   })
 
   it('offers both bulk controls where the tree is', () => {
     render(deckFor('pl'))
-    fireEvent.click(screen.getByText('Composition'))
-    expect(screen.getByText('Fold all')).toBeInTheDocument()
-    expect(screen.getByText('Two levels')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Sastav'))
+    expect(screen.getByText('Sklopi sve')).toBeInTheDocument()
+    expect(screen.getByText('Dva nivoa')).toBeInTheDocument()
   })
 
   it('opens a branch when its node is clicked', () => {
     render(deckFor('pl'))
-    fireEvent.click(screen.getByText('Composition'))
+    fireEvent.click(screen.getByText('Sastav'))
     fireEvent.click(screen.getByText(/Marketing/))
     expect(screen.getByText(/Ads/)).toBeInTheDocument()
   })
 
   it('names the period rather than calling a year to date "this month"', () => {
     render(deckFor('pl'))
-    fireEvent.click(screen.getByText('Composition'))
+    fireEvent.click(screen.getByText('Sastav'))
     expect(screen.getByText(/2026 YTD/)).toBeInTheDocument()
   })
 
   it('draws the tree of whichever branch is open', () => {
     render(deckFor('project'))
-    fireEvent.click(screen.getByText('Composition'))
+    fireEvent.click(screen.getByText('Sastav'))
     expect(screen.getByText(/Hala B/)).toBeInTheDocument()
   })
 })
@@ -213,7 +213,7 @@ describe('the legend is a control', () => {
         onSelect={k => picked.push(k)}
         periodLabel="2026 YTD" priorLabel="2025 YTD" />)
 
-    fireEvent.click(screen.getByTitle(/Open the transactions behind Marketing/))
+    fireEvent.click(screen.getByTitle(/Otvori transakcije za: Marketing/))
     expect(picked).toEqual(['Marketing'])
   })
 })

@@ -14,7 +14,7 @@ import type { Level } from '../services/budgetForecast'
 // test does.
 jest.mock('../supabase', () => ({ supabase: {} }))
 
-const LEVELS = ['Department', 'Sub-category', 'Expense description']
+const LEVELS = ['Sektor', 'Podsektor', 'Opis troška']
 
 describe('scopeOfNewLine', () => {
   it('says nothing when nothing has been picked', () => {
@@ -25,28 +25,28 @@ describe('scopeOfNewLine', () => {
     const scope = scopeOfNewLine(['Marketing', 'SaaS software', 'Figma'], LEVELS)
     expect(scope).not.toBeNull()
     expect(scope!.onParent).toBe(false)
-    expect(scope!.text).toContain('expense description')
-    expect(scope!.text).toContain('deepest')
+    expect(scope!.text).toContain('opis troška')
+    expect(scope!.text).toContain('najdublji')
   })
 
   it('warns, and names what it is NOT on, when a level is left blank', () => {
     const scope = scopeOfNewLine(['Marketing', 'SaaS software'], LEVELS)
     expect(scope!.onParent).toBe(true)
     // The whole point: it must say the figure does not reach the lines below.
-    expect(scope!.text).toContain('not on any expense description under it')
-    expect(scope!.text).toContain('sub-category itself')
+    expect(scope!.text).toContain('ne na neku stavku nivoa „opis troška“ ispod njega')
+    expect(scope!.text).toContain('na sam nivo „podsektor“')
   })
 
   it('warns the same way when only the top level is filled in', () => {
     const scope = scopeOfNewLine(['Marketing'], LEVELS)
     expect(scope!.onParent).toBe(true)
-    expect(scope!.text).toContain('department itself')
-    expect(scope!.text).toContain('not on any sub-category under it')
+    expect(scope!.text).toContain('na sam nivo „sektor“')
+    expect(scope!.text).toContain('ne na neku stavku nivoa „podsektor“ ispod njega')
   })
 
   it('names the next level to pick, so the fix is in the sentence', () => {
     expect(scopeOfNewLine(['Marketing'], LEVELS)!.text)
-      .toContain('pick a sub-category below')
+      .toContain('popunite i polje „podsektor“')
   })
 
   it('does not repeat the label the path already ends with', () => {
@@ -58,9 +58,10 @@ describe('scopeOfNewLine', () => {
 
   it('treats a branch of its own depth on its own terms', () => {
     // The P&L branch is two levels, not three; a category line is a leaf there.
-    const scope = scopeOfNewLine(['Operating expenses', 'Bank charges'], ['Category', 'Sub-category'])
+    // A label that opens with an abbreviation keeps its capitals mid-sentence.
+    const scope = scopeOfNewLine(['Operating expenses', 'Bank charges'], ['P&L kategorija', 'P&L potkategorija'])
     expect(scope!.onParent).toBe(false)
-    expect(scope!.text).toContain('sub-category')
+    expect(scope!.text).toContain('(P&L potkategorija)')
   })
 
   it('has nothing to say about levels it was not given', () => {

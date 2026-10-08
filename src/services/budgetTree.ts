@@ -20,6 +20,7 @@
 // passes the real one; a test passes something that answers like PostgREST.
 
 import { fetchAllPages } from '../utils/fetchAllPages'
+import { countOf, plural } from '../utils/plural'
 import { PROJECT_FILTER_OVERHEAD } from './ledgerFilters'
 import {
   makeClassKey, valueAt, placeEntry, seedForEntry, projectOfKey,
@@ -394,7 +395,7 @@ export async function loadBudgetTree(
     .map((i: any): Installment => {
       const currency = (i.credits as any)?.currency || 'RSD'
       return {
-        id: i.id, credit_name: (i.credits as any)?.name || 'Credit',
+        id: i.id, credit_name: (i.credits as any)?.name || 'Kredit',
         installment_no: i.installment_no, due_date: i.due_date,
         principal_amount: i.principal_amount || 0, interest_amount: i.interest_amount || 0,
         status: i.status, currency,
@@ -600,9 +601,9 @@ export async function loadBudgetTree(
   // otherwise vanish from the EUR reading. The count goes to the page.
   const dinarOnly = adjustments.filter((a: any) => !ledgerReadableIn([a], 'EUR')).length
   const eurUnavailable = dinarOnly === 0 ? null
-    : `${dinarOnly} budget ${dinarOnly === 1 ? 'figure was' : 'figures were'} recorded in RSD only, `
-      + 'so this budget cannot be read in EUR without dropping '
-      + (dinarOnly === 1 ? 'it' : 'them') + '. It is shown in RSD.'
+    : `${countOf(dinarOnly, 'budžetski iznos', 'budžetska iznosa', 'budžetskih iznosa')} `
+      + `${plural(dinarOnly, 'je unet', 'su uneta', 'je uneto')} samo u RSD, pa ovaj budžet ne može da se `
+      + `prikaže u EUR bez ${plural(dinarOnly, 'njega', 'njih', 'njih')}. Prikazan je u RSD.`
 
   const finalRows = Object.values(rowMap)
   const ordered: BudgetRow[] = []

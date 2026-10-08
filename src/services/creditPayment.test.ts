@@ -30,7 +30,7 @@ describe('payableInCreditCurrency', () => {
   it('refuses a credit in any other currency rather than guessing', () => {
     expect(() => payableInCreditCurrency('USD', paid(100, 'RSD'))).toThrow(UnsupportedCreditCurrencyError)
     expect(() => payableInCreditCurrency(null, paid(100, 'RSD'))).toThrow(UnsupportedCreditCurrencyError)
-    expect(() => checkCreditCurrency('CHF', 'Hipotekarni')).toThrow(/Hipotekarni.*CHF.*RSD or EUR/)
+    expect(() => checkCreditCurrency('CHF', 'Hipotekarni')).toThrow(/Hipotekarni.*CHF.*RSD ili EUR/)
   })
 })
 

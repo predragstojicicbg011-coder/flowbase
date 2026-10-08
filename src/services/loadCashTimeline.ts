@@ -68,6 +68,8 @@ import {
   type PlanInvoice, type RentalLease, type RevenuePlanRow,
 } from './revenuePlan'
 import { normalisePaymentDays } from './projects'
+import { monthLongLabel, srDate } from '../utils/months'
+import { countOf, plural } from '../utils/plural'
 
 export interface QueryClient { from: (table: string) => any }
 
@@ -199,9 +201,11 @@ export async function loadCashTimeline(
   const budgetInCurrency = budget.currency === cur
   if (!budgetInCurrency) {
     notes.push(
-      `The budget could not be read in ${cur}, so future months show no projected outflow`
+      `Budžet ne može da se prikaže u ${cur}, pa budući meseci nemaju očekivani odliv`
       // The budget's own reason, less its "It is shown in RSD." — here it is not shown.
-      + (budget.eurUnavailable ? `: ${budget.eurUnavailable.replace(/\s*It is shown in RSD\.\s*$/, '')}` : '.'))
+      + (budget.eurUnavailable
+        ? `: ${budget.eurUnavailable.replace(/\s*(It is shown in RSD|[^.]*prikazan[^.]*u RSD)\.\s*$/i, '')}`
+        : '.'))
   }
   for (const m of future) {
     if (!budgetInCurrency) continue
@@ -233,21 +237,22 @@ export async function loadCashTimeline(
   }
   if (instalmentsNeedRate) {
     notes.push(rates
-      ? `Credit instalments not in ${cur} are converted at the NBS rate of ${rates.date}; `
-        + 'they are future payments and have no booked rate yet.'
-      : `No NBS rate could be read for ${req.today}, so credit instalments not in ${cur} `
-        + 'are left out of the dated outflows.')
+      ? `Rate kredita koje nisu u ${cur} preračunate su po kursu NBS od ${srDate(rates.date)}; `
+        + 'to su buduća plaćanja i još nemaju knjiženi kurs.'
+      : `Kurs NBS nije dostupan za ${srDate(req.today)}, pa rate kredita koje nisu u ${cur} `
+        + 'nisu uključene u odlive po datumima.')
   }
 
   // ── In: what investors and tenants are expected to pay ─────────────────
   const receivables = receivableInflows(invRows, req.currentMonth, cur)
   if (receivables.overdue > 0) {
     notes.push(
-      `${receivables.overdue} revenue invoice(s) are past due; what they still owe is expected `
-      + `in ${req.currentMonth}, not on their original due date.`)
+      `${countOf(receivables.overdue, 'izlazna faktura je', 'izlazne fakture su', 'izlaznih faktura je')} u kašnjenju; `
+      + `preostali iznos se očekuje u mesecu ${monthLongLabel(req.currentMonth)}, a ne na prvobitni datum dospeća.`)
   }
   if (receivables.unconverted > 0) {
-    notes.push(`${receivables.unconverted} open revenue invoice(s) have no ${cur} figure and are left out of the inflow.`)
+    notes.push(`${countOf(receivables.unconverted, 'otvorena izlazna faktura nema', 'otvorene izlazne fakture nemaju', 'otvorenih izlaznih faktura nema')} iznos u ${cur}, pa `
+      + `${plural(receivables.unconverted, 'nije uključena', 'nisu uključene', 'nije uključeno')} u priliv.`)
   }
 
   const projectRows: any[] = (projRes?.data || []).filter((p: any) => inScope(p.company_id))
@@ -261,10 +266,10 @@ export async function loadCashTimeline(
   notes.push(...plan.notes)
   if (rentNeedsRate && rates && plan.lines.some(l => l.source === 'rent')) {
     notes.push(
-      `Rent in a currency other than ${cur} is converted at the NBS rate of ${rates.date}; `
-      + 'it has not been invoiced and has no booked rate yet.')
+      `Zakupnina u valuti koja nije ${cur} preračunata je po kursu NBS od ${srDate(rates.date)}; `
+      + 'još nije fakturisana i nema knjiženi kurs.')
   } else if (rentNeedsRate && rateError) {
-    notes.push(`No NBS rate could be read for ${req.today}, so rent not in ${cur} is left out of the expected inflow.`)
+    notes.push(`Kurs NBS nije dostupan za ${srDate(req.today)}, pa zakupnina koja nije u ${cur} nije uključena u očekivani priliv.`)
   }
   const projectName = new Map(projectRows.map(p => [p.id, p.name || '—']))
   const startOfCurrent = `${req.currentMonth}-01`
@@ -296,7 +301,7 @@ export async function loadCashTimeline(
       const amount = instalmentAmount(i)
       return amount === null ? [] : [{
         date: i.due_date,
-        label: `${(i.credits as any)?.name || 'Credit'} #${i.installment_no}`,
+        label: `${(i.credits as any)?.name || 'Kredit'} #${i.installment_no}`,
         amount,
         kind: 'instalment',
       }]
@@ -318,7 +323,7 @@ export async function loadCashTimeline(
     ? { amount: pickAmount(cashRow, cur) ?? 0, asOf: cashRow.as_of }
     : null
   if (cashRow && pickAmount(cashRow, cur) === null) {
-    notes.push(`The cash position of ${cashRow.as_of} has no ${cur} figure, so it is read as zero.`)
+    notes.push(`Stanje novca od ${srDate(cashRow.as_of)} nema iznos u ${cur}, pa se računa kao nula.`)
   }
 
   // Posted after the reading, inside its own month: the reading is a point and

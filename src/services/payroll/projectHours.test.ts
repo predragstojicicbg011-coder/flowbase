@@ -43,11 +43,11 @@ describe('projectShares', () => {
       [{ project_id: 'a', hours: 120 }, { project_id: 'b', hours: 60 }],
       { worked: 168, paid: 168 }, 'Petrović Marko')
     expect(r.shares).toEqual([])
-    expect(r.error).toMatch(/Petrović Marko: 180 hours .* only 168 .* 12 too many/)
+    expect(r.error).toMatch(/Petrović Marko: 180 sati .* samo 168 .* 12 previše/)
   })
 
   it('refuses project hours in a month with no paid hours', () => {
-    expect(projectShares([{ project_id: 'a', hours: 8 }], null).error).toMatch(/168|worked|paid/)
+    expect(projectShares([{ project_id: 'a', hours: 8 }], null).error).toMatch(/radeno samo 0/)
   })
 
   it('merges two rows of the same project', () => {
@@ -60,8 +60,8 @@ describe('projectShares', () => {
 
 describe('checkProjectHours', () => {
   it('refuses negative hours and hours on no project', () => {
-    expect(checkProjectHours([{ project_id: 'a', hours: -1 }], 10)).toMatch(/negative/)
-    expect(checkProjectHours([{ project_id: null, hours: 4 }], 10)).toMatch(/no project/)
+    expect(checkProjectHours([{ project_id: 'a', hours: -1 }], 10)).toMatch(/negativni/)
+    expect(checkProjectHours([{ project_id: null, hours: 4 }], 10)).toMatch(/bez projekta/)
     expect(checkProjectHours([{ project_id: 'a', hours: 10 }], 10)).toBeNull()
   })
 
@@ -163,7 +163,7 @@ describe('saveProjectHours', () => {
     await expect(saveProjectHours(c, {
       companyId: 'c1', employeeId: 'e1', month: '2026-09', worked: 100,
       rows: [{ project_id: 'a', hours: 120 }],
-    })).rejects.toThrow(/too many/)
+    })).rejects.toThrow(/20 previše/)
     expect(c.calls.upserts).toHaveLength(0)
     expect(c.calls.deletes).toHaveLength(0)
   })

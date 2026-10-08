@@ -169,8 +169,8 @@ export function claimNotice(
   if (free.claimedBy.length === 0) return null
   const who = free.claimedBy.map(labelFor).join(', ')
   return free.exhausted
-    ? `Already fully covered by ${who} in this batch`
-    : `${format(free.remaining)} left — the rest is claimed by ${who}`
+    ? `Već u celosti pokriveno u ovom uvozu: ${who}`
+    : `Preostalo ${format(free.remaining)} — ostatak već koristi: ${who}`
 }
 
 

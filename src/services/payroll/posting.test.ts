@@ -259,7 +259,7 @@ describe('departments', () => {
       rates: RATES_2026, monthHours: FUND,
     }).runs.find(r => r.key === 'regular')!
     const q = planFor({ run, month: MONTH, people: { e1: p }, mapping: [] })
-    expect(checkPlan(q)).toContain('no department')
+    expect(checkPlan(q)).toContain('bez sektora')
   })
 })
 
@@ -274,7 +274,7 @@ describe('checkPlan', () => {
     const broken = { ...good, expectedTotalCost: good.expectedTotalCost + 500 }
     const why = checkPlan(broken)!
     expect(why).toMatch(/-500\.0\d/)
-    expect(why).toContain('Nothing has been written')
+    expect(why).toContain('Ništa nije upisano')
   })
 
   it('refuses a negative payable', () => {
@@ -285,7 +285,7 @@ describe('checkPlan', () => {
       invoices: good.invoices.map(i =>
         i.kind === 'net' ? { ...i, amount: -50 } : i),
     }
-    expect(checkPlan(broken)).toContain('negative invoice')
+    expect(checkPlan(broken)).toContain('negativna faktura')
   })
 })
 
@@ -298,7 +298,7 @@ describe('the notes', () => {
       { e1: sheet({ regular_hours: FUND }) })
     expect(p.invoices.every(i => i.note.includes('2026-08'))).toBe(true)
     expect(p.invoices.every(i => i.note.includes(RUN_LABELS.regular))).toBe(true)
-    expect(p.invoices.find(i => i.kind === 'net')!.note).toContain('after 2500 forwarded')
+    expect(p.invoices.find(i => i.kind === 'net')!.note).toContain('nakon prosleđenih 2500')
   })
 
   it('puts every salary entry under one subcategory the P&L already knows', () => {
@@ -329,7 +329,7 @@ describe('the ledger has to recognise every heading', () => {
     const { plan: p } = plan([person()], { e1: sheet({ regular_hours: FUND }) })
     const why = checkPlan(p, { ...known, departments: ['Somewhere else'] })!
     expect(why).toContain('Development')
-    expect(why).toContain('Nothing was written')
+    expect(why).toContain('Ništa nije upisano')
   })
 
   it('checks nothing when no list is given, so an old caller still works', () => {
@@ -351,7 +351,7 @@ describe('other income does not post as a salary', () => {
     expect(o.pl_subcategory).not.toBe(NET_SUBCATEGORY)
     expect(o.department).toBe('Development')
     expect(o.amount).toBe(20000)
-    expect(o.note).toContain('Other income')
+    expect(o.note).toContain('Ostala primanja')
   })
 })
 
@@ -441,7 +441,7 @@ describe('projects, by hours', () => {
   it('refuses a month with more hours on projects than worked', () => {
     const { plan: p } = build({ e1: [{ project_id: 'a', hours: FUND + 1 }] })
     expect(p.projectErrors).toHaveLength(1)
-    expect(checkPlan(p)).toMatch(/too many/)
+    expect(checkPlan(p)).toMatch(/previše/)
   })
 
   it('writes no allocation codes', () => {

@@ -45,6 +45,7 @@ import {
   type BookAmounts, type BookRates,
 } from '../services/bookAmounts'
 import { fmtMoney, fmtNum } from '../utils/formatters'
+import { countOf } from '../utils/plural'
 // credit payment P&L logic is inline
 
 /** How many posted statements the history list shows before "Load more". */
@@ -521,22 +522,22 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       const closing = (affected || []).filter((i: any) => i.calculated_status === 'paid')
 
       const lines = [
-        `Delete "${log.file_name || 'this statement'}" and everything it posted?`,
+        `Obrisati „${log.file_name || 'ovaj izvod'}“ i sve što je proknjižio?`,
         '',
-        `· ${txCount ?? 0} transaction${txCount === 1 ? '' : 's'}`,
+        `· transakcija: ${txCount ?? 0}`,
       ]
-      if ((ptCount ?? 0) > 0) lines.push(`· ${ptCount} pass-through row${ptCount === 1 ? '' : 's'}`)
+      if ((ptCount ?? 0) > 0) lines.push(`· prolaznih stavki: ${ptCount}`)
       if (invoiceIds.length > 0) {
-        lines.push(`· ${invoiceIds.length} invoice allocation${invoiceIds.length === 1 ? '' : 's'}`)
+        lines.push(`· raspodela na fakture: ${invoiceIds.length}`)
         if (closing.length > 0) {
           lines.push('')
-          lines.push(`${closing.length} invoice${closing.length === 1 ? '' : 's'} currently read as paid and will owe money again:`)
-          lines.push(closing.slice(0, 8).map((i: any) => i.invoice_number || '(no number)').join(', ')
-            + (closing.length > 8 ? `, and ${closing.length - 8} more` : ''))
+          lines.push(`Fakture koje se sada vode kao plaćene i ponovo će imati dug (${closing.length}):`)
+          lines.push(closing.slice(0, 8).map((i: any) => i.invoice_number || '(bez broja)').join(', ')
+            + (closing.length > 8 ? ` i još ${closing.length - 8}` : ''))
         }
       }
       lines.push('')
-      lines.push('This cannot be undone from here.')
+      lines.push('Ovo se ne može poništiti odavde.')
 
       if (!window.confirm(lines.join('\n'))) { setDeleting(null); return }
 
@@ -548,16 +549,16 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
 
       const r = (data || {}) as any
       setNotice(
-        `Deleted ${r.transactions_deleted ?? 0} transaction(s)`
-        + ((r.passthroughs_deleted ?? 0) > 0 ? `, ${r.passthroughs_deleted} pass-through(s)` : '')
-        + `, removed ${r.allocations_removed ?? 0} allocation(s)`
-        + ((r.installments_reopened ?? 0) > 0 ? `, reopened ${r.installments_reopened} credit instalment(s)` : '')
-        + ((r.invoices_restated ?? 0) > 0 ? `, and ${r.invoices_restated} invoice(s) no longer read as they did` : '')
+        `Obrisano transakcija: ${r.transactions_deleted ?? 0}`
+        + ((r.passthroughs_deleted ?? 0) > 0 ? `, prolaznih stavki: ${r.passthroughs_deleted}` : '')
+        + `, uklonjeno raspodela: ${r.allocations_removed ?? 0}`
+        + ((r.installments_reopened ?? 0) > 0 ? `, ponovo otvoreno rata kredita: ${r.installments_reopened}` : '')
+        + ((r.invoices_restated ?? 0) > 0 ? `, faktura kojima se promenio status: ${r.invoices_restated}` : '')
         + '.')
       setHistoryRefresh(n => n + 1)
       onImported()
     } catch (err: any) {
-      setError(`The statement was not deleted: ${err.message}`)
+      setError(`Izvod nije obrisan: ${err.message}`)
     }
     setDeleting(null)
   }
@@ -613,7 +614,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
   const startEdit = async (log: any) => {
     const batchId: string | null = log.filing_ref || null
     if (!batchId) {
-      setError('This entry was posted before statements were tracked as a batch, so its rows cannot be traced back. Edit those transactions individually instead.')
+      setError('Ovaj unos je proknjižen pre nego što su izvodi praćeni kao celina, pa se njegove stavke ne mogu povezati. Izmenite te transakcije pojedinačno.')
       return
     }
     setLoadingStatement(true); setError(''); setNotice('')
@@ -631,7 +632,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           .order('transaction_date').order('created_at').order('id').range(from, to)),
       ])
       if (txRows.length === 0 && ptRows.length === 0) {
-        setError('This statement has no rows left — they were deleted or moved elsewhere.')
+        setError('Ovaj izvod više nema stavki — obrisane su ili premeštene.')
         setLoadingStatement(false)
         return
       }
@@ -694,7 +695,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       setEditing({
         logId: log.id,
         batchId,
-        label: log.file_name || 'Manual entry',
+        label: log.file_name || 'Ručni unos',
         lockedCount: loaded.filter(r => r.locked).length,
         originalMonths: Array.from(new Set(
           loaded.filter(r => !r.locked && r.date).map(r => r.date.slice(0, 7))
@@ -702,7 +703,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       })
       setPartnerSearch({})
     } catch (err: any) {
-      setError(`Could not open this statement: ${err.message}`)
+      setError(`Izvod nije mogao da se otvori: ${err.message}`)
     }
     setLoadingStatement(false)
   }
@@ -739,7 +740,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
   /** A row id means nothing to a person; its position in the statement does. */
   const claimRowLabel = useCallback((rowId: string) => {
     const idx = rows.findIndex(r => r.id === rowId)
-    return idx >= 0 ? `line ${idx + 1}` : 'another line'
+    return idx >= 0 ? `stavka ${idx + 1}` : 'druga stavka'
   }, [rows])
 
   /**
@@ -808,16 +809,16 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
   const fxScripts = useMemo(() => orderedForDifference(quickFillScripts), [quickFillScripts])
 
   const getRowSummary = (row: StatementRow) => {
-    if (row.tx_type === 'credit_payment') return `🏦 Credit payment${row.selected_credit_id ? ' · ' + (credits.find(c => c.id === row.selected_credit_id)?.name || '') : ''}`
-    if (row.tx_type === 'passthrough') return `🔄 Pass-through ${row.pt_direction === 'in' ? 'IN' : 'OUT'}`
+    if (row.tx_type === 'credit_payment') return `🏦 Otplata kredita${row.selected_credit_id ? ' · ' + (credits.find(c => c.id === row.selected_credit_id)?.name || '') : ''}`
+    if (row.tx_type === 'passthrough') return `🔄 Prolazna stavka — ${row.pt_direction === 'in' ? 'UPLATA' : 'ISPLATA'}`
     if (row.tx_type === 'invoice_payment') {
       const inv = openInvoices.find(i => i.id === row.linked_invoice_id)
-      return `💳 Invoice payment${inv ? ` · ${inv.partner_name}` : ''}`
+      return `💳 Plaćanje fakture${inv ? ` · ${inv.partner_name}` : ''}`
     }
     if (row.tx_subtype === 'revenue' && effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance)) return `📥 ${ADVANCE_LABEL}`
-    if (row.tx_subtype === 'revenue') return `📥 Revenue${row.revenue_stream ? ` · ${row.revenue_stream}` : ''}`
+    if (row.tx_subtype === 'revenue') return `📥 Prihod${row.revenue_stream ? ` · ${row.revenue_stream}` : ''}`
     const parts = [row.pl_category_name, row.department_name].filter(Boolean)
-    return `📤 Expense${parts.length ? ` · ${parts.join(' / ')}` : ' · unclassified'}`
+    return `📤 Trošak${parts.length ? ` · ${parts.join(' / ')}` : ' · nerazvrstano'}`
   }
 
   /**
@@ -888,18 +889,18 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         projectId: projectIdFromInput(row.project_id),
         splitLines: row.pl_splits.length + (row.stored_split ? 1 : 0),
       })
-      if (why) return `Line ${row.date} ${row.description || ''}: ${why}`
+      if (why) return `Stavka ${row.date} ${row.description || ''}: ${why}`
     }
     return null
   }
 
   const handlePost = async () => {
-    if (!company || !bank) { setError('Please select company and bank.'); return }
+    if (!company || !bank) { setError('Izaberite firmu i banku.'); return }
     {
       const why = advanceProblem(validRows)
-      if (why) { setError(`${why} Nothing was saved.`); return }
+      if (why) { setError(`${why} Ništa nije sačuvano.`); return }
     }
-    if (validRows.length === 0) { setError('Add at least one row with a date and amount.'); return }
+    if (validRows.length === 0) { setError('Dodajte bar jednu stavku sa datumom i iznosom.'); return }
     setPosting(true); setError('')
     // Every write below can succeed while the result is still not what the
     // rows promised. Collected as they go, checked once at the end.
@@ -919,7 +920,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         }
       }
     } catch (err: any) {
-      setError(`${err.message}. Nothing was saved.`)
+      setError(`${err.message}. Ništa nije sačuvano.`)
       setPosting(false)
       return
     }
@@ -979,7 +980,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           ? whySplitNotSavable({ amount, currency: cur, ...rowBook }, row.pl_splits)
           : null
         if (whyThisSplit) {
-          throw new Error(`Line ${row.date} ${row.description || ''}: ${whyThisSplit}`)
+          throw new Error(`Stavka ${row.date} ${row.description || ''}: ${whyThisSplit}`)
         }
 
         const { data: newTx, error: txErr } = await supabase.from('transactions').insert({
@@ -1019,7 +1020,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           const outcome = await saveSplits(
             supabase, 'transaction', newTx.id,
             { amount, currency: cur, ...rowBook }, row.pl_splits)
-          if (!outcome.ok) throw new Error(`Line ${row.date}: ${outcome.message}`)
+          if (!outcome.ok) throw new Error(`Stavka ${row.date}: ${outcome.message}`)
         }
 
         if (row.tx_type === 'credit_payment' && row.selected_installment_ids.length > 0) {
@@ -1027,7 +1028,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           // rates, the last one taking the rounding, so the legs add up to the
           // line - services/creditPayment.ts.
           const credit = credits.find((c: any) => c.id === row.selected_credit_id)
-          const creditName = credit?.name || 'Credit'
+          const creditName = credit?.name || 'Kredit'
           const legs = creditLegBooker(credit?.currency, rowBook, creditName)
 
           // What this bank line actually paid, in the credit's currency. Until now this was
@@ -1230,14 +1231,14 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                 status: 'posted',
                 note: entryNote(inv.invoice_number || null, difference),
               }).select('id').single()
-              if (fxErr) throw new Error(`The currency difference could not be posted: ${fxErr.message}`)
+              if (fxErr) throw new Error(`Kursna razlika nije proknjižena: ${fxErr.message}`)
 
               if (difference.linksToInvoice && fxTx?.id) {
                 const { error: fxLinkErr } = await supabase.from('invoice_transaction_links').insert({
                   invoice_id: inv.id, transaction_id: fxTx.id,
                   ...linkAmountsFromOwn(shortfallOwn, inv),
                 })
-                if (fxLinkErr) throw new Error(`The currency difference was posted but could not be linked to the invoice: ${fxLinkErr.message}`)
+                if (fxLinkErr) throw new Error(`Kursna razlika je proknjižena, ali nije mogla da se poveže sa fakturom: ${fxLinkErr.message}`)
                 willHold += shortfallOwn
               }
             }
@@ -1269,12 +1270,12 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         row_count: validRows.length - skippedDuplicates,
         default_currency: defaultCurrency,
         note: skippedDuplicates > 0
-          ? `${validRows.length - skippedDuplicates} rows posted, ${skippedDuplicates} skipped as already imported`
-          : `${validRows.length} rows posted manually`,
+          ? `Proknjiženo stavki: ${validRows.length - skippedDuplicates}, preskočeno kao već uvezeno: ${skippedDuplicates}`
+          : `Ručno proknjiženo stavki: ${validRows.length}`,
         filing_ref: importBatchId,
       })
       if (skippedDuplicates > 0) {
-        setError(`Note: ${skippedDuplicates} of ${validRows.length} rows had already been imported and were skipped.`)
+        setError(`Napomena: ${skippedDuplicates} od ${validRows.length} stavki je već bilo uvezeno i preskočeno je.`)
       }
       // Did the invoices end up where the rows said they would? Nothing here
       // can be undone by this point; this exists so nobody walks away from a
@@ -1296,7 +1297,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       setPosted(true)
       setTimeout(() => { onImported(); onClose() }, 1500)
     } catch (err: any) {
-      setError(`Error: ${err.message}`)
+      setError(`Greška: ${err.message}`)
     }
     setPosting(false)
   }
@@ -1317,19 +1318,19 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
     const editable = rows.filter(r => !r.locked)
     const incomplete = editable.filter(r => !(r.date && (parseFloat(r.debit) > 0 || parseFloat(r.credit) > 0)))
     if (incomplete.length > 0) {
-      setError(`${incomplete.length} row${incomplete.length !== 1 ? 's are' : ' is'} missing a date or an amount. Fill them in or remove them.`)
+      setError(`Stavke bez datuma ili iznosa: ${incomplete.length}. Popunite ih ili uklonite.`)
       return
     }
     {
       const why = advanceProblem(editable)
-      if (why) { setError(`${why} Nothing was changed.`); return }
+      if (why) { setError(`${why} Ništa nije promenjeno.`); return }
     }
     // The type cards already refuse this, but the check is repeated here
     // because getting it wrong writes a row into the wrong table and leaves
     // the original behind.
     const misplaced = editable.filter(r => !allowedTypes(r).includes(r.tx_type))
     if (misplaced.length > 0) {
-      setError('A posted row cannot be changed to that transaction type. Remove it and enter a new one instead.')
+      setError('Proknjižena stavka ne može da se promeni u taj tip transakcije. Uklonite je i unesite novu.')
       return
     }
 
@@ -1339,7 +1340,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
     try {
       for (const row of editable) await bookRow(rowAmount(row).amount, row.currency || defaultCurrency, row.date)
     } catch (err: any) {
-      setError(`${err.message}. Nothing was changed.`)
+      setError(`${err.message}. Ništa nije promenjeno.`)
       setPosting(false)
       return
     }
@@ -1359,7 +1360,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           .in('period', Array.from(months).map(m => `${m}-01`))
         if (closed && closed.length > 0) {
           const list = closed.map((c: any) => String(c.period).slice(0, 7)).sort().join(', ')
-          setError(`Period ${list} is locked for this company — nothing was changed. Unlock it in Settings and try again.`)
+          setError(`Period ${list} je zaključan za ovu firmu — ništa nije promenjeno. Otključajte ga u Podešavanjima i pokušajte ponovo.`)
           setPosting(false)
           return
         }
@@ -1502,22 +1503,22 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         date_to: span.date_to,
         row_count: span.row_count,
         default_currency: defaultCurrency,
-        note: editDescription.trim() || `${span.row_count} rows entered manually`,
+        note: editDescription.trim() || `Ručno uneto stavki: ${span.row_count}`,
       }).eq('id', editing.logId)
       if (logErr) throw logErr
 
       const changed = editable.length
       const dropped = removedRows.length
       setNotice(
-        `Statement saved — ${changed} row${changed !== 1 ? 's' : ''} updated` +
-        (dropped > 0 ? `, ${dropped} removed` : '') +
-        (editing.lockedCount > 0 ? `, ${editing.lockedCount} credit row${editing.lockedCount !== 1 ? 's' : ''} left untouched` : '') + '.'
+        `Izvod je sačuvan — izmenjeno stavki: ${changed}` +
+        (dropped > 0 ? `, uklonjeno: ${dropped}` : '') +
+        (editing.lockedCount > 0 ? `, nedirnutih stavki kredita: ${editing.lockedCount}` : '') + '.'
       )
       exitEdit()
       setHistoryVersion(v => v + 1)
       onImported()
     } catch (err: any) {
-      setError(`Error: ${err.message}`)
+      setError(`Greška: ${err.message}`)
     }
     setPosting(false)
   }
@@ -1528,8 +1529,8 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: DIALOG.accentFill, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={DIALOG.accent} strokeWidth="2"><path d="M5 13l4 4L19 7" /></svg>
         </div>
-        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>Statement posted!</div>
-        <div style={{ fontSize: '13px', color: DIALOG.dim }}>{validRows.length} transaction{validRows.length !== 1 ? 's' : ''} added.</div>
+        <div style={{ fontFamily: 'Georgia,serif', fontSize: '20px', color: DIALOG.text }}>Izvod je proknjižen.</div>
+        <div style={{ fontSize: '13px', color: DIALOG.dim }}>Dodato: {countOf(validRows.length, 'transakcija', 'transakcije', 'transakcija')}.</div>
       </div>
     </div>
   )
@@ -1539,11 +1540,11 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       <div style={s.dialog}>
         <div style={s.header}>
           <div>
-            <div style={s.headerTitle}>Manual bank statement entry</div>
-            <div style={s.headerSub}>Enter transactions row by row — click a row to classify it</div>
+            <div style={s.headerTitle}>Ručni unos izvoda</div>
+            <div style={s.headerSub}>Unesite transakcije red po red — kliknite na red da ga razvrstate</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={s.plBadge}>P&amp;L Impact</div>
+            <div style={s.plBadge}>Utiče na P&amp;L</div>
             <span style={s.logoText}>MCFlow</span>
             <button style={s.closeBtn} onClick={onClose}>×</button>
           </div>
@@ -1552,40 +1553,40 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         <div style={s.body}>
           {/* Statement details */}
           <div style={s.section}>
-            <div style={s.sectionTitle}>Statement details</div>
+            <div style={s.sectionTitle}>Podaci o izvodu</div>
             <div style={{ display: 'grid', gridTemplateColumns: showPicker ? '1fr 1fr 160px 120px' : '1fr 160px 120px', gap: '12px' }}>
               {showPicker && (
                 <div style={s.field}>
-                  <label style={s.lbl}>Company <span style={s.req}>*</span></label>
+                  <label style={s.lbl}>Firma <span style={s.req}>*</span></label>
                   {/* Locked while editing: the account is what scopes the batch,
                       and moving a posted statement to another one is not an edit. */}
                   <select style={s.select} value={company} onChange={e => setCompany(e.target.value)} disabled={!!editing}>
-                    <option value="">Select company...</option>
+                    <option value="">Izaberite firmu…</option>
                     {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
               )}
               <div style={s.field}>
-                <label style={s.lbl}>Bank account <span style={s.req}>*</span></label>
+                <label style={s.lbl}>Tekući račun <span style={s.req}>*</span></label>
                 <select style={s.select} value={bank} onChange={e => setBank(e.target.value)} disabled={!company || !!editing}>
-                  <option value="">Select bank...</option>
+                  <option value="">Izaberite banku…</option>
                   {banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </div>
               <div style={s.field}>
-                <label style={s.lbl}>Statement #</label>
-                <input style={s.input} value={statementNumber} onChange={e => setStatementNumber(e.target.value)} placeholder="e.g. 2026-05" />
+                <label style={s.lbl}>Izvod br.</label>
+                <input style={s.input} value={statementNumber} onChange={e => setStatementNumber(e.target.value)} placeholder="npr. 2026-05" />
               </div>
               <div style={s.field}>
-                <label style={s.lbl}>Statement date</label>
+                <label style={s.lbl}>Datum izvoda</label>
                 <input type="date" style={s.input} value={statementDate}
                   onChange={e => applyStatementDate(e.target.value)} />
                 <span style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '3px', lineHeight: 1.4 }}>
-                  Carried to every row that still follows it. A row you date yourself keeps its own.
+                  Prenosi se na svaki red koji ga i dalje prati. Red kome sami unesete datum zadržava svoj.
                 </span>
               </div>
               <div style={s.field}>
-                <label style={s.lbl}>Default currency</label>
+                <label style={s.lbl}>Podrazumevana valuta</label>
                 <select style={s.select} value={defaultCurrency} onChange={e => setDefaultCurrency(e.target.value)}>
                   {DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}
                 </select>
@@ -1599,15 +1600,15 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', paddingBottom: '6px', borderBottom: '0.5px solid ' + DIALOG.border, marginBottom: '10px' }}
                 onClick={() => setHistoryExpanded(prev => !prev)}>
                 <div style={{ fontSize: '10px', fontWeight: '600', color: DIALOG.dim, textTransform: 'uppercase' as const, letterSpacing: '0.08em' }}>
-                  🕐 Posted statements — this account · {defaultCurrency}
+                  🕐 Proknjiženi izvodi — ovaj račun · {defaultCurrency}
                   {historyTotal > 0 && <span style={{ marginLeft: '8px', background: DIALOG.accentFill, color: DIALOG.accent, padding: '1px 7px', borderRadius: '20px', fontSize: '10px' }}>{historyTotal}</span>}
                 </div>
-                <span style={{ fontSize: '10px', color: DIALOG.dim }}>{historyExpanded ? '▲ Hide' : '▼ Show'}</span>
+                <span style={{ fontSize: '10px', color: DIALOG.dim }}>{historyExpanded ? '▲ Sakrij' : '▼ Prikaži'}</span>
               </div>
               {historyExpanded && (
                 importHistory.length === 0 ? (
                   <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '10px 12px', background: DIALOG.raised, borderRadius: '8px', border: '0.5px solid ' + DIALOG.border }}>
-                    {historyLoading ? 'Loading…' : `No statements posted in ${defaultCurrency} for this account yet.`}
+                    {historyLoading ? 'Učitavanje…' : `Za ovaj račun još nema proknjiženih izvoda u ${defaultCurrency}.`}
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '5px' }}>
@@ -1615,21 +1616,21 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                       <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 12px', background: DIALOG.raised, borderRadius: '8px', border: '0.5px solid ' + DIALOG.border }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.text }}>
-                            {log.file_name || 'Manual entry'}
+                            {log.file_name || 'Ručni unos'}
                             {log.default_currency && (
                               <span style={{ marginLeft: '8px', fontSize: '10px', color: DIALOG.dim, fontWeight: '400' }}>{log.default_currency}</span>
                             )}
                           </div>
                           <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                             {log.date_from && log.date_to ? `${log.date_from} → ${log.date_to}` : log.date_from || '—'}
-                            {log.row_count ? ` · ${log.row_count} rows` : ''}
+                            {log.row_count ? ` · stavki: ${log.row_count}` : ''}
                             {log.note ? ` · ${log.note}` : ''}
                           </div>
                         </div>
                         <div style={{ fontSize: '11px', color: DIALOG.dim, whiteSpace: 'nowrap' as const }}>
-                          {new Date(log.created_at).toLocaleDateString('en-GB')}
+                          {new Date(log.created_at).toLocaleDateString('sr-Latn-RS')}
                         </div>
-                        <div style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: DIALOG.accentFill, color: DIALOG.accent, whiteSpace: 'nowrap' as const }}>✓ Posted</div>
+                        <div style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: DIALOG.accentFill, color: DIALOG.accent, whiteSpace: 'nowrap' as const }}>✓ Proknjiženo</div>
                         {/* Without a batch id nothing ties the statement's rows
                             together, so there is no statement to reopen. Say so
                             here rather than offering a button that cannot work. */}
@@ -1638,19 +1639,19 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             <button
                               style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '4px 11px', border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', background: 'transparent', color: DIALOG.dim, cursor: loadingStatement ? 'wait' : 'pointer', whiteSpace: 'nowrap' as const }}
                               disabled={loadingStatement}
-                              onClick={() => startEdit(log)}>✎ Edit</button>
+                              onClick={() => startEdit(log)}>✎ Izmeni</button>
                             <button
                               style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '4px 11px', border: '0.5px solid ' + DIALOG.red, borderRadius: '6px', background: 'transparent', color: DIALOG.red, cursor: deleting ? 'wait' : 'pointer', whiteSpace: 'nowrap' as const, opacity: deleting === log.filing_ref ? 0.6 : 1 }}
                               disabled={!!deleting}
-                              title="Delete this statement and every transaction, allocation and instalment it created"
+                              title="Obriši ovaj izvod i sve transakcije, raspodele i rate koje je napravio"
                               onClick={() => deleteStatement(log)}>
-                              {deleting === log.filing_ref ? '…' : '🗑 Delete'}
+                              {deleting === log.filing_ref ? '…' : '🗑 Obriši'}
                             </button>
                           </>
                         ) : (
                           <span style={{ fontSize: '10px', color: DIALOG.faint, padding: '4px 6px', whiteSpace: 'nowrap' as const }}
-                            title="This statement was posted before its rows were tracked as a batch, so they cannot be traced back to it. Edit those transactions individually.">
-                            not linked
+                            title="Ovaj izvod je proknjižen pre nego što su stavke praćene kao celina, pa se ne mogu povezati sa njim. Izmenite te transakcije pojedinačno.">
+                            nepovezano
                           </span>
                         )}
                       </div>
@@ -1663,12 +1664,12 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         style={{ marginTop: '4px', fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '7px', border: '0.5px solid ' + DIALOG.border, borderRadius: '8px', background: 'transparent', color: DIALOG.dim, cursor: historyLoading ? 'wait' : 'pointer', width: '100%' }}
                         disabled={historyLoading}
                         onClick={() => setHistoryLimit(n => n + HISTORY_PAGE)}>
-                        {historyLoading ? 'Loading…' : `Load more — ${historyTotal - importHistory.length} older`}
+                        {historyLoading ? 'Učitavanje…' : `Učitaj još — starijih: ${historyTotal - importHistory.length}`}
                       </button>
                     )}
                     {importHistory.length >= historyTotal && historyTotal > HISTORY_PAGE && (
                       <div style={{ fontSize: '10px', color: DIALOG.faint, textAlign: 'center' as const, paddingTop: '4px' }}>
-                        All {historyTotal} shown
+                        Prikazano svih {historyTotal}
                       </div>
                     )}
                   </div>
@@ -1684,10 +1685,10 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', cursor: 'pointer' }}
                     onClick={() => setShowUnlinked(v => !v)}>
                     <span style={{ fontSize: '10px', color: DIALOG.faint }}>
-                      {unlinkedCount} older statement{unlinkedCount !== 1 ? 's' : ''} not linked to their rows — no currency, cannot be reopened
+                      Stariji izvodi koji nisu povezani sa stavkama: {unlinkedCount} — bez valute, ne mogu se ponovo otvoriti
                     </span>
                     <span style={{ fontSize: '10px', color: DIALOG.dim, whiteSpace: 'nowrap' as const }}>
-                      {showUnlinked ? '▲ Hide' : '▼ Show'}
+                      {showUnlinked ? '▲ Sakrij' : '▼ Prikaži'}
                     </span>
                   </div>
 
@@ -1696,18 +1697,18 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                       {unlinkedLogs.map(log => (
                         <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '7px 12px', background: DIALOG.panel, borderRadius: '8px', border: '0.5px solid ' + DIALOG.borderSoft, opacity: 0.75 }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '12px', color: DIALOG.dim }}>{log.file_name || 'Manual entry'}</div>
+                            <div style={{ fontSize: '12px', color: DIALOG.dim }}>{log.file_name || 'Ručni unos'}</div>
                             <div style={{ fontSize: '10px', color: DIALOG.faint, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                               {log.date_from && log.date_to ? `${log.date_from} → ${log.date_to}` : log.date_from || '—'}
-                              {log.row_count ? ` · ${log.row_count} rows` : ''}
+                              {log.row_count ? ` · stavki: ${log.row_count}` : ''}
                             </div>
                           </div>
                           <div style={{ fontSize: '11px', color: DIALOG.faint, whiteSpace: 'nowrap' as const }}>
-                            {new Date(log.created_at).toLocaleDateString('en-GB')}
+                            {new Date(log.created_at).toLocaleDateString('sr-Latn-RS')}
                           </div>
                           <span style={{ fontSize: '10px', color: DIALOG.faint, whiteSpace: 'nowrap' as const }}
-                            title="Edit these transactions individually from the Transactions page.">
-                            not linked
+                            title="Izmenite ove transakcije pojedinačno na strani Transakcije.">
+                            nepovezano
                           </span>
                         </div>
                       ))}
@@ -1715,7 +1716,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         <button
                           style={{ marginTop: '2px', fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '6px', border: '0.5px solid ' + DIALOG.borderSoft, borderRadius: '8px', background: 'transparent', color: DIALOG.faint, cursor: 'pointer', width: '100%' }}
                           onClick={() => setUnlinkedLimit(n => n + HISTORY_PAGE)}>
-                          Load more — {unlinkedCount - unlinkedLogs.length} older
+                          Učitaj još — starijih: {unlinkedCount - unlinkedLogs.length}
                         </button>
                       )}
                     </div>
@@ -1731,22 +1732,22 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
               <div style={{ background: DIALOG.blueFill, border: '0.5px solid rgba(78,168,255,0.3)', borderRadius: '10px', padding: '12px 14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '13px', fontWeight: '600', color: DIALOG.blue }}>✎ Editing {editing.label}</div>
+                    <div style={{ fontSize: '13px', fontWeight: '600', color: DIALOG.blue }}>✎ Izmena: {editing.label}</div>
                     <div style={{ fontSize: '11px', color: DIALOG.dim, marginTop: '3px' }}>
-                      Changes are written to the transactions this statement already posted.
-                      {editing.lockedCount > 0 && ` ${editing.lockedCount} credit row${editing.lockedCount !== 1 ? 's are' : ' is'} locked — settle those from the credit screen.`}
+                      Izmene se upisuju u transakcije koje je ovaj izvod već proknjižio.
+                      {editing.lockedCount > 0 && ` Zaključane stavke kredita: ${editing.lockedCount} — njih rešite na ekranu Krediti.`}
                     </div>
                   </div>
                   <button style={{ ...s.btnGhost, fontSize: '12px', padding: '6px 14px', whiteSpace: 'nowrap' as const }} onClick={exitEdit}>
-                    ✕ Cancel edit
+                    ✕ Otkaži izmenu
                   </button>
                 </div>
                 <div style={s.field}>
-                  <label style={s.lbl}>Statement description</label>
+                  <label style={s.lbl}>Opis izvoda</label>
                   <input style={{ ...s.input, width: '100%', boxSizing: 'border-box' as const }}
                     value={editDescription}
                     onChange={e => setEditDescription(e.target.value)}
-                    placeholder="What this statement covers" />
+                    placeholder="Šta ovaj izvod obuhvata" />
                 </div>
               </div>
             </div>
@@ -1756,11 +1757,11 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           <div style={s.section}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
               <div style={s.sectionTitle}>
-                {editing ? 'Statement rows — click a row to reclassify it' : 'Transactions — click row to classify'}
+                {editing ? 'Stavke izvoda — kliknite na red da ga ponovo razvrstate' : 'Transakcije — kliknite na red da ga razvrstate'}
               </div>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', color: DIALOG.dim }}>{validRows.length} valid</span>
-                <button style={s.addRowBtn} onClick={addRow}>+ Add row</button>
+                <span style={{ fontSize: '11px', color: DIALOG.dim }}>ispravnih: {validRows.length}</span>
+                <button style={s.addRowBtn} onClick={addRow}>+ Dodaj red</button>
               </div>
             </div>
 
@@ -1790,15 +1791,15 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                       <span style={{ fontSize: '13px' }}>🏦</span>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: '12px', color: DIALOG.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                          {row.description || 'Credit payment'}
+                          {row.description || 'Otplata kredita'}
                         </div>
                         <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px' }}>
                           {row.date} · {fmtMoney(amount, row.currency || defaultCurrency)}
                         </div>
                       </div>
                       <div style={{ fontSize: '10px', padding: '2px 9px', borderRadius: '20px', background: DIALOG.blueFill, color: DIALOG.blue, whiteSpace: 'nowrap' as const }}
-                        title="Credit payments settle installments and post their own principal and interest rows. Change them from the credit screen.">
-                        🔒 Credit — not editable here
+                        title="Otplate kredita zatvaraju rate i knjiže svoje stavke glavnice i kamate. Menjajte ih na ekranu Krediti.">
+                        🔒 Kredit — ne menja se ovde
                       </div>
                     </div>
                   )
@@ -1825,7 +1826,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             setPartnerSearch(prev => ({ ...prev, [row.id]: e.target.value }))
                             updateRow(row.id, { partner_name: e.target.value, partner_id: null })
                           }}
-                          placeholder="Partner name" />
+                          placeholder="Naziv partnera" />
                         {(partnerSearch[row.id] ?? '').length > 0 && !row.partner_id && (
                           <div style={{ position: 'absolute' as const, top: '100%', left: 0, right: 0, background: DIALOG.panel, border: '1px solid ' + DIALOG.border, borderRadius: '6px', zIndex: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', maxHeight: '200px', overflowY: 'auto' as const }}>
                             {partners.filter(p => p.name.toLowerCase().includes((partnerSearch[row.id] ?? '').toLowerCase())).slice(0, 8).map(p => (
@@ -1838,13 +1839,13 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                 <span style={{ fontWeight: '500', color: DIALOG.text }}>{p.name}</span>
                                 {allPartnerAccounts.filter(pa => pa.partner_id === p.id).length > 0 && (
                                   <span style={{ fontSize: '10px', color: '#7A9BB8' }}>
-                                    {allPartnerAccounts.filter(pa => pa.partner_id === p.id).length} account(s)
+                                    računa: {allPartnerAccounts.filter(pa => pa.partner_id === p.id).length}
                                   </span>
                                 )}
                               </div>
                             ))}
                             {partners.filter(p => p.name.toLowerCase().includes((partnerSearch[row.id] ?? '').toLowerCase())).length === 0 && (
-                              <div style={{ padding: '7px 10px', fontSize: '12px', color: DIALOG.faint }}>New partner: "{partnerSearch[row.id]}"</div>
+                              <div style={{ padding: '7px 10px', fontSize: '12px', color: DIALOG.faint }}>Novi partner: „{partnerSearch[row.id]}“</div>
                             )}
                           </div>
                         )}
@@ -1852,13 +1853,13 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
 
                       <input style={s.cellInput} value={row.description}
                         onChange={e => { e.stopPropagation(); updateRow(row.id, { description: e.target.value }) }}
-                        onClick={e => e.stopPropagation()} placeholder="Description" />
+                        onClick={e => e.stopPropagation()} placeholder="Opis" />
                       <input type="number" style={{ ...s.cellInput, color: parseFloat(row.debit) > 0 ? DIALOG.red : DIALOG.text }}
-                        value={row.debit} placeholder="Debit (out)"
+                        value={row.debit} placeholder="Isplata"
                         onChange={e => { e.stopPropagation(); updateRow(row.id, { debit: e.target.value, credit: e.target.value ? '' : row.credit }) }}
                         onClick={e => e.stopPropagation()} />
                       <input type="number" style={{ ...s.cellInput, color: parseFloat(row.credit) > 0 ? DIALOG.accent : DIALOG.text }}
-                        value={row.credit} placeholder="Credit (in)"
+                        value={row.credit} placeholder="Uplata"
                         onChange={e => { e.stopPropagation(); updateRow(row.id, { credit: e.target.value, debit: e.target.value ? '' : row.debit }) }}
                         onClick={e => e.stopPropagation()} />
                       <select style={s.cellInput} value={row.currency}
@@ -1870,7 +1871,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         {hasAmount && effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance) && (
                           <span style={{ ...ADVANCE_BADGE_STYLE, marginRight: '4px' }}>{ADVANCE_LABEL}</span>
                         )}
-                        {hasAmount ? getRowSummary(row) : <span style={{ color: DIALOG.faint }}>click to classify</span>}
+                        {hasAmount ? getRowSummary(row) : <span style={{ color: DIALOG.faint }}>kliknite da razvrstate</span>}
                       </div>
                       <button style={{ background: 'none', border: 'none', color: DIALOG.faint, fontSize: '15px', cursor: 'pointer', padding: '2px' }}
                         onClick={e => { e.stopPropagation(); removeRow(row.id) }}>×</button>
@@ -1881,13 +1882,13 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                       <div style={{ padding: '14px 16px', borderTop: '0.5px solid ' + DIALOG.border, background: DIALOG.panel, borderRadius: '0 0 9px 9px' }}>
 
                         {/* Transaction type */}
-                        <div style={s.classTitle}>Transaction type</div>
+                        <div style={s.classTitle}>Tip transakcije</div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '14px' }}>
                           {[
-                            { id: 'direct', icon: '⚡', label: 'Direct transaction', sub: 'Impacts P&L directly', activeColor: DIALOG.accent, activeBg: DIALOG.accentFill },
-                            { id: 'invoice_payment', icon: '💳', label: 'Invoice payment', sub: 'Closes open invoices', activeColor: DIALOG.blue, activeBg: DIALOG.blueFill },
-                            { id: 'passthrough', icon: '🔄', label: 'Pass-through', sub: 'Money in transit', activeColor: DIALOG.amber, activeBg: DIALOG.amberFill },
-                            { id: 'credit_payment', icon: '🏦', label: 'Credit payment', sub: 'Close installments', activeColor: DIALOG.blue, activeBg: DIALOG.blueFill },
+                            { id: 'direct', icon: '⚡', label: 'Direktna transakcija', sub: 'Direktno utiče na P&L', activeColor: DIALOG.accent, activeBg: DIALOG.accentFill },
+                            { id: 'invoice_payment', icon: '💳', label: 'Plaćanje fakture', sub: 'Zatvara otvorene fakture', activeColor: DIALOG.blue, activeBg: DIALOG.blueFill },
+                            { id: 'passthrough', icon: '🔄', label: 'Prolazna stavka', sub: 'Novac u prolazu', activeColor: DIALOG.amber, activeBg: DIALOG.amberFill },
+                            { id: 'credit_payment', icon: '🏦', label: 'Otplata kredita', sub: 'Zatvara rate', activeColor: DIALOG.blue, activeBg: DIALOG.blueFill },
                           ].map(t => {
                             // While editing, a saved row cannot change what
                             // table it lives in, and a credit payment cannot
@@ -1902,7 +1903,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                 cursor: selectable ? 'pointer' : 'not-allowed',
                                 opacity: selectable ? 1 : 0.4,
                               }}
-                                title={selectable ? undefined : 'A posted row cannot be changed to this type'}
+                                title={selectable ? undefined : 'Proknjižena stavka ne može da se promeni u ovaj tip'}
                                 onClick={() => { if (selectable) updateRow(row.id, { tx_type: t.id as any }) }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
                                   <span style={{ fontSize: '13px' }}>{t.icon}</span>
@@ -1917,12 +1918,12 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         {/* Pass-through */}
                         {row.tx_type === 'passthrough' && (
                           <>
-                            <div style={s.classTitle}>Pass-through details</div>
+                            <div style={s.classTitle}>Podaci o prolaznoj stavci</div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
                               <div style={s.field}>
-                                <label style={s.lbl}>Direction</label>
+                                <label style={s.lbl}>Smer</label>
                                 <div style={{ display: 'flex', gap: '8px' }}>
-                                  {[{ id: 'in', label: '📥 IN' }, { id: 'out', label: '📤 OUT' }].map(d => (
+                                  {[{ id: 'in', label: '📥 UPLATA' }, { id: 'out', label: '📤 ISPLATA' }].map(d => (
                                     <div key={d.id} style={{ flex: 1, textAlign: 'center' as const, padding: '8px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500',
                                       border: row.pt_direction === d.id ? `2px solid ${d.id === 'in' ? DIALOG.accent : DIALOG.red}` : '0.5px solid ' + DIALOG.border,
                                       background: row.pt_direction === d.id ? (d.id === 'in' ? DIALOG.accentFill : DIALOG.redFill) : DIALOG.raised,
@@ -1942,11 +1943,11 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         {/* Invoice payment */}
                         {row.tx_type === 'invoice_payment' && (
                           <>
-                            <div style={s.classTitle}>Link to open invoice</div>
+                            <div style={s.classTitle}>Poveži sa otvorenom fakturom</div>
                             <div style={{ marginBottom: '14px' }}>
                               {openInvoices.length === 0 ? (
                                 <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', background: DIALOG.raised, borderRadius: '8px' }}>
-                                  No open invoices for this company. Select a company first.
+                                  Ova firma nema otvorenih faktura. Prvo izaberite firmu.
                                 </div>
                               ) : (
                                 <>
@@ -1955,7 +1956,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                     value={invoiceSearch[row.id] || ''}
                                     onChange={e => { e.stopPropagation(); setInvoiceSearch(prev => ({ ...prev, [row.id]: e.target.value })) }}
                                     onClick={e => e.stopPropagation()}
-                                    placeholder="Search partner or invoice #..."
+                                    placeholder="Pretraga po partneru ili broju fakture…"
                                   />
                                   {(() => {
                                     // Counted over the same list the picker draws
@@ -1968,13 +1969,13 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                     return (
                                       <div style={{ fontSize: '11px', color: DIALOG.dim, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                         <span>
-                                          {hidden} invoice{hidden === 1 ? '' : 's'} already taken by another line
-                                          {showTaken[row.id] ? ' — shown, greyed out' : ' — hidden'}
+                                          Faktura koje su već zauzete drugom stavkom: {hidden}
+                                          {showTaken[row.id] ? ' — prikazane, zasivljene' : ' — skrivene'}
                                         </span>
                                         <button
                                           style={{ background: 'transparent', border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', color: DIALOG.dim, fontSize: '10.5px', padding: '2px 8px', cursor: 'pointer', fontFamily: "'Inter', system-ui, sans-serif" }}
                                           onClick={e => { e.stopPropagation(); setShowTaken(prev => ({ ...prev, [row.id]: !prev[row.id] })) }}>
-                                          {showTaken[row.id] ? 'Hide them' : 'Show them'}
+                                          {showTaken[row.id] ? 'Sakrij ih' : 'Prikaži ih'}
                                         </button>
                                       </div>
                                     )
@@ -1983,7 +1984,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                     <div
                                       style={{ padding: '7px 10px', borderRadius: '7px', border: !row.linked_invoice_id ? '1.5px solid ' + DIALOG.accent : '0.5px solid ' + DIALOG.border, background: !row.linked_invoice_id ? DIALOG.accentFill : DIALOG.raised, cursor: 'pointer', fontSize: '12px', color: DIALOG.dim }}
                                       onClick={e => { e.stopPropagation(); updateRow(row.id, { linked_invoice_id: '' }) }}>
-                                      — No invoice (standalone) —
+                                      — Bez fakture (samostalno) —
                                     </div>
                                     {openInvoices
                                       .filter(inv => {
@@ -2018,14 +2019,14 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                                   {inv.invoice_number && <span style={{ fontSize: '10px', color: DIALOG.dim, background: DIALOG.raised, padding: '1px 6px', borderRadius: '4px', fontFamily: 'monospace' }}>{inv.invoice_number}</span>}
                                                 </div>
                                                 <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px' }}>
-                                                  {inv.invoice_date}{inv.due_date ? ` · Due: ${inv.due_date}` : ''}
+                                                  {inv.invoice_date}{inv.due_date ? ` · Dospeće: ${inv.due_date}` : ''}
                                                 </div>
                                                 {inv.expense_description && <div style={{ fontSize: '10px', color: DIALOG.dim, fontStyle: 'italic', marginTop: '1px' }}>{inv.expense_description}</div>}
                                               </div>
                                               <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
                                                 <div style={{ fontSize: '12px', fontWeight: '600', color: DIALOG.text }}>{fmtMoney(inv.amount || 0, inv.currency || 'RSD')}</div>
                                                 <div style={{ fontSize: '10px', color: remOwn > 0 ? DIALOG.red : DIALOG.accent, marginTop: '1px' }}>
-                                                  Rem: {fmtMoney(remOwn, inv.currency || 'RSD')}
+                                                  Preostalo: {fmtMoney(remOwn, inv.currency || 'RSD')}
                                                 </div>
                                               </div>
                                             </div>
@@ -2040,10 +2041,10 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                               )}
                               {linkedInvoice && (
                                 <div style={{ marginTop: '8px', background: DIALOG.blueFill, border: '0.5px solid ' + DIALOG.blue, borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: DIALOG.blue }}>
-                                  💳 Closes: <strong>{linkedInvoice.partner_name}</strong>
+                                  💳 Zatvara: <strong>{linkedInvoice.partner_name}</strong>
                                   {linkedInvoice.invoice_number && ` · ${linkedInvoice.invoice_number}`}
                                   {' · '}<strong>{fmtMoney(linkedInvoice.amount || 0, linkedInvoice.currency || 'RSD')}</strong>
-                                  {' · '}Rem: <strong>{fmtMoney(outstandingOwn(linkedInvoice), linkedInvoice.currency || 'RSD')}</strong>
+                                  {' · '}Preostalo: <strong>{fmtMoney(outstandingOwn(linkedInvoice), linkedInvoice.currency || 'RSD')}</strong>
                                 </div>
                               )}
                               {(() => {
@@ -2063,18 +2064,18 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                         onChange={e => updateRow(row.id, { fx_book: e.target.checked })}
                                         style={{ accentColor: DIALOG.accent, cursor: 'pointer' }} />
                                       <span>
-                                        Book the {fx.difference.kind === 'gain' ? 'gain' : 'shortfall'} of{' '}
-                                        <strong>{formatMoney(fx.amountOwn, fx.currency)}</strong> as a currency difference
+                                        Proknjiži {fx.difference.kind === 'gain' ? 'pozitivnu' : 'negativnu'} kursnu razliku od{' '}
+                                        <strong>{formatMoney(fx.amountOwn, fx.currency)}</strong>
                                       </span>
                                     </label>
                                     <div style={s.fxNote}>{fx.difference.note}</div>
                                     {row.fx_book && (
                                       <>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                                          <span style={{ fontSize: '11.5px', color: DIALOG.dim, whiteSpace: 'nowrap' as const }}>Classify as</span>
+                                          <span style={{ fontSize: '11.5px', color: DIALOG.dim, whiteSpace: 'nowrap' as const }}>Razvrstaj kao</span>
                                           <select style={{ ...s.select, flex: 1 }} value={script?.id || ''}
                                             onChange={e => updateRow(row.id, { fx_script_id: e.target.value })}>
-                                            {fxScripts.length === 0 && <option value="">No quick-fill templates saved</option>}
+                                            {fxScripts.length === 0 && <option value="">Nema sačuvanih šablona</option>}
                                             {fxScripts.map(sc => (
                                               <option key={sc.id} value={sc.id}>{sc.name} — {sc.pl_category}</option>
                                             ))}
@@ -2082,9 +2083,9 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                         </div>
                                         {!script && (
                                           <div style={{ ...s.fxNote, color: DIALOG.red }}>
-                                            No template is set up for currency differences, so there is no
-                                            classification to book this under. Create one called "Currency
-                                            Differences" with the + New button above.
+                                            Nema šablona za kursne razlike, pa nema klasifikacije pod
+                                            kojom bi se ovo proknjižilo. Napravite šablon „Kursne
+                                            razlike“ dugmetom + Novi iznad.
                                           </div>
                                         )}
                                       </>
@@ -2142,15 +2143,14 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                               classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
                               client={supabase}
                               onScriptsChanged={refreshQfScripts}
-                              hint="One bank line, two or more expenses — each with its own classification."
+                              hint="Jedna stavka izvoda, dva ili više troškova — svaki sa svojom klasifikacijom."
                             />}
 
                             {row.pl_splits.length > 0 && (
                               <div style={{ fontSize: '11.5px', color: DIALOG.amber, margin: '2px 0 10px', lineHeight: 1.55 }}>
-                                The classification below is taken from the largest line of the
-                                split and locked while it stands. The split is what the P&amp;L
-                                reads; this is what the ledger lists the line under. Each line
-                                carries its own project.
+                                Klasifikacija ispod je preuzeta iz najveće stavke podele i zaključana
+                                je dok podela postoji. P&amp;L čita podelu; ovo je ono pod čim glavna
+                                knjiga vodi stavku. Svaka stavka podele nosi svoj projekat.
                               </div>
                             )}
                             <div style={{
@@ -2158,9 +2158,9 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                 ? { opacity: 0.5, pointerEvents: 'none' as const, userSelect: 'none' as const }
                                 : {}),
                             }}>
-                            <div style={s.classTitle}>Subtype</div>
+                            <div style={s.classTitle}>Podtip</div>
                             <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
-                              {[{ id: 'expense', label: '📤  Expense' }, { id: 'revenue', label: '📥  Revenue' }].map(sub => (
+                              {[{ id: 'expense', label: '📤  Trošak' }, { id: 'revenue', label: '📥  Prihod' }].map(sub => (
                                 <div key={sub.id} style={{ flex: 1, textAlign: 'center' as const, padding: '9px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500',
                                   border: row.tx_subtype === sub.id ? `1.5px solid ${sub.id === 'expense' ? DIALOG.red : DIALOG.accent}` : '0.5px solid ' + DIALOG.border,
                                   background: row.tx_subtype === sub.id ? (sub.id === 'expense' ? DIALOG.redFill : DIALOG.accentFill) : DIALOG.raised,
@@ -2172,7 +2172,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             {/* Expense classification */}
                             {row.tx_subtype === 'expense' && (
                               <>
-                                <div style={s.classTitle}>P&L Classification</div>
+                                <div style={s.classTitle}>P&L klasifikacija</div>
                                 <div style={{ marginBottom: '10px', display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                   <div style={{ flex: 1, position: 'relative' as const }}>
                                     <div style={{ position: 'relative' as const }}>
@@ -2182,7 +2182,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                         onChange={e => setQfSearch(prev => ({ ...prev, [row.id]: e.target.value }))}
                                         onFocus={() => setQfOpen(row.id)}
                                         onBlur={() => setTimeout(() => setQfOpen(null), 150)}
-                                        placeholder="⚡ Quick fill — click or search…"
+                                        placeholder="⚡ Brza popuna — kliknite ili pretražite…"
                                       />
                                       <span style={{ position: 'absolute' as const, right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '10px', color: DIALOG.accent, pointerEvents: 'none' as const }}>
                                         {qfOpen === row.id ? '▲' : '▼'}
@@ -2198,7 +2198,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                             sc.department.toLowerCase().includes((qfSearch[row.id] || '').toLowerCase())
                                           )
                                           return filtered.length === 0
-                                            ? <div style={{ padding: '10px 12px', fontSize: '12px', color: DIALOG.dim }}>No matches for "{qfSearch[row.id]}"</div>
+                                            ? <div style={{ padding: '10px 12px', fontSize: '12px', color: DIALOG.dim }}>Nema rezultata za „{qfSearch[row.id]}“</div>
                                             : filtered.map(sc => (
                                                 <div key={sc.id}
                                                   style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '0.5px solid ' + DIALOG.borderSoft, display: 'flex', flexDirection: 'column' as const, gap: '2px' }}
@@ -2219,22 +2219,22 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                   <button
                                     style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '5px 10px', border: '1px solid rgba(29,158,117,0.3)', borderRadius: '6px', background: 'rgba(29,158,117,0.08)', color: DIALOG.accent, cursor: 'pointer', whiteSpace: 'nowrap' as const, flexShrink: 0 }}
                                     onClick={e => { e.stopPropagation(); setQfEditing({ ...EMPTY_SCRIPT, id: `script_${Date.now()}` }); setQfDialogOpen(true) }}>
-                                    + New
+                                    + Novi
                                   </button>
                                   <button
                                     style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '5px 10px', border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', background: 'transparent', color: DIALOG.dim, cursor: 'pointer', whiteSpace: 'nowrap' as const, flexShrink: 0 }}
                                     onClick={e => { e.stopPropagation(); setQfEditing(null); setQfDialogOpen(true) }}>
-                                    ✎ Edit
+                                    ✎ Izmeni
                                   </button>
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
                                   <div style={s.field}>
-                                    <label style={s.lbl}>P&L Category</label>
+                                    <label style={s.lbl}>P&L kategorija</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                     <SearchableSelect value={row.pl_category_id}
                                       onChange={v => { const c = plCategories.find(x => x.id === v); updateRow(row.id, { pl_category_id: v, pl_category_name: c?.name || '', pl_subcategory_id: '', pl_subcategory_name: '' }) }}
                                       options={plCategories.map(c => ({ value: c.id, label: c.name }))}
-                                      allLabel="Select category..." searchPlaceholder="Type to search categories…"
+                                      allLabel="Izaberite kategoriju…" searchPlaceholder="Pretraga kategorija…"
                                       style={{ ...pickerChrome, flex: 1 }} />
                                     <InlineCategoryAdd table="pl_categories"
                                       currentCount={plCategories.length}
@@ -2242,12 +2242,12 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                     </div>
                                   </div>
                                   <div style={s.field}>
-                                    <label style={s.lbl}>P&L Sub-category</label>
+                                    <label style={s.lbl}>Potkategorija</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                     <SearchableSelect value={row.pl_subcategory_id}
                                       onChange={v => { const sub = plSubcategories.find(x => x.id === v); updateRow(row.id, { pl_subcategory_id: v, pl_subcategory_name: sub?.name || '' }) }}
                                       options={plSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                                      allLabel="Select sub-category..." searchPlaceholder="Type to search sub-categories…"
+                                      allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
                                       disabled={!row.pl_category_id || plSubs.length === 0}
                                       style={{ ...pickerChrome, flex: 1 }} />
                                     <InlineCategoryAdd table="pl_subcategories" parentId={row.pl_category_id} parentField="category_id"
@@ -2257,15 +2257,15 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                   </div>
                                 </div>
 
-                                <div style={s.classTitle}>Department</div>
+                                <div style={s.classTitle}>Sektor</div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
                                   <div style={s.field}>
-                                    <label style={s.lbl}>Department</label>
+                                    <label style={s.lbl}>Sektor</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                     <SearchableSelect value={row.department_id}
                                       onChange={v => { const d = departments.find(x => x.id === v); updateRow(row.id, { department_id: v, department_name: d?.name || '', dept_subcategory_id: '', dept_subcategory_name: '', expense_description: '' }) }}
                                       options={departments.map(d => ({ value: d.id, label: d.name }))}
-                                      allLabel="Select department..." searchPlaceholder="Type to search departments…"
+                                      allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                                       style={{ ...pickerChrome, flex: 1 }} />
                                     <InlineCategoryAdd table="departments"
                                       currentCount={departments.length}
@@ -2273,12 +2273,12 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                     </div>
                                   </div>
                                   <div style={s.field}>
-                                    <label style={s.lbl}>Dept. Sub-category</label>
+                                    <label style={s.lbl}>Podsektor</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                     <SearchableSelect value={row.dept_subcategory_id}
                                       onChange={v => { const sub = deptSubcategories.find(x => x.id === v); updateRow(row.id, { dept_subcategory_id: v, dept_subcategory_name: sub?.name || '', expense_description: '' }) }}
                                       options={deptSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                                      allLabel="Select sub-category..." searchPlaceholder="Type to search sub-categories…"
+                                      allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
                                       disabled={!row.department_id || deptSubs.length === 0}
                                       style={{ ...pickerChrome, flex: 1 }} />
                                     <InlineCategoryAdd table="dept_subcategories" parentId={row.department_id} parentField="department_id"
@@ -2290,16 +2290,16 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
 
                                 <div style={{ marginBottom: '10px' }}>
                                   <div style={s.field}>
-                                    <label style={s.lbl}>Expense description</label>
+                                    <label style={s.lbl}>Opis troška</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                       {expDescs.length > 0 ? (
                                         <SearchableSelect value={row.expense_description}
                                           onChange={v => updateRow(row.id, { expense_description: v })}
                                           options={expDescs.map(d => ({ value: d.name, label: d.name }))}
-                                          allLabel="Select description..." searchPlaceholder="Type to search descriptions…"
+                                          allLabel="Izaberite opis…" searchPlaceholder="Pretraga opisa…"
                                           style={{ ...pickerChrome, flex: 1 }} />
                                       ) : (
-                                        <input style={{ ...s.input, flex: 1 }} value={row.expense_description} onChange={e => updateRow(row.id, { expense_description: e.target.value })} placeholder="e.g. AWS, Telekom, Rent..." />
+                                        <input style={{ ...s.input, flex: 1 }} value={row.expense_description} onChange={e => updateRow(row.id, { expense_description: e.target.value })} placeholder="npr. AWS, Telekom, zakup…" />
                                       )}
                                       <InlineCategoryAdd table="expense_descriptions" parentId={row.dept_subcategory_id} parentField="dept_subcategory_id"
                                         currentCount={expDescs.length} disabled={!row.dept_subcategory_id}
@@ -2312,14 +2312,14 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             )}
 
                             {/* Cash Flow Classification */}
-                            <div style={s.classTitle}>Cash flow classification</div>
+                            <div style={s.classTitle}>Klasifikacija novčanog toka</div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '6px', marginBottom: '10px' }}>
                               {[
-                                { id: 'recurring', label: '🔁 Recurring' },
-                                { id: 'one_time', label: '1️⃣ One-time' },
-                                { id: 'accrual', label: '📅 Accrual' },
-                                { id: 'capex', label: '🏗 CapEx' },
-                                { id: 'reimbursable', label: '↩️ Reimb.' },
+                                { id: 'recurring', label: '🔁 Ponavljajući' },
+                                { id: 'one_time', label: '1️⃣ Jednokratni' },
+                                { id: 'accrual', label: '📅 Razgraničenje' },
+                                { id: 'capex', label: '🏗 Kap. izdatak' },
+                                { id: 'reimbursable', label: '↩️ Refund.' },
                               ].map(a => (
                                 <div key={a.id} style={{ ...s.allocBtn, padding: '6px 4px', ...(row.cf_type === a.id ? { border: '2px solid ' + DIALOG.accent, background: DIALOG.accentFill } : {}) }}
                                   onClick={() => updateRow(row.id, { cf_type: row.cf_type === a.id ? '' : a.id })}>
@@ -2330,32 +2330,32 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             {row.cf_type === 'recurring' && (
                               <div style={{ marginBottom: '10px', background: DIALOG.raised, borderRadius: '8px', padding: '12px', border: '0.5px solid ' + DIALOG.border }}>
                                 <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-                                  {[{ id: 'monthly', label: '📆 Monthly' }, { id: 'quarterly', label: '📊 Quarterly' }, { id: 'yearly', label: '📅 Yearly' }].map(f => (
+                                  {[{ id: 'monthly', label: '📆 Mesečno' }, { id: 'quarterly', label: '📊 Kvartalno' }, { id: 'yearly', label: '📅 Godišnje' }].map(f => (
                                     <div key={f.id}
                                       style={{ flex: 1, padding: '7px', border: row.cf_frequency === f.id ? '2px solid ' + DIALOG.accent : '0.5px solid ' + DIALOG.border, borderRadius: '8px', background: row.cf_frequency === f.id ? DIALOG.accentFill : DIALOG.raised, cursor: 'pointer', textAlign: 'center' as const, fontSize: '11px', fontWeight: row.cf_frequency === f.id ? '600' : '400', color: row.cf_frequency === f.id ? DIALOG.accent : DIALOG.dim }}
                                       onClick={() => updateRow(row.id, { cf_frequency: f.id })}>{f.label}</div>
                                   ))}
                                 </div>
                                 <div style={s.field}>
-                                  <label style={s.lbl}>Next month estimate ({row.currency})</label>
+                                  <label style={s.lbl}>Procena za sledeći mesec ({row.currency})</label>
                                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                                     <input type="number" style={{ ...s.input, flex: 1 }} value={row.cf_next_month_est}
                                       onChange={e => updateRow(row.id, { cf_next_month_est: e.target.value })}
-                                      placeholder={row.debit ? `Auto: ${fmtNum(parseFloat(row.debit))}` : '0.00'} />
+                                      placeholder={row.debit ? `Automatski: ${fmtNum(parseFloat(row.debit))}` : '0.00'} />
                                     {!row.cf_next_month_est && row.debit && (
                                       <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '5px 10px', border: '1px solid rgba(29,158,117,0.3)', borderRadius: '6px', background: 'transparent', color: DIALOG.accent, cursor: 'pointer', whiteSpace: 'nowrap' as const }}
                                         onClick={() => updateRow(row.id, { cf_next_month_est: row.debit })}>
-                                        Use this amount
+                                        Preuzmi ovaj iznos
                                       </button>
                                     )}
                                   </div>
                                   {row.debit && (
                                     <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '4px' }}>
-                                      Auto: {row.cf_frequency === 'quarterly'
-                                        ? (parseFloat(row.debit) / 3).toFixed(2)
+                                      Automatski: {row.cf_frequency === 'quarterly'
+                                        ? fmtNum(parseFloat(row.debit) / 3)
                                         : row.cf_frequency === 'yearly'
-                                        ? (parseFloat(row.debit) / 12).toFixed(2)
-                                        : fmtNum(parseFloat(row.debit))} {row.currency}/mo
+                                        ? fmtNum(parseFloat(row.debit) / 12)
+                                        : fmtNum(parseFloat(row.debit))} {row.currency}/mes.
                                     </div>
                                   )}
                                 </div>
@@ -2363,7 +2363,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             )}
                             {row.cf_type === 'one_time' && (
                               <div style={{ marginBottom: '10px', fontSize: '11px', color: DIALOG.dim, background: DIALOG.raised, borderRadius: '6px', padding: '8px 10px' }}>
-                                One-time — won't be included in future estimates.
+                                Jednokratni — neće ući u buduće procene.
                               </div>
                             )}
 
@@ -2399,10 +2399,10 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                     </div>
                                   ) : null
                                 })()}
-                                <div style={s.classTitle}>Revenue stream</div>
+                                <div style={s.classTitle}>Vrsta prihoda</div>
                                 <div style={{ marginBottom: '10px' }}>
                                   <select style={{ ...s.select, width: '100%' }} value={row.revenue_stream} onChange={e => updateRow(row.id, { revenue_stream: e.target.value })}>
-                                    <option value="">Select stream...</option>
+                                    <option value="">Izaberite vrstu prihoda…</option>
                                     {REVENUE_STREAMS.map(r => <option key={r}>{r}</option>)}
                                   </select>
                                 </div>
@@ -2412,15 +2412,15 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             {/* Project — one per row; a split row's are on its lines. */}
                             {row.stored_split && (
                               <>
-                                <div style={s.classTitle}>Project</div>
+                                <div style={s.classTitle}>Projekat</div>
                                 <div style={{ marginBottom: '10px', fontSize: '12px', color: DIALOG.dim }}>
-                                  This row is split across projects. Change the split from the General Ledger.
+                                  Ova stavka je podeljena na više projekata. Podelu menjajte iz Glavne knjige.
                                 </div>
                               </>
                             )}
                             {row.pl_splits.length === 0 && !row.stored_split && (
                               <>
-                                <div style={s.classTitle}>Project</div>
+                                <div style={s.classTitle}>Projekat</div>
                                 <div style={{ marginBottom: '10px' }}>
                                   <ProjectSelect
                                     value={projectIdFromInput(row.project_id)}
@@ -2437,7 +2437,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         {/* Credit payment */}
                         {row.tx_type === 'credit_payment' && (
                           <>
-                            <div style={s.classTitle}>Credit installments</div>
+                            <div style={s.classTitle}>Rate kredita</div>
                             <div style={{ marginBottom: '14px' }}>
                               <CreditInstallmentSelector
                                 credits={credits}
@@ -2469,10 +2469,10 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         )}
 
                         {/* Payment reference */}
-                        <div style={s.classTitle}>Payment reference</div>
+                        <div style={s.classTitle}>Podaci za plaćanje</div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 1fr', gap: '10px', marginBottom: '10px' }}>
                           <div style={s.field}>
-                            <label style={s.lbl}>Account number {rowPartnerAccounts.length > 0 ? `(${rowPartnerAccounts.length} from partner)` : ''}</label>
+                            <label style={s.lbl}>Broj računa {rowPartnerAccounts.length > 0 ? `(partnerovih: ${rowPartnerAccounts.length})` : ''}</label>
                             {rowPartnerAccounts.length > 0 ? (
                               <select style={s.select}
                                 value={rowPartnerAccounts.find(a => normalizeAccountNumber(a.account_number) === normalizeAccountNumber(row.account_number))?.account_number || row.account_number}
@@ -2480,7 +2480,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                   const acc = rowPartnerAccounts.find(a => a.account_number === e.target.value)
                                   updateRow(row.id, { account_number: e.target.value, model: acc?.model || row.model })
                                 }}>
-                                <option value="">— No account —</option>
+                                <option value="">— Bez računa —</option>
                                 {rowPartnerAccounts.map(acc => (
                                   <option key={acc.id} value={acc.account_number}>
                                     {acc.account_number}{acc.bank_name ? ` (${acc.bank_name})` : ''}{acc.is_primary ? ' ★' : ''}
@@ -2496,19 +2496,19 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             <input style={s.input} value={row.model} onChange={e => updateRow(row.id, { model: e.target.value })} placeholder="97" />
                           </div>
                           <div style={s.field}>
-                            <label style={s.lbl}>Reference number</label>
+                            <label style={s.lbl}>Poziv na broj</label>
                             <input style={s.input} value={row.reference_number} onChange={e => updateRow(row.id, { reference_number: e.target.value })} placeholder="Poziv na broj" />
                           </div>
                         </div>
 
                         <div style={s.field}>
-                          <label style={s.lbl}>Note</label>
-                          <input style={s.input} value={row.note} onChange={e => updateRow(row.id, { note: e.target.value })} placeholder="Additional note..." />
+                          <label style={s.lbl}>Napomena</label>
+                          <input style={s.input} value={row.note} onChange={e => updateRow(row.id, { note: e.target.value })} placeholder="Dodatna napomena…" />
                         </div>
 
                         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
                           <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '6px 16px', borderRadius: '8px', border: 'none', background: DIALOG.accent, color: DIALOG.onAccent, cursor: 'pointer' }}
-                            onClick={() => setExpandedRow(null)}>✓ Done</button>
+                            onClick={() => setExpandedRow(null)}>✓ Gotovo</button>
                         </div>
                       </div>
                     )}
@@ -2517,7 +2517,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
               })}
             </div>
 
-            <button style={{ ...s.addRowBtn, marginTop: '10px', width: '100%', padding: '10px' }} onClick={addRow}>+ Add row</button>
+            <button style={{ ...s.addRowBtn, marginTop: '10px', width: '100%', padding: '10px' }} onClick={addRow}>+ Dodaj red</button>
           </div>
 
           {notice && (
@@ -2531,24 +2531,24 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         <div style={s.footer}>
           <div style={{ fontSize: '12px', color: DIALOG.dim }}>
             {editing
-              ? `${editableRows.length} row${editableRows.length !== 1 ? 's' : ''} editable` +
-                (removedRows.length > 0 ? ` · ${removedRows.length} to remove` : '') +
-                (editing.lockedCount > 0 ? ` · ${editing.lockedCount} locked` : '')
-              : `${validRows.length} transaction${validRows.length !== 1 ? 's' : ''} ready`}
-            {totalDebit > 0 && <span style={{ color: DIALOG.red, marginLeft: '12px' }}>Out: {fmtMoney(totalDebit, defaultCurrency)}</span>}
-            {totalCredit > 0 && <span style={{ color: DIALOG.accent, marginLeft: '12px' }}>In: {fmtMoney(totalCredit, defaultCurrency)}</span>}
+              ? `Stavki za izmenu: ${editableRows.length}` +
+                (removedRows.length > 0 ? ` · za uklanjanje: ${removedRows.length}` : '') +
+                (editing.lockedCount > 0 ? ` · zaključanih: ${editing.lockedCount}` : '')
+              : `Spremno transakcija: ${validRows.length}`}
+            {totalDebit > 0 && <span style={{ color: DIALOG.red, marginLeft: '12px' }}>Isplate: {fmtMoney(totalDebit, defaultCurrency)}</span>}
+            {totalCredit > 0 && <span style={{ color: DIALOG.accent, marginLeft: '12px' }}>Uplate: {fmtMoney(totalCredit, defaultCurrency)}</span>}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button style={s.btnGhost} onClick={editing ? exitEdit : onClose}>{editing ? 'Discard changes' : 'Cancel'}</button>
+            <button style={s.btnGhost} onClick={editing ? exitEdit : onClose}>{editing ? 'Odbaci izmene' : 'Otkaži'}</button>
             {editing ? (
               <button style={{ ...s.btnPrimary, opacity: posting ? 0.5 : 1 }}
                 onClick={handleSaveEdit} disabled={posting}>
-                {posting ? 'Saving...' : 'Save changes'}
+                {posting ? 'Čuvanje…' : 'Sačuvaj izmene'}
               </button>
             ) : (
               <button style={{ ...s.btnPrimary, opacity: (!company || !bank || validRows.length === 0 || posting) ? 0.5 : 1 }}
                 onClick={handlePost} disabled={!company || !bank || validRows.length === 0 || posting}>
-                {posting ? 'Posting...' : `Post ${validRows.length} transaction${validRows.length !== 1 ? 's' : ''}`}
+                {posting ? 'Knjiženje…' : `Proknjiži (${validRows.length})`}
               </button>
             )}
           </div>
@@ -2563,7 +2563,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
             onClick={e => e.stopPropagation()}>
             <div style={{ background: DIALOG.panelDeep, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ color: DIALOG.text, fontSize: '14px', fontWeight: '500' }}>
-                {qfEditing && qfEditing.name === '' ? '➕ New script' : qfEditing ? `✎ Edit: ${qfEditing.name}` : '⚡ Quick Fill scripts'}
+                {qfEditing && qfEditing.name === '' ? '➕ Novi šablon' : qfEditing ? `✎ Izmena: ${qfEditing.name}` : '⚡ Šabloni za brzu popunu'}
               </div>
               <button style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', fontSize: '20px', cursor: 'pointer' }}
                 onClick={() => { setQfDialogOpen(false); setQfEditing(null) }}>×</button>
@@ -2578,26 +2578,26 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         value={qfEditing.icon} onChange={e => setQfEditing({ ...qfEditing, icon: e.target.value })} />
                     </div>
                     <div>
-                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Naziv skripte *</div>
+                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Naziv šablona *</div>
                       <input style={s.input} value={qfEditing.name}
                         onChange={e => setQfEditing({ ...qfEditing, name: e.target.value })}
-                        placeholder="e.g. Bank fee — domestic" />
+                        placeholder="npr. Bankarska provizija — domaća" />
                     </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
-                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>P&L Category</div>
+                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>P&L kategorija</div>
                       <select style={s.select} value={qfEditing.pl_category}
                         onChange={e => setQfEditing({ ...qfEditing, pl_category: e.target.value, pl_subcategory: '' })}>
-                        <option value="">Select...</option>
+                        <option value="">Izaberite…</option>
                         {plCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                       </select>
                     </div>
                     <div>
-                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>P&L Sub-category</div>
+                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Potkategorija</div>
                       <select style={s.select} value={qfEditing.pl_subcategory}
                         onChange={e => setQfEditing({ ...qfEditing, pl_subcategory: e.target.value })}>
-                        <option value="">Select...</option>
+                        <option value="">Izaberite…</option>
                         {plSubcategories.filter(sub => {
                           const cat = plCategories.find(c => c.name === qfEditing.pl_category)
                           return cat && sub.category_id === cat.id
@@ -2607,18 +2607,18 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
-                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Department</div>
+                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Sektor</div>
                       <select style={s.select} value={qfEditing.department}
                         onChange={e => setQfEditing({ ...qfEditing, department: e.target.value, dept_subcategory: '', expense_description: '' })}>
-                        <option value="">Select...</option>
+                        <option value="">Izaberite…</option>
                         {departments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                       </select>
                     </div>
                     <div>
-                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Dept. Sub-category</div>
+                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Podsektor</div>
                       <select style={s.select} value={qfEditing.dept_subcategory}
                         onChange={e => setQfEditing({ ...qfEditing, dept_subcategory: e.target.value, expense_description: '' })}>
-                        <option value="">Select...</option>
+                        <option value="">Izaberite…</option>
                         {deptSubcategories.filter(sub => {
                           const dept = departments.find(d => d.name === qfEditing.department)
                           return dept && sub.department_id === dept.id
@@ -2627,7 +2627,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Expense Description</div>
+                    <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Opis troška</div>
                     {(() => {
                       const parentDept = departments.find(d => d.name === qfEditing.department)
                       const deptSub = deptSubcategories.find(sub =>
@@ -2636,30 +2636,30 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                       return descs.length > 0
                         ? <select style={s.select} value={qfEditing.expense_description}
                             onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })}>
-                            <option value="">Select...</option>
+                            <option value="">Izaberite…</option>
                             {descs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                           </select>
                         : <input style={s.input} value={qfEditing.expense_description}
                             onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })}
-                            placeholder="e.g. AWS, Telekom..." />
+                            placeholder="npr. AWS, Telekom…" />
                     })()}
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
                     <div>
-                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>CF Type</div>
+                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Tip novčanog toka</div>
                       <select style={s.select} value={qfEditing.cf_type}
                         onChange={e => setQfEditing({ ...qfEditing, cf_type: e.target.value })}>
-                        <option value="recurring">Recurring</option>
-                        <option value="one_time">One-time</option>
-                        <option value="accrual">Accrual</option>
-                        <option value="capex">CapEx</option>
-                        <option value="">— None —</option>
+                        <option value="recurring">Ponavljajući</option>
+                        <option value="one_time">Jednokratni</option>
+                        <option value="accrual">Razgraničenje</option>
+                        <option value="capex">Kapitalni izdatak</option>
+                        <option value="">— Bez —</option>
                       </select>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', paddingTop: '8px', borderTop: '0.5px solid ' + DIALOG.border }}>
                     <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '7px 16px', border: '0.5px solid ' + DIALOG.border, borderRadius: '8px', background: 'transparent', color: DIALOG.dim, cursor: 'pointer' }}
-                      onClick={() => setQfEditing(null)}>← Back</button>
+                      onClick={() => setQfEditing(null)}>← Nazad</button>
                     <button
                       style={{ fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '7px 16px', border: 'none', borderRadius: '8px', background: DIALOG.accent, color: DIALOG.onAccent, cursor: 'pointer', fontWeight: '600', opacity: !qfEditing.name.trim() ? 0.5 : 1 }}
                       disabled={!qfEditing.name.trim()}
@@ -2672,7 +2672,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                           setQfEditing(null)
                         }
                       }}>
-                      ✓ Save script
+                      ✓ Sačuvaj šablon
                     </button>
                   </div>
                 </div>
@@ -2689,19 +2689,19 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         </div>
                       </div>
                       <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '4px 10px', border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', background: 'transparent', color: DIALOG.dim, cursor: 'pointer' }}
-                        onClick={() => setQfEditing(sc)}>✎ Edit</button>
+                        onClick={() => setQfEditing(sc)}>✎ Izmeni</button>
                       <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '4px 10px', border: '0.5px solid ' + DIALOG.redSoft, borderRadius: '6px', background: 'transparent', color: DIALOG.red, cursor: 'pointer' }}
-                        onClick={() => { if (window.confirm(`Delete "${sc.name}"?\n\nIt is shared, so it goes for everyone. Entries already classified with it keep their classification.`)) removeQfScript(sc.id) }}>✕</button>
+                        onClick={() => { if (window.confirm(`Obrisati „${sc.name}“?\n\nŠablon je zajednički, pa se briše za sve. Stavke koje su već razvrstane njime zadržavaju klasifikaciju.`)) removeQfScript(sc.id) }}>✕</button>
                     </div>
                   ))}
                   {quickFillScripts.length === 0 && (
                     <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '16px', textAlign: 'center' as const, background: DIALOG.raised, borderRadius: '8px' }}>
-                      No scripts yet — add the first one below.
+                      Još nema šablona — dodajte prvi ispod.
                     </div>
                   )}
                   <button style={{ marginTop: '8px', fontFamily: 'system-ui,sans-serif', fontSize: '12px', padding: '8px', border: '0.5px solid ' + DIALOG.accentSoft, borderRadius: '8px', background: 'transparent', color: DIALOG.accent, cursor: 'pointer', width: '100%' }}
                     onClick={() => setQfEditing({ ...EMPTY_SCRIPT, id: `script_${Date.now()}` })}>
-                    + Add a script
+                    + Dodaj šablon
                   </button>
                 </div>
               )}

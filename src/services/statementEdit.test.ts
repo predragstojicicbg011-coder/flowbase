@@ -205,16 +205,16 @@ describe('statementSpan', () => {
 
 describe('statementLabel', () => {
   it('names the statement after its number', () => {
-    expect(statementLabel('2026-44')).toBe('Statement #2026-44')
+    expect(statementLabel('2026-44')).toBe('Izvod #2026-44')
   })
 
   it('falls back when no number was typed', () => {
-    expect(statementLabel('')).toBe('Manual entry')
-    expect(statementLabel('   ')).toBe('Manual entry')
+    expect(statementLabel('')).toBe('Ručni unos')
+    expect(statementLabel('   ')).toBe('Ručni unos')
   })
 
   it('trims, so a stray space does not become part of the name', () => {
-    expect(statementLabel('  2026-44 ')).toBe('Statement #2026-44')
+    expect(statementLabel('  2026-44 ')).toBe('Izvod #2026-44')
   })
 })
 

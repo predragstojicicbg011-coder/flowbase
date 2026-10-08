@@ -19,6 +19,11 @@ import {
 } from './engine'
 import { coversDate, overlaps } from './settings'
 import { fetchAllPages } from '../../utils/fetchAllPages'
+import { monthLongLabel } from '../../utils/months'
+
+/** `YYYY-MM-DD` → `01.08.2026.`, the way the interface writes a date. */
+const srIso = (iso: string): string =>
+  `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}.`
 
 export interface EmployeeRow {
   id: string
@@ -65,12 +70,12 @@ export interface AbsenceRow {
 }
 
 export const ABSENCE_REASONS: { value: AbsenceRow['reason']; label: string }[] = [
-  { value: 'maternity', label: 'Maternity leave — paid by the state' },
-  { value: 'parental', label: 'Parental leave' },
-  { value: 'sick_leave_fund', label: 'Sick leave carried by the fund' },
-  { value: 'unpaid_leave', label: 'Unpaid leave of absence' },
-  { value: 'suspension', label: 'Suspended' },
-  { value: 'other', label: 'Something else' },
+  { value: 'maternity', label: 'Porodiljsko odsustvo — isplaćuje država' },
+  { value: 'parental', label: 'Odsustvo radi nege deteta' },
+  { value: 'sick_leave_fund', label: 'Bolovanje na teret fonda' },
+  { value: 'unpaid_leave', label: 'Neplaćeno odsustvo' },
+  { value: 'suspension', label: 'Udaljen sa rada' },
+  { value: 'other', label: 'Drugo' },
 ]
 
 export function absenceLabel(reason: AbsenceRow['reason']): string {
@@ -325,21 +330,21 @@ export function deductionWarning(d: DeductionRow, payerName?: string | null): st
   const hasPercent = d.percent_of_net !== null && d.percent_of_net !== undefined
 
   if (!hasAmount && !hasPercent) {
-    return 'Neither an amount nor a percentage is set, so this deducts nothing.'
+    return 'Nije unet ni iznos ni procenat, pa se ništa ne obustavlja. Unesite jedno od ta dva.'
   }
   if (hasAmount && hasPercent) {
-    return 'An amount and a percentage are both set. The amount is used and the percentage is ignored.'
+    return 'Uneti su i iznos i procenat. Koristi se iznos, a procenat se zanemaruje.'
   }
   if (d.goes_to === 'third_party' && !(d.payee || '').trim()) {
-    return 'This is forwarded to a third party but names nobody, so it would be booked as owed to no one.'
+    return 'Obustava se prosleđuje trećem licu, ali primalac nije naveden, pa bi se proknjižila kao obaveza prema nikome. Navedite primaoca.'
   }
   if (d.goes_to === 'third_party' && looksLikeSameParty(d.payee, payerName)) {
     // The seven health policies came out of the register naming
     // THE EMPLOYER, because the register records who PAYS. Reclassified as
     // forwarded on, the payee has to become whoever actually receives it, or
     // the ledger carries a payable from this company to itself.
-    return `This is forwarded to a third party but names ${payerName} — the company paying it. `
-      + 'Name whoever actually receives the money, or it books a payable owed to itself.'
+    return `Obustava se prosleđuje trećem licu, ali je kao primalac naveden ${payerName} — firma koja je isplaćuje. `
+      + 'Navedite onoga ko zaista prima novac, inače se knjiži obaveza firme prema samoj sebi.'
   }
   return null
 }
@@ -453,10 +458,10 @@ export function employeesForMonth(
     if (found.tooMany.length > 0) {
       problems.push({
         employee,
-        why: `${found.tooMany.length} contracts cover parts of this month `
-          + `(${found.tooMany.map(c => c.valid_from).join(', ')}). Choosing between them `
-          + 'would be choosing between two salaries, so nothing is calculated until one '
-          + 'of them is ended on the first of the month.',
+        why: `${found.tooMany.length} ugovora pokrivaju delove ovog meseca `
+          + `(${found.tooMany.map(c => srIso(c.valid_from)).join(', ')}). Izbor između njih `
+          + 'bio bi izbor između dve zarade, pa se ništa ne obračunava dok se jedan od njih '
+          + 'ne završi prvog dana u mesecu.',
       })
       continue
     }
@@ -464,7 +469,7 @@ export function employeesForMonth(
     if (!contract) {
       problems.push({
         employee,
-        why: `No contract covers ${input.date.slice(0, 7)}.`,
+        why: `Nijedan ugovor ne pokriva ${monthLongLabel(input.date)}. Dodajte ugovor za taj mesec.`,
       })
       continue
     }
@@ -473,9 +478,9 @@ export function employeesForMonth(
     if (dinars === null) {
       problems.push({
         employee,
-        why: `No ${contract.currency} rate for ${input.date}. `
-          + 'The contract cannot be turned into dinars, and a salary calculated '
-          + 'at a guessed rate would look like a checked one.',
+        why: `Nema kursa za ${contract.currency} na dan ${srIso(input.date)}. `
+          + 'Ugovor ne može da se preračuna u dinare, a zarada obračunata '
+          + 'po pretpostavljenom kursu izgledala bi kao proverena.',
       })
       continue
     }
@@ -530,21 +535,21 @@ export function whyContractNotSavable(
   draft: { id?: string; valid_from: string; valid_to: string | null; net_amount: number | string },
   existing: ContractRow[],
 ): string | null {
-  if (!draft.valid_from) return 'Say which date this contract takes effect from.'
+  if (!draft.valid_from) return 'Unesite datum od kog ugovor važi.'
   if (draft.valid_to && draft.valid_to <= draft.valid_from) {
-    return 'The end date has to be after the start date.'
+    return 'Datum završetka mora biti posle datuma početka.'
   }
   const amount = Number(draft.net_amount)
   if (!Number.isFinite(amount) || amount <= 0) {
-    return 'Enter the contracted net amount.'
+    return 'Unesite ugovoreni neto iznos.'
   }
   const clash = existing.find(c =>
     c.id !== draft.id && overlaps(c.valid_from, c.valid_to, draft.valid_from, draft.valid_to))
   if (clash) {
-    return 'Another contract for this employee already covers that period '
-      + `(${clash.valid_from} → ${clash.valid_to || 'still in force'}). `
-      + 'Two contracts for one month would give two salaries, and whichever a run '
-      + 'picked up would look perfectly ordinary. End the old one first.'
+    return 'Drugi ugovor ovog zaposlenog već pokriva taj period '
+      + `(${srIso(clash.valid_from)} → ${clash.valid_to ? srIso(clash.valid_to) : 'i dalje važi'}). `
+      + 'Dva ugovora za isti mesec dala bi dve zarade, a koju god da obračun uzme, '
+      + 'izgledala bi sasvim obično. Prvo završite stari ugovor.'
   }
   return null
 }
@@ -562,7 +567,7 @@ export async function fetchEmployees(client: any, companyId?: string): Promise<E
       .order('full_name').order('id').range(from, to)
     if (companyId) q = q.eq('company_id', companyId)
     return q
-  }).catch((e: any) => { throw new Error(`The employees could not be read: ${e.message || e}`) })
+  }).catch((e: any) => { throw new Error(`Zaposleni nisu učitani: ${e.message || e}. Osvežite stranu.`) })
 }
 
 // Paged rather than read in one go, and ordered by a unique column as well as
@@ -578,7 +583,7 @@ export async function fetchContracts(client: any, employeeIds?: string[]): Promi
       .order('valid_from', { ascending: false }).order('id').range(from, to)
     if (employeeIds) q = q.in('employee_id', employeeIds)
     return q
-  }).catch((e: any) => { throw new Error(`The contracts could not be read: ${e.message || e}`) })
+  }).catch((e: any) => { throw new Error(`Ugovori nisu učitani: ${e.message || e}. Osvežite stranu.`) })
 }
 
 export async function fetchAllocations(client: any, employeeIds?: string[]): Promise<CostAllocationRow[]> {
@@ -589,7 +594,7 @@ export async function fetchAllocations(client: any, employeeIds?: string[]): Pro
     if (employeeIds) q = q.in('employee_id', employeeIds)
     return q
   }).catch((e: any) => {
-    throw new Error(`The cost allocations could not be read: ${e.message || e}`)
+    throw new Error(`Raspodela troškova nije učitana: ${e.message || e}. Osvežite stranu.`)
   })
 }
 
@@ -601,7 +606,7 @@ export async function fetchAbsences(client: any, employeeIds?: string[]): Promis
     if (employeeIds) q = q.in('employee_id', employeeIds)
     return q
   }).catch((e: any) => {
-    throw new Error(`The off-payroll periods could not be read: ${e.message || e}`)
+    throw new Error(`Periodi van obračuna nisu učitani: ${e.message || e}. Osvežite stranu.`)
   })
 }
 
@@ -612,7 +617,7 @@ export async function fetchDeductions(client: any, employeeIds?: string[]): Prom
       .order('valid_from', { ascending: false }).order('id').range(from, to)
     if (employeeIds) q = q.in('employee_id', employeeIds)
     return q
-  }).catch((e: any) => { throw new Error(`The deductions could not be read: ${e.message || e}`) })
+  }).catch((e: any) => { throw new Error(`Obustave nisu učitane: ${e.message || e}. Osvežite stranu.`) })
 }
 
 
@@ -700,20 +705,20 @@ export function editingContractLeaves(
   const covering = after.find(c => coversDate(c as any, onDate))
   if (!covering) {
     notes.push(
-      `Nothing covers ${onDate} after this change, so this employee drops out of `
-      + 'every payroll run from then on — and a run reports the people it found, '
-      + 'not the ones it did not.')
+      `Posle ove izmene nijedan ugovor ne pokriva ${srIso(onDate)}, pa ovaj zaposleni ispada iz `
+      + 'svakog obračuna zarade od tog dana — a obračun prikazuje one koje je našao, '
+      + 'ne one koje nije.')
   }
 
   for (const gap of contractGaps(after)) {
-    notes.push(`No contract covers ${gap.from} up to ${gap.to}.`)
+    notes.push(`Nijedan ugovor ne pokriva period od ${srIso(gap.from)} do ${srIso(gap.to)}.`)
   }
 
   const before = contracts.find(c => c.id === edited.id)
   if (before && before.valid_from !== edited.valid_from) {
     notes.push(
-      `This contract moves from ${before.valid_from} to ${edited.valid_from}. `
-      + 'Any month already calculated from it will no longer reproduce.')
+      `Početak ovog ugovora pomera se sa ${srIso(before.valid_from)} na ${srIso(edited.valid_from)}. `
+      + 'Nijedan mesec već obračunat po njemu više neće dati isti rezultat.')
   }
 
   return notes

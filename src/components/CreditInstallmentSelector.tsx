@@ -2,6 +2,7 @@ import React from 'react'
 import type { CreditOption, CreditInstallment } from './useCreditPayment'
 import { DIALOG } from './dialogTheme'
 import { fmtMoney, fmtNum } from '../utils/formatters'
+import { countOf } from '../utils/plural'
 
 // ── Credit installment selector ─────────────────────────────────────────────
 //
@@ -50,15 +51,15 @@ export default function CreditInstallmentSelector({
   return (
     <div>
       <div style={banner(DIALOG.blue, DIALOG.blueFill)}>
-        Select the credit and installments being paid. They will be marked as paid in Bank Credits.
+        Izaberite kredit i rate koje se plaćaju. Biće označene kao plaćene u Kreditima.
       </div>
 
       {error && <div style={banner(DIALOG.red, DIALOG.redFill)}>⚠️ {error}</div>}
 
       <div style={{ marginBottom: '12px' }}>
-        <label style={{ ...lbl, display: 'block', marginBottom: '6px' }}>Credit</label>
+        <label style={{ ...lbl, display: 'block', marginBottom: '6px' }}>Kredit</label>
         <select style={select} value={selectedCreditId} onChange={e => onCreditChange(e.target.value)}>
-          <option value="">Select credit...</option>
+          <option value="">Izaberite kredit…</option>
           {credits.map(c => (
             <option key={c.id} value={c.id}>{c.name} — {c.bank} ({c.rate_description}) · {c.currency}</option>
           ))}
@@ -70,19 +71,19 @@ export default function CreditInstallmentSelector({
           padding: '16px', textAlign: 'center', fontSize: '13px', borderRadius: '8px',
           color: DIALOG.dim, background: DIALOG.raised, border: `0.5px solid ${DIALOG.border}`,
         }}>
-          ✓ All installments are already paid.
+          ✓ Sve rate su već plaćene.
         </div>
       )}
 
       {installments.length > 0 && (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <label style={lbl}>Outstanding installments</label>
+            <label style={lbl}>Neplaćene rate</label>
             <button onClick={onToggleAll} style={{
               background: 'none', border: 'none', cursor: 'pointer',
               fontFamily: "'Inter',sans-serif", fontSize: '12px', color: DIALOG.accent,
             }}>
-              {selectedInstallmentIds.length === installments.length ? 'Deselect all' : 'Select all'}
+              {selectedInstallmentIds.length === installments.length ? 'Poništi izbor' : 'Izaberi sve'}
             </button>
           </div>
 
@@ -102,22 +103,22 @@ export default function CreditInstallmentSelector({
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
                       <span style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.text }}>
-                        Installment #{inst.installment_no}
+                        Rata #{inst.installment_no}
                       </span>
                       {overdue && (
                         <span style={{
                           fontSize: '10px', padding: '1px 7px', borderRadius: '20px', fontWeight: '600',
                           background: DIALOG.redFill, color: DIALOG.red,
-                        }}>Overdue</span>
+                        }}>U kašnjenju</span>
                       )}
                     </div>
                     <div style={{ fontSize: '11px', color: DIALOG.dim }}>
-                      Due: <strong>{inst.due_date}</strong>
+                      Dospeće: <strong>{inst.due_date}</strong>
                       <span style={{ marginLeft: '10px', color: DIALOG.blue }}>
-                        Principal: {fmtNum(inst.principal_amount)}
+                        Glavnica: {fmtNum(inst.principal_amount)}
                       </span>
                       <span style={{ marginLeft: '10px', color: DIALOG.amber }}>
-                        Interest: {fmtNum(inst.interest_amount)}
+                        Kamata: {fmtNum(inst.interest_amount)}
                       </span>
                     </div>
                   </div>
@@ -138,7 +139,7 @@ export default function CreditInstallmentSelector({
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px',
               background: DIALOG.accentFill, border: `0.5px solid ${DIALOG.accentSoft}`, color: DIALOG.accent,
             }}>
-              <span>{selectedInstallmentIds.length} installment{selectedInstallmentIds.length > 1 ? 's' : ''} selected</span>
+              <span>Izabrano: {countOf(selectedInstallmentIds.length, 'rata', 'rate', 'rata')}</span>
               <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: '700' }}>
                 {fmtMoney(selectedTotal, currency)}
               </span>
