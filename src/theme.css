@@ -1,0 +1,83 @@
+/* ============================================================
+   MCFlow Design System — Theme Tokens
+   Obsidian variant (dark, finance terminal aesthetic)
+   ============================================================ */
+
+:root {
+  /* ── Surfaces ─────────────────────────────── */
+  --page-bg:      #060E1A;
+  --sidebar-bg:   #0A1525;
+  --surface:      #0D1B2C;
+  --surface-2:    #111F30;
+  --card-shadow:  0 4px 20px rgba(0,0,0,0.4);
+
+  /* ── Borders ──────────────────────────────── */
+  --border:         rgba(255,255,255,0.075);
+  --border-strong:  rgba(255,255,255,0.14);
+  --sidebar-border: rgba(255,255,255,0.055);
+
+  /* ── Text ─────────────────────────────────── */
+  --text-1: #DCE9F6;
+  --text-2: #7A9BB8;
+  --text-3: rgba(255,255,255,0.30);
+
+  /* ── Sidebar nav ──────────────────────────── */
+  --nav-icon:         rgba(255,255,255,0.30);
+  --nav-icon-active:  #00D47E;
+  --nav-text:         rgba(255,255,255,0.44);
+  --nav-text-active:  #FFFFFF;
+  --nav-active-bg:    rgba(0,212,126,0.10);
+
+  /* ── Semantic — Revenue / Positive ───────── */
+  --green:    #00D47E;
+  --green-dk: #009A5C;
+  --green-bg: rgba(0,212,126,0.12);
+
+  /* ── Semantic — Expense / Negative ───────── */
+  --red:    #FF5B5A;
+  --red-dk: #CC2929;
+  --red-bg: rgba(255,91,90,0.13);
+
+  /* ── Semantic — Warning ───────────────────── */
+  --amber:    #F5A623;
+  --amber-bg: rgba(245,166,35,0.13);
+
+  /* ── Semantic — Info ─────────────────────── */
+  --blue:    #4EA8FF;
+  --blue-bg: rgba(78,168,255,0.13);
+
+  /* ── Typography ───────────────────────────── */
+  --font-display: 'DM Serif Display', Georgia, serif;
+  --font-body:    'Inter', system-ui, sans-serif;
+  --font-mono:    'DM Mono', 'Fira Mono', monospace;
+  --num-font:     'DM Mono', 'Fira Mono', monospace;
+  --num-size:     27px;
+
+  /* ── Layout — unchanged ───────────────────── */
+  --sidebar-width: 208px;
+  --card-pad:      1.1rem 1.2rem;
+  --page-pad:      24px 28px;
+
+  /* ── Radii — slightly tighter ─────────────── */
+  --radius-sm:   8px;
+  --radius-md:   10px;
+  --radius-full: 9999px;
+
+  /* ── Transitions ──────────────────────────── */
+  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --duration: 0.15s;
+}
+/* Append to src/theme.css */
+:root {
+  --display-font: 'DM Serif Display', Georgia, serif;
+  --num-font: 'DM Mono', 'Fira Mono', monospace;
+  --pill-green-fg: #00D47E;  --pill-green-bg: rgba(0,212,126,0.12);
+  --pill-red-fg:   #FF5B5A;  --pill-red-bg:   rgba(255,91,90,0.12);
+  --pill-amber-fg: #F5A623;  --pill-amber-bg: rgba(245,166,35,0.12);
+  --pill-blue-fg:  #4EA8FF;  --pill-blue-bg:  rgba(78,168,255,0.12);
+  --pill-purple-fg:#A78BFA;  --pill-purple-bg:rgba(167,139,250,0.12);
+  --pill-pink-fg:  #F472B6;  --pill-pink-bg:  rgba(244,114,182,0.12);
+  --pill-neutral-fg: rgba(255,255,255,0.45);
+  --pill-neutral-bg: rgba(255,255,255,0.06);
+}
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&display=swap');

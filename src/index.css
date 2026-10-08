@@ -1,0 +1,237 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600;700&family=DM+Mono:opsz,wght@10..40,400;10..40,500&display=swap');
+@import './theme.css';
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #060E1A;
+  color: #DCE9F6;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* Entity cards */
+.entity-card {
+  transition: transform 0.15s cubic-bezier(0.25,0.46,0.45,0.94),
+              box-shadow 0.15s cubic-bezier(0.25,0.46,0.45,0.94);
+}
+.entity-card:hover {
+  transform: translateY(-2px);
+}
+
+/* Nav links (sidebar) */
+.nav-link {
+  transition: color 0.15s, background 0.15s;
+}
+.nav-link:hover {
+  color: rgba(255,255,255,0.9) !important;
+  background: rgba(255,255,255,0.07) !important;
+}
+
+/* Quick action buttons */
+.quick-btn {
+  transition: background 0.15s, transform 0.1s;
+}
+.quick-btn:hover {
+  background: rgba(255,255,255,0.08) !important;
+  transform: translateX(2px);
+}
+
+/* Shortcut buttons */
+.shortcut-btn {
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+/* Date inputs */
+input[type="date"]:focus {
+  outline: none;
+  border-color: rgba(0,212,126,0.45) !important;
+  box-shadow: 0 0 0 3px rgba(0,212,126,0.1) !important;
+}
+
+/* Alert items */
+.alert-item {
+  transition: background 0.15s;
+}
+.alert-item:hover {
+  filter: brightness(0.97);
+}
+
+/* Metric cards */
+.metric-card {
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.10) !important;
+}
+/* Append to src/theme.css */
+:root {
+  --display-font: 'DM Serif Display', Georgia, serif;
+  --num-font: 'DM Mono', 'Fira Mono', monospace;
+  --pill-green-fg: #00D47E;  --pill-green-bg: rgba(0,212,126,0.12);
+  --pill-red-fg:   #FF5B5A;  --pill-red-bg:   rgba(255,91,90,0.12);
+  --pill-amber-fg: #F5A623;  --pill-amber-bg: rgba(245,166,35,0.12);
+  --pill-blue-fg:  #4EA8FF;  --pill-blue-bg:  rgba(78,168,255,0.12);
+  --pill-purple-fg:#A78BFA;  --pill-purple-bg:rgba(167,139,250,0.12);
+  --pill-pink-fg:  #F472B6;  --pill-pink-bg:  rgba(244,114,182,0.12);
+  --pill-neutral-fg: rgba(255,255,255,0.45);
+  --pill-neutral-bg: rgba(255,255,255,0.06);
+}
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&display=swap');
+/* ─── The surface a page sits on ──────────────────────────────────────────
+ *
+ * Three painted layers and NOT ONE FRAME OF WORK. A canvas of drifting
+ * particles would cost something every sixteen milliseconds for as long as
+ * the tab is open, and it would be moving behind the figures somebody opened
+ * the page to read. This is painted once by the compositor and then forgotten.
+ *
+ *   a wash of the brand green, top left, at 3% — where the eye lands first
+ *   a faint lattice at 2%, which reads as instrument rather than decoration
+ *   a vignette, so the cards lift off the surface instead of floating on it
+ *
+ * `background-attachment: fixed` keeps the wash still while the page scrolls,
+ * which is what makes it feel like a surface rather than a very long image.
+ */
+.app-surface {
+  background-color: #060E1A;
+  background-image:
+    radial-gradient(900px 600px at 12% -5%, rgba(0, 212, 126, 0.055), transparent 60%),
+    radial-gradient(700px 500px at 95% 0%, rgba(78, 168, 255, 0.035), transparent 60%),
+    radial-gradient(1200px 800px at 50% 120%, rgba(0, 0, 0, 0.45), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.016) 0 1px, transparent 1px 44px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0 1px, transparent 1px 44px);
+  background-attachment: fixed;
+}
+
+/* ─── Motion that means a number changed ──────────────────────────────────
+ *
+ * Every animation here runs ONCE, on arrival or on a change. Nothing loops,
+ * because a thing that loops is telling you something is happening when
+ * nothing is — and in a page full of money that is worse than being still.
+ */
+
+@keyframes mf-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* A line drawing itself, for a chart arriving. */
+@keyframes mf-draw {
+  from { stroke-dashoffset: var(--mf-len, 1200); }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes mf-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* The sweep across a skeleton, which is the one exception: it loops because
+ * it is saying "still working", and it stops the moment the data lands. */
+@keyframes mf-shimmer {
+  from { background-position: -320px 0; }
+  to   { background-position: 320px 0; }
+}
+
+.mf-rise { animation: mf-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.mf-fade { animation: mf-fade 260ms ease both; }
+
+/*
+ * A row of figures that assembles in reading order rather than flickering
+ * into place all at once. The stagger lives here, on the container, because
+ * the alternative is every card in the application carrying a delay prop it
+ * would only ever use for this. 70ms is the largest gap that still reads as
+ * one row arriving rather than four things arriving.
+ */
+.mf-stagger > * { animation: mf-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.mf-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.mf-stagger > *:nth-child(2) { animation-delay: 70ms; }
+.mf-stagger > *:nth-child(3) { animation-delay: 140ms; }
+.mf-stagger > *:nth-child(4) { animation-delay: 210ms; }
+.mf-stagger > *:nth-child(5) { animation-delay: 280ms; }
+.mf-stagger > *:nth-child(n+6) { animation-delay: 350ms; }
+
+.mf-draw {
+  stroke-dasharray: var(--mf-len, 1200);
+  animation: mf-draw 900ms cubic-bezier(0.33, 1, 0.68, 1) both;
+}
+
+.mf-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.035) 0%,
+    rgba(255, 255, 255, 0.075) 50%,
+    rgba(255, 255, 255, 0.035) 100%
+  );
+  background-size: 320px 100%;
+  background-repeat: no-repeat;
+  border-radius: 6px;
+  animation: mf-shimmer 1.25s linear infinite;
+}
+
+/*
+ * SOMEBODY WHO HAS ASKED FOR LESS MOTION GETS NONE OF IT. Not a shorter
+ * version — none. The setting exists for people who are made ill by movement,
+ * and a tasteful amount of it is still movement.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .mf-rise, .mf-fade, .mf-draw, .mf-skeleton, .mf-stagger > * {
+    animation: none !important;
+  }
+  .mf-draw { stroke-dasharray: none; }
+}
+
+/* The `+` beside a department sub-category in Budgeting.
+   Always visible — it is there to be found, not discovered — but quiet
+   enough that forty of them do not read as a column of buttons with the
+   account names in between. It brightens under the cursor and takes a
+   visible focus ring, because it is reachable by keyboard like any other. */
+.mf-add-under {
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.mf-add-under:hover {
+  background: rgba(0, 212, 126, 0.16);
+  border-color: rgba(0, 212, 126, 0.45);
+  color: #00D47E;
+}
+.mf-add-under:focus-visible {
+  outline: 2px solid #00D47E;
+  outline-offset: 1px;
+}
+
+/* The actions on a contract card in HR Administration.
+   Visible at rest — they were emoji at 35% opacity and nobody could find
+   them — and each takes its own colour under the cursor so the destructive
+   one is never the one pressed by accident. */
+.mf-card-action,
+.mf-card-danger {
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.mf-card-action:hover {
+  background: rgba(78, 168, 255, 0.16);
+  border-color: rgba(78, 168, 255, 0.45);
+  color: #4EA8FF;
+}
+.mf-card-danger:hover {
+  background: rgba(255, 91, 90, 0.16);
+  border-color: rgba(255, 91, 90, 0.45);
+  color: #FF5B5A;
+}
+.mf-card-action:focus-visible,
+.mf-card-danger:focus-visible {
+  outline: 2px solid #4EA8FF;
+  outline-offset: 1px;
+}
+
+/* The bin on a card. Muted at rest, red under the cursor — a destructive
+   action should say so before it is pressed, not after. */
+.mf-trash { transition: color 120ms ease, background 120ms ease; }
+.mf-trash:hover { color: #FF5B5A; background: rgba(255, 91, 90, 0.12); }
+.mf-trash:focus-visible { outline: 2px solid #FF5B5A; outline-offset: 1px; }
