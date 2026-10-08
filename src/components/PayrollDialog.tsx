@@ -7,6 +7,7 @@ import SearchableSelect from './SearchableSelect'
 import { obligationRows, obligationTotal, employeesMissingDepartment, PL_CATEGORY } from '../services/payrollAllocation'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
 import { fetchAllPartners } from '../services/allPartners'
+import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 
 interface Props {
   onClose: () => void
@@ -50,7 +51,7 @@ interface EmployeeLine {
   partnerSearch: string
 }
 
-const CURRENCIES = ['RSD', 'EUR', 'USD']
+const CURRENCIES = DOCUMENT_CURRENCIES
 
 let lineCounter = 0
 function makeEmployee(): EmployeeLine {

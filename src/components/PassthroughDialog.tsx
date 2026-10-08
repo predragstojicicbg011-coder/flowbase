@@ -5,6 +5,7 @@ import { PostFailure, reportPostFailure, type CompletedWrite } from '../services
 import { getRate, convertToUSD } from '../services/currencyService'
 import { DIALOG } from './dialogTheme'
 import { fetchAllPartners } from '../services/allPartners'
+import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 
 interface Props {
   onClose: () => void
@@ -351,7 +352,7 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
                     <select style={{ ...s.select, ...(fieldErr('currency') ? s.inputError : {}) }} value={currency}
                       onChange={e => { setCurrency(e.target.value); touch('currency') }} onBlur={() => touch('currency')}>
                       <option value="">Select...</option>
-{(companies.find(c => c.id === companyId)?.currencies || ['USD','RSD','EUR','AED']).map((cur: string) => (
+{(companies.find(c => c.id === companyId)?.currencies || DOCUMENT_CURRENCIES).map((cur: string) => (
   <option key={cur}>{cur}</option>
 ))}
                     </select>

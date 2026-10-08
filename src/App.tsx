@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { DataRefreshProvider } from './contexts/DataRefreshContext'
 import { CompaniesProvider } from './contexts/CompaniesContext'
+import { DisplayCurrencyProvider } from './contexts/DisplayCurrencyContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Transactions from './pages/Transactions'
@@ -69,7 +70,9 @@ function App() {
       <AuthProvider>
         <CompaniesProvider>
           <DataRefreshProvider>
-            <AppContent />
+            <DisplayCurrencyProvider>
+              <AppContent />
+            </DisplayCurrencyProvider>
           </DataRefreshProvider>
         </CompaniesProvider>
       </AuthProvider>

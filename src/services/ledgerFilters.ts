@@ -26,13 +26,16 @@
 // field the tab actually has. Even if a filter value leaks into a tab's state,
 // that tab cannot filter on a column it does not own.
 
+import { DOCUMENT_CURRENCIES } from './bookAmounts'
+
 export type Tab = 'invoices' | 'transactions' | 'passthrough'
 
 export const TABS: Tab[] = ['invoices', 'transactions', 'passthrough']
 
 export type DatePreset = 'custom' | 'this_month' | 'last_month' | 'this_quarter' | 'ytd'
 
-export const CURRENCIES = ['USD', 'EUR', 'RSD', 'AED', 'GBP']
+/** The document currencies, from the one list in bookAmounts. */
+export const CURRENCIES = DOCUMENT_CURRENCIES
 
 /** Duplicated from the dialogs, which each keep their own copy of this list.
  *  Revenue rows carry their classification here and not in `pl_category`. */

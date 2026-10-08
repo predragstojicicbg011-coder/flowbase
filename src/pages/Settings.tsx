@@ -9,6 +9,7 @@ import PayrollSettingsTab from '../components/PayrollSettingsTab'
 import UserManagement from '../components/UserManagement'
 import ClosedPeriodsTab from '../components/ClosedPeriodsTab'
 import BanksTab from '../components/BanksTab'
+import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 
 type SettingsTab = 'companies' | 'banks' | 'pl' | 'departments' | 'descriptions' | 'users' | 'periods' | 'templates' | 'payroll'
 
@@ -276,7 +277,7 @@ function CompanyProfilesTab({ canEdit }: { canEdit: boolean }) {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px', gap: '8px', marginBottom: '8px' }}>
                     <div style={s.formField}><label style={s.formLabel}>Bank name</label><input style={s.formInput} value={newBankName} onChange={e => setNewBankName(e.target.value)} placeholder="e.g. Raiffeisen Bank" /></div>
                     <div style={s.formField}><label style={s.formLabel}>Account number</label><input style={s.formInput} value={newAccountNum} onChange={e => setNewAccountNum(e.target.value)} placeholder="e.g. 265-1234567890-12" /></div>
-                    <div style={s.formField}><label style={s.formLabel}>Currency</label><select style={s.formInput} value={newCurrency} onChange={e => setNewCurrency(e.target.value)}><option>RSD</option><option>EUR</option><option>USD</option><option>AED</option><option>GBP</option></select></div>
+                    <div style={s.formField}><label style={s.formLabel}>Currency</label><select style={s.formInput} value={newCurrency} onChange={e => setNewCurrency(e.target.value)}>{DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}</select></div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '8px', alignItems: 'flex-end' }}>
                     <div style={s.formField}><label style={s.formLabel}>SWIFT (optional)</label><input style={s.formInput} value={newSwift} onChange={e => setNewSwift(e.target.value)} placeholder="e.g. RZBSRSBG" /></div>

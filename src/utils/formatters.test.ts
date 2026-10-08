@@ -1,4 +1,7 @@
-import { fmtUSDCompact, fmtUSDFull, budgetFigureFormat, fmtNum, fmtLocal } from './formatters'
+import {
+  fmtUSDCompact, fmtUSDFull, budgetFigureFormat, fmtNum, fmtLocal,
+  fmtMoney, fmtRSD, fmtEUR, fmtMoneyCompact, fmtRSDCompact, fmtEURCompact, fmtMoneyWhole,
+} from './formatters'
 
 // ─── The budget table's own scale ────────────────────────────────────────────
 //
@@ -162,5 +165,68 @@ describe('a local amount with its currency', () => {
     expect(fmtLocal(134561.52, 'RSD')).toBe('134.561,52 RSD')
     expect(fmtLocal(86292, 'RSD')).toBe('86.292,00 RSD')
     expect(fmtLocal(1200, 'EUR')).toBe('1.200,00 EUR')
+  })
+})
+
+// ─── MCFlow's money: RSD books, EUR beside them ──────────────────────────────
+//
+// One convention for every currency: Serbian notation, a space, the ISO code.
+
+describe('fmtMoney', () => {
+  it('writes the figure the Serbian way with the code after it', () => {
+    expect(fmtMoney(1234567.891, 'RSD')).toBe('1.234.567,89 RSD')
+    expect(fmtMoney(1234.5, 'EUR')).toBe('1.234,50 EUR')
+    expect(fmtMoney(99.9, 'USD')).toBe('99,90 USD')
+  })
+
+  it('keeps the minus on a credit note', () => {
+    expect(fmtMoney(-1234.56, 'EUR')).toBe('-1.234,56 EUR')
+  })
+
+  it('writes zero as zero, and never as minus zero', () => {
+    expect(fmtMoney(0, 'RSD')).toBe('0,00 RSD')
+    expect(fmtMoney(-0.001, 'RSD')).toBe('0,00 RSD')
+  })
+
+  it('takes the number of decimals', () => {
+    expect(fmtMoney(1234.56, 'RSD', 0)).toBe('1.235 RSD')
+  })
+
+  it('prints a dash for what is not a number', () => {
+    expect(fmtMoney(null, 'RSD')).toBe('—')
+    expect(fmtMoney(undefined, 'EUR')).toBe('—')
+    expect(fmtMoney(NaN, 'EUR')).toBe('—')
+  })
+
+  it('has RSD and EUR shorthands', () => {
+    expect(fmtRSD(86292)).toBe('86.292,00 RSD')
+    expect(fmtEUR(737.2)).toBe('737,20 EUR')
+  })
+})
+
+describe('fmtMoneyCompact', () => {
+  it('scales to thousands, millions and billions in Serbian', () => {
+    expect(fmtRSDCompact(340)).toBe('340 RSD')
+    expect(fmtRSDCompact(12345)).toBe('12,3 hilj. RSD')
+    expect(fmtRSDCompact(1234567)).toBe('1,2 mil. RSD')
+    expect(fmtRSDCompact(2345678901)).toBe('2,3 mlrd. RSD')
+    expect(fmtEURCompact(1000)).toBe('1,0 hilj. EUR')
+  })
+
+  it("keeps the budget table's sign rules", () => {
+    expect(fmtRSDCompact(-2200)).toBe('-2,2 hilj. RSD')
+    expect(fmtRSDCompact(2200, true)).toBe('+2,2 hilj. RSD')
+    expect(fmtRSDCompact(-2200, true)).toBe(fmtRSDCompact(-2200))
+    expect(fmtRSDCompact(0)).toBe('—')
+    expect(fmtMoneyCompact(null, 'EUR')).toBe('—')
+  })
+})
+
+describe('fmtMoneyWhole', () => {
+  it('prints the whole figure, grouped', () => {
+    expect(fmtMoneyWhole(26432, 'RSD')).toBe('26.432 RSD')
+    expect(fmtMoneyWhole(-26432, 'EUR')).toBe('-26.432 EUR')
+    expect(fmtMoneyWhole(26432, 'EUR', true)).toBe('+26.432 EUR')
+    expect(fmtMoneyWhole(0, 'RSD')).toBe('—')
   })
 })

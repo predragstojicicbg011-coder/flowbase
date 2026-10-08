@@ -29,6 +29,7 @@ import { CREDIT_PRINCIPAL, CREDIT_INTEREST, creditNote, allocatePayment } from '
 import { planSave, isCrossTableMove, type TxTable, type TxType } from '../services/transactionMove'
 import { softDeleteRow } from '../services/writeOrder'
 import { fetchAllPartners } from '../services/allPartners'
+import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 
 interface Props {
   onClose: () => void
@@ -1648,7 +1649,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                     <select style={{ ...s.select, ...(fieldErr('currency') ? s.inputError : {}) }} value={currency}
                       onChange={e => { setCurrency(e.target.value); touch('currency') }} onBlur={() => touch('currency')}>
                       <option value="">Select...</option>
-                      {(companies.find(c => c.id === companyId)?.currencies || ['USD', 'RSD', 'EUR', 'AED']).map((cur: string) => (
+                      {(companies.find(c => c.id === companyId)?.currencies || DOCUMENT_CURRENCIES).map((cur: string) => (
                         <option key={cur}>{cur}</option>
                       ))}
                     </select>

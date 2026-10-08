@@ -7,6 +7,7 @@ import { DIALOG } from './dialogTheme'
 import { obligationRows, obligationTotal, employeesMissingDepartment, PL_CATEGORY } from '../services/payrollAllocation'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
 import { fetchAllPartners } from '../services/allPartners'
+import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 
 interface Props {
   onClose: () => void
@@ -780,7 +781,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                           setExchangeRate(e.target.value === 'USD' ? '1' : '')
                           setRateWarning('')
                         }}>
-                        {['RSD', 'EUR', 'USD'].map(c => <option key={c}>{c}</option>)}
+                        {DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}
                       </select>
                       <button style={s.fetchBtn} onClick={fetchRate} disabled={fetchingRate}>{fetchingRate ? '...' : 'Fetch'}</button>
                     </div>

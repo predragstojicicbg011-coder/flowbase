@@ -1,5 +1,67 @@
-// ── Currency formatters ───────────────────────────────────
-// USD and all amounts shown in USD context
+// ── Money in MCFlow: RSD books, EUR beside them ───────────
+//
+// ONE CONVENTION, for every currency: the figure in Serbian notation, a space,
+// then the ISO code — `1.234.567,89 RSD`, `1.234,56 EUR`, `1.234,56 USD`.
+// The code goes after the number because that is how Serbian invoices and
+// bank statements write it, and because a `€`/`$` prefix next to a Serbian
+// decimal comma reads as two conventions at once.
+//
+//   fmtMoney(n, cur, decimals = 2)   full figure, KEEPS its minus: -1.234,56 EUR
+//   fmtRSD / fmtEUR                  fmtMoney with the currency fixed
+//   fmtMoneyCompact(n, cur, showSign) the glance scale for cards and dense
+//                                    tables: 340 RSD, 12,3 hilj. RSD,
+//                                    1,2 mil. RSD, 1,2 mlrd. RSD
+//   fmtRSDCompact / fmtEURCompact    the same with the currency fixed
+//   fmtMoneyWhole(n, cur, showSign)  the compact scale's full-precision twin:
+//                                    26.432 RSD
+//
+// The compact and whole formatters follow the budget table's sign rules (see
+// fmtUSDCompact below): zero is an em dash, a negative ALWAYS keeps its minus,
+// `showSign` only decides whether a positive gets a `+`. Their (n, showSign)
+// shape is `BudgetFigureFormat`'s, so they drop into the budget table.
+//
+// Not a number (null, undefined, NaN) prints an em dash everywhere.
+
+const srFixed = (n: number, decimals: number): string =>
+  n.toLocaleString('sr-RS', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+
+export const fmtMoney = (n: number | null | undefined, currency: string, decimals = 2): string => {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
+  // toLocaleString of a negative that rounds to zero would print "-0,00".
+  const v = Math.abs(n) < 0.5 * Math.pow(10, -decimals) ? 0 : n
+  return `${srFixed(v, decimals)} ${currency}`
+}
+
+export const fmtRSD = (n: number | null | undefined, decimals = 2): string => fmtMoney(n, 'RSD', decimals)
+export const fmtEUR = (n: number | null | undefined, decimals = 2): string => fmtMoney(n, 'EUR', decimals)
+
+const signed = (n: number, body: string, showSign: boolean): string =>
+  n < 0 ? `-${body}` : showSign ? `+${body}` : body
+
+export const fmtMoneyCompact = (n: number | null | undefined, currency: string, showSign = false): string => {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n === 0) return '—'
+  const abs = Math.abs(n)
+  const scaled = (div: number, unit: string) => `${srFixed(abs / div, 1)} ${unit} ${currency}`
+  const body =
+    abs >= 1e9 ? scaled(1e9, 'mlrd.')
+    : abs >= 1e6 ? scaled(1e6, 'mil.')
+    : abs >= 1e3 ? scaled(1e3, 'hilj.')
+    : `${srFixed(abs, 0)} ${currency}`
+  return signed(n, body, showSign)
+}
+
+export const fmtRSDCompact = (n: number | null | undefined, showSign = false): string => fmtMoneyCompact(n, 'RSD', showSign)
+export const fmtEURCompact = (n: number | null | undefined, showSign = false): string => fmtMoneyCompact(n, 'EUR', showSign)
+
+export const fmtMoneyWhole = (n: number | null | undefined, currency: string, showSign = false): string => {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n === 0) return '—'
+  return signed(n, `${srFixed(Math.abs(n), 0)} ${currency}`, showSign)
+}
+
+// ── Mintflow's USD formatters ─────────────────────────────
+// Kept so pages not yet moved to RSD/EUR compile. Every one is deprecated.
+
+/** @deprecated USD is not a reporting currency in MCFlow — use fmtMoney / fmtRSD / fmtEUR. */
 export const fmtUSD = (n: number, decimals = 0): string => {
   if (!n && n !== 0) return '—'
   return '$' + Math.abs(n).toLocaleString('en-US', {
@@ -8,7 +70,7 @@ export const fmtUSD = (n: number, decimals = 0): string => {
   })
 }
 
-// USD with sign (+ or -)
+/** @deprecated Use fmtMoney, which keeps the sign. */
 export const fmtUSDSigned = (n: number, decimals = 0): string => {
   if (!n && n !== 0) return '—'
   const prefix = n < 0 ? '-$' : '$'
@@ -40,7 +102,8 @@ export const fmtNum = (n: number, decimals = 2): string => {
 }
 
 /**
- * Local currency (RSD, EUR, AED) — Serbian locale: 1.234,56 RSD.
+ * Local currency (RSD, EUR) — Serbian locale: 1.234,56 RSD. See fmtMoney,
+ * which keeps the sign, for new code.
  *
  * WRITES THE MAGNITUDE, NOT THE SIGN, the same way `fmtUSD` does: the call
  * sites that deal in direction supply their own `+` or `-` in front of it
@@ -93,6 +156,8 @@ export const fmtShort = (n: number, currency = 'USD'): string => {
  * the variance cell passed the flag, so a `direct` row of −2,200 printed
  * `$2.2K` next to a variance computed from the real −2,200: one row, two
  * figures, 4,400 apart.
+ *
+ * @deprecated Use fmtRSDCompact / fmtEURCompact (same sign rules).
  */
 export const fmtUSDCompact = (n: number, showSign = false): string => {
   if (n === 0) return '—'
@@ -119,6 +184,8 @@ export const fmtUSDCompact = (n: number, showSign = false): string => {
  * in the same cell on different days, and a cell that changes a figure's sign
  * when the horizon changes is not a formatting preference, it is a wrong
  * number.
+ *
+ * @deprecated Use fmtMoneyWhole (same sign rules).
  */
 export const fmtUSDFull = (n: number, showSign = false): string => {
   if (n === 0) return '—'

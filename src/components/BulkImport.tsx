@@ -359,7 +359,7 @@ function parseWio(content: string): ParsedRow[] {
     if (!line.trim()) return
     const cols = parseCSVLine(line.replace(/\r/g, ''))
     if (cols.length < 11) return
-    const currency = cols[5]?.trim() || 'AED'; const txType = cols[6]?.trim() || ''
+    const currency = cols[5]?.trim() || 'RSD'; const txType = cols[6]?.trim() || ''
     const rawDate = cols[7]?.trim() || ''; const refNum = cols[8]?.trim() || ''
     const description = cols[9]?.trim() || ''
     const rawAmount = parseFloat(cols[10]?.replace(/,/g, '') || '0') || 0

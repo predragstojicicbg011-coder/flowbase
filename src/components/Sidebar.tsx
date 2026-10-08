@@ -2,6 +2,7 @@ import React from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useNav } from '../navigation'
 import type { Page } from '../navigation'
+import DisplayCurrencyToggle from './DisplayCurrencyToggle'
 
 const Icon = ({ children }: { children: React.ReactNode }) => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
@@ -117,6 +118,11 @@ export default function Sidebar() {
         })}
       </nav>
 
+      {/* Which book currency the pages show; remembered per viewer. */}
+      <div style={s.currencyRow}>
+        <DisplayCurrencyToggle />
+      </div>
+
       <div style={s.userRow}>
         <div style={s.avatar}>{initials}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -177,6 +183,10 @@ const s: Record<string, React.CSSProperties> = {
     textAlign: 'left',
     transition: 'background 0.15s, color 0.15s',
     fontFamily: "'Inter', system-ui, sans-serif",
+  },
+  currencyRow: {
+    padding: '10px 16px',
+    borderTop: '1px solid rgba(255,255,255,0.07)',
   },
   userRow: {
     display: 'flex',

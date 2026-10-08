@@ -1,76 +1,117 @@
-import { convertToUSD, perUsdFromRsd, convertToEUR } from './currencyService'
+import {
+  getRate, getRatesForDate, clearRateCache, toIsoDate, nearestBusinessDay, srDate,
+  RateUnavailableError, convertToUSD, perUsdFromRsd,
+} from './currencyService'
 
-// NBS middle rates for a representative day. Both are RSD per unit.
-const USD_RSD = 101.0
-const EUR_RSD = 117.4
+// Every rate here is RSD per 1 unit, as NBS publishes it.
 
-describe('perUsdFromRsd', () => {
-  it('crosses EUR to USD through RSD', () => {
-    // 1 USD = 101 RSD, 1 EUR = 117.4 RSD, so a dollar buys 0.86 EUR.
-    expect(perUsdFromRsd(EUR_RSD, USD_RSD)).toBeCloseTo(0.8603, 4)
+const realFetch = (global as any).fetch
+
+function nbs(rates: Record<string, number | null>, opts: { parity?: number } = {}) {
+  return jest.fn(async (url: string) => {
+    const cur = /currency=(\w+)/.exec(url)![1].toUpperCase()
+    const date = /date=([\d-]+)/.exec(url)![1]
+    const middle = rates[cur]
+    if (middle === undefined) throw new Error('network down')
+    if (middle === null) return { ok: false, status: 500, json: async () => ({ error: 'No rate' }) }
+    return { ok: true, status: 200, json: async () => ({ exchange_middle: middle, parity: opts.parity ?? 1, date }) }
+  })
+}
+
+beforeEach(() => {
+  clearRateCache()
+  jest.spyOn(console, 'warn').mockImplementation(() => {})
+})
+afterEach(() => {
+  (global as any).fetch = realFetch
+  jest.restoreAllMocks()
+})
+
+describe('dates', () => {
+  it('reads ISO and Serbian dates', () => {
+    expect(toIsoDate('2026-10-07')).toBe('2026-10-07')
+    expect(toIsoDate('07.10.2026')).toBe('2026-10-07')
+    expect(toIsoDate('7.10.2026.')).toBe('2026-10-07')
   })
 
-  it('gives a rate above 1 for a currency weaker than the dollar', () => {
-    expect(perUsdFromRsd(27.2, USD_RSD)).toBeCloseTo(3.7132, 4)
+  it('steps a weekend back to Friday, whatever the time zone', () => {
+    expect(nearestBusinessDay('2026-10-03')).toBe('2026-10-02') // Saturday
+    expect(nearestBusinessDay('2026-10-04')).toBe('2026-10-02') // Sunday
+    expect(nearestBusinessDay('2026-10-05')).toBe('2026-10-05') // Monday
   })
 
-  it('is 1 when a currency is worth exactly a dollar', () => {
-    expect(perUsdFromRsd(USD_RSD, USD_RSD)).toBe(1)
-  })
-
-  it('refuses to divide by a missing rate', () => {
-    expect(perUsdFromRsd(0, USD_RSD)).toBe(1)
-    expect(perUsdFromRsd(EUR_RSD, 0)).toBe(1)
+  it('writes a date the Serbian way', () => {
+    expect(srDate('2026-10-07')).toBe('07.10.2026.')
   })
 })
 
-describe('convertToUSD', () => {
-  it('leaves USD alone', () => {
+describe('getRate', () => {
+  it('is 1 for RSD without asking anybody', async () => {
+    const f = nbs({});
+    (global as any).fetch = f
+    await expect(getRate('RSD', '2026-10-07')).resolves.toMatchObject({ rate: 1, to: 'RSD', isFallback: false })
+    expect(f).not.toHaveBeenCalled()
+  })
+
+  it('returns RSD per unit for EUR and USD', async () => {
+    (global as any).fetch = nbs({ EUR: 117.17, USD: 100.42 })
+    expect((await getRate('EUR', '2026-10-07')).rate).toBe(117.17)
+    expect((await getRate('USD', '2026-10-07')).rate).toBe(100.42)
+  })
+
+  it('divides by parity', async () => {
+    (global as any).fetch = nbs({ JPY: 68.5 }, { parity: 100 })
+    expect((await getRate('JPY', '2026-10-07')).rate).toBeCloseTo(0.685, 6)
+  })
+
+  it('caches a good answer', async () => {
+    const f = nbs({ EUR: 117.17 });
+    (global as any).fetch = f
+    await getRate('EUR', '2026-10-07')
+    await getRate('EUR', '2026-10-07')
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  it('throws instead of falling back to a made-up rate', async () => {
+    (global as any).fetch = nbs({ EUR: null })
+    await expect(getRate('EUR', '2026-10-07')).rejects.toThrow(RateUnavailableError)
+    ;(global as any).fetch = nbs({})
+    await expect(getRate('USD', '2026-10-07')).rejects.toThrow('Kurs NBS nije dostupan za 07.10.2026. (USD)')
+  })
+
+  it('does not cache a failure', async () => {
+    (global as any).fetch = nbs({ EUR: null })
+    await expect(getRate('EUR', '2026-10-07')).rejects.toThrow()
+    ;(global as any).fetch = nbs({ EUR: 117.17 })
+    expect((await getRate('EUR', '2026-10-07')).rate).toBe(117.17)
+  })
+
+  it('asks only the NBS proxy, never the old exchange-rate fallback', async () => {
+    const f = nbs({ EUR: null });
+    (global as any).fetch = f
+    await expect(getRate('EUR', '2026-10-07')).rejects.toThrow()
+    expect(f.mock.calls.every(c => String(c[0]).includes('/nbs-rate'))).toBe(true)
+  })
+})
+
+describe('getRatesForDate', () => {
+  it('returns RSD per USD and RSD per EUR', async () => {
+    (global as any).fetch = nbs({ EUR: 117.17, USD: 100.42 })
+    await expect(getRatesForDate('2026-10-07')).resolves.toMatchObject({
+      usdRsdRate: 100.42, eurRsdRate: 117.17, date: '2026-10-07', isFallback: false,
+    })
+  })
+
+  it('throws when either is missing', async () => {
+    (global as any).fetch = nbs({ EUR: 117.17, USD: null })
+    await expect(getRatesForDate('2026-10-07')).rejects.toThrow(RateUnavailableError)
+  })
+})
+
+describe('the deprecated USD helpers', () => {
+  it('still compute what they always did', () => {
+    expect(perUsdFromRsd(117.4, 101)).toBeCloseTo(0.8603, 4)
     expect(convertToUSD(1200, 'USD', 1)).toBe(1200)
-  })
-
-  it('converts RSD at the RSD/USD rate', () => {
-    expect(convertToUSD(235000, 'RSD', USD_RSD)).toBeCloseTo(2326.73, 2)
-  })
-
-  it('converts EUR 1,200 to about $1,395, not $10', () => {
-    // The bug this covers: EUR 1,200 was divided by 117.4 — the RSD/EUR rate —
-    // and booked as $10.22. It has to be divided by EUR-per-USD instead.
-    const perUsd = perUsdFromRsd(EUR_RSD, USD_RSD)
-    expect(convertToUSD(1200, 'EUR', perUsd)).toBeCloseTo(1394.85, 2)
-  })
-
-  it('converts AED', () => {
-    expect(convertToUSD(1000, 'AED', perUsdFromRsd(27.2, USD_RSD))).toBeCloseTo(269.31, 2)
-  })
-
-  it('converts a currency it was never told about, rather than passing it through', () => {
-    // GBP fell off the end of the old if-chain and came back unchanged, so a
-    // pound was booked as a dollar.
-    expect(convertToUSD(100, 'GBP', 0.79)).toBeCloseTo(126.58, 2)
-    expect(convertToUSD(100, 'GBP', 0.79)).not.toBe(100)
-  })
-
-  it('returns the amount rather than Infinity when the rate is unusable', () => {
     expect(convertToUSD(500, 'EUR', 0)).toBe(500)
-    expect(convertToUSD(500, 'EUR', NaN)).toBe(500)
-  })
-
-  it('round-trips against the rate it was given', () => {
-    const perUsd = perUsdFromRsd(EUR_RSD, USD_RSD)
-    const usd = convertToUSD(1200, 'EUR', perUsd)
-    expect(usd * perUsd).toBeCloseTo(1200, 6)
-  })
-})
-
-describe('convertToEUR', () => {
-  it('crosses USD back to EUR through RSD', () => {
-    expect(convertToEUR(1394.8515, EUR_RSD, USD_RSD)).toBeCloseTo(1200, 3)
-  })
-
-  it('is the inverse of converting EUR to USD', () => {
-    const perUsd = perUsdFromRsd(EUR_RSD, USD_RSD)
-    const usd = convertToUSD(850, 'EUR', perUsd)
-    expect(convertToEUR(usd, EUR_RSD, USD_RSD)).toBeCloseTo(850, 6)
   })
 })

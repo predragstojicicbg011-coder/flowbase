@@ -33,6 +33,7 @@ import {
   whySplitNotSavable, classificationFromSplit, type SplitLine,
 } from '../services/expenseSplit'
 import { saveSplits } from '../services/saveSplits'
+import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 // credit payment P&L logic is inline
 
 /** How many posted statements the history list shows before "Load more". */
@@ -1504,7 +1505,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
               <div style={s.field}>
                 <label style={s.lbl}>Default currency</label>
                 <select style={s.select} value={defaultCurrency} onChange={e => setDefaultCurrency(e.target.value)}>
-                  {['RSD', 'USD', 'EUR', 'AED', 'GBP'].map(c => <option key={c}>{c}</option>)}
+                  {DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}
                 </select>
               </div>
             </div>
@@ -1781,7 +1782,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                       <select style={s.cellInput} value={row.currency}
                         onChange={e => { e.stopPropagation(); updateRow(row.id, { currency: e.target.value }) }}
                         onClick={e => e.stopPropagation()}>
-                        {['RSD', 'USD', 'EUR', 'AED', 'GBP'].map(c => <option key={c}>{c}</option>)}
+                        {DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}
                       </select>
                       <div style={{ fontSize: '10px', color: DIALOG.dim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                         {hasAmount ? getRowSummary(row) : <span style={{ color: DIALOG.faint }}>click to classify</span>}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { settingsStyles as s } from '../pages/Settings'
+import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 
 // ── Banks and payment methods ───────────────────────────────────────────────
 // Until this tab existed the banks table was only ever read — adding one meant
@@ -25,7 +26,7 @@ const TYPES = [
   { value: 'bank', label: 'Bank account' },
   { value: 'payment_method', label: 'Payment method' },
 ]
-const CURRENCIES = ['USD', 'EUR', 'RSD', 'AED']
+const CURRENCIES = DOCUMENT_CURRENCIES
 
 const emptyDraft = (companyId: string): Omit<Bank, 'id'> => ({
   company_id: companyId, name: '', type: 'bank', currencies: ['USD'], is_active: true,

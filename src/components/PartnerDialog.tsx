@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import { DIALOG } from './dialogTheme'
+import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 
 interface Props {
   partner?: any
@@ -670,7 +671,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                 <div style={ds.row2}>
                   <div style={ds.field}><label style={ds.lbl}>Currency</label>
                     <select style={ds.select} value={newCurrency} onChange={e => setNewCurrency(e.target.value)}>
-                      <option>RSD</option><option>EUR</option><option>USD</option><option>AED</option>
+                      {DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}
                     </select>
                   </div>
                   <div style={ds.field}><label style={ds.lbl}>Model</label><input style={ds.input} value={newModel} onChange={e => setNewModel(e.target.value)} placeholder="e.g. 97" /></div>

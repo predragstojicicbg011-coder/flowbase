@@ -30,7 +30,11 @@ const json = (body: unknown, status = 200) =>
 
 // Samo valute koje aplikacija stvarno koristi. Bez ovoga bi proxy bio otvoren
 // relej za proizvoljne pozive prema exchangerate-api, na racun naseg kljuca.
-const ALLOWED = new Set(['RSD', 'EUR', 'USD', 'AED'])
+// Mora se slagati sa DOCUMENT_CURRENCIES u src/services/bookAmounts.ts.
+//
+// NE KORISTI SE: funkcija nije deployovana i nema API kljuc. Klijent vise ne
+// pada na nju kad NBS nije dostupan — currencyService tada baca gresku.
+const ALLOWED = new Set(['RSD', 'EUR', 'USD'])
 
 // Mijenjati pri svakoj izmjeni. Vraca se uz greske da se iz odgovora vidi
 // koja verzija je zaista deployovana — poruke same po sebi to ne otkrivaju.
