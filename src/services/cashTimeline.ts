@@ -295,8 +295,127 @@ export interface CashTx {
 export function cashMovement(tx: CashTx, currency: DisplayCurrency): { inflow: number; outflow: number } {
   const amount = Math.abs(pickAmount(tx, currency) ?? 0)
   if (!amount) return { inflow: 0, outflow: 0 }
-  if (tx.type === 'direct' && tx.tx_subtype === 'revenue') return { inflow: amount, outflow: 0 }
-  if (tx.type === 'direct' && tx.tx_subtype === 'expense') return { inflow: 0, outflow: amount }
-  if (tx.type === 'invoice_payment') return { inflow: 0, outflow: amount }
+  const dir = cashDirection(tx)
+  if (dir === 'in') return { inflow: amount, outflow: 0 }
+  if (dir === 'out') return { inflow: 0, outflow: amount }
   return { inflow: 0, outflow: 0 }
+}
+
+/**
+ * Which way a transaction moves cash, or null when it is not cash flow.
+ *
+ * THE DIRECTION OF AN INVOICE PAYMENT IS ITS `tx_subtype`. Every dialog
+ * writes the linked invoice's type there ('expense' — we paid a supplier;
+ * 'revenue' — an investor or tenant paid us). A receipt against a revenue
+ * invoice is an INFLOW; counting every invoice payment as an outflow, as
+ * this once did, turned each collected billing into a payment of the same
+ * size.
+ *
+ * An invoice payment with NO subtype is treated as an outflow — every one of
+ * those was written before revenue invoices existed, when the only invoices
+ * paid were suppliers'. A row that is really a receipt and still carries
+ * null will read the wrong way until it is re-saved.
+ *
+ * An advance (is_advance) is a direct revenue receipt and reads as an inflow
+ * here: it is cash in, whatever the P&L makes of it.
+ */
+export function cashDirection(tx: Pick<CashTx, 'type' | 'tx_subtype'>): 'in' | 'out' | null {
+  if (tx.type === 'direct') {
+    if (tx.tx_subtype === 'revenue') return 'in'
+    if (tx.tx_subtype === 'expense') return 'out'
+    return null
+  }
+  if (tx.type === 'invoice_payment') return tx.tx_subtype === 'revenue' ? 'in' : 'out'
+  return null
+}
+
+
+// ─── What is expected to come in ────────────────────────────────────────────
+
+export interface DatedInflow {
+  /** `YYYY-MM-DD` the money is expected. */
+  date: string
+  label: string
+  /** In the display currency. */
+  amount: number
+  /**
+   * `invoice` — an issued revenue invoice still owed (exact: it has a due
+   * date); `plan` / `rent` — a billing not yet issued, from revenue_plan or a
+   * lease (an estimate).
+   */
+  kind: 'invoice' | 'plan' | 'rent'
+  /** An invoice already past its due date, moved to the month in progress. */
+  overdue?: boolean
+}
+
+/** The part of a v_invoice_status row the receivables inflow reads. */
+export interface ReceivableRow {
+  type?: string | null
+  calculated_status?: string | null
+  partner_name?: string | null
+  invoice_number?: string | null
+  invoice_date?: string | null
+  due_date?: string | null
+  remaining_rsd?: number | string | null
+  remaining_eur?: number | string | null
+}
+
+/**
+ * Open revenue invoices as dated inflows: what each investor or tenant still
+ * owes (`remaining_*`, which already nets out the advance deducted and what
+ * was paid), on its due date — its invoice date when it has none. One
+ * already overdue is money expected NOW: it is dated to the first of the
+ * month in progress and flagged, rather than dropped behind the line.
+ *
+ * Read from the row's own figure in `currency`; a row with none is counted
+ * in `unconverted`, never converted here.
+ */
+export function receivableInflows(
+  rows: readonly ReceivableRow[], currentMonth: MonthKey, currency: DisplayCurrency,
+): { items: DatedInflow[]; unconverted: number; overdue: number } {
+  const items: DatedInflow[] = []
+  let unconverted = 0
+  let overdue = 0
+  const start = `${currentMonth}-01`
+  for (const r of rows) {
+    if (r.type !== 'revenue') continue
+    if (r.calculated_status !== 'unpaid' && r.calculated_status !== 'partial') continue
+    const remaining = pickAmount(r, currency, 'remaining')
+    if (remaining === null) { unconverted++; continue }
+    if (!(remaining > 0)) continue
+    const due = String(r.due_date || r.invoice_date || '').slice(0, 10)
+    if (!due) continue
+    const late = due < start
+    if (late) overdue++
+    items.push({
+      date: late ? start : due,
+      label: [r.partner_name || '—', r.invoice_number].filter(Boolean).join(' · '),
+      amount: cents(remaining),
+      kind: 'invoice',
+      ...(late ? { overdue: true } : {}),
+    })
+  }
+  return { items, unconverted, overdue }
+}
+
+/**
+ * Dated inflows by month, like `datedByMonth` for outflows: summed for the
+ * projection and kept as a list, so a heavy month can say why.
+ */
+export function inflowsByMonthDated(
+  items: readonly DatedInflow[], months: MonthKey[],
+): Record<MonthKey, { total: number; items: DatedInflow[] }> {
+  const horizon = new Set(months)
+  const out: Record<MonthKey, { total: number; items: DatedInflow[] }> = {}
+  for (const i of items) {
+    const month = (i.date || '').slice(0, 7)
+    if (!month || !horizon.has(month)) continue
+    if (!out[month]) out[month] = { total: 0, items: [] }
+    out[month].total = cents(out[month].total + i.amount)
+    out[month].items.push(i)
+  }
+  for (const m of Object.keys(out)) {
+    out[m].items.sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount)
+  }
+  return out
 }

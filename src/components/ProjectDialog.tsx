@@ -15,7 +15,7 @@ import SearchableSelect from './SearchableSelect'
 import { fetchAllPartners } from '../services/allPartners'
 import { runWrite } from '../services/writeOrder'
 import {
-  CONTRACT_CURRENCIES, PROJECT_KINDS, PROJECT_KIND_LABEL,
+  CONTRACT_CURRENCIES, DEFAULT_PAYMENT_DAYS, PROJECT_KINDS, PROJECT_KIND_LABEL,
   contractBookFigures, draftFromProject, emptyDraft, parseContractValue, projectRow, validateProject,
   type ContractBook, type ContractCurrency, type Project, type ProjectDraft, type ProjectKind,
 } from '../services/projects'
@@ -160,6 +160,16 @@ export default function ProjectDialog({ project, companyId, existing, onClose, o
           </div>
           <div style={s.hint}>
             Vrednost se preračunava u RSD i EUR po srednjem kursu NBS na datum ugovora, a bez datuma na današnji dan.
+          </div>
+
+          <label style={{ ...s.field, maxWidth: '260px' }}>
+            <span style={s.lbl}>Rok plaćanja investitora (dana)</span>
+            <input style={s.input} inputMode="numeric" value={draft.payment_days}
+              onChange={e => set('payment_days', e.target.value.replace(/[^\d]/g, ''))}
+              placeholder={String(DEFAULT_PAYMENT_DAYS)} aria-label="Rok plaćanja investitora (dana)" />
+          </label>
+          <div style={s.hint}>
+            Planirana fakturisanja ulaze u prognozu novčanog toka ovoliko dana posle kraja meseca. Prazno je {DEFAULT_PAYMENT_DAYS} dana.
           </div>
 
           <label style={s.field}>

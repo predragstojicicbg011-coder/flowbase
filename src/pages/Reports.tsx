@@ -198,9 +198,12 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
             // between the invoice's rate and the payment's — multiplied by a
             // THIRD rate. Three rates in one figure, on a screen that
             // generates payment orders.
-            outstanding_own: partial
-              ? outstandingOwn({ ...i, paid_amount: open?.paid_amount ?? 0 })
-              : (i.amount || 0),
+            //
+            // Through outstandingOwn on an unpaid bill as well: a revenue
+            // billing that deducts an advance is owed `amount −
+            // advance_deducted` before anything is paid (`invoices.*` carries
+            // advance_deducted).
+            outstanding_own: outstandingOwn({ ...i, paid_amount: partial ? (open?.paid_amount ?? 0) : 0 }),
           }
         })
         // `fetchByIds` returns chunk by chunk, so the ordering within a chunk
@@ -618,8 +621,9 @@ export default function Reports() {
         }),
         fetchAllPages<any>((from, to) => {
           let q = supabase.from('v_invoice_status')
-            .select('calculated_status,remaining_rsd,remaining_eur,due_date')
+            .select('type,calculated_status,remaining_rsd,remaining_eur,due_date')
             .in('calculated_status', ['unpaid', 'partial'])
+            .eq('type', 'revenue')
           if (companyId !== 'all') q = q.eq('company_id', companyId)
           return q.order('due_date', { nullsFirst: false }).order('id').range(from, to)
         }),
@@ -647,7 +651,7 @@ export default function Reports() {
     { label: 'Net Profit (YTD)',    value: loading ? '...' : fmt(kpis.netProfit),                                     sub: `${currentYear} year to date`,  up: kpis.netProfit >= 0,      trend: loading ? '' : kpis.netProfit >= 0 ? 'Profitable' : 'Loss',    accent: kpis.netProfit >= 0 ? '#00D47E' : '#FF5B5A' },
     { label: 'Total Revenue (YTD)', value: loading ? '...' : fmt(kpis.totalRevenue),                                    sub: `${currentYear} year to date`,  up: true,                     trend: loading ? '' : `${fmt(kpis.totalExpenses)} expenses`,           accent: '#00D47E' },
     { label: 'Expense Ratio',       value: loading ? '...' : `${kpis.expenseRatio.toFixed(1)}%`,                        sub: 'Expenses / Revenue YTD',       up: kpis.expenseRatio < 90,   trend: loading ? '' : kpis.expenseRatio < 80 ? 'Healthy' : kpis.expenseRatio < 90 ? 'Watch' : 'High', accent: kpis.expenseRatio < 80 ? '#00D47E' : kpis.expenseRatio < 90 ? '#F5A623' : '#FF5B5A' },
-    { label: 'Open Invoices',       value: loading ? '...' : kpis.openInvoicesCount > 0 ? `${kpis.openInvoicesCount} · ${fmt(kpis.openInvoicesAmount)}` : 'None', sub: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} overdue` : 'All on time', up: kpis.overdueCount === 0, trend: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} overdue` : 'On time', accent: kpis.overdueCount > 0 ? '#FF5B5A' : '#4EA8FF' },
+    { label: 'Open Receivables',    value: loading ? '...' : kpis.openInvoicesCount > 0 ? `${kpis.openInvoicesCount} · ${fmt(kpis.openInvoicesAmount)}` : 'None', sub: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} overdue` : 'All on time', up: kpis.overdueCount === 0, trend: loading ? '' : kpis.overdueCount > 0 ? `${kpis.overdueCount} overdue` : 'On time', accent: kpis.overdueCount > 0 ? '#FF5B5A' : '#4EA8FF' },
   ]
 
   const reports = [

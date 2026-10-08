@@ -270,3 +270,20 @@ describe('rowAmount', () => {
     expect(rowAmount({ debit: 'abc', credit: '' })).toEqual({ amount: 0, isExpense: false })
   })
 })
+
+describe('invoiceStatus with an advance deducted', () => {
+  it('counts the advance as settled, as v_invoice_status does', () => {
+    expect(invoiceStatus(600, 1000, 1000, 400)).toBe('paid')
+    expect(invoiceStatus(100, 1000, 1000, '400')).toBe('partial')
+    expect(invoiceStatus(0, 1000, 1000, 400)).toBe('unpaid')
+  })
+})
+
+describe('an advance, reopened', () => {
+  it('keeps its flag; anything else reads false', () => {
+    const tx = { id: 't', type: 'direct', tx_subtype: 'revenue', amount: 100, is_advance: true, project_id: 'p' }
+    expect(txToSeed(tx).is_advance).toBe(true)
+    expect(txToSeed({ ...tx, is_advance: undefined }).is_advance).toBe(false)
+    expect(passthroughToSeed({ id: 'x', direction: 'in', amount: 1 }).is_advance).toBe(false)
+  })
+})

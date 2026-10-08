@@ -15,6 +15,9 @@ import {
 } from '../services/invoiceClaims'
 import { differenceFor, entryNote, isBookable } from '../services/currencyDifference'
 import {
+  ADVANCE_BADGE_STYLE, ADVANCE_LABEL, doubleCountHint, effectiveAdvance, receiptShape, whyAdvanceNotSavable,
+} from '../services/advanceReceipt'
+import {
   describeMismatches, mismatches, type Expectation, type Settlement,
 } from '../services/settlementCheck'
 import { formatMoney, toOwn, toRsd } from '../services/allocationDisplay'
@@ -114,6 +117,8 @@ interface StatementRow {
   note: string
   selected_credit_id: string
   selected_installment_ids: string[]
+  /** An advance received (avans): kept only while the row is a direct revenue receipt. */
+  is_advance: boolean
 }
 
 
@@ -144,6 +149,7 @@ function makeRow(defaultCurrency = 'RSD', date = ''): StatementRow {
     note: '',
     selected_credit_id: '',
     selected_installment_ids: [],
+    is_advance: false,
   }
 }
 
@@ -784,17 +790,18 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       invoiceShortfall: outstandingRsd - allocRsd,
       paymentUnallocated: rowRsd - allocRsd,
       currency: 'RSD',
+      invoiceType: inv.type ?? null,
     })
     let lossOwn = 0
     try { lossOwn = partFromRsd(difference.amount, rowParent).amount } catch { lossOwn = 0 }
     return {
       inv,
       difference,
-      // A gain is the rest of the invoice and belongs in its currency; a
-      // surplus is part of this bank line and belongs in the currency the
-      // bank moved.
-      amountOwn: difference.kind === 'gain' ? toOwn(difference.amount, inv) : lossOwn,
-      currency: difference.kind === 'gain' ? (inv.currency || rowCur) : rowCur,
+      // The linked side is the rest of the invoice and belongs in its
+      // currency; a surplus is part of this bank line and belongs in the
+      // currency the bank moved.
+      amountOwn: difference.linksToInvoice ? toOwn(difference.amount, inv) : lossOwn,
+      currency: difference.linksToInvoice ? (inv.currency || rowCur) : rowCur,
     }
   }, [openInvoices, defaultCurrency])
 
@@ -807,6 +814,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       const inv = openInvoices.find(i => i.id === row.linked_invoice_id)
       return `💳 Invoice payment${inv ? ` · ${inv.partner_name}` : ''}`
     }
+    if (row.tx_subtype === 'revenue' && effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance)) return `📥 ${ADVANCE_LABEL}`
     if (row.tx_subtype === 'revenue') return `📥 Revenue${row.revenue_stream ? ` · ${row.revenue_stream}` : ''}`
     const parts = [row.pl_category_name, row.department_name].filter(Boolean)
     return `📤 Expense${parts.length ? ` · ${parts.join(' / ')}` : ' · unclassified'}`
@@ -848,16 +856,49 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
 
   /** Set an invoice's status from everything currently allocated against it. */
   const refreshInvoiceStatus = async (invoiceId: string) => {
-    const { data: inv } = await supabase.from('invoices').select('amount').eq('id', invoiceId).single()
+    const { data: inv } = await supabase.from('invoices').select('amount, amount_rsd, advance_deducted').eq('id', invoiceId).single()
     if (!inv) return
     const { data: allocations } = await supabase.from('invoice_transaction_links')
       .select('allocated_amount').eq('invoice_id', invoiceId)
     const total = (allocations || []).reduce((s: number, r: any) => s + (r.allocated_amount || 0), 0)
-    await supabase.from('invoices').update({ status: invoiceStatus(total, inv.amount || 0) }).eq('id', invoiceId)
+    await supabase.from('invoices').update({
+      status: invoiceStatus(total, inv.amount || 0, inv.amount_rsd, inv.advance_deducted),
+    }).eq('id', invoiceId)
+  }
+
+  /**
+   * What the row is, in the columns that decide it: an advance is a direct
+   * revenue receipt with no P&L; an invoice payment carries its invoice's
+   * side, so the cash line reads a receipt as an inflow. See
+   * services/advanceReceipt.ts.
+   */
+  const shapeOf = (row: StatementRow) => receiptShape({
+    type: row.tx_type,
+    subtype: row.tx_subtype,
+    isAdvance: row.is_advance,
+    bankSide: parseFloat(row.debit) > 0 ? 'expense' : 'revenue',
+    invoiceType: openInvoices.find(i => i.id === row.linked_invoice_id)?.type ?? null,
+  })
+
+  /** The first advance among `list` that cannot be saved, said with its line. */
+  const advanceProblem = (list: StatementRow[]): string | null => {
+    for (const row of list) {
+      const why = whyAdvanceNotSavable({
+        type: row.tx_type, subtype: row.tx_subtype, isAdvance: row.is_advance,
+        projectId: projectIdFromInput(row.project_id),
+        splitLines: row.pl_splits.length + (row.stored_split ? 1 : 0),
+      })
+      if (why) return `Line ${row.date} ${row.description || ''}: ${why}`
+    }
+    return null
   }
 
   const handlePost = async () => {
     if (!company || !bank) { setError('Please select company and bank.'); return }
+    {
+      const why = advanceProblem(validRows)
+      if (why) { setError(`${why} Nothing was saved.`); return }
+    }
     if (validRows.length === 0) { setError('Add at least one row with a date and amount.'); return }
     setPosting(true); setError('')
     // Every write below can succeed while the result is still not what the
@@ -945,9 +986,9 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           import_hash: importHash, import_batch_id: importBatchId,
           company_id: company, bank_id: bank, partner_id: partnerId,
           transaction_date: row.date, statement_number: statementNumber || null,
-          type: row.tx_type, tx_subtype: row.tx_subtype,
+          type: row.tx_type, tx_subtype: shapeOf(row).tx_subtype, is_advance: shapeOf(row).is_advance,
           currency: cur, amount, ...rowBook,
-          pl_impact: isDirectWithPL,
+          pl_impact: shapeOf(row).pl_impact,
           pl_category: isDirectWithPL ? (row.pl_category_name || null) : null,
           pl_subcategory: isDirectWithPL ? (row.pl_subcategory_name || null) : null,
           department: isDirectWithPL ? (row.department_name || null) : null,
@@ -1068,7 +1109,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         if (row.tx_type === 'invoice_payment' && row.linked_invoice_id && newTx?.id) {
           // Fetch invoice to determine correct rate
           const { data: inv } = await supabase.from('invoices')
-            .select('id, invoice_number, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, is_indexed, project_id')
+            .select('id, invoice_number, type, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, is_indexed, project_id, advance_deducted')
             .eq('id', row.linked_invoice_id).single()
 
           if (inv) {
@@ -1138,12 +1179,16 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
               // The line at its own rate, less the allocation at the invoice's.
               paymentUnallocated: rowRsd - allocRsd,
               currency: 'RSD',
+              // A receipt short of a revenue billing is a loss, not a gain.
+              invoiceType: inv.type ?? null,
             })
             const fxScript = quickFillScripts.find(sc => sc.id === row.fx_script_id)
               || findCurrencyDifference(quickFillScripts)
 
             if (row.fx_book && isBookable(difference) && fxScript) {
-              const isGain = difference.kind === 'gain'
+              // The LINKED side - the rest of the invoice: a gain on a
+              // supplier's bill, a loss on a revenue billing.
+              const isGain = difference.linksToInvoice
               const rowParent = { currency: cur, exchange_rate: rowBook.exchange_rate, eur_rate: rowBook.eur_rate }
               const fxOwn = isGain
                 // The gain IS the rest of the bill, to the para.
@@ -1165,7 +1210,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                 transaction_date: row.date,
                 statement_number: statementNumber || null,
                 type: 'direct',
-                tx_subtype: isGain ? 'revenue' : 'expense',
+                tx_subtype: difference.direction === 'revenue' ? 'revenue' : 'expense',
                 currency: fxCurrency,
                 amount: fxOwn,
                 ...fxRates,
@@ -1203,6 +1248,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
               amount: inv.amount || 0,
               allocated: willHold,
               amountRsd: inv.amount_rsd ?? null,
+              advanceDeducted: Number(inv.advance_deducted) || 0,
             })
 
             // Status follows what is allocated, in the invoice's own currency.
@@ -1273,6 +1319,10 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
     if (incomplete.length > 0) {
       setError(`${incomplete.length} row${incomplete.length !== 1 ? 's are' : ' is'} missing a date or an amount. Fill them in or remove them.`)
       return
+    }
+    {
+      const why = advanceProblem(editable)
+      if (why) { setError(`${why} Nothing was changed.`); return }
     }
     // The type cards already refuse this, but the check is repeated here
     // because getting it wrong writes a row into the wrong table and leaves
@@ -1374,9 +1424,9 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         const payload = {
           company_id: company, bank_id: bank, partner_id: partnerId,
           transaction_date: row.date, statement_number: statementNumber || null,
-          type: row.tx_type, tx_subtype: row.tx_subtype,
+          type: row.tx_type, tx_subtype: shapeOf(row).tx_subtype, is_advance: shapeOf(row).is_advance,
           currency: cur, amount, ...rowBook,
-          pl_impact: isDirectWithPL,
+          pl_impact: shapeOf(row).pl_impact,
           pl_category: isDirectWithPL ? (row.pl_category_name || null) : null,
           pl_subcategory: isDirectWithPL ? (row.pl_subcategory_name || null) : null,
           department: isDirectWithPL ? (row.department_name || null) : null,
@@ -1415,7 +1465,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
 
         if (row.tx_type === 'invoice_payment' && row.linked_invoice_id) {
           const { data: inv } = await supabase.from('invoices')
-            .select('id, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, is_indexed')
+            .select('id, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, is_indexed, advance_deducted')
             .eq('id', row.linked_invoice_id).single()
           if (inv) {
             // The same unit fault as the posting path above: `allocated_amount`
@@ -1817,6 +1867,9 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         {DOCUMENT_CURRENCIES.map(c => <option key={c}>{c}</option>)}
                       </select>
                       <div style={{ fontSize: '10px', color: DIALOG.dim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                        {hasAmount && effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance) && (
+                          <span style={{ ...ADVANCE_BADGE_STYLE, marginRight: '4px' }}>{ADVANCE_LABEL}</span>
+                        )}
                         {hasAmount ? getRowSummary(row) : <span style={{ color: DIALOG.faint }}>click to classify</span>}
                       </div>
                       <button style={{ background: 'none', border: 'none', color: DIALOG.faint, fontSize: '15px', cursor: 'pointer', padding: '2px' }}
@@ -2050,7 +2103,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                 Only on a direct row: an invoice payment has
                                 no P&L of its own to divide — it closes a bill
                                 classified when it was raised. */}
-                            <SplitEditor
+                            {!effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance) && <SplitEditor
                               parent={{
                                 amount: parseFloat(row.debit) || parseFloat(row.credit) || 0,
                                 // The book figures are worked out at post
@@ -2090,7 +2143,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                               client={supabase}
                               onScriptsChanged={refreshQfScripts}
                               hint="One bank line, two or more expenses — each with its own classification."
-                            />
+                            />}
 
                             {row.pl_splits.length > 0 && (
                               <div style={{ fontSize: '11.5px', color: DIALOG.amber, margin: '2px 0 10px', lineHeight: 1.55 }}>
@@ -2317,6 +2370,35 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             {/* Revenue */}
                             {row.tx_subtype === 'revenue' && (
                               <>
+                                <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer', fontSize: '12px', marginBottom: '8px' }}>
+                                  <input type="checkbox" checked={!!row.is_advance}
+                                    disabled={row.pl_splits.length > 0 || row.stored_split}
+                                    onChange={e => updateRow(row.id, { is_advance: e.target.checked })}
+                                    style={{ accentColor: DIALOG.accent, cursor: 'pointer', marginTop: '2px' }} />
+                                  <span>
+                                    <strong>{ADVANCE_LABEL}</strong> — primljen od investitora
+                                    <span style={{ display: 'block', fontSize: '10.5px', color: DIALOG.dim, lineHeight: 1.4 }}>
+                                      Obaveza, ne prihod: bez uticaja na bilans uspeha, obavezno na projektu, bez podele i bez povezivanja sa fakturom.
+                                    </span>
+                                  </span>
+                                </label>
+                                {effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance) && !projectIdFromInput(row.project_id) && (
+                                  <div style={{ fontSize: '11px', color: DIALOG.red, marginBottom: '8px' }}>
+                                    Avans mora biti na projektu — izaberite projekat ispod.
+                                  </div>
+                                )}
+                                {(() => {
+                                  const hint = doubleCountHint(
+                                    { type: row.tx_type, subtype: row.tx_subtype, isAdvance: row.is_advance },
+                                    row.partner_id, openInvoices)
+                                  return hint ? (
+                                    <div style={{ fontSize: '11px', color: DIALOG.amber, background: DIALOG.amberFill, borderRadius: '6px', padding: '6px 8px', marginBottom: '10px', lineHeight: 1.5 }}>
+                                      {hint}{' '}
+                                      <span style={{ textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}
+                                        onClick={() => updateRow(row.id, { tx_type: 'invoice_payment', is_advance: false })}>Prebaci na plaćanje fakture</span>
+                                    </div>
+                                  ) : null
+                                })()}
                                 <div style={s.classTitle}>Revenue stream</div>
                                 <div style={{ marginBottom: '10px' }}>
                                   <select style={{ ...s.select, width: '100%' }} value={row.revenue_stream} onChange={e => updateRow(row.id, { revenue_stream: e.target.value })}>

@@ -45,13 +45,18 @@ export interface Expectation {
    * being guessed at.
    */
   amountRsd?: number | null
+  /**
+   * A revenue billing's `advance_deducted`, in its own currency. Counted as
+   * settled, as the view counts it; `allocated` must NOT include it.
+   */
+  advanceDeducted?: number | null
 }
 
-/** What `v_invoice_status` will say, given those two figures. */
+/** What `v_invoice_status` will say, given those figures. */
 export function expectedStatus(
-  amount: number, allocated: number, amountRsd?: number | null,
+  amount: number, allocated: number, amountRsd?: number | null, advanceDeducted?: number | null,
 ): Settlement {
-  return settledStatus(amount, allocated, amountRsd)
+  return settledStatus(amount, allocated, amountRsd, advanceDeducted || 0)
 }
 
 export interface Mismatch {
@@ -73,7 +78,7 @@ export function mismatches(
 ): Mismatch[] {
   const out: Mismatch[] = []
   for (const e of expectations) {
-    const want = expectedStatus(e.amount, e.allocated, e.amountRsd)
+    const want = expectedStatus(e.amount, e.allocated, e.amountRsd, e.advanceDeducted)
     const got = actual[e.invoiceId]
     if (got === undefined) {
       out.push({ invoiceId: e.invoiceId, invoiceNumber: e.invoiceNumber, expected: want, actual: 'missing' })

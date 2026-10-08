@@ -1,5 +1,5 @@
 import {
-  cashMovement, cashTimeline, datedByMonth, monthsAround, monthsEndingAt, previousMonth,
+  cashDirection, cashMovement, cashTimeline, datedByMonth, monthsAround, monthsEndingAt, previousMonth,
   type CashInput,
 } from './cashTimeline'
 
@@ -247,5 +247,66 @@ describe('what counts as money moving', () => {
   it('has nothing to say about a transaction of nothing', () => {
     expect(cashMovement({ type: 'direct', tx_subtype: 'revenue', amount_rsd: 0 }, 'RSD'))
       .toEqual({ inflow: 0, outflow: 0 })
+  })
+})
+
+describe('which way an invoice payment moves', () => {
+  it('a receipt against a revenue invoice is an inflow', () => {
+    expect(cashMovement({ type: 'invoice_payment', tx_subtype: 'revenue', amount_rsd: 700 }, 'RSD'))
+      .toEqual({ inflow: 700, outflow: 0 })
+  })
+
+  it('a payment of a supplier bill is an outflow', () => {
+    expect(cashMovement({ type: 'invoice_payment', tx_subtype: 'expense', amount_rsd: 700 }, 'RSD'))
+      .toEqual({ inflow: 0, outflow: 700 })
+  })
+
+  it('an invoice payment with no subtype stays an outflow, as every one before revenue invoices was', () => {
+    expect(cashDirection({ type: 'invoice_payment', tx_subtype: null })).toBe('out')
+  })
+
+  it('direct rows and unknown shapes', () => {
+    expect(cashDirection({ type: 'direct', tx_subtype: 'revenue' })).toBe('in')
+    expect(cashDirection({ type: 'direct', tx_subtype: 'expense' })).toBe('out')
+    expect(cashDirection({ type: 'direct', tx_subtype: null })).toBeNull()
+    expect(cashDirection({ type: 'transfer', tx_subtype: 'revenue' })).toBeNull()
+  })
+})
+
+describe('what investors and tenants are expected to pay', () => {
+  const { receivableInflows, inflowsByMonthDated } = require('./cashTimeline')
+  const rows = [
+    { type: 'revenue', calculated_status: 'unpaid', partner_name: 'Investitor', invoice_number: 'IF-1', due_date: '2026-11-15', remaining_rsd: 1000, remaining_eur: 8.5 },
+    { type: 'revenue', calculated_status: 'partial', partner_name: 'Zakupac', invoice_number: 'IF-2', due_date: '2026-08-01', remaining_rsd: 500, remaining_eur: 4.25 },
+    { type: 'expense', calculated_status: 'unpaid', due_date: '2026-11-01', remaining_rsd: 9999, remaining_eur: 85 },
+    { type: 'revenue', calculated_status: 'paid', due_date: '2026-11-01', remaining_rsd: 0, remaining_eur: 0 },
+    { type: 'revenue', calculated_status: 'unpaid', due_date: '2026-12-01', remaining_rsd: 300, remaining_eur: null },
+  ]
+
+  it('reads what is still owed, in the display currency, on the due date', () => {
+    const r = receivableInflows(rows, '2026-10', 'RSD')
+    expect(r.items.map((i: any) => [i.date, i.amount])).toEqual([
+      ['2026-11-15', 1000], ['2026-10-01', 500], ['2026-12-01', 300],
+    ])
+  })
+
+  it('moves an overdue invoice into the month in progress and flags it', () => {
+    const r = receivableInflows(rows, '2026-10', 'RSD')
+    expect(r.overdue).toBe(1)
+    expect(r.items[1].overdue).toBe(true)
+  })
+
+  it('never converts: a row with no figure in the currency is counted out', () => {
+    const r = receivableInflows(rows, '2026-10', 'EUR')
+    expect(r.unconverted).toBe(1)
+    expect(r.items.map((i: any) => i.amount)).toEqual([8.5, 4.25])
+  })
+
+  it('sums by month inside the horizon only', () => {
+    const r = receivableInflows(rows, '2026-10', 'RSD')
+    const by = inflowsByMonthDated(r.items, ['2026-10', '2026-11'])
+    expect(by['2026-10'].total).toBe(500)
+    expect(by['2026-11'].total).toBe(1000)
+    expect(by['2026-12']).toBeUndefined()
   })
 })

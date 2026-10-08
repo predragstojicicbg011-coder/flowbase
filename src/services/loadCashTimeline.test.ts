@@ -68,3 +68,45 @@ describe('loadCashTimeline — the budget is read in the timeline\'s currency', 
     expect(note).not.toContain('It is shown in RSD')
   })
 })
+
+describe('loadCashTimeline — the inflow ahead', () => {
+  beforeEach(() => mockedBudget.mockReset())
+
+  /** A query whose awaited rows depend on the table. */
+  function tableClient(tables: Record<string, any[]>) {
+    return {
+      from: (table: string) => {
+        const q: any = {}
+        for (const m of ['select', 'gte', 'lte', 'eq', 'or', 'in', 'order']) q[m] = () => q
+        q.range = (lo: number) => lo === 0 ? q : { then: (ok: any) => Promise.resolve({ data: [], error: null }).then(ok) }
+        q.maybeSingle = () => Promise.resolve({ data: null, error: null })
+        q.then = (ok: any, bad: any) => Promise.resolve({ data: tables[table] || [], error: null }).then(ok, bad)
+        return q
+      },
+    }
+  }
+
+  it('is open revenue invoices at their due date plus the plan not yet billed', async () => {
+    mockedBudget.mockResolvedValue(budget('RSD', null))
+    const c = tableClient({
+      v_invoice_status: [
+        // Open: 400 still owed, due in November.
+        { type: 'revenue', calculated_status: 'unpaid', partner_name: 'Investitor', due_date: '2026-11-10',
+          invoice_date: '2026-10-05', project_id: 'p1', remaining_rsd: 400, remaining_eur: 3.4, amount_rsd: 1000, amount_eur: 8.5 },
+      ],
+      projects: [{ id: 'p1', name: 'Zgrada A', payment_days: 0, company_id: 'c1' }],
+      // October plan of 1,000, of which 1,000 already billed (the invoice above): nothing left.
+      // November plan of 2,000, payment term 0 → expected 2026-11-30.
+      revenue_plan: [
+        { project_id: 'p1', month: '2026-10-01', amount: 1000, currency: 'RSD', amount_rsd: 1000, amount_eur: 8.5 },
+        { project_id: 'p1', month: '2026-11-01', amount: 2000, currency: 'RSD', amount_rsd: 2000, amount_eur: 17 },
+      ],
+    })
+    const { timeline, datedIn } = await loadCashTimeline(c, req('RSD'))
+    const nov = timeline.months.find(m => m.month === '2026-11')!
+    expect(nov.inflow).toBe(2400)
+    expect(datedIn['2026-11'].items.map(i => i.kind).sort()).toEqual(['invoice', 'plan'])
+    expect(datedIn['2026-10']).toBeUndefined()
+    expect(timeline.problems.join(' ')).not.toMatch(/nothing yet/)
+  })
+})

@@ -65,6 +65,8 @@ export interface RowSeed {
   cf_frequency: string
   cf_next_month_est: string
   note: string
+  /** An advance received (transactions.is_advance) — only on a direct revenue row. */
+  is_advance: boolean
 }
 
 /** Empty string rather than null, because every one of these binds to an input. */
@@ -110,6 +112,7 @@ export function txToSeed(tx: any, partnerName = ''): RowSeed {
     cf_frequency: str(tx.cf_frequency) || 'monthly',
     cf_next_month_est: money(tx.cf_next_month_est),
     note: '',
+    is_advance: !!tx.is_advance,
   }
 }
 
@@ -144,6 +147,7 @@ export function passthroughToSeed(pt: any, partnerName = ''): RowSeed {
     project_id: '',
     cf_type: '', cf_frequency: 'monthly', cf_next_month_est: '',
     note: '',
+    is_advance: false,
   }
 }
 
@@ -202,8 +206,11 @@ export function statementLabel(statementNumber: string): string {
  */
 export function invoiceStatus(
   allocated: number, invoiceAmount: number, invoiceAmountRsd?: number | null,
+  advanceDeducted?: number | string | null,
 ): 'unpaid' | 'partial' | 'paid' {
-  return settledStatus(invoiceAmount, allocated, invoiceAmountRsd)
+  // A revenue billing's advance deducted is settled, as v_invoice_status
+  // counts it (20261008180000). `allocated` is money only.
+  return settledStatus(invoiceAmount, allocated, invoiceAmountRsd, Number(advanceDeducted) || 0)
 }
 
 /** What a grid row is worth: debit is money out, credit is money in. */

@@ -80,3 +80,14 @@ export function normaliseRevenueStream(v: string | null | undefined): RevenueStr
   if (isRevenueStream(t)) return t
   return LEGACY_REVENUE_STREAMS[t] ?? null
 }
+
+/**
+ * The stream a revenue invoice defaults to on a project of `kind`: a
+ * construction site bills progress, a rental building bills rent. Null for
+ * no project (or an unknown kind) — the user picks.
+ */
+export function streamForProjectKind(kind: string | null | undefined): RevenueStream | null {
+  if (kind === 'construction') return REVENUE_STREAM.construction
+  if (kind === 'rental') return REVENUE_STREAM.rental
+  return null
+}

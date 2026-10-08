@@ -39,6 +39,9 @@ import {
   type BookAmounts,
 } from '../services/bookAmounts'
 import { fmtMoney, fmtNum } from '../utils/formatters'
+import {
+  ADVANCE_BADGE_STYLE, ADVANCE_LABEL, doubleCountHint, effectiveAdvance, paymentSubtypeFor, whyAdvanceNotSavable,
+} from '../services/advanceReceipt'
 
 interface Props {
   onClose: () => void
@@ -89,6 +92,10 @@ interface LinkedInvoice {
   allocated_own: number
   /** The bill's project, so a currency difference on it lands on the same site. */
   project_id?: string | null
+  /** 'expense' or 'revenue': which way the payment moves cash, and which way a currency difference goes. */
+  type?: string | null
+  /** A revenue billing's advance deducted, own currency: settled, but not by this or any payment. */
+  advance_deducted?: number | null
 }
 
 interface ValidationErrors { [key: string]: string }
@@ -155,6 +162,11 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const [ptDirection, setPtDirection] = useState<'in' | 'out'>('out')
   const [ptPeriodMonth, setPtPeriodMonth] = useState(new Date().toISOString().slice(0, 7))
   const [directSubtype, setDirectSubtype] = useState<'expense' | 'revenue'>('expense')
+  // An advance received (avans): a direct revenue receipt on a project, not
+  // revenue. Only kept while the row is a direct revenue receipt — see
+  // services/advanceReceipt.ts.
+  const [isAdvanceFlag, setIsAdvanceFlag] = useState<boolean>(!!transaction?.is_advance)
+  const advance = effectiveAdvance(txType, directSubtype, isAdvanceFlag)
   const [linkedInvoices, setLinkedInvoices] = useState<LinkedInvoice[]>([])
   /**
    * The invoices this payment closed when the dialog opened.
@@ -407,14 +419,19 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         if (!plCatId && !splitActive) e.plCat = 'P&L Category is required'
         if (!deptId && !splitActive) e.dept = 'Department is required'
       }
-      if (directSubtype === 'revenue' && !revStream) e.revStream = 'Revenue stream is required'
+      if (directSubtype === 'revenue' && !revStream && !isAdvanceFlag) e.revStream = 'Revenue stream is required'
+      const whyAdvance = whyAdvanceNotSavable({
+        type: txType, subtype: directSubtype, isAdvance: isAdvanceFlag, projectId,
+        splitLines: splitLines.length,
+      })
+      if (whyAdvance) e.advance = whyAdvance
     }
     return e
   }
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, bankId, currency, txDate, amount, exRate, eurRate, txType, linkedInvoices, selectedInstallmentIds, directSubtype, plCatId, deptId, revStream]) // eslint-disable-line
+  }, [companyId, bankId, currency, txDate, amount, exRate, eurRate, txType, linkedInvoices, selectedInstallmentIds, directSubtype, plCatId, deptId, revStream, isAdvanceFlag, projectId, splitLines]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -521,6 +538,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     if (transaction.period_month || transaction.transaction_date)
       setPtPeriodMonth(String(transaction.period_month || transaction.transaction_date).slice(0, 7))
     setDirectSubtype(transaction.tx_subtype || 'expense')
+    setIsAdvanceFlag(!!transaction.is_advance)
     setNote(transaction.note || '')
     setAmount(transaction.amount?.toString() || '')
     setExRate(transaction.exchange_rate?.toString() || '')
@@ -589,13 +607,13 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const touchStep = (n: number) => {
     if (n === 1) setTouched(p => ({ ...p, companyId: true, bankId: true, currency: true, txDate: true }))
     if (n === 2) setTouched(p => ({ ...p, amount: true, exRate: true }))
-    if (n === 3) setTouched(p => ({ ...p, linkedInvoices: true, creditInstallments: true, plCat: true, dept: true, revStream: true }))
+    if (n === 3) setTouched(p => ({ ...p, linkedInvoices: true, creditInstallments: true, plCat: true, dept: true, revStream: true, advance: true }))
   }
   const stepHasError = (n: number) => {
     const stepFields: Record<number, string[]> = {
       1: ['companyId', 'bankId', 'currency', 'txDate'],
       2: ['amount', 'exRate'],
-      3: ['linkedInvoices', 'creditInstallments', 'plCat', 'dept', 'revStream'],
+      3: ['linkedInvoices', 'creditInstallments', 'plCat', 'dept', 'revStream', 'advance'],
     }
     return (stepFields[n] || []).some(f => !!errors[f])
   }
@@ -613,7 +631,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       setLinksLoading(true)
       const { data, error } = await supabase
         .from('invoice_transaction_links')
-        .select('invoice_id, allocated_amount, allocated_amount_rsd, invoices(id, invoice_number, invoice_date, due_date, currency, amount, amount_rsd, exchange_rate, eur_rate, project_id, partners(name))')
+        .select('invoice_id, allocated_amount, allocated_amount_rsd, invoices(id, invoice_number, invoice_date, due_date, currency, amount, amount_rsd, exchange_rate, eur_rate, project_id, type, advance_deducted, partners(name))')
         .eq('transaction_id', rowId)
       // What is actually left on each of them. The invoice's own amount is not
       // that: a partly paid invoice would show its full value as outstanding,
@@ -648,12 +666,15 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         exchange_rate: l.invoices?.exchange_rate ?? null,
         eur_rate: l.invoices?.eur_rate ?? null,
         project_id: l.invoices?.project_id ?? null,
+        type: l.invoices?.type ?? null,
+        advance_deducted: Number(l.invoices?.advance_deducted) || 0,
         // What the bill is owed with this payment's own link taken back out,
         // which is what the figure beside it has to be judged against.
         outstanding_own: outstandingOwn({
           currency: l.invoices?.currency,
           amount: l.invoices?.amount,
           paid_amount: (paidById.get(l.invoice_id) ?? 0) - (l.allocated_amount || 0),
+          advance_deducted: l.invoices?.advance_deducted,
         }),
         allocated_rsd: l.allocated_amount_rsd || 0,
         // What the field shows and the user edits, in the invoice's own
@@ -701,12 +722,15 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     // same-currency surplus is an unallocated part, not a rate difference.
     paymentUnallocated: fxInvoice ? unallocatedRsd : 0,
     currency: 'RSD',
+    // A receipt short of a revenue billing is a loss, not a gain.
+    invoiceType: fxInvoice?.type ?? null,
   })
   /** The same figure in the currency the created entry will carry. */
   const fxAmountOwn = (() => {
     if (!fxInvoice) return 0
-    // The gain IS the rest of the bill, to the cent, in the bill's currency.
-    if (fxDifference.kind === 'gain') return Math.max(0, fxShortfallOwn)
+    // The linked side IS the rest of the bill, to the cent, in the bill's
+    // currency — a gain on a supplier's bill, a loss on a revenue billing.
+    if (fxDifference.linksToInvoice) return Math.max(0, fxShortfallOwn)
     // A loss is part of this bank line, in the payment's currency at its rate.
     try {
       return partFromRsd(fxDifference.amount, paymentRow).amount
@@ -715,7 +739,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     }
   })()
   const fxCurrency = !fxInvoice ? currency
-    : fxDifference.kind === 'gain' ? allocationCurrency(fxInvoice) : currency
+    : fxDifference.linksToInvoice ? allocationCurrency(fxInvoice) : currency
   const fxScript = fxScripts.find(sc => sc.id === differenceScriptId)
     || findCurrencyDifference(fxScripts)
 
@@ -758,6 +782,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       exchange_rate: inv.exchange_rate ?? null,
       eur_rate: inv.eur_rate ?? null,
       project_id: inv.project_id ?? null,
+      type: inv.type ?? null,
+      advance_deducted: Number(inv.advance_deducted) || 0,
       outstanding_own: outstanding,
       allocated_rsd: settlement.rsd,
       allocated_own: settlement.own,
@@ -833,7 +859,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     const upFront = planSave({ rowId, sourceTable: rowTable, currentType: rowType, nextType: txType })
     if (upFront.kind === 'refuse') { setShowValidationSummary(false); setPostError(upFront.reason); return }
 
-    setTouched({ companyId: true, bankId: true, currency: true, txDate: true, linkedInvoices: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true })
+    setTouched({ companyId: true, bankId: true, currency: true, txDate: true, linkedInvoices: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true, advance: true })
     const e = runValidation()
     if (Object.keys(e).length > 0) { setShowValidationSummary(true); return }
     setPostError('')
@@ -900,16 +926,24 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         if (newP) finalPartnerId = newP.id
       }
       const isDirectWithPL = txType === 'direct'
+      // An advance is a direct revenue receipt, but cash and a liability —
+      // never P&L (CHECK transactions_advance_shape).
+      const plImpact = isDirectWithPL && !advance
 
       const payload = {
         company_id: companyId || null, bank_id: bankId || null,
         partner_id: finalPartnerId || null, transaction_date: txDate,
         statement_number: statement || null, type: txType,
-        tx_subtype: txType === 'direct' ? directSubtype : null,
+        // An invoice payment carries the side of the invoices it settles:
+        // the cash line reads a receipt against a revenue billing as an
+        // inflow by it (cashTimeline.cashDirection).
+        tx_subtype: txType === 'direct' ? directSubtype
+          : txType === 'invoice_payment' ? paymentSubtypeFor(linkedInvoices.map(l => l.type)) : null,
+        is_advance: advance,
         currency, amount: parseFloat(amount),
         exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
         amount_rsd: booked.amount_rsd, amount_eur: booked.amount_eur,
-        is_indexed: isIndexed, pl_impact: isDirectWithPL,
+        is_indexed: isIndexed, pl_impact: plImpact,
         pl_category: isDirectWithPL ? (plCatName || null) : null,
         pl_subcategory: isDirectWithPL ? (plSubName || null) : null,
         department: isDirectWithPL ? (deptName || null) : null,
@@ -1237,11 +1271,13 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           // to see both. A loss is not linked: the invoice is already settled
           // by the payment, and the surplus is part of the same bank line.
           if (bookDifference && fxInvoice && isBookable(fxDifference) && fxScript && fxAmountOwn > 0) {
-            const isGain = fxDifference.kind === 'gain'
-            // A gain is the rest of the invoice, so it is booked as a part of
-            // the invoice at the invoice's stored rates; a loss is a part of
-            // this bank line, at the payment's. Either way its RSD figure is
-            // the difference itself (to the rounding of the part).
+            // The LINKED side (the invoice short: a gain on a supplier's bill,
+            // a loss on a revenue billing) is the rest of the invoice, so it
+            // is booked as a part of the invoice at the invoice's stored
+            // rates; the surplus side is a part of this bank line, at the
+            // payment's. Either way its RSD figure is the difference itself
+            // (to the rounding of the part).
+            const isGain = fxDifference.linksToInvoice
             const fxParent = isGain ? fxInvoice : { ...paymentRow, ...booked }
             const fxBook = partBookAmounts(fxAmountOwn, { ...fxParent, currency: fxCurrency })
             const fxRates = isGain
@@ -1254,7 +1290,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               transaction_date: txDate,
               statement_number: statement || null,
               type: 'direct',
-              tx_subtype: isGain ? 'revenue' : 'expense',
+              // The economics, from currencyDifference: on a revenue billing
+              // a short receipt is a loss.
+              tx_subtype: fxDifference.direction === 'revenue' ? 'revenue' : 'expense',
               currency: fxCurrency,
               amount: fxAmountOwn,
               ...fxRates,
@@ -1314,12 +1352,15 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               invoiceId: l.invoice_id,
               invoiceNumber: l.invoice_number,
               amount: l.amount || 0,
+              // Settled, but not money: the check counts it apart, so the
+              // money figure below leaves it out.
+              advanceDeducted: l.advance_deducted || 0,
               // All in the bill's own currency, which is the unit the check
               // reads back in. What this payment allocates, what everything
               // else had already settled — `outstanding_own` is net of that —
               // and a currency gain if one is being linked to the same bill.
               allocated: (l.allocated_own || 0)
-                + Math.max(0, (l.amount || 0) - (l.outstanding_own || 0))
+                + Math.max(0, (l.amount || 0) - (l.advance_deducted || 0) - (l.outstanding_own || 0))
                 + (bookDifference && fxInvoice?.invoice_id === l.invoice_id
                    && fxDifference.linksToInvoice ? Math.max(0, fxShortfallOwn) : 0),
             }))
@@ -1503,6 +1544,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             {txType === 'direct' && <div style={s.plBadge}>P&L Impact</div>}
             {txType === 'invoice_payment' && <div style={s.cashBadge}>Cash Flow Only</div>}
+            {advance && <span style={{ ...ADVANCE_BADGE_STYLE, marginLeft: '6px' }}>{ADVANCE_LABEL}</span>}
             {txType === 'passthrough' && <div style={{ ...s.cashBadge, background: 'rgba(230,180,50,0.2)', color: DIALOG.amber, border: '0.5px solid rgba(230,180,50,0.3)' }}>Pass-through</div>}
             {txType === 'credit_payment' && <div style={{ ...s.cashBadge, background: 'rgba(78,168,255,0.2)', color: '#4EA8FF', border: '0.5px solid rgba(78,168,255,0.3)' }}>Credit payment</div>}
             <span style={s.logoText}>MCFlow</span>
@@ -1728,7 +1770,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   of its own to divide — it closes a bill that was classified
                   when it was raised, and splitting it here would book the
                   cost twice. */}
-              {txType === 'direct' && (
+              {txType === 'direct' && !advance && (
                 <SplitEditor
                   parent={paymentRow}
                   lines={splitLines}
@@ -2204,9 +2246,35 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   {directSubtype === 'revenue' && (
                     <>
                     <div style={s.section}>
+                      <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer', fontSize: '12.5px' }}>
+                        <input type="checkbox" checked={isAdvanceFlag}
+                          onChange={e => { setIsAdvanceFlag(e.target.checked); touch('advance') }}
+                          style={{ accentColor: DIALOG.accent, cursor: 'pointer', marginTop: '2px' }} />
+                        <span>
+                          <strong>Avans</strong> — primljen od investitora
+                          <div style={{ fontSize: '11px', color: DIALOG.dim, marginTop: '2px', lineHeight: 1.4 }}>
+                            Obaveza, ne prihod: ne ulazi u bilans uspeha, mora biti na projektu, ne deli se i ne povezuje
+                            sa fakturom. Situacije ga kasnije odbijaju kroz „Odbijeni avans”.
+                          </div>
+                        </span>
+                      </label>
+                      {fieldErr('advance') && <span style={s.errorMsg}>{fieldErr('advance')}</span>}
+                    </div>
+                    {(() => {
+                      const hint = doubleCountHint(
+                        { type: txType, subtype: directSubtype, isAdvance: advance }, partnerId, openInvoices)
+                      return hint ? (
+                        <div style={{ ...s.infoBox, background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber, marginBottom: '12px', fontSize: '11.5px', lineHeight: 1.5 }}>
+                          {hint}{' '}
+                          <span style={{ textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}
+                            onClick={() => setTxType('invoice_payment')}>Prebaci na plaćanje fakture</span>
+                        </div>
+                      ) : null
+                    })()}
+                    <div style={s.section}>
                       <div style={s.sectionTitle}>Revenue details</div>
                       <div style={s.field}>
-                        <label style={s.lbl}>Revenue stream <span style={s.req}>*</span></label>
+                        <label style={s.lbl}>Revenue stream {!advance && <span style={s.req}>*</span>}</label>
                         <select style={{ ...s.select, ...(fieldErr('revStream') ? s.inputError : {}) }} value={revStream}
                           onChange={e => { setRevStream(e.target.value); touch('revStream') }} onBlur={() => touch('revStream')}>
                           <option value="">Select stream...</option>
@@ -2258,7 +2326,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   <span>✅</span>
                   <div>
                     <div style={{ fontWeight: '500', marginBottom: '2px' }}>All fields valid — ready to post</div>
-                    <div style={{ fontSize: '11px', opacity: 0.85 }}>{txType === 'direct' ? 'This transaction will impact P&L directly.' : txType === 'credit_payment' ? `Creates ${selectedInstallmentIds.length * 2} P&L entries (principal + interest per installment).` : `This transaction closes ${linkedInvoices.length} invoice(s). No P&L impact.`}</div>
+                    <div style={{ fontSize: '11px', opacity: 0.85 }}>{advance ? 'Avans: novac primljen, obaveza prema investitoru — bez uticaja na bilans uspeha.' : txType === 'direct' ? 'This transaction will impact P&L directly.' : txType === 'credit_payment' ? `Creates ${selectedInstallmentIds.length * 2} P&L entries (principal + interest per installment).` : `This transaction closes ${linkedInvoices.length} invoice(s). No P&L impact.`}</div>
                   </div>
                 </div>
               ) : (
@@ -2276,7 +2344,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   ['Bank', banks.find(b => b.id === bankId)?.name || '—'],
                   ['Partner', showNewPartner ? newPartnerName : (partners.find(p => p.id === partnerId)?.name || partnerSearch || '—')],
                   ['Date', txDate],
-                  ['Type', txType === 'invoice_payment' ? 'Invoice payment' : txType === 'credit_payment' ? 'Credit payment' : txType === 'passthrough' ? 'Pass-through' : `Direct (${directSubtype})`],
+                  ['Type', txType === 'invoice_payment' ? 'Invoice payment' : txType === 'credit_payment' ? 'Credit payment' : txType === 'passthrough' ? 'Pass-through' : advance ? `${ADVANCE_LABEL} (bez uticaja na bilans uspeha)` : `Direct (${directSubtype})`],
+                  ...(advance ? [['Projekat', projectLabelById(projects, projectId)]] : []),
                 ]},
                 ...(txType === 'invoice_payment' && linkedInvoices.length > 0 ? [{ title: 'Linked invoices', rows: linkedInvoices.map(l => [`${l.partner_name} (${l.invoice_number})`, `${formatMoney(l.allocated_own || 0, allocationCurrency(l))} allocated`]) }] : []),
                 ...(txType === 'direct' && directSubtype === 'expense' ? [{ title: 'P&L & expense type', rows: [

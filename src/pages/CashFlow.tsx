@@ -8,7 +8,7 @@ import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import CashFlowTimeline from '../components/CashFlowTimeline'
 import CashPositionDialog from '../components/CashPositionDialog'
 import { loadCashTimeline, type LoadedCashTimeline } from '../services/loadCashTimeline'
-import { previousMonth } from '../services/cashTimeline'
+import { cashDirection, previousMonth } from '../services/cashTimeline'
 
 export default function CashFlow() {
 
@@ -119,26 +119,26 @@ export default function CashFlow() {
   useEffect(() => { loadLine() }, [loadLine])
 
   // ── Cash flow logic ───────────────────────────────────
-  // Inflows: direct revenue transactions
-  const operatingIn = transactions
-    .filter(t => t.type === 'direct' && t.tx_subtype === 'revenue')
-    .reduce((s, t) => s + amt(t), 0)
+  // Direction from services/cashTimeline.cashDirection: a direct revenue
+  // receipt, an advance, and a receipt against a revenue invoice
+  // (invoice_payment with tx_subtype 'revenue') are in; a direct expense and
+  // a payment against a supplier's bill are out.
+  const inflowTx = transactions.filter(t => cashDirection(t) === 'in')
+  const outflowTx = transactions.filter(t => cashDirection(t) === 'out')
+  const operatingIn = inflowTx.reduce((s, t) => s + amt(t), 0)
 
-  // Outflows: direct expense + invoice payments (mi plaćamo)
-  // Excluding banking and taxes (separate line items)
-  const operatingOut = transactions
-    .filter(t =>
-      (t.type === 'direct' && t.tx_subtype === 'expense') ||
-      t.type === 'invoice_payment'
-    )
+  // Outflows, excluding banking and taxes (separate line items). Those two
+  // are read from OUTFLOWS only: interest received is classified under
+  // banking too, and it is already in the inflow.
+  const operatingOut = outflowTx
     .filter(t => !['Banking and Finance', 'Taxes'].includes(t.pl_category || ''))
     .reduce((s, t) => s + amt(t), 0)
 
-  const bankingOut = transactions
+  const bankingOut = outflowTx
     .filter(t => t.pl_category === 'Banking and Finance')
     .reduce((s, t) => s + amt(t), 0)
 
-  const taxOut = transactions
+  const taxOut = outflowTx
     .filter(t => t.pl_category === 'Taxes')
     .reduce((s, t) => s + amt(t), 0)
 
@@ -162,10 +162,10 @@ export default function CashFlow() {
   const getBankFlow = (bankId: string) => {
     const bankTx = transactions.filter(t => t.bank_id === bankId)
     const income = bankTx
-      .filter(t => t.type === 'direct' && t.tx_subtype === 'revenue')
+      .filter(t => cashDirection(t) === 'in')
       .reduce((s, t) => s + amt(t), 0)
     const expense = bankTx
-      .filter(t => (t.type === 'direct' && t.tx_subtype === 'expense') || t.type === 'invoice_payment')
+      .filter(t => cashDirection(t) === 'out')
       .reduce((s, t) => s + amt(t), 0)
     return { income, expense, net: income - expense, txCount: bankTx.length }
   }
@@ -245,7 +245,7 @@ export default function CashFlow() {
           The cash line could not be loaded: {lineError}
         </div>}
         {line && (
-          <CashFlowTimeline timeline={line.timeline} dated={line.dated} />
+          <CashFlowTimeline timeline={line.timeline} dated={line.dated} datedIn={line.datedIn} />
         )}
         {line && !line.timeline.position && (
           <div style={{ marginBottom: '14px' }}>
@@ -363,7 +363,7 @@ export default function CashFlow() {
                       </thead>
                       <tbody>
                         {transactions.slice(0, 15).map(tx => {
-                          const isIn = tx.type === 'direct' && tx.tx_subtype === 'revenue'
+                          const isIn = cashDirection(tx) === 'in'
                           return (
                             <tr key={tx.id} style={s.dataRow}>
                               <td style={s.td}>{tx.transaction_date}</td>
@@ -371,7 +371,7 @@ export default function CashFlow() {
                               <td style={s.td}>{tx.banks?.name || '—'}</td>
                               <td style={s.td}>
                                 <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '20px', background: tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? 'rgba(0,212,126,0.12)' : 'rgba(255,91,90,0.13)') : 'rgba(78,168,255,0.13)', color: tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? '#085041' : '#A32D2D') : '#0C447C' }}>
-                                  {tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? '📥 Direct IN' : '📤 Direct OUT') : '💳 Invoice payment'}
+                                  {tx.is_advance ? 'Avans' : tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? '📥 Direct IN' : '📤 Direct OUT') : (isIn ? '💳 Naplata fakture' : '💳 Invoice payment')}
                                 </span>
                               </td>
                               <td style={{ ...s.td, textAlign: 'right' as const, color: isIn ? '#0F6E56' : '#A32D2D', fontWeight: '500' }}>

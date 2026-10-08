@@ -97,3 +97,17 @@ describe('describeMismatches', () => {
     expect(text).toContain('B-2')
   })
 })
+
+describe('a revenue billing with an advance deducted', () => {
+  it('counts the deduction as settled, the money separately', () => {
+    const { expectedStatus } = require('./settlementCheck')
+    expect(expectedStatus(1000, 700, 1000, 300)).toBe('paid')
+    expect(expectedStatus(1000, 200, 1000, 300)).toBe('partial')
+    expect(expectedStatus(1000, 0, 1000, 300)).toBe('unpaid')
+  })
+
+  it('mismatches reads the advance from the expectation', () => {
+    const { mismatches } = require('./settlementCheck')
+    expect(mismatches([{ invoiceId: 'a', amount: 1000, allocated: 700, amountRsd: 1000, advanceDeducted: 300 }], { a: 'paid' })).toEqual([])
+  })
+})

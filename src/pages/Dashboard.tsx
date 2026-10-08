@@ -201,7 +201,7 @@ export default function Dashboard() {
 
   const [metrics, setMetrics] = useState({
     totalRevenue: 0, totalExpenses: 0, netProfit: 0,
-    unpaidInvoices: 0, openInvoicesCount: 0,
+    unpaidInvoices: 0, openInvoicesCount: 0, payablesTotal: 0, openPayablesCount: 0,
     overdueCount: 0, unmatchedPassthrough: 0,
     prevRevenue: 0, prevExpenses: 0,
   })
@@ -298,13 +298,19 @@ export default function Dashboard() {
       // ── Open invoices ──
       const openInv = await fetchAllPages<any>((from, to) => {
         let q = supabase.from('v_invoice_status')
-          .select('calculated_status,remaining_rsd,remaining_eur,due_date,partner_name,amount_rsd,amount_eur')
+          .select('type,calculated_status,remaining_rsd,remaining_eur,due_date,partner_name,amount_rsd,amount_eur')
           .in('calculated_status', ['unpaid', 'partial'])
         if (companyId) q = q.eq('company_id', companyId)
         return q.order('due_date', { nullsFirst: false }).order('id').range(from, to)
       })
-      const unpaidTotal = openInv.reduce((s, i) => s + (pick(i, 'remaining') ?? 0), 0)
-      const overdueCount = openInv.filter(i => i.due_date && i.due_date < today).length
+      // What investors owe us and what we owe suppliers are kept apart: added
+      // together they make a number that is neither.
+      const receivables = openInv.filter(i => i.type === 'revenue')
+      const payables = openInv.filter(i => i.type !== 'revenue')
+      const unpaidTotal = receivables.reduce((s, i) => s + (pick(i, 'remaining') ?? 0), 0)
+      const payablesTotal = payables.reduce((s, i) => s + (pick(i, 'remaining') ?? 0), 0)
+      const overdueCount = receivables.filter(i => i.due_date && i.due_date < today).length
+      const overduePayables = payables.filter(i => i.due_date && i.due_date < today).length
 
       // ── Pass-through unmatched ──
       // Counted server-side: downloading the rows only to measure the array
@@ -345,14 +351,17 @@ export default function Dashboard() {
 
       // ── Alerts ──
       const newAlerts: { type: 'warn' | 'ok' | 'info'; text: string }[] = []
-      if (overdueCount > 0) newAlerts.push({ type: 'warn', text: `${overdueCount} overdue invoice${overdueCount > 1 ? 's' : ''}` })
-      if ((openInv || []).length > 0) newAlerts.push({ type: 'info', text: `${(openInv || []).length} open invoices · ${money(unpaidTotal)} remaining` })
+      if (overdueCount > 0) newAlerts.push({ type: 'warn', text: `${overdueCount} overdue receivable${overdueCount > 1 ? 's' : ''}` })
+      if (overduePayables > 0) newAlerts.push({ type: 'warn', text: `${overduePayables} overdue supplier invoice${overduePayables > 1 ? 's' : ''}` })
+      if (receivables.length > 0) newAlerts.push({ type: 'info', text: `${receivables.length} open receivable${receivables.length > 1 ? 's' : ''} · ${money(unpaidTotal)} to collect` })
+      if (payables.length > 0) newAlerts.push({ type: 'info', text: `${payables.length} open supplier invoice${payables.length > 1 ? 's' : ''} · ${money(payablesTotal)} to pay` })
       if (unmatchedPt > 0) newAlerts.push({ type: 'warn', text: `${unmatchedPt} unpaired pass-through entries` })
       if (newAlerts.length === 0) newAlerts.push({ type: 'ok', text: 'All clear — no pending alerts' })
 
       setMetrics({
         totalRevenue: revenue, totalExpenses: expenses, netProfit: revenue - expenses,
-        unpaidInvoices: unpaidTotal, openInvoicesCount: (openInv || []).length,
+        unpaidInvoices: unpaidTotal, openInvoicesCount: receivables.length,
+        payablesTotal, openPayablesCount: payables.length,
         overdueCount, unmatchedPassthrough: unmatchedPt,
         prevRevenue: 0, prevExpenses: 0,
       })
@@ -462,9 +471,9 @@ export default function Dashboard() {
           </Rise>
           <Rise delay={165}>
           <MetricCard
-            label="Open Invoices"
+            label="Receivables"
             value={loading ? '—' : metrics.openInvoicesCount > 0 ? money(metrics.unpaidInvoices) : fmtMoney(0, currency, 0)}
-            sub={`${metrics.openInvoicesCount} open${metrics.overdueCount > 0 ? ` · ${metrics.overdueCount} overdue` : ''}`}
+            sub={`${metrics.openInvoicesCount} open${metrics.overdueCount > 0 ? ` · ${metrics.overdueCount} overdue` : ''} · payables ${money(metrics.payablesTotal)}`}
             color={metrics.overdueCount > 0 ? '#F5A623' : '#00D47E'}
             darkColor={metrics.overdueCount > 0 ? '#F5A623' : '#00D47E'}
             sparklineData={[]}

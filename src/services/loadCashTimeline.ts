@@ -10,8 +10,8 @@
 //   past      posted transactions, on the cash basis — the same filter the
 //             period view below uses, so the two halves of this page cannot
 //             disagree about what a month did
-//   ahead     the budget's own estimate for the outflow; the inflow is empty
-//             until the construction-revenue forecast exists
+//   ahead     the budget's own estimate for the outflow; the inflow is what
+//             investors and tenants are expected to pay (below)
 //   anchor    the cash position, a reading somebody took
 //   dated     credit instalments and unpaid invoices, which carry their own
 //             dates and are the only outflows whose timing is known rather
@@ -25,6 +25,23 @@
 // cost. That is a real difference and it is not modelled here — it is said on
 // screen instead, because a lag invented in code is a lag nobody can check.
 // The dated items are exact, and they are listed separately for that reason.
+//
+// ── The inflow ahead ────────────────────────────────────────────────────────
+//
+// Two sources, which cannot overlap (revenuePlan.ts holds the precedence):
+//
+//   (a) issued revenue invoices still owed — v_invoice_status.remaining_*,
+//       already net of advance deducted and of what was paid — on their due
+//       date. One already overdue is expected now: the month in progress,
+//       flagged.
+//   (b) billings not yet issued: plannedRevenueByMonth over the months from
+//       the one in progress, from revenue_plan rows and rental leases, with
+//       revenue invoices already issued in a month taking that month's plan
+//       down (and an issued rent invoice dropping its lease-month), then
+//       dated by cashInflowsFromPlan at billing date + payment term.
+//
+// An issued invoice is in (a) and has already reduced (b), so no billing is
+// counted twice.
 //
 // ── Currency ────────────────────────────────────────────────────────────────
 //
@@ -43,16 +60,21 @@ import { loadBudgetTree } from './budgetTree'
 import { bookAmounts, getBookRates, type BookRates } from './bookAmounts'
 import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import {
-  cashMovement, cashTimeline, datedByMonth, monthsAround,
-  type CashPosition, type CashTimeline, type DatedOutflow, type MonthKey,
+  cashMovement, cashTimeline, datedByMonth, inflowsByMonthDated, monthsAround, receivableInflows,
+  type CashPosition, type CashTimeline, type DatedInflow, type DatedOutflow, type MonthKey,
 } from './cashTimeline'
+import {
+  cashInflowsFromPlan, plannedRevenueByMonth,
+  type PlanInvoice, type RentalLease, type RevenuePlanRow,
+} from './revenuePlan'
+import { normalisePaymentDays } from './projects'
 
 export interface QueryClient { from: (table: string) => any }
 
 export interface CashRequest {
   /** `YYYY-MM` of the month in progress. */
   currentMonth: MonthKey
-  /** ISO date of today. Unused until the revenue forecast reads it. */
+  /** ISO date of today: the NBS rate for converting rent and instalments is today's. */
   today: string
   /** The benchmark month the budget is seeded from. */
   benchmark: string
@@ -67,6 +89,8 @@ export interface CashRequest {
 export interface LoadedCashTimeline {
   timeline: CashTimeline
   dated: Record<MonthKey, { total: number; items: DatedOutflow[] }>
+  /** month -> the inflows expected in it: open revenue invoices, then planned billings. */
+  datedIn: Record<MonthKey, { total: number; items: DatedInflow[] }>
   months: MonthKey[]
 }
 
@@ -93,7 +117,7 @@ export async function loadCashTimeline(
   const scoped = (q: any, col = 'company_id') =>
     req.companyIds.length > 0 ? q.in(col, req.companyIds) : q
 
-  const [txRows, instRows, invRows, { data: cashRow }, budget] =
+  const [txRows, instRows, invRows, { data: cashRow }, budget, billedRes, projRes, planRes, leaseRes] =
     await Promise.all([
       // The same cash-basis filter the period view uses. A currency gain is in
       // the P&L and never touched the bank.
@@ -114,7 +138,7 @@ export async function loadCashTimeline(
 
       fetchAllPages<any>((lo, hi) => scoped(
         client.from('v_invoice_status')
-          .select('id, partner_name, due_date, remaining_rsd, remaining_eur, type, calculated_status, company_id')
+          .select('id, partner_name, invoice_number, invoice_date, due_date, remaining_rsd, remaining_eur, type, calculated_status, company_id')
           .in('calculated_status', ['unpaid', 'partial'])
           .lte('due_date', lastDayOf(last)))
         .order('due_date').order('id').range(lo, hi)),
@@ -126,6 +150,21 @@ export async function loadCashTimeline(
         companyIds: req.companyIds, companyId: '', branch: 'pl',
         currency: cur,
       }),
+
+      // Revenue invoices issued over the window: they take their month's plan
+      // down, and a rent invoice drops its lease-month.
+      scoped(client.from('v_invoice_status')
+        .select('project_id, type, invoice_date, amount_rsd, amount_eur, lease_id, service_month')
+        .eq('type', 'revenue')
+        .gte('invoice_date', `${first}-01`)),
+      scoped(client.from('projects').select('id, name, payment_days, company_id')),
+      scoped(client.from('revenue_plan')
+        .select('project_id, month, amount, currency, amount_rsd, amount_eur')
+        .gte('month', `${req.currentMonth}-01`)
+        .lte('month', `${last}-01`)),
+      scoped(client.from('rental_leases')
+        .select('id, project_id, tenant_partner_id, monthly_rent, currency, start_date, end_date, invoice_day, payment_days, active')
+        .eq('active', true)),
     ])
 
   // ── What actually moved ────────────────────────────────────────────────
@@ -172,31 +211,73 @@ export async function loadCashTimeline(
         .reduce((s, r) => s + (rolled[r.key]?.budget || 0), 0))
   }
 
-  // In: nothing yet. The manual construction-revenue forecast (progress
-  // billings and rentals) feeds this in a later phase; until then a future
-  // month's inflow is zero rather than a guess.
-
   // ── The outflows that carry a date of their own ────────────────────────
   const inScope = (cid: any) => req.companyIds.length === 0 || req.companyIds.includes(cid)
   const instalments = instRows.filter((i: any) => inScope((i.credits as any)?.company_id))
 
-  // An instalment in the other currency needs a rate; today's NBS list is the
-  // only honest one for a payment that has not happened. Fetched only when
-  // some instalment needs it.
+  // An instalment, or a lease's rent, in the other currency needs a rate;
+  // today's NBS list is the only honest one for money that has not moved.
+  // Fetched only when something needs it.
   const creditCurrency = (i: any): string => String((i.credits as any)?.currency || 'RSD').toUpperCase()
+  const leases: RentalLease[] = (leaseRes?.data || []) as RentalLease[]
+  const instalmentsNeedRate = instalments.some((i: any) => creditCurrency(i) !== cur)
+  const rentNeedsRate = leases.some(l => String(l.currency || 'RSD').toUpperCase() !== cur)
   let rates: BookRates | null = null
-  if (instalments.some((i: any) => creditCurrency(i) !== cur)) {
+  let rateError = false
+  if (instalmentsNeedRate || rentNeedsRate) {
     try {
       rates = await getBookRates(req.today)
-      notes.push(
-        `Credit instalments not in ${cur} are converted at the NBS rate of ${rates.date}; `
-        + 'they are future payments and have no booked rate yet.')
     } catch {
-      notes.push(
-        `No NBS rate could be read for ${req.today}, so credit instalments not in ${cur} `
-        + 'are left out of the dated outflows.')
+      rateError = true
     }
   }
+  if (instalmentsNeedRate) {
+    notes.push(rates
+      ? `Credit instalments not in ${cur} are converted at the NBS rate of ${rates.date}; `
+        + 'they are future payments and have no booked rate yet.'
+      : `No NBS rate could be read for ${req.today}, so credit instalments not in ${cur} `
+        + 'are left out of the dated outflows.')
+  }
+
+  // ── In: what investors and tenants are expected to pay ─────────────────
+  const receivables = receivableInflows(invRows, req.currentMonth, cur)
+  if (receivables.overdue > 0) {
+    notes.push(
+      `${receivables.overdue} revenue invoice(s) are past due; what they still owe is expected `
+      + `in ${req.currentMonth}, not on their original due date.`)
+  }
+  if (receivables.unconverted > 0) {
+    notes.push(`${receivables.unconverted} open revenue invoice(s) have no ${cur} figure and are left out of the inflow.`)
+  }
+
+  const projectRows: any[] = (projRes?.data || []).filter((p: any) => inScope(p.company_id))
+  const plan = plannedRevenueByMonth(
+    projectRows.map(p => ({ id: p.id, payment_days: normalisePaymentDays(p.payment_days) })),
+    (planRes?.data || []) as RevenuePlanRow[],
+    leases,
+    future,
+    { currency: cur, eurRate: rates?.eurRate ?? null, invoices: (billedRes?.data || []) as PlanInvoice[] },
+  )
+  notes.push(...plan.notes)
+  if (rentNeedsRate && rates && plan.lines.some(l => l.source === 'rent')) {
+    notes.push(
+      `Rent in a currency other than ${cur} is converted at the NBS rate of ${rates.date}; `
+      + 'it has not been invoiced and has no booked rate yet.')
+  } else if (rentNeedsRate && rateError) {
+    notes.push(`No NBS rate could be read for ${req.today}, so rent not in ${cur} is left out of the expected inflow.`)
+  }
+  const projectName = new Map(projectRows.map(p => [p.id, p.name || '—']))
+  const startOfCurrent = `${req.currentMonth}-01`
+  const planned: DatedInflow[] = cashInflowsFromPlan(plan.lines).map(i => ({
+    // A billing whose payment day has already gone by without an invoice is
+    // still expected — in the month in progress, not behind the line.
+    date: i.date < startOfCurrent ? startOfCurrent : i.date,
+    label: `${projectName.get(i.project_id) || '—'} · ${i.source === 'rent' ? 'zakup' : 'plan'}`,
+    amount: i.amount,
+    kind: i.source,
+  }))
+  const datedIn = inflowsByMonthDated([...receivables.items, ...planned], months)
+  for (const m of future) projected[m].inflow = cents(datedIn[m]?.total || 0)
   const instalmentAmount = (i: any): number | null => {
     const own = cents((Number(i.principal_amount) || 0) + (Number(i.interest_amount) || 0))
     const c = creditCurrency(i)
@@ -260,6 +341,7 @@ export async function loadCashTimeline(
   return {
     months,
     dated,
+    datedIn,
     timeline: withNotes(cashTimeline({
       months, currentMonth: req.currentMonth, actual, projected, position,
       postedAfterReading, currency: cur,

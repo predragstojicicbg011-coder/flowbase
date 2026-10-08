@@ -22,7 +22,12 @@ import {
 import { fmtLocal, fmtMoney, fmtNum } from '../utils/formatters'
 import { fetchAllPartners } from '../services/allPartners'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
-import { REVENUE_STREAMS } from '../services/revenueStreams'
+import { REVENUE_STREAMS, streamForProjectKind } from '../services/revenueStreams'
+import {
+  advanceDeductionBook, projectAdvanceBalance, validateAdvanceDeduction,
+  type AdvanceDeduction, type AdvanceReceipt,
+} from '../services/revenue'
+import { round2 } from '../services/bookAmounts'
 
 interface Props {
   onClose: () => void
@@ -82,6 +87,18 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const [deptSubName, setDeptSubName] = useState('')
   const [expDesc, setExpDesc] = useState('')
   const [revStream, setRevStream] = useState('')
+  // Whether the user picked the stream themselves. Until they do, a revenue
+  // invoice's stream follows its project's kind (a site bills progress, a
+  // building rent) — see streamForProjectKind.
+  const [revStreamChosen, setRevStreamChosen] = useState(false)
+  // ── The advance this billing deducts (Odbijeni avans) ──────────────────
+  // Typed in the invoice's currency. Only on a revenue invoice that is on
+  // one project and not split (CHECK invoices_advance_deducted_check); the
+  // project's advance balance comes from its is_advance receipts less what
+  // its other billings already deducted (revenue.projectAdvanceBalance).
+  const [advanceInput, setAdvanceInput] = useState('')
+  const [projectAdvances, setProjectAdvances] = useState<AdvanceReceipt[]>([])
+  const [projectDeductions, setProjectDeductions] = useState<AdvanceDeduction[]>([])
   // The site or building this bill belongs to; null is company overhead.
   // Null while the bill is split — the lines carry the projects then.
   const [projectId, setProjectId] = useState<string | null>(null)
@@ -268,6 +285,24 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const getExpDescs = (subId: string) => expenseDescriptions.filter(e => e.dept_subcategory_id === subId)
   const revenueStreams = REVENUE_STREAMS
 
+  /** Whether this bill may deduct an advance at all. */
+  const advanceEligible = invType === 'revenue' && !splitActive && !!projectId && (parseFloat(amount) || 0) > 0
+  /** The deduction as it will be saved, in the invoice's currency: 0 where not allowed. */
+  const advanceOwn = advanceEligible ? round2(Math.max(0, parseFloat(advanceInput) || 0)) : 0
+  /** The project's advance still to deduct, this bill's own old deduction left out. */
+  const advanceBalance = projectId
+    ? projectAdvanceBalance(projectId, projectAdvances, projectDeductions.filter(d => !invoice?.id || d.id !== invoice.id))
+    : null
+  /** What the investor is billed to pay: the amount less the advance. */
+  const amountDue = round2((parseFloat(amount) || 0) - advanceOwn)
+  /** The deduction's book figures at this invoice's rates, for the totals. */
+  const advanceBook = (() => {
+    if (!(advanceOwn > 0) || !book.amounts) return null
+    try {
+      return advanceDeductionBook(advanceOwn, { currency, exchange_rate: book.amounts.exchange_rate, eur_rate: book.amounts.eur_rate })
+    } catch { return null }
+  })()
+
   const runValidation = () => {
     const e: ValidationErrors = {}
     if (!companyId) e.companyId = 'Company is required'
@@ -284,12 +319,25 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       if (!deptId && !splitActive) e.dept = 'Department is required'
     }
     if (invType === 'revenue' && !revStream) e.revStream = 'Revenue stream is required'
+    if (advanceOwn > 0) {
+      const why = validateAdvanceDeduction({
+        invoice: {
+          id: invoice?.id, type: invType, project_id: projectId, amount: parseFloat(amount) || 0,
+          currency: currency || 'RSD',
+          exchange_rate: book.amounts?.exchange_rate ?? null, eur_rate: book.amounts?.eur_rate ?? null,
+        },
+        advanceDeducted: advanceOwn,
+        advances: projectAdvances,
+        deductions: projectDeductions,
+      })
+      if (why) e.advance = why
+    }
     return e
   }
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId]) // eslint-disable-line
+  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -315,16 +363,51 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     load()
   }, [])
 
+  // The project's advances and the billings that already deduct them, read
+  // whenever the project of a revenue invoice changes.
+  useEffect(() => {
+    if (invType !== 'revenue' || !projectId) { setProjectAdvances([]); setProjectDeductions([]); return }
+    let cancelled = false
+    const load = async () => {
+      const [adv, ded] = await Promise.all([
+        supabase.from('transactions')
+          .select('id, project_id, currency, amount, amount_rsd, amount_eur, status, deleted_at')
+          .eq('project_id', projectId).eq('is_advance', true),
+        supabase.from('invoices')
+          .select('id, project_id, currency, advance_deducted, advance_deducted_rsd, advance_deducted_eur, deleted_at')
+          .eq('project_id', projectId).gt('advance_deducted', 0),
+      ])
+      if (cancelled) return
+      if (adv.error || ded.error) console.warn('advance balance load error:', (adv.error || ded.error)?.message)
+      setProjectAdvances((adv.data || []) as AdvanceReceipt[])
+      setProjectDeductions((ded.data || []) as AdvanceDeduction[])
+    }
+    load()
+    return () => { cancelled = true }
+  }, [invType, projectId])
+
+  // A revenue invoice's stream follows its project's kind until the user
+  // picks one: 'Građevinske situacije' on a construction site, 'Zakup' on a
+  // rental building.
+  useEffect(() => {
+    if (invType !== 'revenue' || revStreamChosen || !projectId) return
+    const kind = projects.find(p => p.id === projectId)?.kind
+    const stream = streamForProjectKind(kind)
+    if (stream && stream !== revStream) setRevStream(stream)
+  }, [invType, projectId, projects, revStreamChosen]) // eslint-disable-line
+
   useEffect(() => {
     if (!companyId) return
     const load = async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('id, transaction_date, amount, amount_rsd, amount_eur, currency, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, project_id, dept_split_type, tags, note, exchange_rate, eur_rate, is_indexed, banks(id,name), partners(id,name)')
+        .select('id, transaction_date, is_advance, amount, amount_rsd, amount_eur, currency, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, project_id, dept_split_type, tags, note, exchange_rate, eur_rate, is_indexed, banks(id,name), partners(id,name)')
         .eq('company_id', companyId).eq('type', 'direct').eq('status', 'posted')
         .order('transaction_date', { ascending: false }).limit(150)
       if (error) console.error('transactions load error:', error)
-      if (data) setDirectTransactions(data)
+      // An advance carries no P&L and is never an invoice's payment: a
+      // billing uses it through advance_deducted only.
+      if (data) setDirectTransactions(data.filter((t: any) => !t.is_advance))
     }
     load()
   }, [companyId])
@@ -427,6 +510,9 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     setPlSubName(invoice.pl_subcategory || ''); setDeptName(invoice.department || '')
     setDeptSubName(invoice.dept_subcategory || ''); setExpDesc(invoice.expense_description || '')
     setRevStream(invoice.revenue_stream || ''); setProjectId(invoice.project_id ?? null)
+    // An existing bill's stream is the user's, not the project's default.
+    setRevStreamChosen(!!invoice.revenue_stream)
+    setAdvanceInput(Number(invoice.advance_deducted) > 0 ? String(invoice.advance_deducted) : '')
     setDeptSplit(invoice.dept_split_type || 'none'); setNote(invoice.note || '')
     setTags(invoice.tags || []); setAccNum(invoice.account_number || '')
     setModel(invoice.model || ''); setRefNum(invoice.reference_number || '')
@@ -465,14 +551,14 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const touchStep = (n: number) => {
     if (n === 1) setTouched(p => ({ ...p, companyId: true, currency: true, invoiceDate: true, partnerId: true }))
     if (n === 2) setTouched(p => ({ ...p, amount: true, exRate: true }))
-    if (n === 3) setTouched(p => ({ ...p, plCat: true, dept: true, revStream: true }))
+    if (n === 3) setTouched(p => ({ ...p, plCat: true, dept: true, revStream: true, advance: true }))
   }
 
   const stepHasError = (n: number) => {
     const stepFields: Record<number, string[]> = {
       1: ['companyId', 'currency', 'invoiceDate', 'partnerId'],
       2: ['amount', 'exRate'],
-      3: ['plCat', 'dept', 'revStream'],
+      3: ['plCat', 'dept', 'revStream', 'advance'],
     }
     return (stepFields[n] || []).some(f => !!errors[f])
   }
@@ -512,7 +598,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const stepTitles = ['Basic information', 'Amount & currency', 'Classification & P&L', 'Review & post']
 
   const handlePost = async () => {
-    setTouched({ companyId: true, currency: true, invoiceDate: true, partnerId: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true })
+    setTouched({ companyId: true, currency: true, invoiceDate: true, partnerId: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true, advance: true })
     const e = runValidation()
     if (Object.keys(e).length > 0) { setShowValidationSummary(true); return }
     const booked = book.amounts
@@ -555,6 +641,12 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         model: model || null, reference_number: refNum || null,
         note: note || null, tags: tags.length > 0 ? tags : null,
         pl_impact: effectivePlImpact, status: effectiveStatus,
+        // The advance this billing uses up, at the invoice's own rates
+        // (three zeros when it deducts none — which is also what a bill that
+        // stopped being a single-project revenue invoice must say, or the
+        // CHECK refuses it). lease_id and service_month are never written
+        // here: a rent invoice keeps them through an edit.
+        ...advanceDeductionBook(advanceOwn, booked),
       }
 
       // `.select('id')` is what turns a zero-row update back into an error.
@@ -672,6 +764,14 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
           This bill is split — each line above carries its own project.
           Remove the split to put the whole bill on one project.
         </div>
+      ) : invoice?.lease_id ? (
+        <>
+          <ProjectSelect value={projectId} onChange={() => {}} companyId={companyId || null}
+            style={pickerChrome} disabled title="Faktura za zakup pripada projektu ugovora o zakupu" />
+          <div style={{ fontSize: '11.5px', color: DIALOG.dim, marginTop: '6px', lineHeight: 1.5 }}>
+            Faktura za zakup pripada projektu ugovora o zakupu — projekat se ne menja ovde.
+          </div>
+        </>
       ) : (
         <ProjectSelect value={projectId} onChange={setProjectId} companyId={companyId || null}
           style={pickerChrome} />
@@ -967,7 +1067,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                   <div style={s.field}>
                     <label style={s.lbl}>Invoice type <span style={s.req}>*</span></label>
                     <div style={s.typeRow}>
-                      <div style={{ ...s.typeChip, ...(invType === 'expense' ? s.typeChipExpense : {}) }} onClick={() => setInvType('expense')}>📤 Expense</div>
+                      <div style={{ ...s.typeChip, ...(invType === 'expense' ? s.typeChipExpense : {}) }} onClick={() => { if (!invoice?.lease_id) setInvType('expense') }} title={invoice?.lease_id ? 'Faktura za zakup je uvek izlazna' : undefined}>📤 Expense</div>
                       <div style={{ ...s.typeChip, ...(invType === 'revenue' ? s.typeChipRevenue : {}) }} onClick={() => setInvType('revenue')}>📥 Revenue</div>
                     </div>
                   </div>
@@ -1081,7 +1181,8 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                   first question is how many expenses this is — and if it is
                   more than one, the fields underneath stop being the answer
                   and become the fallback the rest of the application reads. */}
-              <SplitEditor
+              {/* A rent invoice stays on its lease's project, whole. */}
+              {!invoice?.lease_id && <SplitEditor
                 parent={splitParent}
                 lines={splitLines}
                 onChange={changeSplitLines}
@@ -1091,7 +1192,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                 client={supabase}
                 onScriptsChanged={() => { fetchScripts(supabase).then(setQuickFillScripts as any) }}
                 hint="One bill, two or more expenses — a laptop and a year of support, say."
-              />
+              />}
               {linkedTxId && (
                 <div style={{ ...s.infoBox, marginBottom: '16px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue }}>
                   🔗 Linked to Direct transaction — P&L fields auto-filled. Changes will sync to the transaction on post.
@@ -1262,15 +1363,65 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                   <div style={s.field}>
                     <label style={s.lbl}>Revenue stream <span style={s.req}>*</span></label>
                     <select style={{ ...s.select, ...(fieldErr('revStream') ? s.inputError : {}) }} value={revStream}
-                      onChange={e => { setRevStream(e.target.value); touch('revStream') }} onBlur={() => touch('revStream')}>
+                      onChange={e => { setRevStream(e.target.value); setRevStreamChosen(true); touch('revStream') }} onBlur={() => touch('revStream')}>
                       <option value="">Select stream...</option>
                       {revenueStreams.map(r => <option key={r}>{r}</option>)}
                     </select>
                     {fieldErr('revStream') && <span style={s.errorMsg}>{fieldErr('revStream')}</span>}
                   </div>
+                  {invoice?.lease_id && (
+                    <div style={{ fontSize: '11.5px', color: DIALOG.dim, marginTop: '6px', lineHeight: 1.5 }}>
+                      Faktura zakupa{invoice.service_month ? ` za ${String(invoice.service_month).slice(0, 7)}` : ''} — ostaje vezana za ugovor o zakupu i svoj mesec.
+                    </div>
+                  )}
                 </div>
               )}
               {invType === 'revenue' && projectPanel}
+
+              {invType === 'revenue' && (
+                <div style={s.section}>
+                  <div style={s.sectionTitle}>Odbijeni avans</div>
+                  {!advanceEligible ? (
+                    <div style={{ fontSize: '11.5px', color: DIALOG.dim, lineHeight: 1.5 }}>
+                      Avans se odbija samo na izlaznoj fakturi koja je na jednom projektu i nije podeljena.
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: '11.5px', color: DIALOG.dim, marginBottom: '8px', lineHeight: 1.5 }}>
+                        Preostali avans na projektu:{' '}
+                        <strong style={{ color: DIALOG.text }}>
+                          {!advanceBalance || (advanceBalance.received_rsd === 0 && advanceBalance.deducted_rsd === 0)
+                            ? 'nema primljenog avansa'
+                            : advanceBalance.currency && advanceBalance.remaining !== null
+                              ? fmtMoney(advanceBalance.remaining, advanceBalance.currency)
+                              : `${fmtMoney(advanceBalance.remaining_rsd, 'RSD')} · ${fmtMoney(advanceBalance.remaining_eur, 'EUR')}`}
+                        </strong>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <input type="number" min="0" step="0.01"
+                          style={{ ...s.input, flex: 1, ...(fieldErr('advance') ? s.inputError : {}) }}
+                          value={advanceInput}
+                          onChange={e => { setAdvanceInput(e.target.value); touch('advance') }}
+                          onBlur={() => touch('advance')}
+                          placeholder={`0.00 ${currency || ''}`} />
+                        {advanceBalance && advanceBalance.currency === (currency || 'RSD') && (advanceBalance.remaining || 0) > 0 && (
+                          <button style={s.linkBtn} onClick={() => {
+                            const max = Math.min(advanceBalance.remaining || 0, parseFloat(amount) || 0)
+                            setAdvanceInput(String(round2(max))); touch('advance')
+                          }}>Odbij preostali</button>
+                        )}
+                      </div>
+                      {fieldErr('advance') && <span style={s.errorMsg}>{fieldErr('advance')}</span>}
+                      {advanceOwn > 0 && (
+                        <div style={{ fontSize: '11.5px', color: DIALOG.dim, marginTop: '6px' }}>
+                          Za naplatu: <strong style={{ color: DIALOG.text }}>{fmtMoney(amountDue, currency || 'RSD')}</strong>
+                          {' '}(prihod ostaje pun iznos fakture)
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               <div style={s.section}>
                 <div style={s.sectionTitle}>Tags & note</div>
@@ -1349,6 +1500,10 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                   ['Exchange rate', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'Manual'})` : 'N/A'],
                   ['RSD (book)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
                   ['EUR', book.amounts ? fmtMoney(amountEur, 'EUR') : '—'],
+                  ...(advanceOwn > 0 ? [
+                    ['Odbijeni avans', `${fmtMoney(advanceOwn, currency || 'RSD')}${advanceBook && currency !== 'RSD' ? ` · ${fmtMoney(advanceBook.advance_deducted_rsd, 'RSD')}` : ''}`],
+                    ['Za naplatu', `${fmtMoney(amountDue, currency || 'RSD')}${advanceBook && book.amounts ? ` · ${fmtMoney(round2(amountRsd - advanceBook.advance_deducted_rsd), 'RSD')} · ${fmtMoney(round2(amountEur - advanceBook.advance_deducted_eur), 'EUR')}` : ''}`],
+                  ] : []),
                 ]},
                 { title: 'P&L & CF classification', rows: [
                   ['P&L Category', plCatName || '—'],

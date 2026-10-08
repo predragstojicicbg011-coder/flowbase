@@ -17,6 +17,9 @@ import { REVENUE_STREAMS } from '../services/revenueStreams'
 import { decodeStatement, hasLostCharacters } from '../services/decodeUpload'
 import { differenceFor, entryNote, isBookable } from '../services/currencyDifference'
 import {
+  ADVANCE_BADGE_STYLE, ADVANCE_LABEL, doubleCountHint, effectiveAdvance, receiptShape, whyAdvanceNotSavable,
+} from '../services/advanceReceipt'
+import {
   describeMismatches, mismatches, type Expectation, type Settlement,
 } from '../services/settlementCheck'
 import {
@@ -128,6 +131,8 @@ interface ImportRow {
   override_note: string
   override_credit_id: string
   override_installment_ids: string[]
+  /** An advance received (avans): kept only while the row is a direct revenue receipt. */
+  override_is_advance: boolean
   /** Otisak reda, racunat pri parsiranju nad PUNOM listom. */
   import_hash: string
   /** Isti otisak vec postoji u bazi — red je uvezen ranije. */
@@ -447,6 +452,7 @@ function makeImportRow(parsed: ParsedRow): ImportRow {
     override_note: '',
     override_credit_id: '',
     override_installment_ids: [],
+    override_is_advance: false,
     import_hash: '',
     already_imported: false,
   }
@@ -659,17 +665,19 @@ export default function BulkImport({ onClose, onImported }: Props) {
       invoiceShortfall: remainingRsd - allocRsd,
       paymentUnallocated: rowRsd - allocRsd,
       currency: 'RSD',
+      invoiceType: inv.type ?? null,
     })
     return {
       inv,
       difference,
-      amountOwn: difference.kind === 'gain'
+      // The linked side (the rest of the bill) is in the invoice's currency.
+      amountOwn: difference.linksToInvoice
         ? toOwn(difference.amount, inv)
         // A loss is part of this bank line, in the line's currency at its rate.
         : booked
           ? partFromRsd(difference.amount, { currency: p.currency, exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate }).amount
           : difference.amount,
-      currency: difference.kind === 'gain' ? (inv.currency || p.currency) : p.currency,
+      currency: difference.linksToInvoice ? (inv.currency || p.currency) : p.currency,
     }
   }, [openInvoices])
 
@@ -987,6 +995,20 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
     // Pre-flight: svi kursevi se provjere PRIJE prvog upisa, da import ne
     // ostane napola odradjen. Valuta kredita se takodje provjeri ovdje.
+    // An advance with no project, a split, or an invoice is refused by the
+    // database partway through the run; refused here, before the first write.
+    for (const row of accepted) {
+      const why = whyAdvanceNotSavable({
+        type: row.override_tx_type, subtype: row.override_tx_subtype, isAdvance: row.override_is_advance,
+        projectId: projectIdFromInput(row.override_project_id),
+        splitLines: row.override_pl_splits.length,
+      })
+      if (why) {
+        setAnalyzeError(`${formatDate(row.parsed.date)} ${row.parsed.description || ''}: ${why} Nothing was posted.`)
+        setStep('review')
+        return
+      }
+    }
     try {
       for (const row of accepted) {
         const p = row.parsed
@@ -1058,9 +1080,20 @@ export default function BulkImport({ onClose, onImported }: Props) {
         }
       }
 
+      // Advance, P&L, and which way an invoice payment moves cash — one rule
+      // for every dialog (services/advanceReceipt.ts).
+      const firstInvoiceId = row.override_linked_invoice_ids?.[0] || row.override_linked_invoice_id
+      const shape = receiptShape({
+        type: row.override_tx_type,
+        subtype: row.override_tx_subtype,
+        isAdvance: row.override_is_advance,
+        bankSide: isExpense ? 'expense' : 'revenue',
+        invoiceType: openInvoices.find(i => i.id === firstInvoiceId)?.type ?? null,
+      })
+
       const { data: newTx, error: txErr } = await supabase.from('transactions').insert({
         import_hash: importHash, import_batch_id: importBatchId,
-        company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), statement_number: p.statement_number || null, type: row.override_tx_type, tx_subtype: row.override_tx_subtype, payment_method: row.override_payment_method || null, currency: p.currency, amount, ...rowBook, pl_impact: isDirectWithPL,
+        company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), statement_number: p.statement_number || null, type: row.override_tx_type, tx_subtype: shape.tx_subtype, is_advance: shape.is_advance, payment_method: row.override_payment_method || null, currency: p.currency, amount, ...rowBook, pl_impact: shape.pl_impact,
         pl_category: isDirectWithPL ? (row.override_pl_category_name || null) : null, pl_subcategory: isDirectWithPL ? (row.override_pl_subcategory_name || null) : null, department: isDirectWithPL ? (row.override_department_name || null) : null, dept_subcategory: isDirectWithPL ? (row.override_dept_subcategory_name || null) : null, expense_description: isDirectWithPL ? (row.override_expense_description || null) : null, revenue_stream: isDirectWithPL ? (row.override_revenue_stream || null) : null,
         project_id: rowProjectId,
         cf_type: isDirectWithPL && row.override_tx_subtype === 'expense' ? (row.override_cf_type || null) : null, cf_frequency: row.override_cf_type === 'recurring' ? row.override_cf_frequency : null, cf_next_month_est: row.override_cf_type === 'recurring' ? (row.override_cf_next_month_est ? parseFloat(row.override_cf_next_month_est) : amount) : null,
@@ -1199,7 +1232,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
             // Fetch invoice details including is_indexed flag
             const { data: inv } = await supabase.from('invoices')
-              .select('id, invoice_number, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, is_indexed')
+              .select('id, invoice_number, type, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, is_indexed, advance_deducted')
               .eq('id', invoiceId).single()
             if (!inv) continue
 
@@ -1223,7 +1256,10 @@ export default function BulkImport({ onClose, onImported }: Props) {
             const { data: prevAlloc } = await supabase.from('invoice_transaction_links')
               .select('allocated_amount').eq('invoice_id', invoiceId)
             const alreadyAllocOrig = (prevAlloc || []).reduce((s: number, r: any) => s + (r.allocated_amount || 0), 0)
-            const remainingInvOrig = Math.max(0, (inv.amount || 0) - alreadyAllocOrig)
+            // Net of the advance a revenue billing deducts: that part is
+            // settled already, and the investor does not pay it again.
+            const advanceOwn = Number(inv.advance_deducted) || 0
+            const remainingInvOrig = Math.max(0, (inv.amount || 0) - advanceOwn - alreadyAllocOrig)
 
             if (remainingInvOrig <= 0.005) continue // already paid
 
@@ -1260,20 +1296,21 @@ export default function BulkImport({ onClose, onImported }: Props) {
               amount: inv.amount || 0,
               allocated: alreadyAllocOrig + allocOwn,
               amountRsd: inv.amount_rsd ?? null,
+              advanceDeducted: advanceOwn,
             })
 
             // Update invoice status based on original currency (prevents FX rounding partial)
             const { data: allAlloc } = await supabase.from('invoice_transaction_links')
               .select('allocated_amount').eq('invoice_id', invoiceId)
             const totalAllocatedOrig = (allAlloc || []).reduce((s: number, r: any) => s + (r.allocated_amount || 0), 0)
-            const invStatus = settledStatus(inv.amount || 0, totalAllocatedOrig, inv.amount_rsd)
+            const invStatus = settledStatus(inv.amount || 0, totalAllocatedOrig, inv.amount_rsd, advanceOwn)
             await supabase.from('invoices')
               .update({ status: invStatus, updated_at: new Date().toISOString() })
               .eq('id', invoiceId)
 
             // Auto-close children if parent is fully paid
             const { data: children } = await supabase.from('invoices')
-              .select('id, amount, amount_rsd').eq('parent_invoice_id', invoiceId)
+              .select('id, amount, amount_rsd, advance_deducted').eq('parent_invoice_id', invoiceId)
             if (children && children.length > 0) {
               if (invStatus === 'paid') {
                 for (const child of children) {
@@ -1292,7 +1329,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                     invoice_id: child.id, transaction_id: newTx.id,
                     ...linkAmountsFromOwn(childAllocOrig, inv),
                   })
-                  const childStatus = settledStatus(child.amount || 0, childAllocOrig, child.amount_rsd)
+                  const childStatus = settledStatus(child.amount || 0, childAllocOrig, child.amount_rsd, Number(child.advance_deducted) || 0)
                   await supabase.from('invoices').update({ status: childStatus, updated_at: new Date().toISOString() }).eq('id', child.id)
                 }
               }
@@ -1314,7 +1351,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
           if (row.override_fx_book && invoiceIds.length === 1 && fxScript) {
             const { data: inv } = await supabase.from('invoices')
-              .select('id, invoice_number, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, project_id')
+              .select('id, invoice_number, type, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, project_id, advance_deducted')
               .eq('id', invoiceIds[0]).single()
             const { data: st } = await supabase.from('v_invoice_status')
               .select('amount, paid_amount').eq('id', invoiceIds[0]).maybeSingle()
@@ -1333,10 +1370,14 @@ export default function BulkImport({ onClose, onImported }: Props) {
                 // What is left of the line, at the line's rate.
                 paymentUnallocated: partBookAmounts(round2(spareOrig), rowParent).amount_rsd,
                 currency: 'RSD',
+                // A receipt short of a revenue billing is a loss, not a gain.
+                invoiceType: inv.type ?? null,
               })
 
               if (isBookable(difference)) {
-                const isGain = difference.kind === 'gain'
+                // The LINKED side - the rest of the invoice: a gain on a
+                // supplier's bill, a loss on a revenue billing.
+                const isGain = difference.linksToInvoice
                 const fxOwn = isGain
                   // The gain IS the rest of the bill, to the para.
                   ? shortfallOwn
@@ -1355,7 +1396,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                   transaction_date: formatDate(p.date),
                   statement_number: p.statement_number || null,
                   type: 'direct',
-                  tx_subtype: isGain ? 'revenue' : 'expense',
+                  tx_subtype: difference.direction === 'revenue' ? 'revenue' : 'expense',
                   currency: fxCurrency,
                   amount: fxOwn,
                   ...fxRates,
@@ -1744,6 +1785,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
                               }}>
                                 already imported
                               </span>
+                            )}
+                            {effectiveAdvance(row.override_tx_type, row.override_tx_subtype, row.override_is_advance) && (
+                              <span style={ADVANCE_BADGE_STYLE}>{ADVANCE_LABEL}</span>
                             )}
                           </div>
                           <div style={{ fontSize: '11px', color: '#7A9BB8' }}>{p.date} · {p.description?.slice(0, 65)}{(p.description?.length || 0) > 65 ? '...' : ''}</div>
@@ -2413,6 +2457,34 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
                           {row.override_tx_type === 'direct' && row.override_tx_subtype === 'revenue' && (
                             <div style={{ marginTop: '8px' }}>
+                              <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer', fontSize: '12px', marginBottom: '8px' }}>
+                                <input type="checkbox" checked={!!row.override_is_advance}
+                                  onChange={e => updateRow(p.id, { override_is_advance: e.target.checked })}
+                                  style={{ accentColor: DIALOG.accent, cursor: 'pointer', marginTop: '2px' }} />
+                                <span>
+                                  <strong>{ADVANCE_LABEL}</strong> — primljen od investitora
+                                  <span style={{ display: 'block', fontSize: '10.5px', color: DIALOG.dim, lineHeight: 1.4 }}>
+                                    Obaveza, ne prihod: bez uticaja na bilans uspeha, obavezno na projektu, bez podele i bez povezivanja sa fakturom.
+                                  </span>
+                                </span>
+                              </label>
+                              {effectiveAdvance(row.override_tx_type, row.override_tx_subtype, row.override_is_advance) && !projectIdFromInput(row.override_project_id) && (
+                                <div style={{ fontSize: '11px', color: DIALOG.red, marginBottom: '8px' }}>
+                                  Avans mora biti na projektu — izaberite projekat ispod.
+                                </div>
+                              )}
+                              {(() => {
+                                const hint = doubleCountHint(
+                                  { type: row.override_tx_type, subtype: row.override_tx_subtype, isAdvance: row.override_is_advance },
+                                  row.override_partner_id || null, openInvoices)
+                                return hint ? (
+                                  <div style={{ fontSize: '11px', color: DIALOG.amber, background: DIALOG.amberFill, borderRadius: '6px', padding: '6px 8px', marginBottom: '8px', lineHeight: 1.5 }}>
+                                    {hint}{' '}
+                                    <span style={{ textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}
+                                      onClick={() => updateRow(p.id, { override_tx_type: 'invoice_payment', override_is_advance: false })}>Prebaci na plaćanje fakture</span>
+                                  </div>
+                                ) : null
+                              })()}
                               <div style={s.editField}>
                                 <label style={s.editLbl}>Revenue stream</label>
                                 <select style={s.editSelect} value={row.override_revenue_stream} onChange={e => updateRow(p.id, { override_revenue_stream: e.target.value })}>

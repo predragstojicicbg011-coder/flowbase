@@ -126,3 +126,40 @@ describe('the wording carries no currency when none was given', () => {
     expect(d.note).not.toMatch(/RSD|EUR|USD/)
   })
 })
+
+describe('a revenue invoice turns the economics round, not the shape', () => {
+  const rev = (invoiceShortfall: number, paymentUnallocated: number) =>
+    differenceFor({ invoiceShortfall, paymentUnallocated, currency: 'RSD', invoiceType: 'revenue' })
+
+  it('receiving less than was billed is a loss, still linked to close the invoice', () => {
+    const d = rev(6074.04, 0)
+    expect(d.kind).toBe('loss')
+    expect(d.direction).toBe('expense')
+    expect(d.linksToInvoice).toBe(true)
+    expect(d.amount).toBeCloseTo(6074.04, 2)
+    expect(d.note).toContain('received')
+    expect(isBookable(d)).toBe(true)
+  })
+
+  it('receiving more than was billed is a gain, split off the bank line', () => {
+    const d = rev(0, 6074.04)
+    expect(d.kind).toBe('gain')
+    expect(d.direction).toBe('revenue')
+    expect(d.linksToInvoice).toBe(false)
+  })
+
+  it('still refuses to book over an unfinished allocation', () => {
+    expect(rev(100, 100).kind).toBe('allocate-first')
+  })
+
+  it('an expense invoice, or one of no stated type, is as before', () => {
+    expect(differenceFor({ invoiceShortfall: 100, paymentUnallocated: 0, invoiceType: 'expense' }).kind).toBe('gain')
+    expect(differenceFor({ invoiceShortfall: 100, paymentUnallocated: 0, invoiceType: null }).kind).toBe('gain')
+    expect(differenceFor({ invoiceShortfall: 0, paymentUnallocated: 100, invoiceType: 'expense' }).kind).toBe('loss')
+  })
+
+  it('the entry note speaks of receiving', () => {
+    expect(entryNote('IF-1', rev(100, 0))).toBe('Currency difference on IF-1 — received less than invoiced')
+    expect(entryNote('IF-1', rev(0, 100))).toBe('Currency difference on IF-1 — received more than invoiced')
+  })
+})

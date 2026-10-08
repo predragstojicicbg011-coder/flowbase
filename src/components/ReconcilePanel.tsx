@@ -94,8 +94,10 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
         .single()
       setSource(tx)
 
-      // Candidates = open invoices for same company
-      if (tx?.company_id) {
+      // Candidates = open invoices for same company. None for an advance
+      // (is_advance): it reaches a billing through advance_deducted only,
+      // and the database refuses the link.
+      if (tx?.company_id && !tx.is_advance) {
         const { data: invs } = await supabase
           .from('v_invoice_status')
           .select('*')
@@ -135,7 +137,9 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
           .eq('company_id', inv.company_id)
           .eq('type', 'direct')
           .order('transaction_date', { ascending: false })
-        setCandidates(txs || [])
+        // An advance is not a payment of any invoice (trigger
+        // invoice_transaction_links_not_advance): never a candidate.
+        setCandidates((txs || []).filter((t: any) => !t.is_advance))
       }
 
       // Existing links

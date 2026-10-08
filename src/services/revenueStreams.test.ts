@@ -51,3 +51,13 @@ describe('revenue streams', () => {
     expect(values).toEqual([...REVENUE_STREAMS])
   })
 })
+
+describe('streamForProjectKind', () => {
+  const { streamForProjectKind } = require('./revenueStreams')
+  it('a site bills progress, a building rent', () => {
+    expect(streamForProjectKind('construction')).toBe('Građevinske situacije')
+    expect(streamForProjectKind('rental')).toBe('Zakup')
+    expect(streamForProjectKind(null)).toBeNull()
+    expect(streamForProjectKind('other')).toBeNull()
+  })
+})

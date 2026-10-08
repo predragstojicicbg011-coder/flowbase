@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { C, deck, useWidth } from './chartChrome'
 import { niceMax, shortMoney } from '../services/expenseCharts'
-import type { CashMonth, CashTimeline, DatedOutflow } from '../services/cashTimeline'
+import type { CashMonth, CashTimeline, DatedInflow, DatedOutflow } from '../services/cashTimeline'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
 
@@ -56,10 +56,16 @@ const BASIS_WORD: Record<CashMonth['basis'], string> = {
   projected: 'expected',
 }
 
-export default function CashFlowTimeline({ timeline, dated, onPickMonth }: {
+export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPickMonth }: {
   timeline: CashTimeline
   /** month -> the outflows that carry a date of their own. */
   dated: Record<string, { total: number; items: DatedOutflow[] }>
+  /**
+   * month -> the inflows expected in it: open revenue invoices on their due
+   * date (overdue ones in the month in progress), then billings planned or
+   * rent not yet invoiced, at billing date + payment term.
+   */
+  datedIn?: Record<string, { total: number; items: DatedInflow[] }>
   onPickMonth?: (month: string) => void
 }) {
   const { currency } = useDisplayCurrency()
@@ -170,6 +176,10 @@ export default function CashFlowTimeline({ timeline, dated, onPickMonth }: {
           {rows.map((r, i) => {
             const cx = cxOf(i)
             const dated1 = dated[r.month]
+            const in1 = r.basis === 'actual' ? undefined : datedIn[r.month]
+            const billed1 = in1 ? in1.items.filter(x => x.kind === 'invoice') : []
+            const planned1 = in1 ? in1.items.filter(x => x.kind !== 'invoice') : []
+            const sum = (xs: DatedInflow[]) => xs.reduce((t, x) => t + x.amount, 0)
             return (
               <g key={r.month}
                 style={{ cursor: onPickMonth ? 'pointer' : 'default' }}
@@ -187,6 +197,20 @@ export default function CashFlowTimeline({ timeline, dated, onPickMonth }: {
                       <div style={st.tipRow}>
                         <span>Balance at month end</span>
                         <b style={{ color: r.closing < 0 ? OUT : BALANCE }}>{money2(r.closing)}</b>
+                      </div>
+                    )}
+                    {billed1.length > 0 && (
+                      <div style={st.tipNote}>
+                        Očekivana naplata po fakturama: {money(sum(billed1))} — {billed1.slice(0, 3)
+                          .map(x => x.overdue ? `${x.label} (dospelo)` : x.label).join(', ')}
+                        {billed1.length > 3 && ` i još ${billed1.length - 3}`}.
+                      </div>
+                    )}
+                    {planned1.length > 0 && (
+                      <div style={st.tipNote}>
+                        Planirano (još nefakturisano): {money(sum(planned1))} — {planned1.slice(0, 3)
+                          .map(x => x.label).join(', ')}
+                        {planned1.length > 3 && ` i još ${planned1.length - 3}`}.
                       </div>
                     )}
                     {dated1 && (
@@ -260,6 +284,8 @@ export default function CashFlowTimeline({ timeline, dated, onPickMonth }: {
         of its own is how a chart invents a crossing that is not in the data. The balance
         is walked outward from the cash reading in both directions — it is the only
         measured figure on the line, so it anchors rather than terminates it.
+        Očekivani prilivi: otvorene izlazne fakture na dan dospeća (dospele — u tekućem mesecu),
+        zatim plan prihoda i zakupi koji još nisu fakturisani, na kraj meseca plus rok plaćanja.
       </div>
     </div>
   )

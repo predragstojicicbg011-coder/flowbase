@@ -22,7 +22,23 @@
 //                                           it rather than added to it.
 //
 // So a gain is linked and a loss is not, and that asymmetry is the whole of
-// the logic here. Getting it the other way round would either leave an invoice
+// the logic here.
+//
+// ── A REVENUE INVOICE TURNS THE ECONOMICS ROUND, NOT THE SHAPE ─────────────
+//
+// The above is a bill the company PAYS. On a revenue invoice (a billing to an
+// investor or tenant) the company RECEIVES, and receiving less than was
+// billed is a LOSS; receiving more is a GAIN. The shape is unchanged — the
+// short side still has to be linked to close the invoice, the surplus still
+// splits off the bank line — so `linksToInvoice` follows the shape and
+// `kind` / `direction` follow the economics:
+//
+//                         expense bill            revenue invoice
+//   invoice short         gain, linked            loss, linked
+//   payment has surplus   loss, not linked        gain, not linked
+//
+// Callers decide "which side of the pair is this" by `linksToInvoice`, never
+// by `kind`. Getting it the other way round would either leave an invoice
 // open forever or allocate more to a payment than the bank actually moved.
 //
 // This module decides the figure and the direction. It does not know what a
@@ -67,6 +83,11 @@ export interface DifferenceInput {
   /** The currency both figures are in, for the wording. */
   currency?: string
   tolerance?: number
+  /**
+   * The invoice's `type`. 'revenue' flips gain and loss (see the top of the
+   * file). Anything else — including missing — is an expense bill, as before.
+   */
+  invoiceType?: string | null
 }
 
 const money = (n: number, currency?: string) =>
@@ -100,7 +121,19 @@ export function differenceFor(input: DifferenceInput): Difference {
     }
   }
 
+  const revenue = input.invoiceType === 'revenue'
+
   if (invoiceIsShort) {
+    if (revenue) {
+      return {
+        kind: 'loss',
+        amount: short,
+        direction: 'expense',
+        linksToInvoice: true,
+        note: `Less was received than was invoiced, by ${money(short, cur)}. Booking it as a loss `
+          + `closes the invoice; nothing else will.`,
+      }
+    }
     return {
       kind: 'gain',
       amount: short,
@@ -112,6 +145,16 @@ export function differenceFor(input: DifferenceInput): Difference {
   }
 
   if (paymentHasSpare) {
+    if (revenue) {
+      return {
+        kind: 'gain',
+        amount: spare,
+        direction: 'revenue',
+        linksToInvoice: false,
+        note: `More was received than was invoiced, by ${money(spare, cur)}. The invoice is already `
+          + `closed, so this splits the surplus off the same bank line as a gain.`,
+      }
+    }
     return {
       kind: 'loss',
       amount: spare,
@@ -136,7 +179,10 @@ export function isBookable(d: Difference): boolean {
  */
 export function entryNote(invoiceNumber: string | null | undefined, d: Difference): string {
   const which = invoiceNumber ? ` on ${invoiceNumber}` : ''
-  return d.kind === 'gain'
-    ? `Currency difference${which} — paid less than invoiced`
-    : `Currency difference${which} — paid more than invoiced`
+  // The shape, not the economics: short is "less than invoiced" whichever
+  // side of the bill the company is on.
+  const verb = d.direction === (d.linksToInvoice ? 'expense' : 'revenue') ? 'received' : 'paid'
+  return d.linksToInvoice
+    ? `Currency difference${which} — ${verb} less than invoiced`
+    : `Currency difference${which} — ${verb} more than invoiced`
 }
