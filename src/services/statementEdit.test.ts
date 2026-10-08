@@ -21,12 +21,7 @@ const expenseTx = {
   dept_subcategory: 'Office',
   expense_description: 'Telekom',
   revenue_stream: null,
-  rev_alloc_type: 'sg100',
-  rev_alloc_aimfox: null,
-  rev_alloc_sg: null,
-  opex_type: 'opex',
-  opex_amount: null,
-  performance_amount: null,
+  project_id: null,
   cf_type: 'recurring',
   cf_frequency: 'monthly',
   cf_next_month_est: 12500,
@@ -41,10 +36,10 @@ describe('txToSeed', () => {
   })
 
   it('puts revenue in the credit column instead', () => {
-    const seed = txToSeed({ ...expenseTx, tx_subtype: 'revenue', revenue_stream: 'Aimfox' })
+    const seed = txToSeed({ ...expenseTx, tx_subtype: 'revenue', revenue_stream: 'Građevinske situacije' })
     expect(seed.credit).toBe('12500')
     expect(seed.debit).toBe('')
-    expect(seed.revenue_stream).toBe('Aimfox')
+    expect(seed.revenue_stream).toBe('Građevinske situacije')
   })
 
   it('carries every classification field back onto the row', () => {
@@ -66,11 +61,26 @@ describe('txToSeed', () => {
   })
 
   it('falls back to a usable default where a stored value is missing', () => {
-    const seed = txToSeed({ ...expenseTx, currency: null, rev_alloc_type: null, opex_type: null, cf_frequency: null })
+    const seed = txToSeed({ ...expenseTx, currency: null, cf_frequency: null })
     expect(seed.currency).toBe('RSD')
-    expect(seed.rev_alloc).toBe('sg100')
-    expect(seed.opex_type).toBe('opex')
     expect(seed.cf_frequency).toBe('monthly')
+  })
+
+  it('carries the row’s project back onto the grid', () => {
+    expect(txToSeed({ ...expenseTx, project_id: 'site-1' }).project_id).toBe('site-1')
+  })
+
+  /** Null is company overhead; the grid holds it as the empty choice. */
+  it('reads a row on no project as overhead, the empty choice', () => {
+    expect(txToSeed(expenseTx).project_id).toBe('')
+    expect(txToSeed({ ...expenseTx, project_id: undefined as any }).project_id).toBe('')
+  })
+
+  it('carries no allocation fields any more', () => {
+    const seed: any = txToSeed(expenseTx)
+    for (const k of ['rev_alloc', 'aimfox_val', 'sg_val', 'opex_type', 'opex_val', 'performance_val']) {
+      expect(seed).not.toHaveProperty(k)
+    }
   })
 
   it('keeps the partner name it is given, since the row stores only an id', () => {
@@ -120,6 +130,11 @@ describe('passthroughToSeed', () => {
     expect(seed.debit).toBe('900')
     expect(seed.credit).toBe('')
     expect(seed.pt_direction).toBe('out')
+  })
+
+  /** A pass-through never reaches the P&L, so it belongs to no project. */
+  it('puts a pass-through on no project', () => {
+    expect(passthroughToSeed(pt).project_id).toBe('')
   })
 
   it('keeps the period the row was filed under, not the date it was paid', () => {

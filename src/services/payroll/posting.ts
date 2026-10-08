@@ -33,9 +33,14 @@
 // equals what the run said the month costs.
 
 import type { PayrollRun, RunKey } from './runs'
+import type { HoursAtRate } from './timesheets'
 import type { EmployeeForMonth } from './employees'
 import { deductionAmount } from './employees'
 import { obligationRows, obligationTotal } from '../payrollAllocation'
+import {
+  projectShares, distributeAmount, totalsByProject,
+  type DistributedLine, type HoursBasis, type ProjectShare,
+} from './projectHours'
 import {
   PL_CATEGORY, SUBCATEGORY, OTHER_INCOME_SUBCATEGORY, SALARY_DEPT_SUBCATEGORY,
   cashFlowTypeFor, endOfMonth, unknownNames, type LedgerNames,
@@ -58,9 +63,15 @@ export interface PlannedInvoice {
   pl_subcategory: string
   department: string | null
   dept_subcategory: string | null
-  /** Which revenue stream carries it, and how. From the employee's allocation. */
-  rev_alloc_type: string
-  opex_type: string
+  /**
+   * How this invoice's amount falls over projects, by the employee's hours.
+   *
+   * One line (or none) is written as the invoice's own `project_id`; two or
+   * more are written as pl_splits lines under it, and the invoice's own
+   * project is then null. Always adds up to `amount` exactly. Empty on the
+   * obligation parent, which is not in the P&L.
+   */
+  projects: DistributedLine[]
   /** Recurring while they are still employed; one-off for a final month. */
   cf_type: 'recurring' | 'one_time'
   expense_description: string
@@ -78,8 +89,6 @@ export interface PlannedTransaction {
   pl_subcategory: string
   department: string | null
   dept_subcategory: string | null
-  rev_alloc_type: string
-  opex_type: string
   cf_type: 'recurring' | 'one_time'
   expense_description: string
   /** Negative — it cancels part of an expense already booked. */
@@ -94,6 +103,12 @@ export interface PostingPlan {
   transactions: PlannedTransaction[]
   /** What the run said the month costs. The plan has to come to this. */
   expectedTotalCost: number
+  /**
+   * People whose project hours cannot be used, by message. A plan with any
+   * of these is refused by `checkPlan`: posting them to overhead instead would
+   * be a guess about which site they were on.
+   */
+  projectErrors: string[]
 }
 
 export interface PlanInput {
@@ -123,6 +138,17 @@ export interface PlanInput {
   currencyRates?: Record<string, number>
   /** Where a retained deduction's storno goes, by deduction label. */
   retainedCategories?: Record<string, { pl_category: string; pl_subcategory: string }>
+  /**
+   * Hours on each project this month, by employee id
+   * (payroll_timesheet_projects). Somebody missing has no project hours, and
+   * their whole cost is overhead.
+   */
+  projectHours?: Record<string, readonly { project_id: string | null; hours: number }[]>
+  /**
+   * Worked and paid hours by employee id — see `hoursBasisFromRuns`. Somebody
+   * missing has no paid hours this month, and their cost is overhead.
+   */
+  hoursBasis?: Record<string, HoursBasis>
 }
 
 /**
@@ -172,13 +198,9 @@ export function retainedCategoryFor(
 export interface Placement {
   department: string | null
   dept_subcategory: string | null
-  rev_alloc_type: string
-  opex_type: string
 }
 
-const UNPLACED: Placement = {
-  department: null, dept_subcategory: null, rev_alloc_type: 'sg100', opex_type: 'opex',
-}
+const UNPLACED: Placement = { department: null, dept_subcategory: null }
 
 export function departmentFor(
   unit: string | null, mapping: UnitMapping[],
@@ -197,28 +219,17 @@ export function departmentFor(
  * override an individual's would make the record of that decision a thing that
  * changed nothing.
  *
- * The allocation also carries the revenue-stream codes, which the mapping has
- * no opinion about — those used to be hard-coded as 'sg100' / 'opex' on every
- * entry, which was one allocation for twenty-five different people.
+ * Which PROJECT the cost goes to is not decided here: that is the hours, in
+ * payroll_timesheet_projects, and `projectShares`.
  */
 export function placementFor(person: EmployeeForMonth | undefined, mapping: UnitMapping[]): Placement {
   if (person?.allocation) {
     const a = person.allocation
-    return {
-      department: a.department,
-      dept_subcategory: a.dept_subcategory,
-      rev_alloc_type: a.rev_alloc_type,
-      opex_type: a.opex_type,
-    }
+    return { department: a.department, dept_subcategory: a.dept_subcategory }
   }
   const unit = departmentFor(person?.employee.organisational_unit ?? null, mapping)
   if (!unit) return UNPLACED
-  return {
-    department: unit.department,
-    dept_subcategory: unit.dept_subcategory,
-    rev_alloc_type: 'sg100',
-    opex_type: 'opex',
-  }
+  return { department: unit.department, dept_subcategory: unit.dept_subcategory }
 }
 
 /**
@@ -260,6 +271,26 @@ export function planFor(input: PlanInput): PostingPlan {
   let retainedAcrossRun = 0
 
   const tag = `Payroll ${month} — ${run.label}`
+
+  // ── Projects, by hours ───────────────────────────────────────────────
+  // One set of shares per person, measured once and applied to every
+  // invoice of theirs, so their net, their forwarded deductions and their
+  // share of the filing all fall over the same sites in the same proportion.
+  const hours = input.projectHours ?? {}
+  const basis = input.hoursBasis ?? {}
+  const sharesOf = new Map<string, ProjectShare[]>()
+  const projectErrors: string[] = []
+  const sharesFor = (employeeId: string, name: string): ProjectShare[] => {
+    const known = sharesOf.get(employeeId)
+    if (known) return known
+    const r = projectShares(hours[employeeId] ?? [], basis[employeeId] ?? null, name)
+    if (r.error) projectErrors.push(r.error)
+    const shares = r.error ? [{ project_id: null, hours: 0, share: 1 }] : r.shares
+    sharesOf.set(employeeId, shares)
+    return shares
+  }
+  const spread = (employeeId: string, name: string, amount: number): DistributedLine[] =>
+    distributeAmount(round2(amount), sharesFor(employeeId, name.split(' — ')[0]))
 
   for (const line of run.salaries) {
     const p = people[line.employeeId]
@@ -307,9 +338,10 @@ export function planFor(input: PlanInput): PostingPlan {
           pl_category: PL_CATEGORY,
           pl_subcategory: NET_SUBCATEGORY,
           department, dept_subcategory: deptSub,
-          rev_alloc_type: where.rev_alloc_type, opex_type: where.opex_type, cf_type: cf,
+          cf_type: cf,
           expense_description: line.name,
           amount: round2(amount),
+          projects: spread(line.employeeId, line.name, amount),
           pl_impact: true,
           note: `${tag} — Deduction forwarded: ${d.label} — ${line.name}`,
         })
@@ -331,7 +363,7 @@ export function planFor(input: PlanInput): PostingPlan {
           pl_category: retainedWhere.pl_category,
           pl_subcategory: retainedWhere.pl_subcategory,
           department, dept_subcategory: deptSub,
-          rev_alloc_type: where.rev_alloc_type, opex_type: where.opex_type, cf_type: cf,
+          cf_type: cf,
           expense_description: d.label,
           amount: round2(-amount),
           note: `${tag} — Retained deduction (storno): ${d.label} — ${line.name}`,
@@ -351,9 +383,10 @@ export function planFor(input: PlanInput): PostingPlan {
         pl_category: PL_CATEGORY,
         pl_subcategory: NET_SUBCATEGORY,
         department, dept_subcategory: deptSub,
-        rev_alloc_type: where.rev_alloc_type, opex_type: where.opex_type, cf_type: cf,
+        cf_type: cf,
         expense_description: line.name,
         amount: toEmployee,
+        projects: spread(line.employeeId, line.name, toEmployee),
         pl_impact: true,
         note: `${tag} — Net salary — ${line.name}`
           + (thirdPartyTotal > 0 ? `, after ${round2(thirdPartyTotal)} forwarded` : ''),
@@ -361,6 +394,7 @@ export function planFor(input: PlanInput): PostingPlan {
     }
 
     obligations.push({
+      employee_id: line.employeeId,
       employee_name: line.name,
       department_name: department,
       dept_subcategory_name: deptSub,
@@ -385,14 +419,15 @@ export function planFor(input: PlanInput): PostingPlan {
       pl_subcategory: OTHER_INCOME_SUBCATEGORY,
       department: where.department,
       dept_subcategory: deptSub,
-      rev_alloc_type: where.rev_alloc_type, opex_type: where.opex_type,
       cf_type: cashFlowTypeFor(p?.employee ?? {}, monthEnd),
       expense_description: line.name,
       amount: round2(line.line.net),
+      projects: spread(line.employeeId, line.name, line.line.net),
       pl_impact: true,
       note: `${tag} — Other income — ${line.name}`,
     })
     obligations.push({
+      employee_id: line.employeeId,
       employee_name: line.name,
       department_name: where.department,
       dept_subcategory_name: deptSub,
@@ -402,14 +437,11 @@ export function planFor(input: PlanInput): PostingPlan {
     })
   }
 
-  // Every child row belongs to one employee, so it posts with that person's
-  // allocation rather than with a default that would quietly send a quarter of
-  // the tax filing to the wrong revenue stream.
-  const placementByName = new Map<string, Placement>()
+  // Every child row belongs to one employee, so it follows that person's
+  // hours over the projects, like their salary does.
   const cfByName = new Map<string, 'recurring' | 'one_time'>()
   for (const line of [...run.salaries, ...run.otherIncome]) {
     const p = people[line.employeeId]
-    placementByName.set(line.name, placementFor(p, mapping))
     cfByName.set(line.name, cashFlowTypeFor(p?.employee ?? {}, monthEnd))
   }
 
@@ -424,9 +456,10 @@ export function planFor(input: PlanInput): PostingPlan {
       pl_category: PL_CATEGORY,
       pl_subcategory: SUBCATEGORY.tax,
       department: null, dept_subcategory: null,
-      rev_alloc_type: 'sg100', opex_type: 'opex', cf_type: 'recurring',
+      cf_type: 'recurring',
       expense_description: `Tax & contributions — ${month} ${run.label}`,
       amount: owed,
+      projects: [],
       // The payable the bank payment matches. Its children carry the P&L, so
       // counting it too would double every filing.
       pl_impact: false,
@@ -442,11 +475,12 @@ export function planFor(input: PlanInput): PostingPlan {
         pl_subcategory: r.pl_subcategory,
         department: r.department,
         dept_subcategory: r.dept_subcategory,
-        rev_alloc_type: placementByName.get(r.employee_name)?.rev_alloc_type ?? 'sg100',
-        opex_type: placementByName.get(r.employee_name)?.opex_type ?? 'opex',
         cf_type: cfByName.get(r.employee_name) ?? 'recurring',
         expense_description: r.expense_description,
         amount: r.amount,
+        projects: r.employee_id
+          ? spread(r.employee_id, r.employee_name, r.amount)
+          : [{ project_id: null, amount: r.amount }],
         pl_impact: true,
         parentRef: 'obligation',
         note: `${tag} — ${r.pl_subcategory} — ${r.employee_name}`,
@@ -470,7 +504,34 @@ export function planFor(input: PlanInput): PostingPlan {
     // the cost of employing people. This is what is POSTED, which is that
     // cost less the part of it the employee paid for themselves.
     expectedTotalCost: round2(run.totals.totalCost - retainedAcrossRun),
+    projectErrors,
   }
+}
+
+/**
+ * Worked and paid hours per employee, from the salary lines of the runs.
+ *
+ * Paid is `line.hours` — every paid hour at its coefficient, exactly what the
+ * salary was prorated on. Worked is the `regular_hours` category. An employee
+ * with no salary line (a month wholly unpaid, or additions only) is left out:
+ * there are no paid hours to share their cost over, so it is overhead.
+ */
+export function hoursBasisFromRuns(runs: readonly PayrollRun[]): Record<string, HoursBasis> {
+  const out: Record<string, HoursBasis> = {}
+  for (const run of runs) {
+    for (const s of run.salaries) {
+      const worked = (s.categories as HoursAtRate[])
+        .filter(c => c.field === 'regular_hours')
+        .reduce((sum, c) => sum + c.hours, 0)
+      out[s.employeeId] = { worked: round2(worked), paid: round2(s.hours) }
+    }
+  }
+  return out
+}
+
+/** What the plan puts on each project (null = overhead), P&L rows only. */
+export function planProjectTotals(plan: PostingPlan): DistributedLine[] {
+  return totalsByProject(plan.invoices.filter(i => i.pl_impact).flatMap(i => i.projects))
 }
 
 /**
@@ -535,6 +596,11 @@ export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null
     }
   }
 
+  if (plan.projectErrors.length > 0) {
+    return `Sati po projektima ne odgovaraju mesecu. Nothing was written. `
+      + plan.projectErrors.join(' ')
+  }
+
   // The specific faults first. Each of them ALSO throws the total out, so
   // reporting the total first would answer "it does not add up" to somebody
   // whose actual problem is a named employee with no department.
@@ -551,6 +617,16 @@ export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null
     return `${undept.length} entries would land with no department (${names.join(', ')}). `
       + 'They would all fall into Unassigned, where a salary looks like an ordinary '
       + 'cost of nobody. Map the organisational units first.'
+  }
+
+  // Every invoice's project lines must come to the invoice, to the para:
+  // the database refuses a split that does not, and a single project line
+  // that did not would move cost between sites without anybody choosing to.
+  const unbalanced = plan.invoices.find(i => i.pl_impact && Math.round(
+    i.projects.reduce((s, l) => s + l.amount, 0) * 100) !== Math.round(i.amount * 100))
+  if (unbalanced) {
+    return `"${unbalanced.expense_description}" (${unbalanced.amount.toFixed(2)}) does not `
+      + 'add up over its projects. Nothing was written.'
   }
 
   const total = planTotal(plan)

@@ -3,12 +3,12 @@ import { useLocation, useNavigate } from 'react-router-dom'
 
 export type Page =
   | 'dashboard' | 'transactions' | 'revenue' | 'cashflow'
-  | 'budgeting' | 'reports' | 'expenses' | 'partners' | 'credits'
+  | 'budgeting' | 'reports' | 'expenses' | 'projects' | 'partners' | 'credits'
   | 'hr' | 'payroll' | 'settings'
 
 // Redoslijed odgovara redoslijedu u sidebar-u.
 export const PAGES: Page[] = [
-  'dashboard', 'transactions', 'expenses', 'revenue', 'cashflow',
+  'dashboard', 'transactions', 'expenses', 'projects', 'revenue', 'cashflow',
   'budgeting', 'reports', 'credits', 'hr', 'payroll', 'partners', 'settings',
 ]
 

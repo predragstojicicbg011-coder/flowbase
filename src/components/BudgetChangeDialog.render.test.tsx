@@ -146,3 +146,36 @@ describe('what a budget change records', () => {
     expect(screen.getByText(/next month's benchmark will not move it/i)).toBeTruthy()
   })
 })
+
+describe('which project a budget change is for', () => {
+  const openFor = (props: Record<string, any>) => render(
+    <BudgetChangeDialog
+      month="2026-11" monthLabel="November 2026"
+      level="department" classification={classification}
+      rowLabel="Sales" current={1400} seed={1400} seedEur={null}
+      onClose={() => {}} onSaved={() => {}} {...props} />)
+
+  it('records an overhead line with no project, as every change before projects', async () => {
+    openFor({})
+    typeFigure('2000')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(rows()[0]).toMatchObject({ project_id: null, amount_rsd: 600, seed_rsd: 1400 })
+  })
+
+  it('records the project it was opened for, pinning that project\'s seed and not the row\'s', async () => {
+    const seedForProject = jest.fn((p: string | null) => (p === 'p1'
+      ? { seed: 400, seedEur: null } : { seed: 1000, seedEur: null }))
+    openFor({ projectId: 'p1', projectLocked: true, seedForProject })
+    typeFigure('2000')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    // The delta is still against the figure the cell shows, so it reads back
+    // as typed; only the pinned base is the project's own.
+    expect(rows()[0]).toMatchObject({ project_id: 'p1', amount_rsd: 600, seed_rsd: 400 })
+    expect(seedForProject).toHaveBeenCalledWith('p1')
+  })
+
+  it('names a fixed project rather than offering to change it', () => {
+    openFor({ projectId: null, projectLocked: true })
+    expect(screen.getByTestId('budget-change-project').textContent).toBe('Opšti troškovi')
+  })
+})

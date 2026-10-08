@@ -1,5 +1,6 @@
 import { summaryRows, entryRows, preambleRows, BRANCH_LEVELS } from './expenseExport'
 import type { ComparedNode, PlEntry } from './expenseTree'
+import { OVERHEAD_LABEL } from './projects'
 
 const node = (over: Partial<ComparedNode> & { label: string; path: string[] }): ComparedNode => ({
   key: over.path.join('|'),
@@ -74,18 +75,18 @@ describe('summaryRows', () => {
   it('names the branch on every row, so two sheets can be concatenated', () => {
     expect(summaryRows(tree, 'pl', 1000, never).every(r => r.Branch === 'P&L')).toBe(true)
     expect(summaryRows(tree, 'department', 1000, never).every(r => r.Branch === 'Department')).toBe(true)
-    expect(summaryRows(tree, 'stream', 1000, never).every(r => r.Branch === 'Revenue stream')).toBe(true)
-    expect(summaryRows(tree, 'type', 1000, never).every(r => r.Branch === 'Cost type')).toBe(true)
+    expect(summaryRows(tree, 'project', 1000, never).every(r => r.Branch === 'Project')).toBe(true)
   })
 
   /**
-   * The allocated branches put their root — Social Growth, OPEX — in a column
-   * of its own and break down by cost category underneath, so the four sheets
-   * can sit in one file without a level meaning two different things.
+   * The project branch puts its root — the project, or Opšti troškovi — in a
+   * column of its own and breaks down by cost category underneath, so the
+   * sheets can sit in one file without a level meaning two different things.
    */
-  it('gives an allocated branch its own first column', () => {
-    const [root, mid, leaf] = summaryRows(tree, 'stream', 1000, never)
-    expect(root['Allocated to']).toBe('Marketing')
+  it('gives the project branch its own first column', () => {
+    const [root, mid, leaf] = summaryRows(tree, 'project', 1000, never)
+    expect(root.Project).toBe('Marketing')
+    expect(leaf.Project).toBe('Marketing')
     expect(mid['P&L category']).toBe('Office')
     expect(leaf['P&L sub-category']).toBe('Figma')
     expect(leaf.Department).toBe('')
@@ -192,7 +193,7 @@ describe('preambleRows', () => {
   it('describes every sheet the workbook holds', () => {
     const fields = preambleRows(facts).map(r => r.Field)
     expect(fields).toEqual(expect.arrayContaining([
-      'Sheet: By department', 'Sheet: By P&L', 'Sheet: Entries',
+      'Sheet: By department', 'Sheet: By P&L', 'Sheet: By project', 'Sheet: Entries',
     ]))
   })
 
@@ -208,9 +209,26 @@ describe('BRANCH_LEVELS', () => {
     expect(BRANCH_LEVELS.department).toEqual(['Department', 'Dept. sub-category', 'Expense description'])
   })
 
-  it('starts an allocated branch with what the share was allocated to', () => {
-    const tail = ['P&L category', 'P&L sub-category']
-    expect(BRANCH_LEVELS.stream).toEqual(['Allocated to', ...tail])
-    expect(BRANCH_LEVELS.type).toEqual(['Allocated to', ...tail])
+  it('starts the project branch with the project', () => {
+    expect(BRANCH_LEVELS.project).toEqual(['Project', 'P&L category', 'P&L sub-category'])
+  })
+
+  it('leaves the Project column blank on the other branches', () => {
+    const t = [node({ label: 'X', path: ['X'] })]
+    expect(summaryRows(t, 'pl', 1, never)[0].Project).toBe('')
+    expect(summaryRows(t, 'department', 1, never)[0].Project).toBe('')
+  })
+})
+
+describe('entryRows — the project column', () => {
+  const base = { pl_date: '2026-03-01', pl_category: 'Ops', pl_subcategory: null, department: null,
+    dept_subcategory: null, expense_description: null }
+
+  it('names each row by its own project, and overhead when it has none', () => {
+    const rows = entryRows([
+      { ...base, id: 's1', amount_rsd: 600, project_id: 'p1', project_name: 'Zgrada A' },
+      { ...base, id: 's2', amount_rsd: 400, project_id: null },
+    ] as PlEntry[], new Map())
+    expect(rows.map(r => r.Project).sort()).toEqual(['Zgrada A', OVERHEAD_LABEL].sort())
   })
 })

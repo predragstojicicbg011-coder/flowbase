@@ -20,8 +20,9 @@
 // passes the real one; a test passes something that answers like PostgREST.
 
 import { fetchAllPages } from '../utils/fetchAllPages'
+import { PROJECT_FILTER_OVERHEAD } from './ledgerFilters'
 import {
-  makeClassKey, valueAt, placeEntry, seedForEntry,
+  makeClassKey, valueAt, placeEntry, seedForEntry, projectOfKey,
 } from './budgetKeys'
 import { getBookRates, rateFor, type BookRates } from './bookAmounts'
 import {
@@ -86,6 +87,13 @@ export interface BudgetTreeRequest {
   companyId: string
   branch: BranchId
   /**
+   * Which project's budget: `''` (or absent) for all of them together,
+   * PROJECT_FILTER_OVERHEAD for overhead lines only, or a project id. Narrows
+   * the actuals, the seed and the ledger alike. The credit schedule is
+   * company overhead, so a single project's budget carries none of it.
+   */
+  project?: string
+  /**
    * The currency `rolled` is wanted in. RSD when not said. EUR is honoured
    * where the ledger can be read in EUR; otherwise `rolled` is RSD and
    * `currency` says so.
@@ -125,6 +133,17 @@ export interface BudgetTree {
    * entry carries its RSD figure and, where it has one, its EUR figure.
    */
   ledgerByNode: Record<string, Record<string, Adjustment[]>>
+  /**
+   * currency -> nodeKey -> month -> project ('' for overhead) -> the seed on
+   * that node alone, for that project's lines alone.
+   *
+   * A change is recorded for one project, and the seed it pins (`seed_rsd`,
+   * see `pinnedBase`) has to be that project's seed on the node, not the
+   * node's whole seed — or the next replay would put the other projects'
+   * money under this project's base. With one project or none on a node this
+   * is the node's own seed.
+   */
+  seedByNodeProject: Record<BudgetCurrency, Record<string, Record<string, Record<string, number>>>>
   /** What the credit schedule put into the horizon, in RSD. */
   creditScheduled: number
   /**
@@ -149,6 +168,11 @@ export async function loadBudgetTree(
   client: QueryClient, req: BudgetTreeRequest,
 ): Promise<BudgetTree> {
   const { monthKeys, benchmark, companyIds, companyId, branch } = req
+  const project = (req.project || '').trim()
+  /** Narrows a query on a table with `project_id` to the requested project. */
+  const scopeProject = (q: any) => !project ? q
+    : project === PROJECT_FILTER_OVERHEAD ? q.is('project_id', null)
+    : q.eq('project_id', project)
   const firstMonth = monthKeys[0]
   const lastMonth = monthKeys[monthKeys.length - 1]
 
@@ -174,7 +198,8 @@ export async function loadBudgetTree(
       // cf_type and cf_frequency ride along: the seed is built from these
       // same rows, so the forecast and the actuals cannot disagree about
       // which universe they describe.
-      .select('id, amount_rsd, amount_eur, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, cf_type, cf_frequency')
+      // project_id is part of the budget line a row seeds (`makeClassKey`).
+      .select('id, amount_rsd, amount_eur, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, cf_type, cf_frequency, project_id')
       // The view carries revenue as well: its tx_type is the transaction's
       // tx_subtype. Without this filter revenue lands in an expense budget.
       .eq('tx_type', 'expense')
@@ -185,6 +210,7 @@ export async function loadBudgetTree(
     // returns early while `companyIds` is empty. Do not copy the check
     // without that early return — DrillModal had to grow its own.
     if (companyIds.length > 0) q = q.in('company_id', companyIds)
+    q = scopeProject(q)
     return q.order('pl_date').order('id').range(from, to)
   })
 
@@ -217,7 +243,7 @@ export async function loadBudgetTree(
       // `seed_rsd` / `seed_eur` are what stop a typed figure moving when the benchmark
       // month rolls over. Left out of this list, every cell on the page goes
       // back to drifting and nothing says so. See `pinnedBase`.
-      .select('id, company_id, budget_month, level, pl_category, pl_subcategory, department, dept_subcategory, expense_description, kind, amount_rsd, amount_eur, reason, created_at, seed_rsd, seed_eur')
+      .select('id, company_id, budget_month, level, pl_category, pl_subcategory, department, dept_subcategory, expense_description, project_id, kind, amount_rsd, amount_eur, reason, created_at, seed_rsd, seed_eur')
       .gte('budget_month', `${firstMonth}-01`)
       .lte('budget_month', `${lastMonth}-01`)
     // NO company filter on the consolidated view, deliberately. The budget
@@ -228,6 +254,7 @@ export async function loadBudgetTree(
     // set since budgeting became group-level. Filtered only where one
     // company is selected, and that view does not draw a budget at all.
     if (companyId) q = q.in('company_id', [companyId])
+    q = scopeProject(q)
     return q.order('created_at').order('id').range(from, to)
   })
 
@@ -358,7 +385,11 @@ export async function loadBudgetTree(
   // exactly. It used to land in the Committed row, which has no category, so
   // the biggest single outflow of the month was the only one a reader could
   // not look up — while the credit rows above it estimated nothing at all.
+  // Overhead: a credit belongs to the company, not to a site. A budget
+  // narrowed to one project carries none of it.
+  const scheduleInScope = !project || project === PROJECT_FILTER_OVERHEAD
   const installments = installmentRows
+    .filter(() => scheduleInScope)
     .filter((i: any) => inScope((i.credits as any)?.company_id))
     .map((i: any): Installment => {
       const currency = (i.credits as any)?.currency || 'RSD'
@@ -456,6 +487,8 @@ export async function loadBudgetTree(
   // but seeding an ancestor from that set as well would count every
   // descendant twice once `rollUp` adds the children in.
   const seedByNode: Record<BudgetCurrency, Record<string, Record<string, number>>> = { RSD: {}, EUR: {} }
+  // The same seed kept apart by project, for the per-project ledger replay.
+  const seedByNodeProject: BudgetTree['seedByNodeProject'] = { RSD: {}, EUR: {} }
 
   for (const ck of allKeys) {
     const parts = ck.split('|')
@@ -484,6 +517,11 @@ export async function loadBudgetTree(
         if (s) {
           if (!seedByNode[c][nodeKey]) seedByNode[c][nodeKey] = {}
           seedByNode[c][nodeKey][mk] = (seedByNode[c][nodeKey][mk] || 0) + s
+          const pk = projectOfKey(ck) || ''
+          if (!seedByNodeProject[c][nodeKey]) seedByNodeProject[c][nodeKey] = {}
+          const byMonth = seedByNodeProject[c][nodeKey]
+          if (!byMonth[mk]) byMonth[mk] = {}
+          byMonth[mk][pk] = (byMonth[mk][pk] || 0) + s
         }
       }
     }
@@ -516,6 +554,31 @@ export async function loadBudgetTree(
   // alike. By the time the ledger gets here that is all there is: the
   // assembly loop above has already resolved each carried-over `set` into
   // its own branch-independent delta.
+  //
+  // Replayed PER PROJECT. Each entry pins the seed of its own project's lines
+  // on the node (`pinnedBase`), so it has to be replayed on that project's
+  // seed alone: replaying a site's entry on the node's whole seed would put
+  // every other project's money under the site's pinned base and lose it.
+  // A node whose entries are all overhead — every budget before projects —
+  // has one bucket whose seed is the node's own, which is the old replay.
+  const ledgerDelta = (c: BudgetCurrency, nodeKey: string, mk: string): number => {
+    const entries = ledger[nodeKey]?.[mk] || []
+    if (entries.length === 0) return 0
+    const byProject = new Map<string, Adjustment[]>()
+    for (const a of entries) {
+      const pk = (a.project_id || '').trim()
+      const list = byProject.get(pk) || []
+      list.push(a)
+      byProject.set(pk, list)
+    }
+    let delta = 0
+    byProject.forEach((list, pk) => {
+      const seed = seedByNodeProject[c][nodeKey]?.[mk]?.[pk] || 0
+      delta += applyLedger(seed, list, c) - seed
+    })
+    return delta
+  }
+
   const rollIn = (c: BudgetCurrency): Record<string, Record<string, RolledNode>> => {
     const rolledByMonth: Record<string, Record<string, RolledNode>> = {}
     for (const mk of cellMonths) {
@@ -524,7 +587,7 @@ export async function loadBudgetTree(
         return {
           key: r.key, label: r.label, level: r.level, parent: r.parent ?? null,
           seed,
-          ledger: applyLedger(seed, ledger[r.key]?.[mk] || [], c) - seed,
+          ledger: ledgerDelta(c, r.key, mk),
           actual: actualByNode[c][r.key]?.[mk] || 0,
         }
       })
@@ -575,5 +638,6 @@ export async function loadBudgetTree(
     creditScheduled: schedule.RSD.total,
     creditUnpriced: { RSD: schedule.RSD.unpriced.length, EUR: schedule.EUR.unpriced.length },
     ledgerByNode: ledger,
+    seedByNodeProject,
   }
 }

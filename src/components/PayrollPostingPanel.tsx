@@ -2,8 +2,14 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
 import {
   planFor, checkPlan, planTotal, stornoTotal, unmappedUnits,
+  hoursBasisFromRuns, planProjectTotals,
   type PostingPlan, type UnitMapping,
 } from '../services/payroll/posting'
+import {
+  fetchProjectHours, projectHoursByEmployee, type ProjectHoursRow,
+} from '../services/payroll/projectHours'
+import { useProjects } from '../contexts/ProjectsContext'
+import { OVERHEAD_LABEL, projectLabelById } from '../services/projects'
 import { postPlan, undoPosting, fetchPostings, type PostContext } from '../services/payroll/post'
 import { fetchHolidays, lastWorkingDayOf, type HolidayRow } from '../services/payroll/holidays'
 import {
@@ -75,6 +81,9 @@ export default function PayrollPostingPanel({
   /** Payroll rows already in the ledger missing any of the three. */
   const [orphaned, setOrphaned] = useState<Posted[]>([])
   const [filling, setFilling] = useState(false)
+  /** Sati po projektima for the month, by employee — how the cost is shared. */
+  const [projectHours, setProjectHours] = useState<Record<string, ProjectHoursRow[]>>({})
+  const { projects } = useProjects()
 
   const reload = useCallback(async () => {
     setError(null)
@@ -96,6 +105,9 @@ export default function PayrollPostingPanel({
         fetchHolidays(supabase),
       ])
       if (mapErr) throw new Error(mapErr.message)
+      // Read on every reload, so hours changed on the timesheet since are
+      // what the preview below shows and what would be posted.
+      setProjectHours(projectHoursByEmployee(await fetchProjectHours(supabase, month)))
       setMapping(maps || [])
       setPostings(posted)
       setPartners(people_ as PartnerLike[])
@@ -192,6 +204,8 @@ export default function PayrollPostingPanel({
     return [...seen.values()]
   }, [allDeductions, partners])
 
+  const hoursBasis = useMemo(() => hoursBasisFromRuns(runs), [runs])
+
   const plans = useMemo(() => {
     const out: Record<string,
       { plan: PostingPlan; why: string | null; missing: string[]; runId: string | null }> = {}
@@ -203,6 +217,8 @@ export default function PayrollPostingPanel({
         deductionPartners,
         taxPartnerId: taxPartner.partnerId,
         currencyRates: exchangeRate ? { EUR: exchangeRate } : {},
+        projectHours,
+        hoursBasis,
       })
       // WHAT LANDS IN THE LEDGER HAS TO BE THE THING THAT WAS KEPT. The only
       // way to be sure is to insist the two agree at the moment of posting:
@@ -228,7 +244,7 @@ export default function PayrollPostingPanel({
     }
     return out
   }, [runs, month, people, mapping, exchangeRate, ledger, savedRuns,
-      employeePartners, deductionPartners, taxPartner])
+      employeePartners, deductionPartners, taxPartner, projectHours, hoursBasis])
 
   /**
    * The already-posted rows this can put a partner on, by the SAME matcher
@@ -528,6 +544,9 @@ export default function PayrollPostingPanel({
                   </span>
                 )}
               </div>
+              <ProjectPreview
+                totals={planProjectTotals(entry.plan)}
+                nameOf={id => (id ? projectLabelById(projects, id) : OVERHEAD_LABEL)} />
               {entry.why && <div style={s.blocked}>{entry.why}</div>}
             </div>
             <div>
@@ -547,6 +566,30 @@ export default function PayrollPostingPanel({
           </div>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * How a run's P&L cost falls over projects, before anything is posted: the
+ * same lines the posting writes, added up per project, overhead last.
+ */
+function ProjectPreview({ totals, nameOf }: {
+  totals: { project_id: string | null; amount: number }[]
+  nameOf: (id: string | null) => string
+}) {
+  if (totals.length === 0) return null
+  const all = totals.reduce((s2, t) => s2 + t.amount, 0)
+  return (
+    <div style={{ marginTop: '6px', fontSize: '11px', color: '#7A9BB8', lineHeight: 1.6 }}>
+      <span style={{ color: '#9BC4EC' }}>Po projektima (po satima): </span>
+      {totals.map((t, i) => (
+        <span key={t.project_id ?? 'overhead'}>
+          {i > 0 && ' · '}
+          {nameOf(t.project_id)} <b style={{ color: '#DCE9F6' }}>{fmtNum(t.amount)}</b>
+          {all > 0 && ` (${Math.round((t.amount / all) * 1000) / 10}%)`}
+        </span>
+      ))}
     </div>
   )
 }

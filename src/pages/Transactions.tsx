@@ -18,7 +18,10 @@ import PayrollImportDialog from '../components/PayrollImportDialog'
 import SearchableSelect, { type SelectOption } from '../components/SearchableSelect'
 import { fmtMoney } from '../utils/formatters'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { useProjects } from '../contexts/ProjectsContext'
+import { OVERHEAD_LABEL, projectLabel, projectLabelById } from '../services/projects'
 import {
+  PROJECT_FILTER_OVERHEAD,
   TABS, CURRENCIES, REVENUE_STREAMS, PRESET_LABELS,
   emptyFiltersByTab, buildPredicates, activeChips, clearFields, clearTab,
   presetRange, dateColumn, plCategoryColumn,
@@ -420,7 +423,7 @@ export default function Transactions() {
   const bankOpts = useMemo(
     () => (f.companyId ? lk.banks.filter(b => b.company_id === f.companyId) : lk.banks), [lk.banks, f.companyId])
   const plCatOpts = useMemo(() => {
-    if (plCategoryColumn(activeTab, f) === 'revenue_stream') return REVENUE_STREAMS
+    if (plCategoryColumn(activeTab, f) === 'revenue_stream') return [...REVENUE_STREAMS]
     return lk.plCats.filter(c => c.type !== 'revenue').map(c => c.name)
   }, [activeTab, f, lk.plCats])
 
@@ -439,11 +442,22 @@ export default function Transactions() {
   const plSubSelOpts = useMemo<SelectOption[]>(
     () => nameOpts(plSubOpts.map(x => x.name)), [plSubOpts])
 
+  // Every project, closed ones too: an old bill on a closed site must still
+  // be findable. Narrowed to the company filter when one is set.
+  const { projects } = useProjects()
+  const projectSelOpts: SelectOption[] = useMemo(() => [
+    { value: PROJECT_FILTER_OVERHEAD, label: OVERHEAD_LABEL },
+    ...projects
+      .filter(p => !f.companyId || p.company_id === f.companyId)
+      .map(p => ({ value: p.id, label: p.active ? projectLabel(p) : `${projectLabel(p)} (zatvoren)` })),
+  ], [projects, f.companyId])
+
   const chipNames = useMemo(() => ({
     company: (id: string) => companies.find(c => c.id === id)?.name || '',
+    project: (id: string) => projectLabelById(projects, id),
     partner: (id: string) => lk.partners.find(p => p.id === id)?.name || '',
     bank: (id: string) => lk.banks.find(b => b.id === id)?.name || '',
-  }), [lk, companies])
+  }), [lk, companies, projects])
   const chips = useMemo(() => activeChips(activeTab, f, chipNames, currency), [activeTab, f, chipNames, currency])
 
   const clearAll = () => {
@@ -490,6 +504,8 @@ export default function Transactions() {
 
   const classificationPickers = (
     <>
+      {searchPicker(f.projectId, v => ({ projectId: v }), 'All projects',
+        projectSelOpts, { maxWidth: '210px' })}
       {searchPicker(f.expenseDescription, v => ({ expenseDescription: v }), 'All expense descriptions',
         expDescSelOpts, { maxWidth: '210px' })}
       {searchPicker(f.department, v => ({ department: v, deptSubcategory: '' }), 'All departments',
@@ -753,7 +769,7 @@ export default function Transactions() {
                   <tr style={s.thead}>
                     <th style={s.th}>Invoice date</th><th style={s.th}>Due date</th><th style={s.th}>Partner</th>
                     <th style={s.th}>Invoice #</th><th style={s.th}>Type</th><th style={s.th}>P&L Category</th>
-                    <th style={s.th}>Company</th><th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
+                    <th style={s.th}>Project</th><th style={s.th}>Company</th><th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
                     <th style={{ ...s.th, textAlign: 'right' as const }}>Remaining</th><th style={s.th}>Status</th><th style={s.th}></th>
                   </tr>
                 </thead>
@@ -768,6 +784,7 @@ export default function Transactions() {
                         <td style={s.td}><span style={s.invNumCell}>{inv.invoice_number || '—'}</span></td>
                         <td style={s.td}><span style={{ ...s.badge, background: inv.type === 'expense' ? '#FCEBEB' : '#E1F5EE', color: inv.type === 'expense' ? '#A32D2D' : '#085041' }}>{inv.type}</span></td>
                         <td style={s.td}><span style={s.catCell}>{inv.pl_category || inv.revenue_stream || '—'}</span></td>
+                        <td style={s.td}><span style={s.compCell}>{projectLabelById(projects, inv.project_id, inv.project_name)}</span></td>
                         <td style={s.td}><span style={s.compCell}>{inv.company_name || '—'}</span></td>
                         <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{fmtMoney(inv.amount || 0, inv.currency)}</span></td>
                         <td style={{ ...s.td, textAlign: 'right' as const }}><span style={{ ...s.amtCell, color: (pick(inv, 'remaining') ?? 0) > 0.01 ? '#FF5B5A' : '#00D47E' }}>{format(pick(inv, 'remaining'))}</span></td>
@@ -811,7 +828,7 @@ export default function Transactions() {
                 <thead>
                   <tr style={s.thead}>
                     <th style={s.th}>Date</th><th style={s.th}>Partner</th><th style={s.th}>Type</th>
-                    <th style={s.th}>P&L / Invoice</th><th style={s.th}>Note</th><th style={s.th}>Company</th>
+                    <th style={s.th}>P&L / Invoice</th><th style={s.th}>Project</th><th style={s.th}>Note</th><th style={s.th}>Company</th>
                     <th style={s.th}>Bank</th><th style={{ ...s.th, textAlign: 'right' as const }}>Amount</th>
                     <th style={{ ...s.th, textAlign: 'right' as const }}>{currency}</th><th style={s.th}>P&L</th><th style={s.th}></th>
                   </tr>
@@ -823,6 +840,7 @@ export default function Transactions() {
                       <td style={s.td}><span style={s.partnerCell}>{t.partners?.name || '—'}</span></td>
                       <td style={s.td}><span style={{ ...s.badge, background: txTypeColors[t.type]?.bg, color: txTypeColors[t.type]?.color }}>{t.type === 'invoice_payment' ? 'Inv. payment' : t.type}</span></td>
                       <td style={s.td}><span style={s.catCell}>{t.pl_impact ? (t.pl_category || t.revenue_stream || '—') : <span style={{ color: 'rgba(255,255,255,0.30)', fontSize: '11px' }}>via invoice</span>}</span></td>
+                      <td style={s.td}><span style={s.compCell}>{projectLabelById(projects, t.project_id)}</span></td>
                       <td style={s.td}><span style={s.descCell}>{t.note || '—'}</span></td>
                       <td style={s.td}><span style={s.compCell}>{t.companies?.name || '—'}</span></td>
                       <td style={s.td}><span style={s.compCell}>{t.banks?.name || '—'}</span></td>

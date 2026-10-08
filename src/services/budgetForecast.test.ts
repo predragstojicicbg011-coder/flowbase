@@ -854,3 +854,36 @@ describe('reading the budget in EUR', () => {
     expect(commitmentsByMonth([v], ['2026-09'], '2026-08').byMonth['2026-09'].total).toBe(49224)
   })
 })
+
+import { budgetLineKey } from './budgetForecast'
+import { makeClassKey } from './budgetKeys'
+
+describe('the seed, per project', () => {
+  it('keys an overhead row exactly as before projects existed', () => {
+    expect(budgetLineKey(entry())).toBe(classificationKey(entry()))
+    expect(budgetLineKey(entry({ project_id: null }))).toBe(classificationKey(entry()))
+  })
+
+  it('keeps two projects of one classification apart, and apart from overhead', () => {
+    const { byKey } = seedFromEntries([
+      entry({ amount_rsd: 100 }),
+      entry({ amount_rsd: 60, project_id: 'p1' }),
+      entry({ amount_rsd: 40, project_id: 'p2' }),
+    ], MONTHS, '2026-08')
+    expect(byKey[classificationKey(entry())]['2026-09']).toBe(100)
+    expect(byKey[budgetLineKey(entry({ project_id: 'p1' }))]['2026-09']).toBe(60)
+    expect(byKey[budgetLineKey(entry({ project_id: 'p2' }))]['2026-09']).toBe(40)
+  })
+
+  it('keys a seed the way the tree and the drill key a row', () => {
+    const e = entry({ project_id: 'p1' })
+    expect(budgetLineKey(e)).toBe(makeClassKey(e))
+  })
+
+  it('still recognises a credit instalment on a project, and seeds none of it', () => {
+    const { byKey, notCarried } = seedFromEntries(
+      [{ ...entry(), ...CREDIT_PRINCIPAL, project_id: 'p1' } as SourceEntry], MONTHS, '2026-08')
+    expect(Object.keys(byKey)).toEqual([])
+    expect(notCarried).toBe(0)
+  })
+})

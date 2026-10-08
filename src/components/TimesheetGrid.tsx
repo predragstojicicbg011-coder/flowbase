@@ -10,6 +10,23 @@ import {
 } from '../services/payroll/holidays'
 import type { EmployeeForMonth } from '../services/payroll/employees'
 import TimesheetImportDialog from './TimesheetImportDialog'
+import ProjectSelect from './ProjectSelect'
+import {
+  fetchProjectHours, projectHoursByEmployee, saveProjectHours, checkProjectHours,
+  assignedHours, mergeProjectHours, unassignedWorkedHours,
+} from '../services/payroll/projectHours'
+import { OVERHEAD_LABEL } from '../services/projects'
+
+/** One editable row of "Sati po projektima"; hours kept as typed. */
+interface ProjectHoursDraft { key: string; project_id: string | null; hours: string }
+
+const toDrafts = (rows: { project_id: string; hours: number }[]): ProjectHoursDraft[] =>
+  rows.map((r, i) => ({ key: `${r.project_id}-${i}`, project_id: r.project_id, hours: String(r.hours) }))
+
+const NO_PROJECT_ROWS: ProjectHoursDraft[] = []
+
+const fromDrafts = (rows: ProjectHoursDraft[]) =>
+  rows.map(r => ({ project_id: r.project_id, hours: parseFloat(r.hours.replace(',', '.')) || 0 }))
 
 /**
  * The hours of one month, for everybody on it.
@@ -54,12 +71,24 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
   const [dirty, setDirty] = useState<Record<string, boolean>>({})
   const [importing, setImporting] = useState(false)
   const [showRare, setShowRare] = useState(false)
+  /** Sati po projektima, by employee, as stored. */
+  const [projectRows, setProjectRows] = useState<Record<string, ProjectHoursDraft[]>>({})
+  /** Whose project section is open. */
+  const [openProjects, setOpenProjects] = useState<string | null>(null)
+
+  const loadProjectHours = useCallback(async () => {
+    const list = await fetchProjectHours(supabase, month)
+    const by = projectHoursByEmployee(list)
+    const out: Record<string, ProjectHoursDraft[]> = {}
+    for (const [id, r] of Object.entries(by)) out[id] = toDrafts(mergeProjectHours(r))
+    setProjectRows(out)
+  }, [month])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
-    fetchTimesheets(supabase, month)
-      .then(list => {
+    Promise.all([fetchTimesheets(supabase, month), loadProjectHours()])
+      .then(([list]) => {
         if (cancelled) return
         const byEmployee: Record<string, TimesheetRow> = {}
         for (const t of list) byEmployee[t.employee_id] = t
@@ -68,7 +97,7 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
       .catch(e => { if (!cancelled) setError(e.message) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [month])
+  }, [month, loadProjectHours])
 
   const rowFor = (employeeId: string): TimesheetRow =>
     rows[employeeId] || emptyTimesheet(employeeId, month)
@@ -85,6 +114,12 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
     setSavingId(employeeId); setError(null)
     try {
       await saveTimesheet(supabase, rowFor(employeeId))
+      // Saved either way — the hours are what they are — but a worked figure
+      // now below the hours already on projects is said at once, not at posting.
+      const who = people.find(p => p.employee.id === employeeId)?.employee.full_name
+      const clash = checkProjectHours(
+        fromDrafts(projectRows[employeeId] || NO_PROJECT_ROWS), workedHours(rowFor(employeeId)), who)
+      if (clash) setError(clash)
       setDirty(d => ({ ...d, [employeeId]: false }))
       setSavedId(employeeId)
       window.setTimeout(() => setSavedId(cur => (cur === employeeId ? null : cur)), 1600)
@@ -205,11 +240,13 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
           onImported={() => {
             // Re-read rather than patch: what is on screen after an import
             // should be what is stored, not what the import believed it wrote.
-            fetchTimesheets(supabase, month).then(list => {
+            // Project hours are not touched by an import; they are re-read
+            // too, so a worked figure that fell below them shows at once.
+            Promise.all([fetchTimesheets(supabase, month), loadProjectHours()]).then(([list]) => {
               const byEmployee: Record<string, TimesheetRow> = {}
               for (const t of list) byEmployee[t.employee_id] = t
               setRows(byEmployee); setDirty({})
-            })
+            }).catch(e => setError(e.message))
           }}
         />
       )}
@@ -225,6 +262,7 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
                 </th>
               ))}
               <th style={s.thRight}>Total</th>
+              <th style={s.th}>Projekti</th>
               <th style={s.th}>Against the month</th>
             </tr>
           </thead>
@@ -235,8 +273,13 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
               const rowFund = fundFor(p)
               const problems = has ? checkTimesheet(t, rowFund) : []
               const bad = problems.some(x => x.level === 'error')
+              const pRows = projectRows[p.employee.id] || NO_PROJECT_ROWS
+              const onProjects = assignedHours(fromDrafts(pRows))
+              const projectProblem = checkProjectHours(fromDrafts(pRows), workedHours(t))
+              const isOpen = openProjects === p.employee.id
               return (
-                <tr key={p.employee.id}
+                <React.Fragment key={p.employee.id}>
+                <tr
                   style={{ ...s.tr, background: i % 2 === 0 ? '#0D1B2C' : '#111F30' }}>
                   <td style={s.td}>
                     <div style={{ fontWeight: '600', fontSize: '13px', color: '#00D47E' }}>
@@ -270,6 +313,14 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
                     )}
                   </td>
                   <td style={s.td}>
+                    <button
+                      style={{ ...s.projBtn, ...(projectProblem ? s.projBtnBad : {}) }}
+                      title={projectProblem || 'Sati po projektima'}
+                      onClick={() => setOpenProjects(isOpen ? null : p.employee.id)}>
+                      {round(onProjects)} / {round(workedHours(t))} h {isOpen ? '▴' : '▾'}
+                    </button>
+                  </td>
+                  <td style={s.td}>
                     {savingId === p.employee.id ? <span style={s.smallCell}>Saving…</span>
                       : savedId === p.employee.id ? <span style={s.ok}>Saved</span>
                       : dirty[p.employee.id] ? <span style={s.smallCell}>Unsaved</span>
@@ -281,10 +332,128 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
                         </span>}
                   </td>
                 </tr>
+                {isOpen && (
+                  <tr style={{ background: '#0A1626' }}>
+                    <td colSpan={columns.length + 4} style={{ padding: '10px 14px 14px' }}>
+                      <ProjectHoursEditor
+                        companyId={p.employee.company_id}
+                        employeeId={p.employee.id}
+                        name={p.employee.full_name}
+                        month={month}
+                        worked={workedHours(t)}
+                        absenceHours={round(totalHours(t) - workedHours(t))}
+                        stored={pRows}
+                        onSaved={next => setProjectRows(r => ({ ...r, [p.employee.id]: next }))}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               )
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * "Sati po projektima" for one person and month: rows of (project, hours),
+ * what they leave unassigned, and where that goes.
+ */
+function ProjectHoursEditor({
+  companyId, employeeId, name, month, worked, absenceHours, stored, onSaved,
+}: {
+  companyId: string
+  employeeId: string
+  name: string
+  month: string
+  /** regular_hours: the most that can be on projects. */
+  worked: number
+  /** Every other hour on the timesheet — never project work. */
+  absenceHours: number
+  stored: ProjectHoursDraft[]
+  onSaved: (rows: ProjectHoursDraft[]) => void
+}) {
+  const [draft, setDraft] = useState<ProjectHoursDraft[]>(stored)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+  useEffect(() => { setDraft(stored) }, [stored])
+
+  const parsed = fromDrafts(draft)
+  const onProjects = assignedHours(parsed)
+  const rest = unassignedWorkedHours(parsed, worked)
+  const problem = checkProjectHours(parsed, worked, name)
+  const duplicate = draft.some((r, i) => r.project_id
+    && draft.findIndex(o => o.project_id === r.project_id) !== i)
+
+  const update = (key: string, patch: Partial<ProjectHoursDraft>) => {
+    setDraft(d => d.map(r => (r.key === key ? { ...r, ...patch } : r))); setSaved(false)
+  }
+  const add = () => {
+    setDraft(d => [...d, { key: `new-${Date.now()}-${d.length}`, project_id: null, hours: '' }])
+    setSaved(false)
+  }
+  const remove = (key: string) => { setDraft(d => d.filter(r => r.key !== key)); setSaved(false) }
+
+  const save = async () => {
+    setBusy(true); setError(null)
+    try {
+      // A row with neither a project nor hours is simply not stored.
+      const rows = parsed.filter(r => r.project_id || r.hours > 0)
+      await saveProjectHours(supabase, { companyId, employeeId, month, worked, rows })
+      onSaved(toDrafts(mergeProjectHours(rows).filter(r => r.hours > 0)))
+      setSaved(true)
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setBusy(false)
+  }
+
+  return (
+    <div>
+      <div style={s.projTitle}>Sati po projektima — {name}</div>
+      {draft.length === 0 && (
+        <div style={s.smallCell}>
+          Nijedan projekat: ceo trošak ovog meseca ide u {OVERHEAD_LABEL}.
+        </div>
+      )}
+      {draft.map(r => (
+        <div key={r.key} style={s.projRow}>
+          <div style={{ width: '280px' }}>
+            <ProjectSelect value={r.project_id} onChange={v => update(r.key, { project_id: v })} />
+          </div>
+          <input style={s.cell} inputMode="decimal" value={r.hours} placeholder="0"
+            aria-label="Sati"
+            onChange={e => update(r.key, { hours: e.target.value })} />
+          <span style={s.smallCell}>h</span>
+          <button style={s.projRemove} title="Ukloni" aria-label="Ukloni"
+            onClick={() => remove(r.key)}>&times;</button>
+        </div>
+      ))}
+      <div style={{ ...s.smallCell, margin: '8px 0', lineHeight: 1.6 }}>
+        Na projektima <b style={{ color: problem ? '#FF8E8D' : '#DCE9F6' }}>{round(onProjects)} h</b>
+        {' '}od {round(worked)} h rada.
+        {rest > 0 && <> Ostatak od {round(rest)} h ide u {OVERHEAD_LABEL}.</>}
+        {absenceHours > 0 && (
+          <> Odsustva ({round(absenceHours)} h — praznik, godišnji odmor, bolovanje…) nisu rad
+            na projektu: njihov deo troška takođe ide u {OVERHEAD_LABEL}.</>
+        )}
+      </div>
+      {(problem || duplicate || error) && (
+        <div style={s.error}>
+          {error || problem || 'Isti projekat je naveden dva puta — sati će biti sabrani.'}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <button style={{ ...s.ghost, marginLeft: 0 }} onClick={add}>+ Dodaj projekat</button>
+        <button style={{ ...s.ghost, marginLeft: 0, color: '#00D47E' }} onClick={save}
+          disabled={busy || !!problem}>
+          {busy ? 'Čuvanje…' : 'Sačuvaj sate po projektima'}
+        </button>
+        {saved && <span style={s.ok}>Sačuvano</span>}
       </div>
     </div>
   )
@@ -312,6 +481,11 @@ const s: Record<string, React.CSSProperties> = {
   tdRight: { padding: '8px 12px', verticalAlign: 'middle' as const, textAlign: 'right' as const, color: '#7A9BB8', fontVariantNumeric: 'tabular-nums' },
   cell: { width: '62px', boxSizing: 'border-box' as const, textAlign: 'right' as const, fontFamily: 'system-ui,sans-serif', fontSize: '13px', fontVariantNumeric: 'tabular-nums', border: '1px solid rgba(255,255,255,0.075)', borderRadius: '6px', padding: '6px 8px', background: '#060E1A', color: '#DCE9F6', outline: 'none' },
   cellBad: { borderColor: 'rgba(255,91,90,0.40)' },
+  projBtn: { background: 'none', border: '1px solid rgba(255,255,255,0.10)', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', color: '#9BC4EC', cursor: 'pointer', whiteSpace: 'nowrap' as const, fontVariantNumeric: 'tabular-nums' },
+  projBtnBad: { borderColor: 'rgba(255,91,90,0.40)', color: '#FF8E8D' },
+  projTitle: { fontSize: '12px', fontWeight: '600', color: '#DCE9F6', marginBottom: '8px' },
+  projRow: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' },
+  projRemove: { background: 'none', border: 'none', color: '#FF8E8D', fontSize: '16px', cursor: 'pointer' },
   smallCell: { fontSize: '11px', color: '#7A9BB8' },
   ok: { fontSize: '11px', color: '#00D47E' },
   missing: { fontSize: '11px', color: '#C8A24A' },

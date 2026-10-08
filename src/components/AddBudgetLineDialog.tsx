@@ -4,6 +4,9 @@ import { DIALOG, chrome } from './dialogTheme'
 import InlineCategoryAdd from './InlineCategoryAdd'
 import BudgetChangeDialog from './BudgetChangeDialog'
 import { classificationFor } from '../services/budgetKeys'
+import ProjectSelect from './ProjectSelect'
+import { useProjects } from '../contexts/ProjectsContext'
+import { projectLabelById } from '../services/projects'
 import type { Level } from '../services/budgetForecast'
 
 // ─── Adding a budget line that has never been spent on ───────────────────────
@@ -178,7 +181,8 @@ export function resolveSeed(
 }
 
 export default function AddBudgetLineDialog({
-  levels, months, currentFor, seedFor, seedEurFor, seedPath, onClose, onSaved,
+  levels, months, currentFor, seedFor, seedEurFor, seedPath, projectId = null, projectLocked = false,
+  onClose, onSaved,
 }: {
   /** The open branch's levels, outermost first. */
   levels: Level[]
@@ -202,12 +206,16 @@ export default function AddBudgetLineDialog({
    * been spent on; usually is not always, and a line that does carry a seed
    * would drift exactly like any other. See `pinnedBase`.
    */
-  seedFor: (pathLabels: string[], month: string) => number
+  seedFor: (pathLabels: string[], month: string, projectId: string | null) => number
   /**
    * The same seed in EUR, or null where the page has no EUR reading of the
    * budget. Recorded beside the RSD seed; see `BudgetChangeDialog`.
    */
-  seedEurFor?: (pathLabels: string[], month: string) => number | null
+  seedEurFor?: (pathLabels: string[], month: string, projectId: string | null) => number | null
+  /** The project the line is for, to start with; null is an overhead line. */
+  projectId?: string | null
+  /** True when the page is narrowed to one scope: the project is named, not picked. */
+  projectLocked?: boolean
   /**
    * The tree row this was opened from, as labels — empty from the page's own
    * button, filled from the `+` beside a sub-category.
@@ -222,6 +230,8 @@ export default function AddBudgetLineDialog({
   const [picks, setPicks] = useState<(Lookup | null)[]>(() => levels.map(() => null))
   const [month, setMonth] = useState(months[0]?.key || '')
   const [step, setStep] = useState<'pick' | 'figure'>('pick')
+  const [project, setProject] = useState<string | null>(projectId)
+  const { projects } = useProjects()
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -369,8 +379,11 @@ export default function AddBudgetLineDialog({
         classification={classificationFor(pathLabels, level, [], levels)}
         rowLabel={pathLabels.join(' → ')}
         current={currentFor(pathLabels, monthMeta.key)}
-        seed={seedFor(pathLabels, monthMeta.key)}
-        seedEur={seedEurFor ? seedEurFor(pathLabels, monthMeta.key) : null}
+        seed={seedFor(pathLabels, monthMeta.key, project)}
+        seedEur={seedEurFor ? seedEurFor(pathLabels, monthMeta.key, project) : null}
+        // Chosen here, so the change dialog names it rather than asking again.
+        projectId={project}
+        projectLocked
         onClose={onClose}
         onSaved={onSaved}
       />
@@ -436,6 +449,13 @@ export default function AddBudgetLineDialog({
               )}
             </div>
           ))}
+
+          <div>
+            <div style={s.lbl}>Project</div>
+            {projectLocked
+              ? <div style={{ fontSize: '13px', color: DIALOG.text }}>{projectLabelById(projects, project)}</div>
+              : <ProjectSelect value={project} onChange={setProject} title="Project" />}
+          </div>
 
           <div>
             <div style={s.lbl}>Month <span style={{ color: DIALOG.red }}>*</span></div>

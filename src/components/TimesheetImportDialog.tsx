@@ -1,10 +1,13 @@
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../supabase'
 import {
-  parseWorkbook, matchEmployees, toTimesheet,
+  parseWorkbook, matchEmployees, toTimesheet, projectHoursAboveWorked,
   type ParsedEmployee,
 } from '../services/payroll/timesheetImport'
+import {
+  fetchProjectHours, projectHoursByEmployee, type ProjectHoursRow,
+} from '../services/payroll/projectHours'
 import { saveTimesheet, checkTimesheet, totalHours, type TimesheetRow } from '../services/payroll/timesheets'
 import type { EmployeeForMonth } from '../services/payroll/employees'
 import { fundForEmployee, type MonthFund } from '../services/payroll/holidays'
@@ -47,6 +50,14 @@ export default function TimesheetImportDialog({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
+  /** Hours already on projects this month. An import never touches them. */
+  const [projectHours, setProjectHours] = useState<Record<string, ProjectHoursRow[]>>({})
+
+  useEffect(() => {
+    fetchProjectHours(supabase, month)
+      .then(list => setProjectHours(projectHoursByEmployee(list)))
+      .catch(e => setError(e.message))
+  }, [month])
 
   const loadAliases = useCallback(async () => {
     const { data } = await supabase
@@ -129,6 +140,9 @@ export default function TimesheetImportDialog({
 
   const blocking = rows.filter(r => r.problems.length > 0)
   const ready = rows.filter(r => r.sheet && r.problems.length === 0)
+  /** Worked hours that would fall below the hours already on projects. */
+  const belowProjects = projectHoursAboveWorked(ready.map(r => r.sheet!), projectHours)
+  const nameOf = (id: string) => people.find(p => p.employee.id === id)?.employee.full_name ?? id
 
   const link = async (fileName: string, employeeId: string) => {
     if (!employeeId) return
@@ -207,6 +221,18 @@ export default function TimesheetImportDialog({
               {missing.map(p => p.employee.full_name).join(', ')}.
               {' '}A payroll missing a person is the error this module exists to catch, so
               nothing is imported until they are here or taken off the month.
+            </div>
+          )}
+
+          {belowProjects.length > 0 && (
+            <div style={s.error}>
+              <b>Sati po projektima:</b> an import does not change the hours on projects, but
+              for {belowProjects.length === 1 ? 'this person' : 'these people'} the imported
+              work is now less than what is on their projects —{' '}
+              {belowProjects.map(c => `${nameOf(c.employeeId)} (${hours(c.worked)} h rada, `
+                + `${hours(c.onProjects)} h na projektima)`).join(', ')}.
+              {' '}Posting will refuse the month until the project hours are corrected on the
+              timesheet.
             </div>
           )}
 

@@ -59,6 +59,7 @@ jest.mock('../supabase', () => {
       case 'eq': return v === f.val
       case 'neq': return v !== f.val
       case 'in': return (f.val as any[]).includes(v)
+      case 'is': return f.val === null ? v === null || v === undefined : v === f.val
       case 'gte': return v != null && String(v) >= String(f.val)
       case 'lte': return v != null && String(v) <= String(f.val)
       default: return true
@@ -126,6 +127,7 @@ jest.mock('../supabase', () => {
         if (prop === 'eq') return (col: string, val: any) => { filters.push({ op: 'eq', col, val }); return builder }
         if (prop === 'neq') return (col: string, val: any) => { filters.push({ op: 'neq', col, val }); return builder }
         if (prop === 'in') return (col: string, val: any) => { filters.push({ op: 'in', col, val }); return builder }
+        if (prop === 'is') return (col: string, val: any) => { filters.push({ op: 'is', col, val }); return builder }
         if (prop === 'gte') return (col: string, val: any) => { filters.push({ op: 'gte', col, val }); return builder }
         if (prop === 'lte') return (col: string, val: any) => { filters.push({ op: 'lte', col, val }); return builder }
         return () => builder
@@ -270,7 +272,7 @@ const thisMonthLabel = (): string =>
  */
 const renderForCompany = async (id: string) => {
   render(<Budgeting />)
-  const select = await screen.findByRole('combobox')
+  const select = await screen.findByRole('combobox', { name: 'Companies' })
   await waitFor(() => expect(within(select).getByText('Alpha d.o.o.')).toBeInTheDocument())
   fireEvent.change(select, { target: { value: id } })
 }
@@ -1067,7 +1069,7 @@ describe('the Budgeting page on a single company', () => {
     expect(screen.getByText('all 12 months')).toBeInTheDocument()
     expect(screen.getByText('+ Add budget line')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: COMPANY_A } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Companies' }), { target: { value: COMPANY_A } })
     // The switch re-queries, so the table is rebuilt before any of this is on
     // screen — the sub-header naming the company is what says it has landed.
     await waitFor(() => expect(screen.getByText('Alpha d.o.o.', { selector: 'th' })).toBeInTheDocument())
@@ -1096,10 +1098,10 @@ describe('the Budgeting page on a single company', () => {
   it('brings the budget back when the group is selected again', async () => {
     await renderConsolidated()
     await expandAll()
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: COMPANY_A } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Companies' }), { target: { value: COMPANY_A } })
     await waitFor(() => expect(screen.queryByText('BUDGET')).not.toBeInTheDocument())
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Companies' }), { target: { value: '' } })
     await waitFor(() => expect(screen.getByText('BUDGET')).toBeInTheDocument())
     expect(screen.getByText('all 12 months')).toBeInTheDocument()
     expect(screen.getByText('+ Add budget line')).toBeInTheDocument()
@@ -1120,7 +1122,7 @@ describe('the page without tabs', () => {
     await expandAll()
     expect(screen.getByText(/Total expenses/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'P&L' })).toBeInTheDocument()
-    expect(screen.getByRole('combobox')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Companies' })).toBeInTheDocument()
   })
 
   it('offers no revenue forecast or simulation', async () => {
@@ -1262,5 +1264,87 @@ describe('the budget read in EUR', () => {
     await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
     await waitFor(() => expect(budgetFigure('Administration', 1).textContent).toContain('175.500 RSD'))
     expect(screen.getByText(/recorded in RSD only/)).toBeInTheDocument()
+  })
+})
+
+describe('a budget for one project, or for overhead', () => {
+  const ledgerWrites = () => mockDb.writes.filter(w => w.table === 'budget_adjustments')
+  const PROJECT = { id: 'p1', company_id: COMPANY_A, name: 'Zgrada A', code: null, kind: 'construction', active: true }
+
+  beforeEach(() => {
+    seedDb({
+      projects: [PROJECT],
+      v_pl_entries: [
+        expenseRow(),
+        expenseRow({ id: 'tx-2', amount_rsd: 400, project_id: 'p1' }),
+      ],
+    })
+  })
+
+  const pickProject = async (value: string) => {
+    const select = await screen.findByRole('combobox', { name: 'Project' })
+    await waitFor(() => expect(within(select).getByText('Zgrada A')).toBeInTheDocument())
+    fireEvent.change(select, { target: { value } })
+  }
+
+  it('reads every project together by default, as the page always did', async () => {
+    await renderConsolidated()
+    await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
+    expect((screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement).value).toBe('')
+    expect(budgetFigure('Administration', 0).textContent).toMatch(/1[.,]?400/)
+    const scoped = mockDb.requests.filter(r => r.filters.some(f => f.col === 'project_id'))
+    expect(scoped).toEqual([])
+  })
+
+  it('narrows the actuals and the ledger to the chosen project', async () => {
+    await renderConsolidated()
+    await pickProject('p1')
+    await waitFor(() => {
+      for (const table of ['v_pl_entries', 'budget_adjustments']) {
+        expect(mockDb.requests.some(r => r.table === table
+          && r.filters.some(f => f.op === 'eq' && f.col === 'project_id' && f.val === 'p1'))).toBe(true)
+      }
+    })
+    await waitFor(() => expect(budgetFigure('Administration', 0).textContent).toMatch(/^400/))
+  })
+
+  it('reads overhead as the lines with no project', async () => {
+    await renderConsolidated()
+    await pickProject('__overhead__')
+    await waitFor(() => expect(mockDb.requests.some(r => r.table === 'budget_adjustments'
+      && r.filters.some(f => f.op === 'is' && f.col === 'project_id' && f.val === null))).toBe(true))
+  })
+
+  it("records a change made on one project's budget for that project, against its own seed", async () => {
+    await renderConsolidated()
+    await pickProject('p1')
+    await waitFor(() => expect(budgetFigure('Administration', 0).textContent).toMatch(/^400/))
+    await expandAll()
+
+    // The leaf, where the seed sits: a row pins its OWN seed, not its children's.
+    fireEvent.click(budgetFigure('Telekom', 0))
+    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: '1000' } })
+    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Site plan' } })
+    fireEvent.click(screen.getByText('Record change'))
+
+    await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
+    expect(ledgerWrites()[0].row).toMatchObject({
+      company_id: null, project_id: 'p1', expense_description: 'Telekom',
+      amount_rsd: 600, seed_rsd: 400,
+    })
+  })
+
+  it('records a change on the all-projects view as overhead, pinning the overhead seed only', async () => {
+    await renderConsolidated()
+    await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
+    await expandAll()
+
+    fireEvent.click(budgetFigure('Telekom', 0))
+    fireEvent.change(await screen.findByLabelText('Change to'), { target: { value: '2000' } })
+    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'Group plan' } })
+    fireEvent.click(screen.getByText('Record change'))
+
+    await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
+    expect(ledgerWrites()[0].row).toMatchObject({ project_id: null, amount_rsd: 600, seed_rsd: 1000 })
   })
 })

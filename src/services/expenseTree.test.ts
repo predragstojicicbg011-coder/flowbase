@@ -2,9 +2,10 @@ import {
   buildTree, totalOf, flatten, findNode, adjustedTotal, excludedTotal,
   withComparison, topMovers, paretoCut, pathFor, monthsIn,
   isExpenseRow, isRevenueRow, rowsFor, byDateDesc, UNASSIGNED, PlEntry,
-  contributionsFor, contributesTo, contributionTo, isAllocated,
-  SOCIAL_GROWTH, AIMFOX, OPEX, PERFORMANCE, Branch,
+  contributionsFor, contributesTo, contributionTo, projectRootOf,
+  UNKNOWN_PROJECT, BRANCHES, Branch,
 } from './expenseTree'
+import { OVERHEAD_LABEL } from './projects'
 
 const e = (o: Partial<PlEntry> & { amount_rsd: number }): PlEntry => ({
   pl_category: 'Professional and Production Services',
@@ -291,171 +292,111 @@ describe('monthsIn', () => {
   })
 })
 
-describe('allocated branches', () => {
-  const ALL: Branch[] = ['pl', 'department', 'stream', 'type']
+describe('the project branch', () => {
   const total = (rows: PlEntry[], b: Branch) => totalOf(buildTree(rows, b, 'RSD'))
+  const roots = (rows: PlEntry[], cur: 'RSD' | 'EUR' = 'RSD') =>
+    Object.fromEntries(buildTree(rows, 'project', cur).map(n => [n.label, n.amount]))
 
-  it('knows which branches divide a row and which file it', () => {
-    expect(isAllocated('stream')).toBe(true)
-    expect(isAllocated('type')).toBe(true)
-    expect(isAllocated('pl')).toBe(false)
-    expect(isAllocated('department')).toBe(false)
+  it('offers exactly the three filing branches', () => {
+    expect([...BRANCHES]).toEqual(['pl', 'department', 'project'])
   })
 
-  it('gives a whole row to the stream that owns all of it', () => {
-    const row = e({ amount_rsd: 1000, rev_alloc_type: 'sg100' })
-    const tree = buildTree([row], 'stream', 'RSD')
-    expect(tree.map(n => n.label)).toEqual([SOCIAL_GROWTH])
-    expect(tree[0].amount).toBe(1000)
+  it('files a row under its project, then its category and sub-category', () => {
+    const row = e({ amount_rsd: 1000, project_id: 'p1', project_name: 'Zgrada A', pl_category: 'Materijal', pl_subcategory: 'Beton' })
+    expect(pathFor(row, 'project')).toEqual(['Zgrada A', 'Materijal', 'Beton'])
+    const tree = buildTree([row], 'project', 'RSD')
+    expect(tree.map(n => n.label)).toEqual(['Zgrada A'])
+    expect(tree[0].children[0].children[0].amount).toBe(1000)
   })
 
-  it('splits a by-value row across both streams', () => {
-    const row = e({
-      amount_rsd: 1000, amount: 1000,
-      rev_alloc_type: 'byval', rev_alloc_sg: 600, rev_alloc_aimfox: 400,
-    })
-    const by = Object.fromEntries(buildTree([row], 'stream', 'RSD').map(n => [n.label, n.amount]))
-    expect(by[SOCIAL_GROWTH]).toBe(600)
-    expect(by[AIMFOX]).toBe(400)
+  it('puts a row with no project under overhead, never spread over the projects', () => {
+    const rows = [
+      e({ amount_rsd: 700, project_id: 'p1', project_name: 'Zgrada A' }),
+      e({ amount_rsd: 300, project_id: null }),
+      e({ amount_rsd: 50, project_id: '  ' }),
+    ]
+    expect(roots(rows)).toEqual({ 'Zgrada A': 700, [OVERHEAD_LABEL]: 350 })
+  })
+
+  it('names a project the view could not name rather than calling it overhead', () => {
+    expect(projectRootOf({ project_id: 'p9', project_name: null })).toBe(UNKNOWN_PROJECT)
+    expect(projectRootOf({ project_id: null, project_name: 'stale' })).toBe(OVERHEAD_LABEL)
   })
 
   /**
-   * The bug this branch inherits a fix for: the split is typed in the
-   * currency of the bill. 1,886 EUR split 1,000 / 886 against a
-   * 221,039.20 RSD total must read as dinars, not as 1,000 RSD.
+   * v_pl_entries returns a split document as one row per split line, each
+   * with its OWN project. One 1,000 bill split 600 / 300 / 100 across two
+   * sites and overhead lands on all three, for its line's amount each.
    */
-  it('converts a split typed in the currency of the bill', () => {
-    const row = e({
-      amount: 1886, amount_rsd: 221039.2, amount_eur: 1886,
-      rev_alloc_type: 'byval', rev_alloc_sg: 1000, rev_alloc_aimfox: 886,
-    })
-    const by = Object.fromEntries(buildTree([row], 'stream', 'RSD').map(n => [n.label, n.amount]))
-    expect(by[SOCIAL_GROWTH]).toBeCloseTo(117200, 4)
-    expect(by[AIMFOX]).toBeCloseTo(103839.2, 4)
-    expect(by[SOCIAL_GROWTH] + by[AIMFOX]).toBeCloseTo(221039.2, 6)
-  })
-
-  it('reads the same split in euros when the viewer reads the books in EUR', () => {
-    const row = e({
-      amount: 1886, amount_rsd: 221039.2, amount_eur: 1886,
-      rev_alloc_type: 'byval', rev_alloc_sg: 1000, rev_alloc_aimfox: 886,
-    })
-    const by = Object.fromEntries(buildTree([row], 'stream', 'EUR').map(n => [n.label, n.amount]))
-    expect(by[SOCIAL_GROWTH]).toBe(1000)
-    expect(by[AIMFOX]).toBe(886)
-  })
-
-  it('treats a row classified before the field existed as pure OPEX', () => {
-    const tree = buildTree([e({ amount_rsd: 500, opex_type: null })], 'type', 'RSD')
-    expect(tree.map(n => n.label)).toEqual([OPEX])
-    expect(tree[0].amount).toBe(500)
-  })
-
-  it('splits performance spend from fixed cost', () => {
-    const row = e({
-      amount_rsd: 800, amount: 800,
-      opex_type: 'split', opex_amount: 300, performance_amount: 500,
-    })
-    const by = Object.fromEntries(buildTree([row], 'type', 'RSD').map(n => [n.label, n.amount]))
-    expect(by[OPEX]).toBe(300)
-    expect(by[PERFORMANCE]).toBe(500)
+  it('lets each split line of one document count for its own project and overhead', () => {
+    const lines = [
+      e({ id: 's1', amount_rsd: 600, amount_eur: 5.12, project_id: 'p1', project_name: 'Zgrada A' }),
+      e({ id: 's2', amount_rsd: 300, amount_eur: 2.56, project_id: 'p2', project_name: 'Hala B' }),
+      e({ id: 's3', amount_rsd: 100, amount_eur: 0.85, project_id: null }),
+    ]
+    expect(roots(lines)).toEqual({ 'Zgrada A': 600, 'Hala B': 300, [OVERHEAD_LABEL]: 100 })
+    const eur = roots(lines, 'EUR')
+    expect(eur['Zgrada A']).toBeCloseTo(5.12, 6)
+    expect(eur[OVERHEAD_LABEL]).toBeCloseTo(0.85, 6)
+    expect(total(lines, 'project')).toBe(1000)
   })
 
   it('shows an expense as a cost whichever sign it was stored with', () => {
-    const row = e({
-      amount: -800, amount_rsd: -800,
-      opex_type: 'split', opex_amount: -300, performance_amount: -500,
-    })
-    const by = Object.fromEntries(buildTree([row], 'type', 'RSD').map(n => [n.label, n.amount]))
-    expect(by[OPEX]).toBe(300)
-    expect(by[PERFORMANCE]).toBe(500)
+    expect(roots([e({ amount_rsd: -800, project_id: 'p1', project_name: 'Zgrada A' })]))
+      .toEqual({ 'Zgrada A': 800 })
   })
 
-  it('breaks each half down by cost category underneath', () => {
-    const row = e({
-      amount_rsd: 1000, amount: 1000, pl_category: 'Marketing', pl_subcategory: 'Ads',
-      rev_alloc_type: 'byval', rev_alloc_sg: 600, rev_alloc_aimfox: 400,
-    })
-    const sg = buildTree([row], 'stream', 'RSD').find(n => n.label === SOCIAL_GROWTH)!
-    expect(sg.children.map(c => c.label)).toEqual(['Marketing'])
-    expect(sg.children[0].children.map(c => c.label)).toEqual(['Ads'])
-    expect(sg.children[0].children[0].amount).toBe(600)
+  it('places a row with no category under Unassigned inside its project', () => {
+    const row = e({ amount_rsd: 400, project_id: 'p1', project_name: 'Zgrada A', pl_category: '  ', pl_subcategory: null })
+    const a = buildTree([row], 'project', 'RSD')[0]
+    expect(a.children[0].label).toBe(UNASSIGNED)
+    expect(a.children[0].children[0].label).toBe(UNASSIGNED)
   })
 
   /**
-   * The property that makes the four tabs one report rather than four
-   * opinions. If this ever fails, the screen is lying on at least one tab.
+   * The property that makes the tabs one report rather than three opinions.
+   * If this ever fails, the screen is lying on at least one tab.
    */
-  it('totals the same on all four branches', () => {
+  it('totals the same on all three branches', () => {
     const rows = [
-      e({ amount_rsd: 1000, amount: 1000, rev_alloc_type: 'byval', rev_alloc_sg: 600, rev_alloc_aimfox: 400, opex_type: 'performance' }),
-      e({ amount_rsd: 250, rev_alloc_type: 'af100', opex_type: 'opex' }),
-      e({ amount_rsd: 80, amount: 80, opex_type: 'split', opex_amount: 30, performance_amount: 50 }),
-      e({ amount_rsd: 1000, amount: 1000, rev_alloc_type: 'sg100', department: null, pl_category: null }),
-      e({ amount_rsd: -120 }),
+      e({ amount_rsd: 1000, project_id: 'p1', project_name: 'Zgrada A' }),
+      e({ amount_rsd: 250, project_id: 'p2', project_name: 'Hala B' }),
+      e({ amount_rsd: 80 }),
+      e({ amount_rsd: 1000, project_id: 'p1', project_name: 'Zgrada A', department: null, pl_category: null }),
+      e({ amount_rsd: -120, project_id: 'p3' }),
     ]
-    const totals = ALL.map(b => total(rows, b))
+    const totals = BRANCHES.map(b => total(rows, b))
     for (const t of totals) expect(t).toBeCloseTo(totals[0], 6)
     expect(totals[0]).toBe(2450)
   })
-
-  it('halves a row nobody classified rather than dropping it', () => {
-    const row = e({ amount_rsd: 1000, rev_alloc_type: null })
-    const by = Object.fromEntries(buildTree([row], 'stream', 'RSD').map(n => [n.label, n.amount]))
-    expect(by[SOCIAL_GROWTH]).toBe(500)
-    expect(by[AIMFOX]).toBe(500)
-  })
-
-  it('places a row with no category under Unassigned inside its stream', () => {
-    const row = e({ amount_rsd: 400, rev_alloc_type: 'af100', pl_category: '  ', pl_subcategory: null })
-    const af = buildTree([row], 'stream', 'RSD').find(n => n.label === AIMFOX)!
-    expect(af.children[0].label).toBe(UNASSIGNED)
-    expect(af.children[0].children[0].label).toBe(UNASSIGNED)
-  })
 })
 
-describe('the rows behind an allocated figure', () => {
-  const split = e({
-    amount_rsd: 1000, amount: 1000, pl_category: 'Marketing', pl_subcategory: 'Ads',
-    rev_alloc_type: 'byval', rev_alloc_sg: 600, rev_alloc_aimfox: 400,
-  })
-  const onlySg = e({ amount_rsd: 500, pl_category: 'Marketing', pl_subcategory: 'Ads', rev_alloc_type: 'sg100' })
+describe('the rows behind a figure', () => {
+  const a1 = e({ amount_rsd: 1000, pl_category: 'Materijal', pl_subcategory: 'Beton', project_id: 'p1', project_name: 'Zgrada A' })
+  const ovh = e({ amount_rsd: 500, pl_category: 'Materijal', pl_subcategory: 'Beton', project_id: null })
 
-  it('lists a split transaction under both halves', () => {
-    expect(contributesTo(split, 'stream', [SOCIAL_GROWTH], 'RSD')).toBe(true)
-    expect(contributesTo(split, 'stream', [AIMFOX], 'RSD')).toBe(true)
-  })
-
-  it('keeps a whole-row allocation out of the other half', () => {
-    expect(contributesTo(onlySg, 'stream', [SOCIAL_GROWTH], 'RSD')).toBe(true)
-    expect(contributesTo(onlySg, 'stream', [AIMFOX], 'RSD')).toBe(false)
+  it('keeps a row out of every project but its own', () => {
+    expect(contributesTo(a1, 'project', ['Zgrada A'], 'RSD')).toBe(true)
+    expect(contributesTo(a1, 'project', [OVERHEAD_LABEL], 'RSD')).toBe(false)
+    expect(contributesTo(ovh, 'project', [OVERHEAD_LABEL], 'RSD')).toBe(true)
   })
 
   it('matches on the deeper path too, not just the root', () => {
-    expect(contributesTo(split, 'stream', [AIMFOX, 'Marketing', 'Ads'], 'RSD')).toBe(true)
-    expect(contributesTo(split, 'stream', [AIMFOX, 'Marketing', 'Travel'], 'RSD')).toBe(false)
+    expect(contributesTo(a1, 'project', ['Zgrada A', 'Materijal', 'Beton'], 'RSD')).toBe(true)
+    expect(contributesTo(a1, 'project', ['Zgrada A', 'Materijal', 'Armatura'], 'RSD')).toBe(false)
   })
 
-  /**
-   * What the drill-down has to say out loud: the list adds up to 1,500 while
-   * the figure above it says 1,100, because one of the rows is in the figure
-   * for part of its value.
-   */
-  it('reports the share a row contributes, not the row', () => {
-    expect(contributionTo(split, 'stream', [SOCIAL_GROWTH], 'RSD')).toBe(600)
-    expect(contributionTo(onlySg, 'stream', [SOCIAL_GROWTH], 'RSD')).toBe(500)
-    const shown = contributionTo(split, 'stream', [SOCIAL_GROWTH], 'RSD')
-      + contributionTo(onlySg, 'stream', [SOCIAL_GROWTH], 'RSD')
-    expect(shown).toBe(1100)
+  it('reports the whole row on every branch', () => {
+    expect(contributionTo(a1, 'project', ['Zgrada A'], 'RSD')).toBe(1000)
+    expect(contributionTo(a1, 'pl', ['Materijal'], 'RSD')).toBe(1000)
+    expect(contributionTo(a1, 'project', [OVERHEAD_LABEL], 'RSD')).toBe(0)
   })
 
-  it('gives the whole row on a filing branch', () => {
-    expect(contributionTo(split, 'pl', ['Marketing'], 'RSD')).toBe(1000)
+  it('returns exactly one contribution per row', () => {
+    for (const b of BRANCHES) expect(contributionsFor(a1, b, 'RSD')).toHaveLength(1)
   })
 
-  it('returns both halves of a row even when one of them is nothing', () => {
-    const cs = contributionsFor(onlySg, 'stream', 'RSD')
-    expect(cs).toHaveLength(2)
-    expect(cs[1].amount).toBe(0)
+  it('does not count a zero row as being under anything', () => {
+    expect(contributesTo(e({ amount_rsd: 0, project_id: 'p1', project_name: 'Zgrada A' }), 'project', ['Zgrada A'], 'RSD')).toBe(false)
   })
 })

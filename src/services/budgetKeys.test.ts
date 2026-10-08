@@ -726,3 +726,78 @@ describe('the invariant: a group total is the sum of the companies in it', () =>
     expect(pageTotal(['A', 'B'], [])).toBe(pageTotal(['A'], []) + pageTotal(['B'], []))
   })
 })
+
+import { projectKeySuffix, projectOfKey, agreedProject } from './budgetKeys'
+
+describe('the project in a budget line key', () => {
+  const cls = { pl_category: 'Opex', department: 'Sales', expense_description: 'Ads' }
+
+  it('leaves an overhead line\'s key exactly as it was before projects', () => {
+    expect(makeClassKey(cls)).toBe('Opex||Sales||Ads')
+    expect(makeClassKey({ ...cls, project_id: null })).toBe('Opex||Sales||Ads')
+    expect(makeClassKey({ ...cls, project_id: '' })).toBe('Opex||Sales||Ads')
+    expect(projectKeySuffix(null)).toBe('')
+  })
+
+  it('adds the project as a sixth segment, so two sites never share a line', () => {
+    const a = makeClassKey({ ...cls, project_id: 'p1' })
+    const b = makeClassKey({ ...cls, project_id: 'p2' })
+    expect(a).toBe('Opex||Sales||Ads|#p1')
+    expect(a).not.toBe(b)
+    expect(a).not.toBe(makeClassKey(cls))
+  })
+
+  it('reads the project back out of a key, and overhead as null', () => {
+    expect(projectOfKey(makeClassKey({ ...cls, project_id: 'p1' }))).toBe('p1')
+    expect(projectOfKey(makeClassKey(cls))).toBeNull()
+    // A classification value starting with # is not a project.
+    expect(projectOfKey(makeClassKey({ expense_description: '#7 crane' }))).toBeNull()
+  })
+
+  it('does not move a project key off its node: the tree reads the five levels only', () => {
+    const parts = makeClassKey({ ...cls, project_id: 'p1' }).split('|')
+    expect(valueAt(parts, 'department')).toBe('Sales')
+    expect(valueAt(parts, 'expense_description')).toBe('Ads')
+  })
+
+  it('agrees on a project only when every key under a row does', () => {
+    const p1 = makeClassKey({ ...cls, project_id: 'p1' })
+    const p1b = makeClassKey({ ...cls, expense_description: 'Print', project_id: 'p1' })
+    const ovh = makeClassKey(cls)
+    expect(agreedProject([p1, p1b])).toBe('p1')
+    expect(agreedProject([p1, ovh])).toBeNull()
+    expect(agreedProject([ovh])).toBeNull()
+    expect(agreedProject([])).toBeNull()
+  })
+
+  it('files a change under the five columns only — the project travels separately', () => {
+    const p1 = makeClassKey({ ...cls, project_id: 'p1' })
+    const c = classificationFor(['Sales'], 'department', [p1], ['department', 'dept_subcategory', 'expense_description'])
+    expect(c).toEqual({
+      pl_category: 'Opex', pl_subcategory: null,
+      department: 'Sales', dept_subcategory: null, expense_description: null,
+    })
+  })
+})
+
+describe('the seed a set entry is measured against, per project', () => {
+  const MONTH = '2026-03'
+  const CO = 'company-1'
+  const seeds: SeedsByCompany = {
+    [CO]: {
+      'Payroll|Salaries|Sales||': { [MONTH]: 1000 },
+      'Payroll|Salaries|Sales|||#p1': { [MONTH]: 400 },
+      'Payroll|Salaries|Sales|||#p2': { [MONTH]: 250 },
+    },
+  }
+
+  it('measures an overhead entry against overhead seeds alone', () => {
+    expect(seedForEntry({ company_id: CO, department: 'Sales' }, seeds, MONTH)).toBe(1000)
+  })
+
+  it('measures a project entry against that project\'s seeds alone', () => {
+    expect(seedForEntry({ company_id: CO, department: 'Sales', project_id: 'p1' }, seeds, MONTH)).toBe(400)
+    expect(seedForEntry({ company_id: CO, department: 'Sales', project_id: 'p2' }, seeds, MONTH)).toBe(250)
+    expect(seedForEntry({ company_id: CO, department: 'Sales', project_id: 'p9' }, seeds, MONTH)).toBe(0)
+  })
+})

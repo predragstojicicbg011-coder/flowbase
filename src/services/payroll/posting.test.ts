@@ -1,6 +1,6 @@
 import {
   planFor, planTotal, stornoTotal, checkPlan, unmappedUnits, departmentFor,
-  NET_SUBCATEGORY, RETAINED_FALLBACK, type UnitMapping,
+  NET_SUBCATEGORY, RETAINED_FALLBACK, hoursBasisFromRuns, planProjectTotals, type UnitMapping,
 } from './posting'
 import { runsFor, RUN_LABELS, type RunInput } from './runs'
 import { RATES_2026, splitContractedNet } from './engine'
@@ -382,5 +382,73 @@ describe('where a retained deduction is cancelled', () => {
     // sub-category anywhere — so every unmapped deduction would have been
     // refused, and before the ledger check existed it would have created it.
     expect(RETAINED_FALLBACK.pl_subcategory).toBe('Renumeration, allowances and other benefits')
+  })
+})
+
+describe('projects, by hours', () => {
+  const build = (projectHours: Record<string, { project_id: string; hours: number }[]>,
+    timesheet = sheet({ regular_hours: FUND })) => {
+    const input: RunInput = {
+      people: [person({ deductions: [deduction({ goes_to: 'third_party', payee: 'Bank' })] })],
+      timesheets: { e1: timesheet }, rates: RATES_2026, monthHours: FUND,
+      currencyRates: { EUR: 117.3586 }, coefficients: { godisnji_odmor: 1 },
+    }
+    const result = runsFor(input)
+    const run = result.runs.find(r => r.key === 'regular')!
+    return {
+      run,
+      plan: planFor({
+        run, month: MONTH, people: { e1: input.people[0] }, mapping: MAPPING,
+        currencyRates: { EUR: 117.3586 },
+        projectHours, hoursBasis: hoursBasisFromRuns(result.runs),
+      }),
+    }
+  }
+
+  it('changes only the attribution: the month posts the same total', () => {
+    const before = build({})
+    const after = build({ e1: [{ project_id: 'a', hours: 100 }, { project_id: 'b', hours: 40 }] })
+    expect(planTotal(after.plan)).toBe(planTotal(before.plan))
+    expect(checkPlan(after.plan)).toBeNull()
+    // Everything overhead without project rows.
+    expect(planProjectTotals(before.plan).map(t => t.project_id)).toEqual([null])
+  })
+
+  it('splits every one of the person\'s P&L invoices by the same hours, each adding up exactly', () => {
+    const { plan: p } = build({ e1: [{ project_id: 'a', hours: 100 }, { project_id: 'b', hours: 40 }] })
+    const pl = p.invoices.filter(i => i.pl_impact)
+    expect(pl.map(i => i.kind)).toEqual(expect.arrayContaining(['net', 'third_party', 'obligation_child']))
+    for (const i of pl) {
+      expect(i.projects.map(l => l.project_id)).toEqual(['a', 'b', null])
+      expect(Math.round(i.projects.reduce((s, l) => s + l.amount, 0) * 100)).toBe(Math.round(i.amount * 100))
+    }
+    const totals = planProjectTotals(p)
+    const all = totals.reduce((s, t) => s + t.amount, 0)
+    expect(totals.find(t => t.project_id === 'a')!.amount / all).toBeCloseTo(100 / FUND, 3)
+    // The parent payable is not in the P&L and carries no projects.
+    expect(p.invoices.find(i => i.kind === 'obligation_parent')!.projects).toEqual([])
+  })
+
+  it('puts the share of paid leave in overhead', () => {
+    const { plan: p } = build(
+      { e1: [{ project_id: 'a', hours: FUND - 16 }] },
+      sheet({ regular_hours: FUND - 16, vacation_hours: 16 }))
+    const totals = planProjectTotals(p)
+    const all = totals.reduce((s, t) => s + t.amount, 0)
+    expect(totals.find(t => t.project_id === null)!.amount / all).toBeCloseTo(16 / FUND, 3)
+  })
+
+  it('refuses a month with more hours on projects than worked', () => {
+    const { plan: p } = build({ e1: [{ project_id: 'a', hours: FUND + 1 }] })
+    expect(p.projectErrors).toHaveLength(1)
+    expect(checkPlan(p)).toMatch(/too many/)
+  })
+
+  it('writes no allocation codes', () => {
+    const { plan: p } = build({})
+    for (const i of p.invoices) {
+      expect('rev_alloc_type' in i).toBe(false)
+      expect('opex_type' in i).toBe(false)
+    }
   })
 })

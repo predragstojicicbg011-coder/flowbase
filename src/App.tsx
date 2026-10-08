@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { DataRefreshProvider } from './contexts/DataRefreshContext'
 import { CompaniesProvider } from './contexts/CompaniesContext'
+import { ProjectsProvider } from './contexts/ProjectsContext'
 import { DisplayCurrencyProvider } from './contexts/DisplayCurrencyContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -13,6 +14,7 @@ import Budgeting from './pages/Budgeting'
 import Reports from './pages/Reports'
 import ExpenseAnalysis from './pages/ExpenseAnalysis'
 import Partners from './pages/Partners'
+import Projects from './pages/Projects'
 import Settings from './pages/Settings'
 import Credits from './pages/Credits'
 import HR from './pages/HR'
@@ -50,6 +52,7 @@ function AppContent() {
               itself is gone. Anyone holding a link or a bookmark to it lands
               on the report that replaced it rather than on the dashboard. */}
           <Route path="/pl"           element={<Navigate to="/expenses" replace />} />
+          <Route path="/projects"     element={<Projects />} />
           <Route path="/partners"     element={<Partners />} />
           <Route path="/credits"      element={<Credits />} />
           <Route path="/hr"           element={<HR />} />
@@ -69,11 +72,13 @@ function App() {
     <HashRouter>
       <AuthProvider>
         <CompaniesProvider>
-          <DataRefreshProvider>
-            <DisplayCurrencyProvider>
-              <AppContent />
-            </DisplayCurrencyProvider>
-          </DataRefreshProvider>
+          <ProjectsProvider>
+            <DataRefreshProvider>
+              <DisplayCurrencyProvider>
+                <AppContent />
+              </DisplayCurrencyProvider>
+            </DataRefreshProvider>
+          </ProjectsProvider>
         </CompaniesProvider>
       </AuthProvider>
     </HashRouter>

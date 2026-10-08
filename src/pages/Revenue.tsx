@@ -4,16 +4,32 @@ import { SkeletonRows } from '../components/motion'
 import { runWrite } from '../services/writeOrder'
 import { fmtMoney, fmtNum } from '../utils/formatters'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { useProjects } from '../contexts/ProjectsContext'
+import ProjectSelect from '../components/ProjectSelect'
+import { projectLabelById } from '../services/projects'
+import {
+  REVENUE_STREAM, REVENUE_STREAMS, isRevenueStream, normaliseRevenueStream, type RevenueStream,
+} from '../services/revenueStreams'
+import { PROJECT_FILTER_OVERHEAD, matchesProjectFilter } from '../services/ledgerFilters'
 
-const BRANDS = ['Kicksta', 'Flock', 'Nitreo', 'Kenji', 'Upleap', 'EngagementBoost', 'Upgram', 'SocialFollow', 'Aimfox']
+// ── Revenue ─────────────────────────────────────────────────────────────────
+//
+// Expected income (revenue_entries) and the money that settled it. Mintflow
+// grouped this by product brand and by its two businesses; MCFlow groups it by
+// PROJECT — the site or building the income belongs to, null for company-level
+// income — and classifies it by `revenue_stream` from ./revenueStreams, the
+// one list the database CHECK allows. `brand` is a Mintflow column that
+// nothing reads or writes any more.
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   open: { bg: 'rgba(245,166,35,0.13)', color: '#F5A623' }, partial: { bg: 'rgba(78,168,255,0.13)', color: '#4EA8FF' },
   collected: { bg: 'rgba(0,212,126,0.12)', color: '#00D47E' }, cancelled: { bg: 'rgba(255,91,90,0.13)', color: '#FF5B5A' },
 }
 const STREAM_COLORS: Record<string, { bg: string; color: string }> = {
-  aimfox: { bg: 'rgba(99,91,255,0.15)', color: '#9D97FF' }, social_growth: { bg: 'rgba(0,212,126,0.12)', color: '#00D47E' },
+  [REVENUE_STREAM.construction]: { bg: 'rgba(0,212,126,0.12)', color: '#00D47E' },
+  [REVENUE_STREAM.rental]: { bg: 'rgba(99,91,255,0.15)', color: '#9D97FF' },
   other: { bg: 'rgba(255,255,255,0.06)', color: '#7A9BB8' },
 }
+const streamColor = (v: string | null | undefined) => STREAM_COLORS[v || ''] || STREAM_COLORS.other
 const COLL_STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   unmatched: { bg: 'rgba(245,166,35,0.13)', color: '#F5A623' }, partial: { bg: 'rgba(78,168,255,0.13)', color: '#4EA8FF' },
   matched: { bg: 'rgba(0,212,126,0.12)', color: '#00D47E' },
@@ -29,7 +45,10 @@ export default function Revenue() {
   const [editCollection, setEditCollection] = useState<any>(null)
   const [search, setSearch] = useState('')
   const [filterStream, setFilterStream] = useState('all')
-  const [filterBrand, setFilterBrand] = useState('all')
+  // '' all, PROJECT_FILTER_OVERHEAD company-level, or a project id.
+  const [filterProject, setFilterProject] = useState('')
+  const { projects } = useProjects()
+  const projectName = (e: any) => projectLabelById(projects, e.project_id)
   const [filterStatus, setFilterStatus] = useState('all')
   const [entries, setEntries] = useState<any[]>([])
   const [collections, setCollections] = useState<any[]>([])
@@ -74,9 +93,9 @@ export default function Revenue() {
 
   const filteredEntries = entries.filter(e =>
     (filterStream === 'all' || e.revenue_stream === filterStream) &&
-    (filterBrand === 'all' || e.brand === filterBrand) &&
+    matchesProjectFilter(e.project_id, filterProject) &&
     (filterStatus === 'all' || e.calculated_status === filterStatus) &&
-    (!search || (e.brand||'').toLowerCase().includes(search.toLowerCase()) ||
+    (!search || projectName(e).toLowerCase().includes(search.toLowerCase()) ||
       (e.notes||'').toLowerCase().includes(search.toLowerCase()) ||
       (e.invoice_ref||'').toLowerCase().includes(search.toLowerCase()))
   )
@@ -91,13 +110,17 @@ export default function Revenue() {
   const totalCollected = entries.filter(e => e.calculated_status === 'collected').reduce((s,e) => s+amt(e), 0)
   const unmatchedCount = collections.filter(c => c.status === 'unmatched').length
 
-  const brandTotals = BRANDS.map(brand => ({
-    brand, stream: brand === 'Aimfox' ? 'aimfox' : 'social_growth',
-    total: entries.filter(e => e.brand === brand).reduce((s,e) => s+amt(e), 0),
-    collected: entries.filter(e => e.brand === brand).reduce((s,e) => s+amt(e, 'collected'), 0),
-    count: entries.filter(e => e.brand === brand).length,
-  })).filter(b => b.count > 0).sort((a,b) => b.total-a.total)
-  const maxBrand = brandTotals[0]?.total || 1
+  // One card per project the entries name, plus company-level income.
+  type ProjectTotal = { key: string; label: string; total: number; collected: number; count: number }
+  const byProject = new Map<string, ProjectTotal>()
+  for (const e of entries) {
+    const key: string = e.project_id || PROJECT_FILTER_OVERHEAD
+    const t = byProject.get(key) || { key, label: projectName(e), total: 0, collected: 0, count: 0 }
+    t.total += amt(e); t.collected += amt(e, 'collected'); t.count += 1
+    byProject.set(key, t)
+  }
+  const projectTotals = Array.from(byProject.values()).sort((a, b) => b.total - a.total)
+  const maxProject = projectTotals[0]?.total || 1
 
   return (
     <div style={s.root} className="app-surface" onClick={() => setShowMenu(null)}>
@@ -105,7 +128,7 @@ export default function Revenue() {
         <div style={s.pageHeader}>
           <div>
             <div style={s.pageTitle}>Revenue</div>
-            <div style={s.pageSub}>Receivables and collections by brand and stream</div>
+            <div style={s.pageSub}>Receivables and collections by project and stream</div>
           </div>
           <div style={s.btnGroup}>
             <button style={s.btnEntry} onClick={() => { setEditEntry(null); setShowEntryDialog(true) }}>📈 New entry</button>
@@ -136,19 +159,16 @@ export default function Revenue() {
           </div>
         </div>
 
-        {brandTotals.length > 0 && (
-          <div style={s.brandWidget}>
-            <div style={s.brandWidgetTitle}>Brand breakdown · {entries.length} total entries</div>
+        {projectTotals.length > 0 && (
+          <div style={s.projectWidget}>
+            <div style={s.projectWidgetTitle}>By project · {entries.length} total entries</div>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' as const }}>
-              {brandTotals.map(b => (
-                <div key={b.brand} style={{ ...s.brandCard, ...(filterBrand === b.brand ? s.brandCardActive : {}) }} onClick={() => setFilterBrand(filterBrand === b.brand ? 'all' : b.brand)}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#DCE9F6' }}>{b.brand}</span>
-                    <span style={{ ...s.badge, ...STREAM_COLORS[b.stream] }}>{b.stream === 'aimfox' ? 'AF' : 'SG'}</span>
-                  </div>
+              {projectTotals.map(b => (
+                <div key={b.key} style={{ ...s.projectCard, ...(filterProject === b.key ? s.projectCardActive : {}) }} onClick={() => setFilterProject(filterProject === b.key ? '' : b.key)}>
+                  <div style={{ fontSize: '12px', fontWeight: '600', color: '#DCE9F6', marginBottom: '6px' }}>{b.label}</div>
                   <div style={{ fontSize: '15px', fontWeight: '600', color: '#00D47E', marginBottom: '4px' }}>{money(b.total)}</div>
                   <div style={{ height: '3px', background: 'rgba(255,255,255,0.07)', borderRadius: '2px', overflow: 'hidden', marginBottom: '5px' }}>
-                    <div style={{ height: '100%', width: `${(b.total/maxBrand)*100}%`, background: b.stream === 'aimfox' ? '#9D97FF' : '#00D47E', borderRadius: '2px' }} />
+                    <div style={{ height: '100%', width: `${(b.total/maxProject)*100}%`, background: '#00D47E', borderRadius: '2px' }} />
                   </div>
                   <div style={{ fontSize: '10px', color: '#7A9BB8' }}>{b.count} entr{b.count>1?'ies':'y'} · {money(b.collected)} collected</div>
                 </div>
@@ -167,13 +187,15 @@ export default function Revenue() {
         </div>
 
         <div style={s.filterBar}>
-          <input type="text" placeholder={subTab==='entries'?'Search brand, ref, notes...':'Search reference, notes...'} value={search} onChange={e => setSearch(e.target.value)} style={s.searchInput} />
+          <input type="text" placeholder={subTab==='entries'?'Search project, ref, notes...':'Search reference, notes...'} value={search} onChange={e => setSearch(e.target.value)} style={s.searchInput} />
           {subTab === 'entries' && (<>
             <select value={filterStream} onChange={e => setFilterStream(e.target.value)} style={s.filterSelect}>
-              <option value="all">All streams</option><option value="aimfox">Aimfox</option><option value="social_growth">Social Growth</option><option value="other">Other</option>
+              <option value="all">All streams</option>{REVENUE_STREAMS.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
-            <select value={filterBrand} onChange={e => setFilterBrand(e.target.value)} style={s.filterSelect}>
-              <option value="all">All brands</option>{BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+            <select value={filterProject} onChange={e => setFilterProject(e.target.value)} style={s.filterSelect}>
+              <option value="">All projects</option>
+              <option value={PROJECT_FILTER_OVERHEAD}>{projectLabelById(projects, null)}</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{projectLabelById(projects, p.id)}</option>)}
             </select>
           </>)}
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={s.filterSelect}>
@@ -206,7 +228,7 @@ export default function Revenue() {
             ) : (
               <table style={s.table}>
                 <thead><tr style={s.thead}>
-                  <th style={s.th}>Period</th><th style={s.th}>Brand</th><th style={s.th}>Stream</th><th style={s.th}>Source</th><th style={s.th}>Ref</th>
+                  <th style={s.th}>Period</th><th style={s.th}>Project</th><th style={s.th}>Stream</th><th style={s.th}>Source</th><th style={s.th}>Ref</th>
                   <th style={{ ...s.th, textAlign:'right' as const }}>Amount {currency}</th><th style={{ ...s.th, textAlign:'right' as const }}>Collected</th>
                   <th style={{ ...s.th, textAlign:'right' as const }}>Remaining</th><th style={s.th}>Status</th><th style={s.th}></th>
                 </tr></thead>
@@ -214,8 +236,8 @@ export default function Revenue() {
                   {filteredEntries.map((e,i) => (
                     <tr key={e.id} style={{ ...s.tr, background: i%2===0?'#0D1B2C':'#111F30' }}>
                       <td style={s.td}><span style={s.dateCell}>{e.period_month}</span></td>
-                      <td style={s.td}><span style={{ fontSize:'13px',fontWeight:'600',color:'#DCE9F6' }}>{e.brand}</span></td>
-                      <td style={s.td}><span style={{ ...s.badge, ...(STREAM_COLORS[e.revenue_stream]||STREAM_COLORS.other) }}>{e.revenue_stream==='aimfox'?'Aimfox':e.revenue_stream==='social_growth'?'Social Growth':'Other'}</span></td>
+                      <td style={s.td}><span style={{ fontSize:'13px',fontWeight:'600',color:'#DCE9F6' }}>{projectName(e)}</span></td>
+                      <td style={s.td}><span style={{ ...s.badge, ...streamColor(e.revenue_stream) }}>{e.revenue_stream || '—'}</span></td>
                       <td style={s.td}><span style={{ ...s.badge, background:'rgba(255,255,255,0.06)',color:'#7A9BB8' }}>{e.source}</span></td>
                       <td style={s.td}><span style={s.monoCell}>{e.invoice_ref||'—'}</span></td>
                       <td style={{ ...s.td, textAlign:'right' as const }}><span style={s.amtCell}>{money(amt(e))}</span></td>
@@ -258,23 +280,17 @@ export default function Revenue() {
             ) : (
               <table style={s.table}>
                 <thead><tr style={s.thead}>
-                  <th style={s.th}>Date</th><th style={s.th}>Source</th><th style={s.th}>Brand</th><th style={s.th}>Reference</th>
+                  <th style={s.th}>Date</th><th style={s.th}>Source</th><th style={s.th}>Reference</th>
                   <th style={{ ...s.th, textAlign:'right' as const }}>Amount</th><th style={{ ...s.th, textAlign:'right' as const }}>{currency}</th>
                   <th style={s.th}>Status</th><th style={s.th}></th>
                 </tr></thead>
                 <tbody>
                   {filteredCollections.map((c,i) => {
-                    let brandLabel = ''
-                    try { brandLabel = JSON.parse(c.notes||'{}').brand||'' } catch {}
                     return (
                       <tr key={c.id} style={{ ...s.tr, background: i%2===0?'#0D1B2C':'#111F30' }}>
                         <td style={s.td}><span style={s.dateCell}>{(c.transaction_date||'').slice(0,10)}</span></td>
                         <td style={s.td}>
                           <span style={{ ...s.badge, ...STREAM_COLORS.other }}>{c.processor || '—'}</span>
-                        </td>
-                        <td style={s.td}>
-                          {brandLabel ? <span style={{ ...s.badge, ...STREAM_COLORS[brandLabel==='Aimfox'?'aimfox':'social_growth'] }}>{brandLabel}</span>
-                            : <span style={{ color:'rgba(255,255,255,0.20)',fontSize:'12px' }}>—</span>}
                         </td>
                         <td style={s.td}><span style={s.monoCell}>{(c.reference||'—').slice(0,24)}</span></td>
                         <td style={{ ...s.td, textAlign:'right' as const }}><span style={s.amtCell}>{fmtNum(c.amount||0)} {c.currency}</span></td>
@@ -308,15 +324,68 @@ export default function Revenue() {
   )
 }
 
-function RevenueEntryDialog({ entry, onClose }: any) {
+/**
+ * Editing an entry's project and stream. Amounts are not edited here — a
+ * new entry, and changing what one is worth, come with the construction
+ * billings phase. The stream written is always one of REVENUE_STREAMS, which
+ * is exactly what the database CHECK allows; a stored Mintflow value is shown
+ * mapped (normaliseRevenueStream) so saving cleans it rather than failing.
+ */
+function RevenueEntryDialog({ entry, onClose, onSaved }: any) {
+  const [projectId, setProjectId] = useState<string | null>(entry?.project_id ?? null)
+  const [stream, setStream] = useState<RevenueStream>(
+    normaliseRevenueStream(entry?.revenue_stream) ?? REVENUE_STREAM.construction)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const save = async () => {
+    if (!isRevenueStream(stream)) { setError('Choose a revenue stream.'); return }
+    setSaving(true); setError('')
+    const { ok, message } = await runWrite('Save the revenue entry',
+      supabase.from('revenue_entries')
+        .update({ project_id: projectId, revenue_stream: stream, updated_at: new Date().toISOString() })
+        .eq('id', entry.id))
+    setSaving(false)
+    if (!ok) { setError(message); return }
+    onSaved()
+  }
+
+  const box = { position:'fixed' as const, inset:0, background:'rgba(0,0,0,0.65)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }
+  const card = { background:'#0D1B2C', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'16px', padding:'2rem 2.5rem', width:'520px' }
+  const label = { fontSize:'11px', color:'#7A9BB8', marginBottom:'6px', display:'block' as const }
+
+  if (!entry) {
+    return (
+      <div style={box}>
+        <div style={{ ...card, textAlign:'center' as const }}>
+          <div style={{ fontSize:'36px', marginBottom:'14px' }}>📈</div>
+          <div style={{ fontSize:'18px', fontWeight:'500', color:'#DCE9F6', marginBottom:'8px' }}>Revenue Entry</div>
+          <div style={{ fontSize:'13px', color:'#7A9BB8', marginBottom:'8px' }}>New entry</div>
+          <div style={{ fontSize:'12px', color:'rgba(157,151,255,0.8)', background:'rgba(157,151,255,0.08)', border:'1px solid rgba(157,151,255,0.2)', borderRadius:'8px', padding:'10px 16px', marginBottom:'24px' }}>Step 3 — coming soon</div>
+          <button onClick={onClose} style={{ background:'#9D97FF', color:'#060E1A', border:'none', borderRadius:'8px', padding:'9px 24px', cursor:'pointer', fontFamily:'system-ui,sans-serif', fontSize:'13px', fontWeight:'600' }}>Close</button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
-      <div style={{ background:'#0D1B2C', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'16px', padding:'2.5rem', width:'520px', textAlign:'center' as const }}>
-        <div style={{ fontSize:'36px', marginBottom:'14px' }}>📈</div>
-        <div style={{ fontSize:'18px', fontWeight:'500', color:'#DCE9F6', marginBottom:'8px' }}>Revenue Entry</div>
-        <div style={{ fontSize:'13px', color:'#7A9BB8', marginBottom:'8px' }}>{entry?'Edit entry':'New entry'}</div>
-        <div style={{ fontSize:'12px', color:'rgba(157,151,255,0.8)', background:'rgba(157,151,255,0.08)', border:'1px solid rgba(157,151,255,0.2)', borderRadius:'8px', padding:'10px 16px', marginBottom:'24px' }}>Step 3 — coming soon</div>
-        <button onClick={onClose} style={{ background:'#9D97FF', color:'#060E1A', border:'none', borderRadius:'8px', padding:'9px 24px', cursor:'pointer', fontFamily:'system-ui,sans-serif', fontSize:'13px', fontWeight:'600' }}>Close</button>
+    <div style={box}>
+      <div style={card}>
+        <div style={{ fontSize:'18px', fontWeight:'500', color:'#DCE9F6', marginBottom:'4px' }}>Edit revenue entry</div>
+        <div style={{ fontSize:'12px', color:'#7A9BB8', marginBottom:'20px' }}>{entry.period_month} · {entry.invoice_ref || 'no reference'}</div>
+        <label style={label}>Project</label>
+        <div style={{ marginBottom:'14px' }}>
+          <ProjectSelect value={projectId} onChange={setProjectId} companyId={entry.company_id} />
+        </div>
+        <label style={label} htmlFor="rev-stream">Revenue stream</label>
+        <select id="rev-stream" value={stream} onChange={e => setStream(e.target.value as RevenueStream)} style={{ ...s.filterSelect, width:'100%', marginBottom:'18px' }}>
+          {REVENUE_STREAMS.map(v => <option key={v} value={v}>{v}</option>)}
+        </select>
+        {error && <div style={{ fontSize:'12px', color:'#FF5B5A', marginBottom:'12px' }}>{error}</div>}
+        <div style={{ display:'flex', justifyContent:'flex-end', gap:'8px' }}>
+          <button onClick={onClose} style={{ background:'transparent', color:'#7A9BB8', border:'1px solid rgba(255,255,255,0.12)', borderRadius:'8px', padding:'9px 18px', cursor:'pointer', fontSize:'13px' }}>Cancel</button>
+          <button onClick={save} disabled={saving} style={{ background:'#9D97FF', color:'#060E1A', border:'none', borderRadius:'8px', padding:'9px 24px', cursor:'pointer', fontFamily:'system-ui,sans-serif', fontSize:'13px', fontWeight:'600' }}>{saving ? 'Saving…' : 'Save'}</button>
+        </div>
       </div>
     </div>
   )
@@ -340,7 +409,7 @@ function RevenueReconcileDialog({ entry, onClose }: any) {
       <div style={{ background:'#0D1B2C', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'16px', padding:'2.5rem', width:'520px', textAlign:'center' as const }}>
         <div style={{ fontSize:'36px', marginBottom:'14px' }}>🔗</div>
         <div style={{ fontSize:'18px', fontWeight:'500', color:'#DCE9F6', marginBottom:'8px' }}>Match Collection</div>
-        <div style={{ fontSize:'13px', color:'#7A9BB8', marginBottom:'8px' }}>Entry: <strong style={{ color:'#DCE9F6' }}>{entry?.brand} · {entry?.period_month}</strong></div>
+        <div style={{ fontSize:'13px', color:'#7A9BB8', marginBottom:'8px' }}>Entry: <strong style={{ color:'#DCE9F6' }}>{entry?.invoice_ref || '—'} · {entry?.period_month}</strong></div>
         <div style={{ fontSize:'12px', color:'rgba(78,168,255,0.8)', background:'rgba(78,168,255,0.08)', border:'1px solid rgba(78,168,255,0.2)', borderRadius:'8px', padding:'10px 16px', marginBottom:'24px' }}>Step 5 — coming soon</div>
         <button onClick={onClose} style={{ background:'#185FA5', color:'#fff', border:'none', borderRadius:'8px', padding:'9px 24px', cursor:'pointer', fontFamily:'system-ui,sans-serif', fontSize:'13px', fontWeight:'600' }}>Close</button>
       </div>
@@ -365,10 +434,10 @@ const s: Record<string, React.CSSProperties> = {
   summaryLabel: { fontSize:'10px', fontWeight:'500', color:'rgba(255,255,255,0.30)', textTransform:'uppercase' as const, letterSpacing:'0.08em', marginBottom:'6px' },
   summaryVal: { fontSize:'22px', fontWeight:'500', color:'#DCE9F6', marginBottom:'4px' },
   summarySub: { fontSize:'11px', color:'#7A9BB8' },
-  brandWidget: { background:'#0D1B2C', border:'1px solid rgba(255,255,255,0.075)', borderRadius:'10px', padding:'14px 16px', marginBottom:'16px' },
-  brandWidgetTitle: { fontSize:'10px', fontWeight:'600', color:'rgba(255,255,255,0.30)', textTransform:'uppercase' as const, letterSpacing:'0.1em', marginBottom:'12px' },
-  brandCard: { background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'8px', padding:'10px 12px', cursor:'pointer', minWidth:'130px', flex:'1', transition:'border 0.15s' },
-  brandCardActive: { border:'1px solid rgba(157,151,255,0.4)', background:'rgba(157,151,255,0.06)' },
+  projectWidget: { background:'#0D1B2C', border:'1px solid rgba(255,255,255,0.075)', borderRadius:'10px', padding:'14px 16px', marginBottom:'16px' },
+  projectWidgetTitle: { fontSize:'10px', fontWeight:'600', color:'rgba(255,255,255,0.30)', textTransform:'uppercase' as const, letterSpacing:'0.1em', marginBottom:'12px' },
+  projectCard: { background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'8px', padding:'10px 12px', cursor:'pointer', minWidth:'130px', flex:'1', transition:'border 0.15s' },
+  projectCardActive: { border:'1px solid rgba(157,151,255,0.4)', background:'rgba(157,151,255,0.06)' },
   subTabBar: { display:'flex', gap:'4px', marginBottom:'14px', background:'rgba(255,255,255,0.04)', borderRadius:'8px', padding:'4px', width:'fit-content' },
   subTab: { fontFamily:'system-ui,sans-serif', fontSize:'12px', padding:'7px 16px', border:'none', background:'transparent', color:'#7A9BB8', cursor:'pointer', borderRadius:'6px', fontWeight:'500', display:'flex', alignItems:'center', gap:'8px' },
   subTabActive: { background:'rgba(157,151,255,0.12)', color:'#9D97FF' },

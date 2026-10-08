@@ -15,31 +15,47 @@ const plan = (over: Partial<PostingPlan> = {}): PostingPlan => ({
     { kind: 'net', employeeId: 'e1', employeeName: 'A', partnerId: null,
       pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries',
       department: 'Dev', dept_subcategory: 'Eng', expense_description: 'A',
-      rev_alloc_type: 'af100', opex_type: 'opex', cf_type: 'recurring',
+      cf_type: 'recurring', projects: [{ project_id: 'p1', amount: 1000 }],
       amount: 1000, pl_impact: true, note: 'net' },
     { kind: 'obligation_parent', employeeId: null, employeeName: '', partnerId: null,
       pl_category: 'Employee and Labour', pl_subcategory: 'Tax on salary',
       department: null, dept_subcategory: null, expense_description: 'Tax',
-      rev_alloc_type: 'sg100', opex_type: 'opex', cf_type: 'recurring',
+      cf_type: 'recurring', projects: [],
       amount: 400, pl_impact: false, note: 'parent' },
     { kind: 'obligation_child', employeeId: null, employeeName: 'A', partnerId: null,
       pl_category: 'Employee and Labour', pl_subcategory: 'Tax on salary',
       department: 'Dev', dept_subcategory: 'Eng', expense_description: 'A',
-      rev_alloc_type: 'af100', opex_type: 'opex', cf_type: 'one_time',
+      cf_type: 'one_time', projects: [{ project_id: 'p1', amount: 400 }],
       amount: 400, pl_impact: true, parentRef: 'obligation', note: 'child' },
   ],
   transactions: [],
   expectedTotalCost: 1400,
+  projectErrors: [],
   ...over,
 })
 
 /** A client that records what it was asked to write. */
 function client(over: { claimError?: any; invoiceError?: any; txError?: any; linkError?: any } = {}) {
-  const calls: any = { invoices: [], transactions: [], postings: [], updates: [] }
+  const calls: any = { invoices: [], transactions: [], postings: [], updates: [], splits: [], splitDeletes: [] }
   let n = 0
   return {
     calls,
     from(table: string) {
+      if (table === 'pl_splits') {
+        const chain: any = {
+          eq: (col: string, v: any) => { calls.splitDeletes.push([col, v]); return chain },
+          in: (col: string, v: any) => { calls.splitDeletes.push([col, v]); return chain },
+          select: async () => ({ data: [], error: null }),
+          then: (res: any) => res({ data: null, error: null }),
+        }
+        return {
+          delete: () => chain,
+          insert(rows: any[]) {
+            calls.splits.push(...rows)
+            return { select: async () => ({ data: rows.map((_, i) => ({ id: `s-${i}` })), error: null }) }
+          },
+        }
+      }
       if (table === 'payroll_postings') {
         return {
           insert(row: any) {
@@ -162,7 +178,9 @@ describe('what each invoice carries', () => {
     }
     expect(net.amount_rsd).toBe(1000)
     expect(net.amount_eur).toBe(8.52)  // 1000 / 117.3586 = 8.5209 → 8.52
-    expect(net.rev_alloc_type).toBe('af100')
+    expect(net.project_id).toBe('p1')
+    expect('rev_alloc_type' in net).toBe(false)
+    expect('opex_type' in net).toBe(false)
     expect(net.cf_type).toBe('recurring')
     expect(net.cf_next_month_est).toBe(1000)
   })
@@ -192,7 +210,7 @@ describe('retained deductions', () => {
         kind: 'retained_storno', employeeName: 'A',
         pl_category: 'Employee and Labour', pl_subcategory: 'FitPass expenses',
         department: 'Dev', dept_subcategory: 'Eng', expense_description: 'Fitpass',
-        rev_alloc_type: 'af100', opex_type: 'performance', cf_type: 'recurring',
+        cf_type: 'recurring',
         amount: -1000, note: 'storno',
       }],
     }), CONTEXT, 'Salaries')
@@ -203,10 +221,10 @@ describe('retained deductions', () => {
     expect(c.calls.transactions[0].exchange_rate).toBe(1)
     expect(c.calls.transactions[0].eur_rate).toBe(117.3586)
     expect(c.calls.transactions[0].status).toBe('posted')
-    // The allocation codes come from the plan, not from a constant: they used
-    // to be hard-coded, which was one revenue stream for twenty-five people.
-    expect(c.calls.transactions[0].rev_alloc_type).toBe('af100')
-    expect(c.calls.transactions[0].opex_type).toBe('performance')
+    // Overhead: it cancels part of an expense that is not a site's.
+    expect(c.calls.transactions[0].project_id).toBeNull()
+    expect('rev_alloc_type' in c.calls.transactions[0]).toBe(false)
+    expect('opex_type' in c.calls.transactions[0]).toBe(false)
   })
 })
 
@@ -260,7 +278,10 @@ describe('undoPosting', () => {
           order.push(table)
           return { data: [], error: table === 'invoices' ? (over.deleteError || null) : null }
         }
-        return { delete: () => ({ in: () => ({ select: done }), eq: () => ({ select: done }) }) }
+        return { delete: () => ({
+          in: () => ({ select: done }),
+          eq: () => ({ select: done, in: () => ({ select: done }) }),
+        }) }
       },
     }
   }
@@ -294,7 +315,7 @@ describe('undoPosting', () => {
     // second posting lands on top of the first.
     const c = undoClient()
     await undoPosting(c, posting)
-    expect(c.order).toEqual(['invoices', 'transactions', 'payroll_postings'])
+    expect(c.order).toEqual(['pl_splits', 'invoices', 'transactions', 'payroll_postings'])
     expect(c.updates[0]).toMatchObject({ status: 'draft', posted_at: null })
   })
 
@@ -309,7 +330,7 @@ describe('undoPosting', () => {
     // recoverable. Every other order loses something.
     const c = undoClient({ thawError: { message: 'nope' } })
     await expect(undoPosting(c, posting)).rejects.toThrow(/still locked/)
-    expect(c.order).toEqual(['invoices', 'transactions', 'payroll_postings'])
+    expect(c.order).toEqual(['pl_splits', 'invoices', 'transactions', 'payroll_postings'])
   })
 
   it('does not look for a run to thaw when the posting has none', async () => {
@@ -354,4 +375,50 @@ describe('what a final month tells the forecast', () => {
     expect(child.cf_type).toBe('one_time')
     expect(child.cf_next_month_est).toBe(0)
   })
+})
+
+describe('projects', () => {
+  const shared = (): PostingPlan => plan({
+    invoices: [
+      { kind: 'net', employeeId: 'e1', employeeName: 'A', partnerId: null,
+        pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries',
+        department: 'Dev', dept_subcategory: 'Eng', expense_description: 'A',
+        cf_type: 'recurring',
+        projects: [
+          { project_id: 'p1', amount: 600.33 },
+          { project_id: 'p2', amount: 300.33 },
+          { project_id: null, amount: 99.34 },
+        ],
+        amount: 1000, pl_impact: true, note: 'net' },
+    ],
+    expectedTotalCost: 1000,
+  })
+
+  it('writes a shared invoice once, with no project of its own, and one split line per project', async () => {
+    const c = client()
+    await postPlan(c, shared(), CONTEXT, 'Salaries')
+    expect(c.calls.invoices).toHaveLength(1)
+    expect(c.calls.invoices[0].project_id).toBeNull()
+    expect(c.calls.invoices[0].amount).toBe(1000)
+    expect(c.calls.splits.map((r: any) => r.project_id)).toEqual(['p1', 'p2', null])
+    expect(c.calls.splits.every((r: any) => r.source === 'invoice' && r.source_id === 'inv-1')).toBe(true)
+    expect(c.calls.splits.every((r: any) => r.department === 'Dev' && r.pl_subcategory === 'Net Salaries')).toBe(true)
+  })
+
+  it('makes the split lines add up to the invoice in the document currency, dinars and euros', async () => {
+    const c = client()
+    await postPlan(c, shared(), CONTEXT, 'Salaries')
+    const inv = c.calls.invoices[0]
+    const sum = (k: string) => Math.round(c.calls.splits.reduce((s: number, r: any) => s + r[k], 0) * 100) / 100
+    expect(sum('amount')).toBe(inv.amount)
+    expect(sum('amount_rsd')).toBe(inv.amount_rsd)
+    expect(sum('amount_eur')).toBe(inv.amount_eur)
+  })
+
+  it('writes no split for an invoice on one project', async () => {
+    const c = client()
+    await postPlan(c, plan(), CONTEXT, 'Salaries')
+    expect(c.calls.splits).toHaveLength(0)
+  })
+
 })

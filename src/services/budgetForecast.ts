@@ -21,6 +21,7 @@
 
 import { CREDIT_PRINCIPAL, CREDIT_INTEREST } from './creditClassification'
 import { bookAmountsAtRate, round2 } from './bookAmounts'
+import { projectKeySuffix } from './budgetKeys'
 
 /** The two currencies a budget can be read in. */
 export type BudgetCurrency = 'RSD' | 'EUR'
@@ -49,6 +50,11 @@ export interface SourceEntry {
    * breakdown from it, and a row without one is filed under `''`.
    */
   company_id?: string | null
+  /**
+   * The row's own project (a split line's, not its document's); null is
+   * overhead. Part of the budget line the row seeds — see `budgetLineKey`.
+   */
+  project_id?: string | null
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
@@ -84,6 +90,20 @@ export function classificationKey(e: {
 }
 
 /**
+ * The budget line a row belongs to: its classification and, when it has one,
+ * its project. Exactly `makeClassKey` in ./budgetKeys — an overhead row's key
+ * is its bare `classificationKey`, so a budget without projects keys as it
+ * always did.
+ *
+ * `classificationKey` stays classification-only on purpose: the credit check
+ * below compares classifications, and a project must never stop an instalment
+ * from being recognised as one.
+ */
+export function budgetLineKey(e: Parameters<typeof classificationKey>[0] & { project_id?: string | null }): string {
+  return classificationKey(e) + projectKeySuffix(e.project_id)
+}
+
+/**
  * Whether an entry is one leg of a credit instalment payment.
  *
  * Exact, by construction: the two classifications this app writes for the two
@@ -109,7 +129,7 @@ export function isCreditPayment(e: {
 }
 
 export interface SeedResult {
-  /** classification key -> month -> seeded amount, every company merged. */
+  /** budget line key (`budgetLineKey`) -> month -> seeded amount, every company merged. */
   byKey: Record<string, Record<MonthKey, number>>
   /**
    * The same seeds kept apart: company -> classification key -> month.
@@ -225,7 +245,7 @@ export function seedFromEntries(
 
     if (carryStep(e) === 0) { notCarried += amount; continue }
 
-    const key = classificationKey(e)
+    const key = budgetLineKey(e)
     const company = e.company_id || ''
     if (!byCompany[company]) byCompany[company] = {}
     const perCompany = byCompany[company]
@@ -567,6 +587,11 @@ export interface Adjustment {
   amount_eur?: number | null
   reason: string
   created_at: string
+  /**
+   * The project the entry budgets for; null or absent is an overhead line.
+   * A node's ledger is replayed per project — see `loadBudgetTree`.
+   */
+  project_id?: string | null
   /**
    * The seed this entry's node carried, in this month, at the moment the
    * figure was typed, in RSD. `budget_adjustments.seed_rsd`.

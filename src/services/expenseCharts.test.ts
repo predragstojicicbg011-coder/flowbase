@@ -1,11 +1,10 @@
 import {
   buildTree, withComparison, PlEntry, ComparedNode,
-  SOCIAL_GROWTH, AIMFOX,
 } from './expenseTree'
 import {
   monthlySeries, bridgeSteps, paretoSeries, niceMax, niceFloor, bridgeScale, axisTicks,
   shortMoney, monthLabel, OTHER,
-  moverBars, moverScale, quantileEdges, binOf, rowBin, heatGrid, facingRows,
+  moverBars, moverScale, quantileEdges, binOf, rowBin, heatGrid,
   behaviourOf, branchRoots,
 } from './expenseCharts'
 
@@ -476,74 +475,6 @@ describe('heatGrid', () => {
 })
 
 // ─── The split, side by side ────────────────────────────────────────────────
-
-describe('facingRows', () => {
-  const rows = [
-    e({ amount_rsd: 1000, amount: 1000, pl_category: 'Marketing', pl_subcategory: 'Ads', rev_alloc_type: 'byval', rev_alloc_sg: 700, rev_alloc_aimfox: 300 }),
-    e({ amount_rsd: 400, pl_category: 'Office', pl_subcategory: 'Rent', rev_alloc_type: 'sg100' }),
-    e({ amount_rsd: 250, pl_category: 'Legal', pl_subcategory: 'Advice', rev_alloc_type: 'af100' }),
-  ]
-  const tree = buildTree(rows, 'stream', 'RSD')
-  const chart = () => facingRows(tree, SOCIAL_GROWTH, AIMFOX)
-
-  it('puts each category on both sides of the centre line', () => {
-    const marketing = chart().rows.find(r => r.label === 'Marketing')!
-    expect(marketing.left).toBe(700)
-    expect(marketing.right).toBe(300)
-  })
-
-  it('leaves a side at zero where only one stream pays', () => {
-    const legal = chart().rows.find(r => r.label === 'Legal')!
-    expect(legal.left).toBe(0)
-    expect(legal.right).toBe(250)
-  })
-
-  it('orders by what the category costs in total, both sides together', () => {
-    expect(chart().rows.map(r => r.label)).toEqual(['Marketing', 'Office', 'Legal'])
-  })
-
-  it('scales both sides off one number', () => {
-    expect(chart().max).toBeGreaterThanOrEqual(700)
-  })
-
-  it('carries the node keys, so either half opens its own transactions', () => {
-    const marketing = chart().rows.find(r => r.label === 'Marketing')!
-    expect(marketing.leftPath).toEqual([SOCIAL_GROWTH, 'Marketing'])
-    expect(marketing.rightPath).toEqual([AIMFOX, 'Marketing'])
-  })
-
-  it('reports each side its own total', () => {
-    expect(chart().leftTotal).toBe(1100)
-    expect(chart().rightTotal).toBe(550)
-  })
-
-  /**
-   * A stream that spent nothing has no node in the tree. Reading the labels
-   * off the tree would drop it, and a one-sided chart would read as a
-   * complete comparison.
-   */
-  it('keeps a side that spent nothing at all', () => {
-    const oneSided = buildTree([e({ amount_rsd: 500, rev_alloc_type: 'sg100' })], 'stream', 'RSD')
-    const c = facingRows(oneSided, SOCIAL_GROWTH, AIMFOX)
-    expect(c.rightLabel).toBe(AIMFOX)
-    expect(c.rightTotal).toBe(0)
-    expect(c.rows.every(r => r.right === 0)).toBe(true)
-  })
-
-  it('folds the tail into Other rather than losing it', () => {
-    const c = facingRows(tree, SOCIAL_GROWTH, AIMFOX, 1)
-    expect(c.rows.map(r => r.label)).toEqual(['Marketing', 'Other'])
-    const other = c.rows[1]
-    expect(other.left).toBe(400)
-    expect(other.right).toBe(250)
-  })
-
-  it('does not collapse to a zero axis on an empty period', () => {
-    expect(facingRows([], SOCIAL_GROWTH, AIMFOX).max).toBe(1)
-  })
-})
-
-// ─── The branching tree ─────────────────────────────────────────────────────
 
 describe('behaviourOf', () => {
   const NINE = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05',

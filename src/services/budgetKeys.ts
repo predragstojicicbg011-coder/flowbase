@@ -12,6 +12,21 @@
 // The second half of the file answers the other half of the question: given a
 // key or a ledger row, WHICH node of the open branch does it sit on. Both
 // branches read it, which is what keeps their totals equal.
+//
+// ── The project is part of the line ──────────────────────────────────────────
+//
+// A budget line is a classification AND a project: `project_id` on
+// budget_adjustments, null meaning an overhead line (Opšti troškovi). The key
+// carries it as a sixth segment, `|#<project id>`, written ONLY when there is a
+// project. An overhead line's key is therefore exactly the five-segment key it
+// always was, so a budget with no projects in it behaves byte for byte as it
+// did before projects existed.
+//
+// The tree does not branch on the project — it is not a level. Lines of
+// different projects with the same classification sit on the same node (the
+// page narrows to one project with a filter instead), but their KEYS differ,
+// so the drill under a node lists each project's rows by its own key, and a
+// `set` is measured against its own project's seed only (`seedForEntry`).
 
 import type { Level } from './budgetForecast'
 
@@ -21,6 +36,30 @@ export interface ClassifiedRow {
   department?: string | null
   dept_subcategory?: string | null
   expense_description?: string | null
+  /** The project the line belongs to; null or absent is overhead. */
+  project_id?: string | null
+}
+
+/** Marks the project segment of a key. Never the first character of a uuid. */
+export const PROJECT_SEGMENT = '#'
+
+/**
+ * The key's project suffix: `|#<id>` for a project, nothing for overhead.
+ * See the note at the top of the file for why overhead adds nothing.
+ */
+export function projectKeySuffix(projectId: string | null | undefined): string {
+  const id = (projectId || '').trim()
+  return id ? `|${PROJECT_SEGMENT}${id}` : ''
+}
+
+/** The project a classification key belongs to, or null for an overhead line. */
+export function projectOfKey(classKey: string): string | null {
+  const parts = classKey.split('|')
+  const last = parts[parts.length - 1] || ''
+  // Only a sixth segment can be the project; a classification value that
+  // happens to start with `#` sits in one of the first five.
+  if (parts.length <= CLASS_LEVELS.length || !last.startsWith(PROJECT_SEGMENT)) return null
+  return last.slice(PROJECT_SEGMENT.length) || null
 }
 
 /**
@@ -35,14 +74,15 @@ export interface ClassifiedRow {
 export type SeedsByCompany = Record<string, Record<string, Record<string, number>>>
 
 /**
- * The five classification columns joined into one key.
+ * The five classification columns joined into one key, and the project after
+ * them when there is one.
  *
  * `null` and `''` fold to the same `''`: a row with no department and a row
  * with an empty department belong in the same budget line, because neither has
  * been classified.
  */
 export function makeClassKey(r: ClassifiedRow): string {
-  return classPartsOf(r).join('|')
+  return classPartsOf(r).join('|') + projectKeySuffix(r.project_id)
 }
 
 /** A node of the budget tree, as far as the key walk is concerned. */
@@ -330,8 +370,16 @@ export function seedForEntry(
   const seedsByKey = seedsByCompany[entry.company_id || '']
   if (!seedsByKey) return 0
 
+  // The project is matched EXACTLY, never as a wildcard: an overhead line
+  // (no project) is measured against overhead seeds alone, as
+  // v_budget_vs_actual compares it with overhead actuals alone. A missing
+  // classification level means "not classified this far"; a missing project
+  // means "overhead", which is a value.
+  const wantProject = (entry.project_id || '').trim() || null
+
   let total = 0
   for (const classKey of Object.keys(seedsByKey)) {
+    if (projectOfKey(classKey) !== wantProject) continue
     const parts = classKey.split('|')
     let matches = true
     for (let i = 0; i < want.length; i++) {
@@ -344,6 +392,22 @@ export function seedForEntry(
 
 /** The five classification columns a ledger row stores. */
 export type Classification = Record<Level, string | null>
+
+/**
+ * The project every one of `classKeys` belongs to, or null when they disagree,
+ * when there are none, or when they agree on overhead. What a change recorded
+ * on a node defaults to when the page is not narrowed to one project.
+ */
+export function agreedProject(classKeys: string[]): string | null {
+  let agreed: string | null = null
+  let first = true
+  for (const ck of classKeys) {
+    const p = projectOfKey(ck)
+    if (first) { agreed = p; first = false; continue }
+    if (p !== agreed) return null
+  }
+  return agreed
+}
 
 /**
  * The value every one of `classKeys` carries at `level`, or `null` when they

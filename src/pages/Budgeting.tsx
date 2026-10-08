@@ -5,8 +5,11 @@ import { SkeletonRows } from '../components/motion'
 import { fmtMoneyCompact, fmtMoneyWhole, type BudgetFigureFormat } from '../utils/formatters'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import {
-  classKeysUnder, nodeKeysUnder, classificationFor,
+  classKeysUnder, nodeKeysUnder, classificationFor, agreedProject,
 } from '../services/budgetKeys'
+import { useProjects } from '../contexts/ProjectsContext'
+import { OVERHEAD_LABEL, projectLabel } from '../services/projects'
+import { PROJECT_FILTER_OVERHEAD } from '../services/ledgerFilters'
 import {
   inLedgerOrder, variance,
   type Adjustment, type RolledNode, type BudgetCurrency,
@@ -151,6 +154,13 @@ function varianceColor(variance: number): string {
 export default function Budgeting() {
   const { companies, defaultCompany, showPicker, error: companiesError } = useCompanies()
   const [companyId, setCompanyId] = useState('')
+  /**
+   * Which project's budget: '' every project and overhead together (the
+   * default, and exactly the page as it was before projects), a project id,
+   * or PROJECT_FILTER_OVERHEAD for overhead lines alone. See `loadBudgetTree`.
+   */
+  const [projectFilter, setProjectFilter] = useState('')
+  const { projects } = useProjects()
   const [loading, setLoading] = useState(false)
   const [rows, setRows] = useState<BudgetRow[]>([])
   const [months, setMonths] = useState<MonthMeta[]>([])
@@ -165,6 +175,9 @@ export default function Budgeting() {
    * EUR figure — or null where the ledger cannot be read in EUR.
    */
   const [rolledEur, setRolledEur] = useState<Record<string, Record<string, RolledNode>> | null>(null)
+  /** Each row's own seed per project, per currency — what a change pins. */
+  const [seedByNodeProject, setSeedByNodeProject] = useState<
+    Record<BudgetCurrency, Record<string, Record<string, Record<string, number>>>>>({ RSD: {}, EUR: {} })
   /** Why the budget has no EUR reading, said when EUR is asked for. */
   const [eurUnavailable, setEurUnavailable] = useState<string | null>(null)
   /**
@@ -294,7 +307,7 @@ export default function Budgeting() {
     const run = async () => {
       const tree = await loadBudgetTree(supabase, {
         monthKeys: months.map(m => m.key),
-        benchmark, companyIds, companyId, branch,
+        benchmark, companyIds, companyId, branch, project: projectFilter,
       })
       if (cancelled) return
       setRows(tree.rows)
@@ -313,13 +326,14 @@ export default function Budgeting() {
       // least able to afford losing their place in. So it happens when the
       // shape changes: a different branch, a different company. Same tree,
       // same folds.
-      const shape = `${branch}|${companyId}|${companyIds.join(',')}`
+      const shape = `${branch}|${companyId}|${companyIds.join(',')}|${projectFilter}`
       if (shapeRef.current !== shape) {
         shapeRef.current = shape
         setCollapsed(new Set(tree.rows.filter(r => r.hasChildren).map(r => r.key)))
       }
       setRolledRsd(tree.rolledRsd)
       setRolledEur(tree.rolledEur)
+      setSeedByNodeProject(tree.seedByNodeProject)
       setEurUnavailable(tree.eurUnavailable)
       setNotCarriedByCurrency({ RSD: tree.notCarried, EUR: tree.notCarriedEur })
       setLedgerByNode(tree.ledgerByNode)
@@ -348,6 +362,7 @@ export default function Budgeting() {
         setRows([])
         setRolledRsd({})
         setRolledEur(null)
+        setSeedByNodeProject({ RSD: {}, EUR: {} })
         setNotCarriedByCurrency({ RSD: 0, EUR: 0 })
         setLedgerByNode({})
       } finally {
@@ -356,7 +371,7 @@ export default function Budgeting() {
     }
     guarded()
     return () => { cancelled = true }
-  }, [companyId, companyIds, months, benchmark, branch, refreshTick])
+  }, [companyId, companyIds, months, benchmark, branch, refreshTick, projectFilter])
 
   const toggleCollapse = (key: string) => {
     setCollapsed(prev => {
@@ -464,6 +479,29 @@ export default function Budgeting() {
   const classificationOf = (row: BudgetRow) =>
     classificationFor(row.pathLabels, row.level, row.classKeys, LEVELS[branch])
 
+  // ── Which project a change is for ───────────────────────────────────────
+  //
+  // Narrowed to a project — or to overhead — a change is for that scope and
+  // the dialogs only name it. On the all-projects view the user picks,
+  // starting from the project every key under the row agrees on (overhead
+  // where they disagree or name none).
+  const scopedProject: string | null | undefined =
+    projectFilter === '' ? undefined
+      : projectFilter === PROJECT_FILTER_OVERHEAD ? null
+        : projectFilter
+  const projectLocked = scopedProject !== undefined
+  const projectFor = (row?: BudgetRow): string | null =>
+    projectLocked ? (scopedProject as string | null) : (row ? agreedProject(row.classKeys) : null)
+
+  /** A row's own seed for ONE project's lines, in RSD and (where readable) EUR. */
+  const seedOfProject = (rowKey: string, mk: string, projectId: string | null) => {
+    const pk = projectId || ''
+    return {
+      seed: seedByNodeProject.RSD[rowKey]?.[mk]?.[pk] || 0,
+      seedEur: rolledEur ? (seedByNodeProject.EUR[rowKey]?.[mk]?.[pk] || 0) : null,
+    }
+  }
+
   /**
    * The labels of a row's direct children, in the order the tree draws them.
    *
@@ -550,10 +588,14 @@ export default function Budgeting() {
    * here — but read rather than assumed, for the same reason the figure above
    * it is.
    */
-  const seedForPath = (pathLabels: string[], mk: string) =>
-    atRsd(`${branch}:${pathLabels.join('|')}`, mk)?.seed || 0
-  const seedEurForPath = (pathLabels: string[], mk: string) =>
-    seedEurAt(`${branch}:${pathLabels.join('|')}`, mk)
+  //
+  // For one project's lines on that path: the seed a change pins is its own
+  // project's, see `seedOfProject`. With no projects on the path that is the
+  // path's whole seed, as it always was.
+  const seedForPath = (pathLabels: string[], mk: string, projectId: string | null) =>
+    seedOfProject(`${branch}:${pathLabels.join('|')}`, mk, projectId).seed
+  const seedEurForPath = (pathLabels: string[], mk: string, projectId: string | null) =>
+    seedOfProject(`${branch}:${pathLabels.join('|')}`, mk, projectId).seedEur
 
   /**
    * The drill that is open: an actual cell's, or the explanation behind the
@@ -771,9 +813,26 @@ export default function Budgeting() {
                 onClick={() => setHorizon(h)}>{h}m</button>
             ))}
           </div>
+          {/* Which project's budget. "All projects" is the whole budget; one
+              project, or overhead, narrows the actuals, the seed and the
+              ledger to that scope, and a change made there is for it. */}
+          <select
+            style={pg.companySelect}
+            value={projectFilter}
+            aria-label="Project"
+            title="Project"
+            onChange={e => setProjectFilter(e.target.value)}
+          >
+            <option value="">All projects</option>
+            <option value={PROJECT_FILTER_OVERHEAD}>{OVERHEAD_LABEL}</option>
+            {projects
+              .filter(p => !companyId || p.company_id === companyId)
+              .map(p => <option key={p.id} value={p.id}>{projectLabel(p)}{p.active ? '' : ' (zatvoren)'}</option>)}
+          </select>
           {showPicker && (
             <select
               style={pg.companySelect}
+              aria-label="Companies"
               value={companyId}
               onChange={e => setCompanyId(e.target.value)}
             >
@@ -1284,6 +1343,9 @@ export default function Budgeting() {
           current={budgetCell.current}
           seed={budgetCell.seed}
           seedEur={budgetCell.seedEur}
+          projectId={projectFor(budgetCell.row)}
+          projectLocked={projectLocked}
+          seedForProject={pid => seedOfProject(budgetCell.row.key, budgetCell.m.key, pid)}
           // The dialog says what the change is about to land ON, not merely
           // which row was clicked. It needs the children to do that, and the
           // tree is here.
@@ -1310,6 +1372,8 @@ export default function Budgeting() {
           seedFor={seedForPath}
           seedEurFor={seedEurForPath}
           seedPath={addingLine.seed}
+          projectId={projectFor()}
+          projectLocked={projectLocked}
           onClose={() => setAddingLine(null)}
           // The row itself needs nothing new to appear: `ledgerPaths` builds a
           // row for any node the ledger names, so a reload is the whole of it.

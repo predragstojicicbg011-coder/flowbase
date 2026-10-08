@@ -46,8 +46,6 @@ export interface ScriptDraft {
   department: string
   dept_subcategory: string
   expense_description: string
-  rev_alloc: string
-  opex_type: string
   cf_type: string
   sort_order?: number
 }
@@ -92,8 +90,6 @@ export function toRow(draft: ScriptDraft): Record<string, unknown> {
     department: draft.department || '',
     dept_subcategory: draft.dept_subcategory || '',
     expense_description: draft.expense_description || '',
-    rev_alloc: draft.rev_alloc || 'shared',
-    opex_type: draft.opex_type || 'opex',
     cf_type: draft.cf_type || '',
     sort_order: draft.sort_order ?? 0,
   }

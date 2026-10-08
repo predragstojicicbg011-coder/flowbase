@@ -4,17 +4,16 @@ import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
 import { niceMax, shortMoney, monthLabel, OTHER } from '../services/expenseCharts'
 import {
-  moverBars, moverScale, heatGrid, binOf, rowBin, facingRows,
+  moverBars, moverScale, heatGrid, binOf, rowBin,
 } from '../services/expenseCharts'
 
-// ── Three panels the stack could not give ───────────────────────────────────
+// ── Two panels the stack could not give ───────────────────────────────────
 //
 // The deck had four charts and all four asked a version of "how big". These
-// ask the three questions that come next in a real conversation about costs:
+// ask the two questions that come next in a real conversation about costs:
 //
 //   Movers    which lines moved, ranked, with the direction kept
 //   Heatmap   all forty lines at once, month by month — spikes and stoppages
-//   Split     on an allocated tab, which costs lean which way
 //
 // ── Colour, by the job it does ──────────────────────────────────────────────
 //
@@ -27,20 +26,10 @@ import {
 // validated against this surface: monotone lightness, every adjacent gap
 // visible, and the darkest step still clear of the background so an empty
 // cell and a small one are not the same thing.
-//
-// Split is identity — two entities, not two poles — so it is a two-slot
-// categorical pair: ΔE 24 under protanopia, 27 to normal vision, both inside
-// the dark-mode lightness band. Deeper than the rest of the page on purpose:
-// these are large fills, and a large fill at the saturation of a small mark
-// shouts over everything beside it.
 
 /** Sequential, one hue. Validated --ordinal against #0D1B2C. */
 const HEAT = ['#39608C', '#4A82B8', '#5EA3DC', '#82C4F0', '#B4E0F9']
 const HEAT_EMPTY = 'rgba(255,255,255,0.035)'
-
-/** Two slots, categorical. Validated against #0D1B2C: all checks pass. */
-export const SIDE_LEFT = '#3585D0'
-export const SIDE_RIGHT = '#C08020'
 
 /**
  * The panels' money, in the viewer's display currency: whole units in the
@@ -332,123 +321,5 @@ export function HeatLegend({ tree, months, depth, limit, byRow }: {
         </span>
       )}
     </div>
-  )
-}
-
-// ═══ Split ═══════════════════════════════════════════════════════════════════
-
-export function FacingChart({ tree, leftLabel, rightLabel, limit, w, onTip, onSelect }: {
-  tree: Parameters<typeof facingRows>[0]
-  leftLabel: string
-  rightLabel: string
-  limit: number
-  w: number
-  onTip: (t: Tip) => void
-  onSelect: (k: string | null) => void
-}) {
-  const { money } = useMoney()
-  const chart = facingRows(tree, leftLabel, rightLabel, limit)
-  if (chart.rows.length === 0) return <Empty h={240} text="No spend in this period." />
-
-  const ROW = 28
-  const BAR = 15
-  const gutter = Math.min(Math.max(w * 0.2, 104), 210)
-  const PAD = { t: 44, b: 24, x: 6 }
-  const sideW = Math.max((w - gutter - PAD.x * 2) / 2, 40)
-  const h = PAD.t + chart.rows.length * ROW + PAD.b
-  const mid = PAD.x + sideW + gutter / 2
-  const chars = Math.floor(gutter / 6.4)
-
-  const max = Math.max(chart.max, 1)
-  const total = chart.leftTotal + chart.rightTotal
-  const leftShare = total > 0 ? chart.leftTotal / total : 0
-
-  const ticks = [max / 2, max]
-
-  return (
-    <svg width="100%" height={h} style={{ display: 'block' }}>
-      {/* The headline: what each side costs in total, and the one bar that
-          says how the period divided. Without it the rows below are shapes
-          with no sum. */}
-      <text x={mid - gutter / 2 - 8} y="15" textAnchor="end" fontSize="11.5" fill={SIDE_LEFT} fontWeight="600">
-        {leftLabel} · {money(chart.leftTotal)}
-      </text>
-      <text x={mid + gutter / 2 + 8} y="15" textAnchor="start" fontSize="11.5" fill={SIDE_RIGHT} fontWeight="600">
-        {rightLabel} · {money(chart.rightTotal)}
-      </text>
-      <rect x={PAD.x} y="21" width={Math.max(w - PAD.x * 2, 10)} height="6" rx="3" fill={SIDE_RIGHT} opacity="0.85" />
-      <rect x={PAD.x} y="21" width={Math.max((w - PAD.x * 2) * leftShare - 1, 0)} height="6" rx="3"
-        fill={SIDE_LEFT} opacity="0.85" />
-      <text x={mid} y="17" textAnchor="middle" fontSize="9.5" fill={C.faint}>
-        {(leftShare * 100).toFixed(0)} / {((1 - leftShare) * 100).toFixed(0)}
-      </text>
-
-      {ticks.map(t => (
-        <g key={t}>
-          <line x1={mid - gutter / 2 - (t / max) * sideW} x2={mid - gutter / 2 - (t / max) * sideW}
-            y1={PAD.t - 6} y2={h - PAD.b + 2} stroke={C.grid} strokeWidth="1" />
-          <line x1={mid + gutter / 2 + (t / max) * sideW} x2={mid + gutter / 2 + (t / max) * sideW}
-            y1={PAD.t - 6} y2={h - PAD.b + 2} stroke={C.grid} strokeWidth="1" />
-          <text x={mid - gutter / 2 - (t / max) * sideW} y={h - 8} textAnchor="middle" fontSize="9" fill={C.faint}>
-            {shortMoney(t)}
-          </text>
-          <text x={mid + gutter / 2 + (t / max) * sideW} y={h - 8} textAnchor="middle" fontSize="9" fill={C.faint}>
-            {shortMoney(t)}
-          </text>
-        </g>
-      ))}
-
-      {chart.rows.map((r, i) => {
-        const y = PAD.t + i * ROW + (ROW - BAR) / 2
-        const lw = (r.left / max) * sideW
-        const rw = (r.right / max) * sideW
-        const lean = r.total > 0 ? r.left / r.total : 0
-
-        const tipFor = (side: 'left' | 'right') => (ev: React.MouseEvent) => onTip({
-          x: ev.nativeEvent.offsetX, y: ev.nativeEvent.offsetY,
-          body: (
-            <>
-              <TipHead>{r.label}</TipHead>
-              <TipRow label={leftLabel} value={money(r.left)} dim={side === 'right'} />
-              <TipRow label={rightLabel} value={money(r.right)} dim={side === 'left'} />
-              <TipRow label="together" value={money(r.total)} dim />
-              <TipRow label="leans"
-                value={lean >= 0.999 ? leftLabel : lean <= 0.001 ? rightLabel
-                  : `${(lean * 100).toFixed(0)}% ${leftLabel}`} dim />
-            </>
-          ),
-        })
-
-        return (
-          <g key={r.label}>
-            <text x={mid} y={y + BAR / 2 + 4} textAnchor="middle" fontSize="11" fill={C.text}>
-              {clip(r.label, chars)}
-            </text>
-
-            <g style={{ cursor: r.leftKey ? 'pointer' : 'default' }}
-              onMouseMove={tipFor('left')} onClick={() => r.leftKey && onSelect(r.leftKey)}>
-              <rect x={PAD.x} y={PAD.t + i * ROW} width={sideW} height={ROW} fill="transparent" />
-              <rect x={mid - gutter / 2 - lw} y={y} width={Math.max(lw, r.left > 0 ? 2 : 0)} height={BAR}
-                rx="3.5" fill={SIDE_LEFT} opacity="0.92" />
-              {lw > 46 && (
-                <text x={mid - gutter / 2 - lw + 6} y={y + BAR - 3.5} fontSize="10"
-                  fill="#0A1626" fontFamily="'DM Mono', monospace">{shortMoney(r.left)}</text>
-              )}
-            </g>
-
-            <g style={{ cursor: r.rightKey ? 'pointer' : 'default' }}
-              onMouseMove={tipFor('right')} onClick={() => r.rightKey && onSelect(r.rightKey)}>
-              <rect x={mid + gutter / 2} y={PAD.t + i * ROW} width={sideW} height={ROW} fill="transparent" />
-              <rect x={mid + gutter / 2} y={y} width={Math.max(rw, r.right > 0 ? 2 : 0)} height={BAR}
-                rx="3.5" fill={SIDE_RIGHT} opacity="0.92" />
-              {rw > 46 && (
-                <text x={mid + gutter / 2 + rw - 6} y={y + BAR - 3.5} textAnchor="end" fontSize="10"
-                  fill="#1A1206" fontFamily="'DM Mono', monospace">{shortMoney(r.right)}</text>
-              )}
-            </g>
-          </g>
-        )
-      })}
-    </svg>
   )
 }

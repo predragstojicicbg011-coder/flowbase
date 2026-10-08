@@ -28,6 +28,8 @@ export const SUBCATEGORY = {
 } as const
 
 export interface EmployeeObligation {
+  /** Carried onto the rows, so a row can follow its person over projects. */
+  employee_id?: string | null
   employee_name: string
   department_name?: string | null
   dept_subcategory_name?: string | null
@@ -45,6 +47,7 @@ export interface ObligationRow {
   expense_description: string
   amount: number
   /** Which employee and component this row came from, for the note. */
+  employee_id: string | null
   employee_name: string
   component: 'tax' | 'employee' | 'employer'
   /** True when the filing's rounding adjustment was folded into this row. */
@@ -81,6 +84,7 @@ export function obligationRows(
         dept_subcategory: e.dept_subcategory_name || null,
         expense_description: e.employee_name,
         amount: round2(amount),
+        employee_id: e.employee_id ?? null,
         employee_name: e.employee_name,
         component,
       })

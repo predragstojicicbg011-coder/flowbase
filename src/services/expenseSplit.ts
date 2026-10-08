@@ -42,8 +42,11 @@ export interface SplitLine {
   department: string
   dept_subcategory: string
   expense_description: string
-  rev_alloc_type: string
-  opex_type: string
+  /**
+   * The project this line belongs to; null is company overhead. A split
+   * document's own project_id is null — the lines carry the projects.
+   */
+  project_id: string | null
   cf_type: string
   note: string
 }
@@ -71,7 +74,7 @@ export function emptyLine(key: string): SplitLine {
     amount: null,
     pl_category: '', pl_subcategory: '',
     department: '', dept_subcategory: '', expense_description: '',
-    rev_alloc_type: 'shared', opex_type: 'opex', cf_type: '',
+    project_id: null, cf_type: '',
     note: '',
   }
 }
@@ -180,8 +183,7 @@ export interface SplitRow {
   department: string | null
   dept_subcategory: string | null
   expense_description: string | null
-  rev_alloc_type: string | null
-  opex_type: string | null
+  project_id: string | null
   cf_type: string | null
   note: string | null
   sort_order: number
@@ -233,8 +235,7 @@ export function rowsFor(parent: SplitParent, lines: SplitLine[]): SplitRow[] {
       department: l.department.trim() || null,
       dept_subcategory: l.dept_subcategory.trim() || null,
       expense_description: l.expense_description.trim() || null,
-      rev_alloc_type: l.rev_alloc_type || null,
-      opex_type: l.opex_type || null,
+      project_id: l.project_id || null,
       cf_type: l.cf_type || null,
       note: l.note.trim() || null,
       sort_order: i,
@@ -254,8 +255,7 @@ export function linesFrom(rows: SplitRow[], keyOf: (n: number) => string): Split
       department: r.department || '',
       dept_subcategory: r.dept_subcategory || '',
       expense_description: r.expense_description || '',
-      rev_alloc_type: r.rev_alloc_type || 'shared',
-      opex_type: r.opex_type || 'opex',
+      project_id: r.project_id || null,
       cf_type: r.cf_type || '',
       note: r.note || '',
     }))
@@ -263,9 +263,9 @@ export function linesFrom(rows: SplitRow[], keyOf: (n: number) => string): Split
 
 // ── A line is a script and an amount ────────────────────────────────────────
 //
-// Eight classification fields per line, three lines, is twenty-four dropdowns
+// Six classification fields per line, three lines, is eighteen dropdowns
 // on a form whose whole point was to be unobtrusive. A quick-fill script
-// already carries all eight and is the thing people actually think in — "this
+// already carries all six and is the thing people actually think in — "this
 // half is Figma, that half is the laptop" — so a line is a script and a
 // figure, and the classification comes along for the ride.
 //
@@ -282,13 +282,14 @@ export interface ScriptLike {
   department: string
   dept_subcategory: string
   expense_description: string
-  /** The script's word for `rev_alloc_type`. */
-  rev_alloc: string
-  opex_type: string
   cf_type: string
 }
 
-/** A line filled from a script, keeping whatever amount it already had. */
+/**
+ * A line filled from a script, keeping whatever amount and project it already
+ * had. A script never carries a project (see quickFillStore): the project is
+ * chosen per document, per line.
+ */
 export function applyScript(line: SplitLine, script: ScriptLike): SplitLine {
   return {
     ...line,
@@ -297,8 +298,6 @@ export function applyScript(line: SplitLine, script: ScriptLike): SplitLine {
     department: script.department || '',
     dept_subcategory: script.dept_subcategory || '',
     expense_description: script.expense_description || '',
-    rev_alloc_type: script.rev_alloc || line.rev_alloc_type,
-    opex_type: script.opex_type || line.opex_type,
     cf_type: script.cf_type || line.cf_type,
   }
 }
@@ -364,4 +363,43 @@ export function classificationFromSplit(lines: SplitLine[]): ParentClassificatio
     dept_subcategory: top.dept_subcategory,
     expense_description: top.expense_description,
   }
+}
+
+// ── The project, while a document is split ─────────────────────────────────
+//
+// A document on one project carries it itself (`project_id` on the
+// transaction or invoice). A document shared by several is split, and then
+// THE LINES carry the projects and the parent carries none — null — so that
+// nothing reading the parent row can count the document twice, or on the
+// wrong site. The dialogs hide the parent's picker while lines exist.
+//
+// The moves between the two states should not lose what was picked:
+//
+//   starting a split   the new lines start on the project the document was on
+//                      (a line already given one keeps it), and the parent is
+//                      cleared;
+//   removing it        the document goes back to the project of its biggest
+//                      line — the same line its classification is taken from;
+//   editing lines      the parent stays clear.
+
+export interface SplitProjectChange {
+  lines: SplitLine[]
+  /** What the parent document's own project_id should now be. */
+  parentProjectId: string | null
+}
+
+export function splitProjectChange(
+  prev: SplitLine[], next: SplitLine[], parentProjectId: string | null,
+): SplitProjectChange {
+  if (next.length === 0) {
+    const top = dominantLine(prev)
+    return { lines: next, parentProjectId: top ? (top.project_id ?? null) : parentProjectId }
+  }
+  if (prev.length === 0) {
+    return {
+      lines: next.map(l => (l.project_id ? l : { ...l, project_id: parentProjectId ?? null })),
+      parentProjectId: null,
+    }
+  }
+  return { lines: next, parentProjectId: null }
 }

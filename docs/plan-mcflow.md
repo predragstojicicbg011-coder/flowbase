@@ -10,11 +10,13 @@ Odluke od 2026-10-08:
 
 ## Faze
 
+Status (2026-10-08): faze 1–4 su završene i migracije su primenjene.
+
 1. **Uklanjanje onoga što je samo za Aimfox**: Chargebee, Braintree i sinhronizacija procesora, Integrations tab, Simulation tab, Aftwrk uvoz, R&D i subvencija u platama, prevoz.
 2. **Jedno pravno lice**: izbacuju se biranje firme, pretraga firme po imenu ("Constellation LLC"), "Constel Group" i oznake pravnih lica.
 3. **Valuta RSD + EUR**: jedan pomoćni sloj `toBookAmounts()`. U šemi `amount_usd` postaje `amount_rsd` i dodaje se `amount_eur`. Menjaju se i view-ovi, formatiranje iznosa i sva mesta gde se kurs računa ručno.
 4. **Projekti**: šifarnik `projects` (gradilište / zakup) i `project_id` na transakcijama, fakturama, `pl_splits` i budžetu. To zamenjuje `rev_alloc_*` (Aimfox/Social Growth).
-5. **Prihodi**: situacije i zakup po projektu (`revenue_entries` + naplata) i ručna mesečna prognoza.
+5. **Prihodi**: situacije i zakup po projektu (`revenue_entries` + naplata) i ručna mesečna prognoza. Treba odlučiti i da li `v_pl_entries` uzima izlazne fakture (situacije) kao prihod. Do sada ih ne uzima, nego prihod računa iz uplata.
 6. **Srpski interfejs.**
 7. **Početni podaci i puštanje**: banke, profil firme, korisnici, hosting i prvi push na GitHub.
 

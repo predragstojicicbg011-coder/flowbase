@@ -77,14 +77,15 @@ export function absenceLabel(reason: AbsenceRow['reason']): string {
   return ABSENCE_REASONS.find(r => r.value === reason)?.label ?? reason
 }
 
-/** Which books a salary posts to, and how it is allocated, over a period. */
+/**
+ * Which department and sub-category a salary posts to, over a period. Which
+ * project it goes to is decided by the hours, not here.
+ */
 export interface CostAllocationRow {
   id: string
   employee_id: string
   department: string
   dept_subcategory: string | null
-  rev_alloc_type: string
-  opex_type: string
   valid_from: string
   valid_to: string | null
   note: string | null

@@ -8,10 +8,13 @@ import { useCompanies } from '../contexts/CompaniesContext'
 import { EntriesModal, useEntryEditor, em } from '../components/EntriesModal'
 import { MonthlyEntryList } from '../components/MonthlyEntryList'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { useProjects } from '../contexts/ProjectsContext'
+import { OVERHEAD_LABEL, projectLabel } from '../services/projects'
+import { PROJECT_FILTER_OVERHEAD, matchesProjectFilter, projectFilterLabel } from '../services/ledgerFilters'
 import { KeyFigures, ChartDeck } from '../components/ExpenseVisuals'
 import {
   buildTree, withComparison, paretoCut, flatten, findNode,
-  contributesTo, isAllocated, BRANCH_LABEL, BRANCH_COLUMNS,
+  contributesTo, BRANCHES, BRANCH_LABEL, BRANCH_COLUMNS,
   adjustedTotal, excludedTotal, totalOf, monthsIn, isExpenseRow,
   Branch, PlEntry, ComparedNode, UNASSIGNED,
 } from '../services/expenseTree'
@@ -28,25 +31,28 @@ import {
 //   what changed and why      → movers, ranked by contribution to the change
 //   can I trust this number   → reconciliation strip, and drill to the rows
 //
-// FOUR branches, four lenses on one number:
+// THREE branches, three lenses on one number:
 //
 //   P&L category      what kind of cost
 //   Department        who spends it
-//   Revenue stream    which business it was bought for
-//   Performance/OPEX  fixed running cost, or spend that chases revenue
+//   Project           which site or building it was spent on — or
+//                     Opšti troškovi, the company's overhead
 //
 // They always tie. Rows missing a level are put under an explicit Unassigned
-// node rather than dropped, and the last two — which split a row by value
-// rather than filing it — get their shares from services/allocation.ts, whose
-// arithmetic guarantees the halves sum to the row.
+// node rather than dropped. Every row is FILED, never divided: a document
+// shared by several projects arrives from v_pl_entries as one row per split
+// line, each with its own project (see services/expenseTree.ts).
+//
+// A project filter narrows the whole page — every branch, the charts and the
+// export — to one project, or to overhead alone.
 //
 // ── Why this page absorbed the P&L page ─────────────────────────────────────
 //
-// The old P&L page carried these last two analyses as extra columns beside a
-// statement whose other figures had stopped being trustworthy. The analyses
-// were the part worth keeping, so they moved here, where the tree, the
-// comparison, the hide-a-line arithmetic and the drill-down already exist and
-// are tested. One report, four tabs, one total.
+// The old P&L page carried its analyses as extra columns beside a statement
+// whose other figures had stopped being trustworthy. The analyses were the
+// part worth keeping, so they moved here, where the tree, the comparison, the
+// hide-a-line arithmetic and the drill-down already exist and are tested. One
+// report, three tabs, one total.
 
 
 const pct = (n: number | null, dp = 1) => n === null ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(dp)}%`
@@ -88,13 +94,10 @@ function periodRange(mode: 'month' | 'quarter' | 'ytd', anchor: string) {
 
 function fetchEntries(dateFrom: string, dateTo: string, companyId: string): Promise<PlEntry[]> {
   return fetchAllPages<PlEntry>((from, to) => {
-    // `amount` and the six allocation fields are what the stream and cost-type
-    // branches are built from. `amount` is not decoration: the two typed
-    // splits are stored in the currency of the bill, and the factor that
-    // turns them into the display currency is amount_rsd / amount (or
-    // amount_eur / amount) off this very row.
+    // `project_id` / `project_name` are the row's own — a split line's, not
+    // its document's — and are what the project branch and filter read.
     let q = supabase.from('v_pl_entries')
-      .select('id, tx_type, amount, amount_rsd, amount_eur, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, rev_alloc_type, rev_alloc_sg, rev_alloc_aimfox, opex_type, opex_amount, performance_amount')
+      .select('id, tx_type, amount, amount_rsd, amount_eur, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, project_id, project_name')
       .gte('pl_date', dateFrom).lte('pl_date', dateTo)
     if (companyId !== 'all') q = q.eq('company_id', companyId)
     return q.order('pl_date').order('id').range(from, to)
@@ -114,6 +117,14 @@ export default function ExpenseAnalysis() {
   const [mode, setMode] = useState<'month' | 'quarter' | 'ytd'>('ytd')
   const [anchor, setAnchor] = useState(new Date().toISOString().slice(0, 7))
   const [branch, setBranch] = useState<Branch>('pl')
+  // '' all, PROJECT_FILTER_OVERHEAD overhead only, or a project id.
+  const [projectFilter, setProjectFilter] = useState('')
+  const { projects } = useProjects()
+  const projectChoices = useMemo(
+    () => projects.filter(p => companyId === 'all' || p.company_id === companyId),
+    [projects, companyId])
+  const projectFilterName = projectFilterLabel(
+    projectFilter, id => { const p = projects.find(x => x.id === id); return p ? projectLabel(p) : '' })
 
   const [current, setCurrent] = useState<PlEntry[]>([])
   const [prior, setPrior] = useState<PlEntry[]>([])
@@ -162,12 +173,17 @@ export default function ExpenseAnalysis() {
   //
   // `side` in the service is where the revenue half plugs in later: swap this
   // predicate for the revenue tx_types and nothing else has to change.
-  const curExp = useMemo(() => current.filter(isExpenseRow), [current])
-  const priorExp = useMemo(() => prior.filter(isExpenseRow), [prior])
-  const priExp = useMemo(() => prior.filter(isExpenseRow), [prior])
+  //
+  // The project filter applies to both periods, so the comparison stays like
+  // for like.
+  const inScope = useCallback(
+    (e: PlEntry) => isExpenseRow(e) && matchesProjectFilter(e.project_id, projectFilter),
+    [projectFilter])
+  const curExp = useMemo(() => current.filter(inScope), [current, inScope])
+  const priorExp = useMemo(() => prior.filter(inScope), [prior, inScope])
 
   const tree = useMemo(() => buildTree(curExp, branch, currency), [curExp, branch, currency])
-  const priorTree = useMemo(() => buildTree(priExp, branch, currency), [priExp, branch, currency])
+  const priorTree = useMemo(() => buildTree(priorExp, branch, currency), [priorExp, branch, currency])
   // Rows with no figure in the display currency count as zero — said, not hidden.
   const missingFigure = useMemo(() => curExp.filter(e => pick(e) === null).length, [curExp, pick])
   const compared = useMemo(() => withComparison(tree, priorTree), [tree, priorTree])
@@ -195,8 +211,7 @@ export default function ExpenseAnalysis() {
     return {
       plTotal,
       deptTotal: totalOf(deptTree),
-      streamTotal: totalOf(buildTree(curExp, 'stream', currency)),
-      typeTotal: totalOf(buildTree(curExp, 'type', currency)),
+      projectTotal: totalOf(buildTree(curExp, 'project', currency)),
       unassigned: deptTree.find(n => n.label === UNASSIGNED)?.amount || 0,
     }
   }, [curExp, currency])
@@ -205,11 +220,9 @@ export default function ExpenseAnalysis() {
   /**
    * How far the open branch is from the P&L total.
    *
-   * The filing branches cannot drift — the same rows, the same amounts, a
-   * different order. The allocated ones can: a by-value split is typed by
-   * hand, and two numbers that do not add up to the bill put the difference
-   * here rather than nowhere. It is a data error worth a line on the screen,
-   * not an exception, so the page states it and carries on.
+   * Every branch files the same rows, so this should be zero. It is kept as
+   * a guard: if a branch ever drops or doubles a row, the page says so
+   * rather than showing two totals that silently disagree.
    */
   const drift = total - recon.plTotal
   const drifting = Math.abs(drift) >= 0.01
@@ -230,30 +243,17 @@ export default function ExpenseAnalysis() {
   // value is empty, and was `''` to the copy, which fell back first and
   // trimmed after. Those rows were in the node's total and missing from the
   // list underneath it. Now the list is by construction the set the node was
-  // summed from — including, on an allocated branch, the rows that are in it
-  // for part of their value.
+  // summed from.
   const drillRows = useMemo(() => {
     if (!selectedNode) return []
     return curExp.filter(e => contributesTo(e, branch, selectedNode.path, currency))
   }, [selectedNode, curExp, branch, currency])
 
   /**
-   * What those rows are worth in full, as against the figure above them.
-   *
-   * On an allocated branch a 100,000 RSD invoice split 60/40 is listed under both
-   * halves, and a reader who adds the list up gets a number larger than the
-   * one they clicked. Saying so is not a footnote — it is the difference
-   * between a report and a trap.
-   */
-  const drillWhole = useMemo(
-    () => drillRows.reduce((sum, e) => sum + Math.abs(pick(e) ?? 0), 0),
-    [drillRows, pick])
-
-  /**
    * The whole report, in a file someone else can work with.
    *
-   * Four sheets, and the split matters: a preamble that says what the file is,
-   * the tree in BOTH branches so the reader is not stuck with whichever one
+   * Five sheets, and the split matters: a preamble that says what the file is,
+   * the tree in EVERY branch so the reader is not stuck with whichever one
    * happened to be open, and every entry on its own row with its full
    * classification repeated onto it. That last sheet is the one a pivot or an
    * analysis tool can use — a tree cannot be pivoted.
@@ -314,7 +314,7 @@ export default function ExpenseAnalysis() {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(preambleRows({
         period: range.label,
         priorPeriod: range.priorLabel,
-        company: companyName,
+        company: projectFilter ? `${companyName} · ${projectFilterName}` : companyName,
         total, prior: priorTotal, excluded, adjusted, unassigned,
         paretoLines: pareto.cutoff,
         entryCount: entries.length,
@@ -326,8 +326,7 @@ export default function ExpenseAnalysis() {
       const SHEETS: [Branch, string][] = [
         ['pl', 'By P&L'],
         ['department', 'By department'],
-        ['stream', 'By revenue stream'],
-        ['type', 'Performance vs OPEX'],
+        ['project', 'By project'],
       ]
       for (const [b, sheet] of SHEETS) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
@@ -420,7 +419,7 @@ export default function ExpenseAnalysis() {
             <div style={s.pageTitle}>P&amp;L Analysis</div>
             <div style={s.pageSub}>
               {loading ? 'Loading…'
-                : `${companyName} · ${range.label} vs ${range.priorLabel} · ${curExp.length.toLocaleString()} entries · ${currency}`
+                : `${companyName}${projectFilter ? ` · ${projectFilterName}` : ''} · ${range.label} vs ${range.priorLabel} · ${curExp.length.toLocaleString()} entries · ${currency}`
                   + (missingFigure > 0 ? ` · ${missingFigure.toLocaleString()} with no ${currency} figure, counted as zero` : '')}
             </div>
           </div>
@@ -431,6 +430,14 @@ export default function ExpenseAnalysis() {
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
+            <select style={s.sel} value={projectFilter} title="Project"
+              onChange={e => { setProjectFilter(e.target.value); setSelected(null) }}>
+              <option value="">All projects</option>
+              <option value={PROJECT_FILTER_OVERHEAD}>{OVERHEAD_LABEL}</option>
+              {projectChoices.map(p => (
+                <option key={p.id} value={p.id}>{projectLabel(p)}{p.active ? '' : ' (zatvoren)'}</option>
+              ))}
+            </select>
             <select style={s.sel} value={mode} onChange={e => setMode(e.target.value as any)}>
               <option value="month">Monthly</option>
               <option value="quarter">Quarterly</option>
@@ -467,10 +474,9 @@ export default function ExpenseAnalysis() {
         <div style={s.toolbar}>
           {/* One row of tabs over one total. The order runs from the most
               descriptive question to the most managerial: what kind of cost,
-              who spent it, which business it was for, and whether it was a
-              fixed cost or a bet on revenue. */}
+              who spent it, and which site it was spent on. */}
           <div style={s.branchToggle}>
-            {(['pl', 'department', 'stream', 'type'] as Branch[]).map(b => (
+            {BRANCHES.map(b => (
               <button key={b}
                 style={{ ...s.branchBtn, ...(branch === b ? s.branchBtnOn : {}) }}
                 onClick={() => { setBranch(b); setSelected(null) }}>
@@ -508,9 +514,8 @@ export default function ExpenseAnalysis() {
         {drifting && (
           <div style={{ ...s.banner, borderColor: 'rgba(245,166,35,0.35)', background: 'rgba(245,166,35,0.08)', color: '#F5A623' }}>
             This view totals {money(total)}, {money(Math.abs(drift))} {drift > 0 ? 'more' : 'less'} than
-            the {money(recon.plTotal)} the other tabs show. On an allocated view that means one or more
-            rows carry a by-value split whose two halves do not add up to the bill — worth fixing at the
-            transaction rather than reading around.
+            the {money(recon.plTotal)} the other tabs show. Every tab files the same rows, so this is a
+            fault in the report, not in the books — please report it.
           </div>
         )}
 
@@ -571,10 +576,6 @@ export default function ExpenseAnalysis() {
             footerLeft={
               `${drillRows.length.toLocaleString()} transaction${drillRows.length !== 1 ? 's' : ''} · `
               + `grouped by month, newest first · amounts in ${currency} · click Edit to modify`
-              + (isAllocated(branch) && drillWhole - selectedNode.amount >= 0.01
-                ? ` · these transactions are worth ${money(drillWhole)} in full; `
-                  + `${money(selectedNode.amount)} of that is allocated here and the rest to the other side`
-                : '')
             }
             onClose={() => setSelected(null)}>
 
@@ -596,13 +597,11 @@ export default function ExpenseAnalysis() {
         {editorNode}
 
         <div style={s.footnote}>
-          All four tabs read the same rows, so they always total the same. A row missing a
+          All three tabs read the same rows, so they always total the same. A row missing a
           department is placed under <strong>Unassigned</strong> rather than dropped, which is why the
-          department view reconciles. <strong>By revenue stream</strong> and{' '}
-          <strong>Performance vs OPEX</strong> divide each row by value rather than filing it, so a
-          split transaction appears under both headings at part of its worth — the figures still add
-          to the same total, and the drill-down says what a listed row contributed. A split typed on a
-          foreign-currency bill is converted at that bill's own booked rate, never today's.
+          department view reconciles. <strong>By project</strong> files each row under its own project;
+          a document split across several projects counts on each for its split line, and a row with
+          no project is <strong>{OVERHEAD_LABEL}</strong> — overhead is never spread over the projects.
           Hiding a line removes it from the total so you can ask what spend looks like without it;
           the excluded amount stays on screen.
         </div>
@@ -640,7 +639,7 @@ function Spark({ values, max, rising }: { values: number[]; max: number; rising:
 /** One glyph per tab. Kept beside the styles rather than in the service:
  *  the service is tested arithmetic and has no business owning an emoji. */
 const BRANCH_ICON: Record<Branch, string> = {
-  pl: '📊', department: '🏗', stream: '🧭', type: '⚡',
+  pl: '📊', department: '🏢', project: '🏗',
 }
 
 const s: Record<string, React.CSSProperties> = {

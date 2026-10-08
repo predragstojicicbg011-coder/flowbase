@@ -109,15 +109,15 @@ describe('burn, and how long it can go on', () => {
 
 describe('how much of it is one brand', () => {
   const brands = [
-    { label: 'Aimfox', amount: 204513.92 },
-    { label: 'Kicksta', amount: 86159.72 },
-    { label: 'Nitreo', amount: 10789.02 },
-    { label: 'Flock', amount: 8532.11 },
+    { label: 'Zgrada A', amount: 204513.92 },
+    { label: 'Hala B', amount: 86159.72 },
+    { label: 'Stan C', amount: 10789.02 },
+    { label: 'Lokal D', amount: 8532.11 },
   ]
 
   it('ranks them and gives each its share of the whole', () => {
     const c = concentration(brands)
-    expect(c.shares[0].label).toBe('Aimfox')
+    expect(c.shares[0].label).toBe('Zgrada A')
     expect(c.topShare).toBeCloseTo(204513.92 / c.total, 6)
   })
 
@@ -143,7 +143,7 @@ describe('how much of it is one brand', () => {
   })
 
   it('leaves out a brand worth nothing rather than ranking a row of zeros', () => {
-    expect(concentration([...brands, { label: 'SocialFollow', amount: 0 }]).shares)
+    expect(concentration([...brands, { label: 'Garaža E', amount: 0 }]).shares)
       .toHaveLength(4)
   })
 

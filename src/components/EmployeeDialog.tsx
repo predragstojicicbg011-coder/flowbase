@@ -13,6 +13,7 @@ import { splitContractedNet } from '../services/payroll/engine'
 import SearchableSelect from './SearchableSelect'
 import { fetchAllPartners } from '../services/allPartners'
 import { fmtLocal, fmtNum } from '../utils/formatters'
+import { OVERHEAD_LABEL } from '../services/projects'
 import {
   PL_CATEGORY, SUBCATEGORY, SALARY_DEPT_SUBCATEGORY, OTHER_INCOME_SUBCATEGORY,
 } from '../services/payroll/booking'
@@ -982,20 +983,10 @@ function DeductionsTab({ employee, deductions, partners, payerName, onChanged }:
   )
 }
 
-const REV_ALLOC = [
-  { value: 'sg100', label: '100% Social Growth' },
-  { value: 'af100', label: '100% Aimfox' },
-  { value: 'shared', label: 'Shared 50/50' },
-  { value: 'byval', label: 'By value' },
-]
-const OPEX = [
-  { value: 'opex', label: '100% OPEX' },
-  { value: 'performance', label: '100% Performance' },
-  { value: 'split', label: 'Split by value' },
-]
-
 /**
- * Where this person's cost lands, and how it is allocated, with dates.
+ * Which department this person's cost lands in, with dates. Which PROJECT it
+ * goes to is not set here: payroll cost follows the hours on each project,
+ * entered on the timesheet ("Sati po projektima").
  *
  * Dated for the same reason everything else here is: somebody who moved from
  * Marketing to Dev in June did not retroactively cost Dev anything in May, and
@@ -1029,7 +1020,7 @@ function AllocationTab({ employee, rows, onChanged }: {
   }, [])
   const blank = {
     id: '', department: '', dept_subcategory: '',
-    rev_alloc_type: 'sg100', opex_type: 'opex', valid_from: '', valid_to: '', note: '',
+    valid_from: '', valid_to: '', note: '',
   }
   const [draft, setDraft] = useState(blank)
   const [busy, setBusy] = useState(false)
@@ -1046,8 +1037,6 @@ function AllocationTab({ employee, rows, onChanged }: {
       employee_id: employee.id,
       department: draft.department.trim(),
       dept_subcategory: draft.dept_subcategory.trim() || null,
-      rev_alloc_type: draft.rev_alloc_type,
-      opex_type: draft.opex_type,
       valid_from: draft.valid_from,
       valid_to: draft.valid_to || null,
       note: draft.note.trim() || null,
@@ -1076,9 +1065,6 @@ function AllocationTab({ employee, rows, onChanged }: {
     if (err) { setError(`It could not be deleted: ${err.message}`); return }
     onChanged()
   }
-
-  const labelOf = (list: { value: string; label: string }[], v: string) =>
-    list.find(x => x.value === v)?.label || v
 
   const chosenDept = departments.find(d => d.name === draft.department)
   const subsForDept = chosenDept
@@ -1128,6 +1114,11 @@ function AllocationTab({ employee, rows, onChanged }: {
           </span>
         </div>
         <div style={s.chainNote}>
+          Projekti: the cost is shared over projects by the hours on each, entered on the
+          timesheet under &ldquo;Sati po projektima&rdquo;; hours on no project, and paid
+          absences, go to {OVERHEAD_LABEL}.
+        </div>
+        <div style={s.chainNote}>
           Only the department is a choice. The sub-category follows from what the amount
           is — an addition paid outside the salary lands in the same team, but not among
           the net salaries.
@@ -1148,7 +1139,6 @@ function AllocationTab({ employee, rows, onChanged }: {
             <div style={{ display: 'flex', gap: '6px' }}>
               <button style={s.ghostSmall} onClick={() => setDraft({
                 id: r.id, department: r.department, dept_subcategory: r.dept_subcategory || '',
-                rev_alloc_type: r.rev_alloc_type, opex_type: r.opex_type,
                 valid_from: r.valid_from, valid_to: r.valid_to || '', note: r.note || '',
               })}>Edit</button>
               <button className="mf-trash" title="Delete" aria-label="Delete" style={s.deleteBtn} onClick={() => remove(r)}>&#128465;</button>
@@ -1157,9 +1147,6 @@ function AllocationTab({ employee, rows, onChanged }: {
           <div style={s.cardRow}>
             <b style={{ color: '#DCE9F6' }}>{r.department}</b>
             {r.dept_subcategory && <span>&middot; {r.dept_subcategory}</span>}
-          </div>
-          <div style={s.cardMeta}>
-            {labelOf(REV_ALLOC, r.rev_alloc_type)} &middot; {labelOf(OPEX, r.opex_type)}
           </div>
           {r.note && <div style={s.cardNote}>{r.note}</div>}
         </div>
@@ -1183,18 +1170,6 @@ function AllocationTab({ employee, rows, onChanged }: {
               {chosenDept ? `— ${SALARY_DEPT_SUBCATEGORY} —` : 'choose a department first'}
             </option>
             {subsForDept.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Revenue allocation">
-          <select style={s.input} value={draft.rev_alloc_type}
-            onChange={e => setDraft({ ...draft, rev_alloc_type: e.target.value })}>
-            {REV_ALLOC.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </Field>
-        <Field label="OPEX treatment">
-          <select style={s.input} value={draft.opex_type}
-            onChange={e => setDraft({ ...draft, opex_type: e.target.value })}>
-            {OPEX.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </Field>
         <Field label="From">

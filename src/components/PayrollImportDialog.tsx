@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { DIALOG } from './dialogTheme'
+import ProjectSelect from './ProjectSelect'
 import { obligationRows, obligationTotal, employeesMissingDepartment, PL_CATEGORY } from '../services/payrollAllocation'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
 import { fetchAllPartners } from '../services/allPartners'
@@ -47,9 +48,8 @@ interface ParsedEmployee {
   department_name: string
   dept_subcategory_id: string
   dept_subcategory_name: string
-  rev_alloc_type: string
-  rev_alloc_af_pct: number
-  opex_type: string
+  /** The project this person's cost goes to; null is overhead. */
+  project_id: string | null
   cf_type: string
   expanded: boolean
   accepted: boolean
@@ -209,8 +209,7 @@ function parsePayrollXlsx(workbook: XLSX.WorkBook, taxMode: TaxMode): { header: 
         deductions, gross_salary: gross,
         department_id: '', department_name: '',
         dept_subcategory_id: '', dept_subcategory_name: '',
-        rev_alloc_type: 'sg100', rev_alloc_af_pct: 50,
-        opex_type: 'opex', cf_type: 'recurring',
+        project_id: null, cf_type: 'recurring',
         expanded: true, accepted: true,
         edit_net: String(net_salary_raw),
         edit_tax: String(tax),
@@ -412,29 +411,6 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
   const totalGross = accepted.reduce((s, e) => s + e.gross_salary, 0)
   const totalTaxObl = totalEE + totalER + (parseFloat(taxRounding) || 0)
 
-  /**
-   * A `pct` split, resolved into figures the invoice can actually carry.
-   *
-   * `rev_alloc_af_pct` is a column on `payroll_lines` and nowhere else. Writing
-   * `rev_alloc_type: 'pct'` onto an invoice therefore gave it a type with no
-   * data behind it, and everything reading that invoice — the P&L's analytic
-   * columns above all — had nothing to go on and fell back to splitting it in
-   * half. A 70/30 filing was shown as 50/50.
-   *
-   * So the percentage is turned into a by-value split here, in the currency of
-   * the invoice, which is where `rev_alloc_sg` and `rev_alloc_aimfox` are read
-   * from. The picker still offers a percentage, because that is how the split
-   * is thought about; only the storage changes.
-   */
-  const revAllocFor = (emp: { rev_alloc_type: string; rev_alloc_af_pct: number }, amount: number) => {
-    if (emp.rev_alloc_type !== 'pct') {
-      return { rev_alloc_type: emp.rev_alloc_type, rev_alloc_aimfox: null, rev_alloc_sg: null }
-    }
-    const af = Math.round(amount * (emp.rev_alloc_af_pct / 100) * 100) / 100
-    // The remainder, not a second rounding: the pair must sum to the amount.
-    return { rev_alloc_type: 'byval', rev_alloc_aimfox: af, rev_alloc_sg: Math.round((amount - af) * 100) / 100 }
-  }
-
   const handlePost = async () => {
     if (!companyId) { alert('Please select a company.'); return }
     if (!hasEurRate) { alert('Enter the NBS EUR rate for the payment date first — every entry carries its EUR figure.'); return }
@@ -517,7 +493,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             tax_on_salary: emp.tax_on_salary, contrib_employee: emp.contrib_employee, contrib_employer: emp.contrib_employer,
             deductions_third_party: emp.deductions.filter(d => d.type === 'third_party').map(d => ({ name: d.name, amount: d.amount, partner_id: d.partner_id })),
             deductions_retained: emp.deductions.filter(d => d.type !== 'third_party').map(d => ({ type: d.type, amount: d.amount })),
-            rev_alloc_type: emp.rev_alloc_type, rev_alloc_af_pct: emp.rev_alloc_af_pct, opex_type: emp.opex_type, cf_type: emp.cf_type,
+            cf_type: emp.cf_type,
           })
           if (lineErr) throw new PostFailure('the payroll lines', lineErr.message)
         }
@@ -528,7 +504,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             type: 'expense', pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries',
             department: emp.department_name || null, dept_subcategory: emp.dept_subcategory_name || null,
             expense_description: emp.employee_name,
-            ...revAllocFor(emp, emp.net_salary), opex_type: emp.opex_type,
+            project_id: emp.project_id || null,
             cf_type: emp.cf_type, cf_frequency: 'monthly', cf_next_month_est: emp.net_salary,
             currency, amount: emp.net_salary, ...book(emp.net_salary),
             pl_impact: true, status: 'unpaid',
@@ -548,7 +524,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             type: 'expense', pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries',
             department: emp.department_name || null, dept_subcategory: emp.dept_subcategory_name || null,
             expense_description: emp.employee_name,
-            ...revAllocFor(emp, ded.amount), opex_type: emp.opex_type,
+            project_id: emp.project_id || null,
             cf_type: emp.cf_type, cf_frequency: 'monthly', cf_next_month_est: ded.amount,
             currency, amount: ded.amount, ...book(ded.amount),
             pl_impact: true, status: 'unpaid',
@@ -568,7 +544,6 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             department: 'General Business Expenses',
             dept_subcategory: isFit ? 'Labour related expenses' : 'General expenses',
             expense_description: isFit ? 'FitPass expenses' : 'Penalty, fines and other forced fees',
-            rev_alloc_type: 'shared', opex_type: 'opex',
             note: `Payroll ${invDate.slice(0, 7)} — Storno: ${ded.name} — ${emp.employee_name}`, status: 'posted',
           })
           if (txErr) throw new PostFailure('the retained-deduction entries', txErr.message)
@@ -584,7 +559,6 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           invoice_date: invDate, due_date: dueDate || null,
           type: 'expense', pl_category: PL_CATEGORY, pl_subcategory: 'Tax on salary',
           expense_description: `Objedinjena naplata — ${taxFilingRef || invDate.slice(0, 7)} (${taxMode === 'incentive' ? 'Tax Incentives' : 'Standard'})`,
-          rev_alloc_type: 'sg100', opex_type: 'opex',
           cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: totalTaxObl,
           currency, amount: totalTaxObl, ...book(totalTaxObl),
           pl_impact: false, status: 'unpaid',
@@ -632,8 +606,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             type: 'expense', pl_category: PL_CATEGORY, pl_subcategory: r.pl_subcategory,
             department: r.department, dept_subcategory: r.dept_subcategory,
             expense_description: r.expense_description,
-            rev_alloc_type: emp?.rev_alloc_type || 'sg100',
-            opex_type: emp?.opex_type || 'opex',
+            project_id: emp?.project_id || null,
             cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: r.amount,
             currency, amount: r.amount, ...book(r.amount),
             pl_impact: true, status: 'unpaid', parent_invoice_id: parentId || null,
@@ -1002,27 +975,9 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                             </>
                           )}
 
-                          <div style={s.empSection}>P&L allocation</div>
-                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' as const, marginBottom: '8px' }}>
-                            {[{ id: 'sg100', label: '100% SG' }, { id: 'af100', label: '100% AF' }, { id: 'shared', label: '50/50' }, { id: 'pct', label: '% Split' }].map(a => (
-                              <div key={a.id} style={{ padding: '5px 12px', border: emp.rev_alloc_type === a.id ? '2px solid #00D47E' : '1px solid rgba(255,255,255,0.08)', borderRadius: '20px', cursor: 'pointer', fontSize: '11px', fontWeight: '500', color: emp.rev_alloc_type === a.id ? '#00D47E' : '#7A9BB8', background: emp.rev_alloc_type === a.id ? 'rgba(0,212,126,0.08)' : 'transparent' }}
-                                onClick={() => updateEmployee(emp.id, { rev_alloc_type: a.id } as any)}>
-                                {a.label}
-                              </div>
-                            ))}
-                          </div>
-                          {emp.rev_alloc_type === 'pct' && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.03)', padding: '10px 12px', borderRadius: '8px' }}>
-                              <span style={{ fontSize: '12px', color: '#4EA8FF', minWidth: '30px' }}>AF</span>
-                              <input type="range" min={0} max={100} value={emp.rev_alloc_af_pct}
-                                onChange={e2 => updateEmployee(emp.id, { rev_alloc_af_pct: parseInt(e2.target.value) } as any)}
-                                style={{ flex: 1 }} />
-                              <span style={{ fontSize: '12px', color: '#00D47E', minWidth: '30px', textAlign: 'right' as const }}>SG</span>
-                              <span style={{ fontSize: '12px', fontWeight: '600', color: '#DCE9F6', minWidth: '80px', textAlign: 'right' as const }}>
-                                {emp.rev_alloc_af_pct}% / {100 - emp.rev_alloc_af_pct}%
-                              </span>
-                            </div>
-                          )}
+                          <div style={s.empSection}>Projekat</div>
+                          <ProjectSelect value={emp.project_id}
+                            onChange={v => updateEmployee(emp.id, { project_id: v })} />
                         </div>
                       )}
                     </div>

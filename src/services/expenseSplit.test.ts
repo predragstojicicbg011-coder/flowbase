@@ -2,7 +2,7 @@ import {
   emptyLine, sumOf, remainderOf, isBalanced, whySplitNotSavable,
   absorbRemainder, splitInHalf, rowsFor, linesFrom,
   SPLIT_TOLERANCE, applyScript, scriptMatching, dominantLine,
-  classificationFromSplit, type SplitLine,
+  classificationFromSplit, splitProjectChange, type SplitLine,
 } from './expenseSplit'
 import { RateUnavailableError } from './bookAmounts'
 
@@ -232,6 +232,29 @@ describe('reading a stored split back', () => {
     expect(back.map(l => l.department)).toEqual(['Product', 'Admin'])
     expect(isBalanced(parent, back)).toBe(true)
   })
+
+  /** One bill shared by two sites: each line carries its own project, and a
+   *  line on no project is overhead (null), not an empty string. */
+  it('carries each line’s project through to the row and back', () => {
+    const parent = RSD_PARENT
+    const original = [
+      line({ amount: 40000, pl_category: 'A', project_id: 'site-1' }),
+      line({ amount: 80000, pl_category: 'B', project_id: null }),
+    ]
+    const rows = rowsFor(parent, original)
+    expect(rows.map(r => r.project_id)).toEqual(['site-1', null])
+    const back = linesFrom(rows, key)
+    expect(back.map(l => l.project_id)).toEqual(['site-1', null])
+  })
+
+  it('stores an empty-string project as overhead (null)', () => {
+    const rows = rowsFor(RSD_PARENT, [
+      line({ amount: 60000, pl_category: 'A', project_id: '' as any }),
+      line({ amount: 60000, pl_category: 'B', project_id: 'site-2' }),
+    ])
+    expect(rows[0].project_id).toBeNull()
+    expect(rows[1].project_id).toBe('site-2')
+  })
 })
 
 describe('a line filled from a script', () => {
@@ -239,15 +262,21 @@ describe('a line filled from a script', () => {
     id: 's1', name: 'Figma', icon: '⚡',
     pl_category: 'General Business', pl_subcategory: 'Software subscriptions',
     department: 'Admin', dept_subcategory: 'Tools', expense_description: 'Figma',
-    rev_alloc: 'sg100', opex_type: 'opex', cf_type: 'recurring',
+    cf_type: 'recurring',
   }
 
-  it('takes all eight fields off the script', () => {
+  it('takes all six fields off the script', () => {
     const out = applyScript(emptyLine('a'), script)
     expect(out.pl_category).toBe('General Business')
     expect(out.dept_subcategory).toBe('Tools')
-    expect(out.rev_alloc_type).toBe('sg100')
     expect(out.cf_type).toBe('recurring')
+  })
+
+  /** A script carries no project; the line's project is chosen per document. */
+  it('keeps the project the line already had', () => {
+    const out = applyScript({ ...emptyLine('a'), project_id: 'p-1' }, script)
+    expect(out.project_id).toBe('p-1')
+    expect(applyScript(emptyLine('b'), script).project_id).toBeNull()
   })
 
   it('leaves the amount where it was', () => {
@@ -311,5 +340,44 @@ describe('what a split payment is itself classified as', () => {
   it('says nothing about a payment that is not split', () => {
     expect(dominantLine([])).toBeNull()
     expect(classificationFromSplit([])).toBeNull()
+  })
+})
+
+describe('the project while a document is split', () => {
+  const l = (amount: number, project_id: string | null = null) =>
+    ({ ...emptyLine(`k${amount}`), amount, pl_category: 'A', project_id })
+
+  /** A bill on site A, split in two: both halves start on site A. */
+  it('starts the new lines on the document’s project and clears the document', () => {
+    const out = splitProjectChange([], [l(60), l(40)], 'site-a')
+    expect(out.lines.map(x => x.project_id)).toEqual(['site-a', 'site-a'])
+    expect(out.parentProjectId).toBeNull()
+  })
+
+  it('keeps a project a new line was already given', () => {
+    const out = splitProjectChange([], [l(60, 'site-b'), l(40)], 'site-a')
+    expect(out.lines.map(x => x.project_id)).toEqual(['site-b', 'site-a'])
+  })
+
+  it('starts overhead lines on a document that was overhead', () => {
+    const out = splitProjectChange([], [l(60), l(40)], null)
+    expect(out.lines.map(x => x.project_id)).toEqual([null, null])
+    expect(out.parentProjectId).toBeNull()
+  })
+
+  /** Two projects on one row would count the bill twice. */
+  it('keeps the document clear while lines are edited', () => {
+    const out = splitProjectChange([l(60, 'a'), l(40, 'b')], [l(50, 'a'), l(50, 'b')], 'stale')
+    expect(out.parentProjectId).toBeNull()
+  })
+
+  it('puts the document back on its biggest line’s project when the split is removed', () => {
+    const out = splitProjectChange([l(30, 'a'), l(70, 'b')], [], null)
+    expect(out.lines).toEqual([])
+    expect(out.parentProjectId).toBe('b')
+  })
+
+  it('leaves the document alone when there was no split either side', () => {
+    expect(splitProjectChange([], [], 'site-a').parentProjectId).toBe('site-a')
   })
 })

@@ -451,8 +451,8 @@ describe('somebody who joined or left mid-month', () => {
     // who is in fact configured.
     const alloc = {
       id: 'al1', employee_id: 'e1', department: 'Office & Administration',
-      dept_subcategory: 'Salary expenses domestic', rev_alloc_type: 'sg100',
-      opex_type: 'opex', valid_from: '2026-09-07', valid_to: null, note: null,
+      dept_subcategory: 'Salary expenses domestic',
+      valid_from: '2026-09-07', valid_to: null, note: null,
     }
     const r = employeesForMonth([joiner], [theirContract], [], input, [alloc])
     expect(r.people[0].allocation?.department).toBe('Office & Administration')

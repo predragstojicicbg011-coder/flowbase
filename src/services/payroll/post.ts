@@ -17,6 +17,8 @@
 
 import { checkPlan, planTotal, type PostingPlan, type PlannedInvoice } from './posting'
 import { bookAmountsAtRate, type BookAmounts } from '../bookAmounts'
+import { saveSplits } from '../saveSplits'
+import type { SplitLine } from '../expenseSplit'
 import { firstOfMonth } from './timesheets'
 
 export interface PostContext {
@@ -167,8 +169,10 @@ export async function postPlan(
       department: t.department,
       dept_subcategory: t.dept_subcategory,
       expense_description: t.expense_description,
-      rev_alloc_type: t.rev_alloc_type,
-      opex_type: t.opex_type,
+      // Overhead. A storno cancels part of an expense booked elsewhere (the
+      // FitPass bill, the insurance premium), which is not a site's cost, so
+      // its reversal is not one either.
+      project_id: null,
       status: 'posted',
       note: t.note,
     }).select('id').single()
@@ -219,6 +223,31 @@ export async function postPlan(
   return { postingId, invoiceIds, transactionIds }
 }
 
+/**
+ * The project an invoice carries itself: its one project line's, or null when
+ * it has none or is split (the split lines then carry the projects).
+ */
+export function ownProjectOf(invoice: PlannedInvoice): string | null {
+  return invoice.projects.length === 1 ? invoice.projects[0].project_id : null
+}
+
+/** The split lines an invoice is written with; empty unless it has two or more projects. */
+export function splitLinesFor(invoice: PlannedInvoice): SplitLine[] {
+  if (invoice.projects.length < 2) return []
+  return invoice.projects.map((p, i) => ({
+    key: String(i),
+    amount: p.amount,
+    pl_category: invoice.pl_category,
+    pl_subcategory: invoice.pl_subcategory,
+    department: invoice.department ?? '',
+    dept_subcategory: invoice.dept_subcategory ?? '',
+    expense_description: invoice.expense_description,
+    project_id: p.project_id,
+    cf_type: invoice.cf_type,
+    note: p.project_id ? 'Po satima na projektu' : 'Opšti troškovi — sati van projekata',
+  }))
+}
+
 async function insertInvoice(
   client: any,
   invoice: PlannedInvoice,
@@ -227,6 +256,7 @@ async function insertInvoice(
   parentId: string | null,
   book: (amount: number) => BookAmounts,
 ): Promise<string> {
+  const booked = book(invoice.amount)
   const { data, error } = await client.from('invoices').insert({
     company_id: context.companyId,
     partner_id: invoice.partnerId,
@@ -239,8 +269,7 @@ async function insertInvoice(
     department: invoice.department,
     dept_subcategory: invoice.dept_subcategory,
     expense_description: invoice.expense_description,
-    rev_alloc_type: invoice.rev_alloc_type,
-    opex_type: invoice.opex_type,
+    project_id: ownProjectOf(invoice),
     cf_type: invoice.cf_type,
     cf_frequency: 'monthly',
     // Nothing is expected next month from somebody who has left, and a
@@ -248,7 +277,7 @@ async function insertInvoice(
     cf_next_month_est: invoice.cf_type === 'recurring' ? invoice.amount : 0,
     currency: context.currency,
     amount: invoice.amount,
-    ...book(invoice.amount),
+    ...booked,
     pl_impact: invoice.pl_impact,
     status: 'unpaid',
     parent_invoice_id: parentId,
@@ -257,6 +286,26 @@ async function insertInvoice(
 
   if (error) throw new PostStepFailure(labelFor(invoice), error.message)
   if (!data?.id) throw new PostStepFailure(labelFor(invoice), 'it returned no id')
+
+  // Shared over several projects: the invoice once, its lines one per
+  // project and one for overhead. The dinars and euros of the lines are
+  // derived from the invoice's own book figures, the last line taking the
+  // rounding, so they sum to it in every column.
+  const lines = splitLinesFor(invoice)
+  if (lines.length > 0) {
+    const saved = await saveSplits(client, 'invoice', data.id, {
+      amount: invoice.amount,
+      currency: context.currency,
+      exchange_rate: booked.exchange_rate,
+      eur_rate: booked.eur_rate,
+      amount_rsd: booked.amount_rsd,
+      amount_eur: booked.amount_eur,
+    }, lines)
+    if (!saved.ok) {
+      throw new PostStepFailure(`the project split of ${labelFor(invoice)}`,
+        `${saved.message} The invoice ${data.id} is written and booked to overhead.`)
+    }
+  }
   return data.id
 }
 
@@ -340,6 +389,14 @@ export async function undoPosting(
   }
 
   if (posting.created_invoice_ids?.length) {
+    // The project split lines first. They hang off the invoice by id and
+    // nothing removes them with it, so left behind they would be orphans.
+    const { error: splitErr } = await client.from('pl_splits')
+      .delete().eq('source', 'invoice').in('source_id', posting.created_invoice_ids).select('id')
+    if (splitErr) {
+      throw new Error(`The project split of these invoices could not be removed `
+        + `(${splitErr.message}). Nothing else was deleted and the month is still posted.`)
+    }
     const { error } = await client.from('invoices')
       .delete().in('id', posting.created_invoice_ids).select('id')
     if (error) {

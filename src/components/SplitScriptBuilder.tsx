@@ -52,8 +52,6 @@ export default function SplitScriptBuilder({
   const [dept, setDept] = useState('')
   const [deptSub, setDeptSub] = useState('')
   const [expDesc, setExpDesc] = useState('')
-  const [revAlloc, setRevAlloc] = useState('shared')
-  const [opexType, setOpexType] = useState('opex')
   const [cfType, setCfType] = useState('recurring')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -87,7 +85,7 @@ export default function SplitScriptBuilder({
     department: nameOf(depts, dept),
     dept_subcategory: nameOf(deptSubs, deptSub),
     expense_description: nameOf(descs, expDesc),
-    rev_alloc: revAlloc, opex_type: opexType, cf_type: cfType,
+    cf_type: cfType,
   }
 
   /**
@@ -195,22 +193,6 @@ export default function SplitScriptBuilder({
               parentField="dept_subcategory_id" currentCount={descsHere.length} disabled={!deptSub}
               onAdded={item => { setDescs(p => [...p, { ...item, dept_subcategory_id: deptSub }]); setExpDesc(item.id) }} />
           </div>
-        ))}
-        {field('Revenue stream', (
-          <select style={s.input} value={revAlloc} onChange={e => setRevAlloc(e.target.value)}>
-            <option value="shared">Shared</option>
-            <option value="sg100">100% Social Growth</option>
-            <option value="af100">100% Aimfox</option>
-          </select>
-        ))}
-      </div>
-
-      <div style={s.row}>
-        {field('Expense type', (
-          <select style={s.input} value={opexType} onChange={e => setOpexType(e.target.value)}>
-            <option value="opex">OPEX</option>
-            <option value="performance">Performance</option>
-          </select>
         ))}
         {field('Cash flow', (
           <select style={s.input} value={cfType} onChange={e => setCfType(e.target.value)}>

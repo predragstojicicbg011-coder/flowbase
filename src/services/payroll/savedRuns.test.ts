@@ -29,8 +29,8 @@ const person = (over: Partial<EmployeeForMonth> = {}): EmployeeForMonth => ({
   deductions: [],
   allocation: {
     id: 'a1', employee_id: 'e1', department: 'Development Expenses',
-    dept_subcategory: 'Salary expenses domestic', rev_alloc_type: 'sg100',
-    opex_type: 'opex', valid_from: '2026-01-01', valid_to: null, note: null,
+    dept_subcategory: 'Salary expenses domestic',
+    valid_from: '2026-01-01', valid_to: null, note: null,
   },
   serviceYears: 4, serviceYearsDerived: true, ...over,
 })

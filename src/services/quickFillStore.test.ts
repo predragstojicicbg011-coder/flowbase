@@ -7,7 +7,7 @@ import type { QuickFillScript } from '../data/quickfill'
 const script = (id: string, name: string): QuickFillScript => ({
   id, name, icon: '', pl_category: 'Banking and Finance', pl_subcategory: '',
   department: '', dept_subcategory: '', expense_description: '',
-  rev_alloc: 'shared', opex_type: 'opex', cf_type: '',
+  cf_type: '',
 })
 
 describe('findCurrencyDifference', () => {
@@ -54,8 +54,8 @@ describe('whyNotSavable', () => {
   const existing = [{ id: 'a', name: 'Bank fee' }, { id: 'b', name: 'Currency Differences' }]
   const draft = (over: Partial<ScriptDraft> = {}): ScriptDraft => ({
     name: 'Rent', icon: '', pl_category: '', pl_subcategory: '', department: '',
-    dept_subcategory: '', expense_description: '', rev_alloc: 'shared',
-    opex_type: 'opex', cf_type: '', ...over,
+    dept_subcategory: '', expense_description: '',
+    cf_type: '', ...over,
   })
 
   it('saves a template that only has a name', () => {
@@ -105,11 +105,10 @@ describe('toRow', () => {
     const row = toRow({
       name: '  Rent  ', icon: '', pl_category: 'Overheads', pl_subcategory: '',
       department: '', dept_subcategory: '', expense_description: '',
-      rev_alloc: '', opex_type: '', cf_type: '',
+      cf_type: '',
     })
     expect(row.name).toBe('Rent')
-    expect(row.rev_alloc).toBe('shared')
-    expect(row.opex_type).toBe('opex')
+    expect(row.cf_type).toBe('')
     expect(row.sort_order).toBe(0)
   })
 
@@ -117,7 +116,19 @@ describe('toRow', () => {
     expect(Object.keys(toRow({
       id: 'x', name: 'Rent', icon: '', pl_category: '', pl_subcategory: '',
       department: '', dept_subcategory: '', expense_description: '',
-      rev_alloc: 'shared', opex_type: 'opex', cf_type: '',
+      cf_type: '',
     }))).not.toContain('id')
+  })
+
+  /** A template is a classification. A project is chosen per document, and
+   *  the columns that used to allocate (rev_alloc, opex_type) are gone. */
+  it('writes no allocation and no project', () => {
+    const keys = Object.keys(toRow({
+      name: 'Rent', icon: '', pl_category: '', pl_subcategory: '',
+      department: '', dept_subcategory: '', expense_description: '', cf_type: '',
+    }))
+    expect(keys).not.toContain('rev_alloc')
+    expect(keys).not.toContain('opex_type')
+    expect(keys).not.toContain('project_id')
   })
 })

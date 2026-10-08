@@ -24,6 +24,7 @@
 // Both are shown, marked, and left alone. Everything else round-trips.
 
 import { settledStatus } from './settleInvoice'
+import { projectIdToInput } from './projects'
 
 export type RowSource = 'transactions' | 'passthrough'
 
@@ -55,12 +56,11 @@ export interface RowSeed {
   dept_subcategory_name: string
   expense_description: string
   revenue_stream: string
-  rev_alloc: string
-  aimfox_val: string
-  sg_val: string
-  opex_type: string
-  opex_val: string
-  performance_val: string
+  /**
+   * The row's project as the grid holds it: a project id, or '' for company
+   * overhead. Convert with projectIdFromInput when writing.
+   */
+  project_id: string
   cf_type: string
   cf_frequency: string
   cf_next_month_est: string
@@ -105,12 +105,7 @@ export function txToSeed(tx: any, partnerName = ''): RowSeed {
     dept_subcategory_name: str(tx.dept_subcategory),
     expense_description: str(tx.expense_description),
     revenue_stream: str(tx.revenue_stream),
-    rev_alloc: str(tx.rev_alloc_type) || 'sg100',
-    aimfox_val: money(tx.rev_alloc_aimfox),
-    sg_val: money(tx.rev_alloc_sg),
-    opex_type: str(tx.opex_type) || 'opex',
-    opex_val: money(tx.opex_amount),
-    performance_val: money(tx.performance_amount),
+    project_id: projectIdToInput(tx.project_id),
     cf_type: str(tx.cf_type),
     cf_frequency: str(tx.cf_frequency) || 'monthly',
     cf_next_month_est: money(tx.cf_next_month_est),
@@ -146,8 +141,7 @@ export function passthroughToSeed(pt: any, partnerName = ''): RowSeed {
     pl_category_name: '', pl_subcategory_name: '',
     department_name: '', dept_subcategory_name: '',
     expense_description: '', revenue_stream: '',
-    rev_alloc: 'sg100', aimfox_val: '', sg_val: '',
-    opex_type: 'opex', opex_val: '', performance_val: '',
+    project_id: '',
     cf_type: '', cf_frequency: 'monthly', cf_next_month_est: '',
     note: '',
   }

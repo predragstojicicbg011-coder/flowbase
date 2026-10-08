@@ -1,4 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react'
+import { useProjects } from '../contexts/ProjectsContext'
+import { projectProfitability, type ProjectProfit } from '../services/projects'
 import { useAuth } from '../contexts/AuthContext'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { supabase } from '../supabase'
@@ -208,6 +210,15 @@ export default function Dashboard() {
   const [topPartners, setTopPartners] = useState<{ name: string; amount: number; type: string }[]>([])
   const [recentActivity, setRecentActivity] = useState<any[]>([])
   const [alerts, setAlerts] = useState<{ type: 'warn' | 'ok' | 'info'; text: string }[]>([])
+  // The period's P&L rows by project, kept so the panel can be priced against
+  // the project list whenever that arrives. Overhead is not a project and is
+  // not ranked; see projectProfitability.
+  const [projectRows, setProjectRows] = useState<any[]>([])
+  const { projects } = useProjects()
+  const topProjects: ProjectProfit[] = projectProfitability(projectRows, currency, projects).projects
+    .filter(p => p.revenue !== 0 || p.directCost !== 0)
+    .sort((a, b) => b.margin - a.margin)
+    .slice(0, 5)
 
   // One chip for everything together and one per company. Shown only when
   // there is more than one company; with one, "all" IS that company.
@@ -242,11 +253,13 @@ export default function Dashboard() {
       // ── P&L entries for period ──
       const plEntries = await fetchAllPages<any>((from, to) => {
         let q = supabase.from('v_pl_entries')
-          .select('tx_type,amount_rsd,amount_eur,pl_date,pl_category,partner_id')
+          .select('tx_type,amount_rsd,amount_eur,pl_date,pl_category,partner_id,project_id,project_name')
           .gte('pl_date', dateFrom).lte('pl_date', dateTo)
         if (companyId) q = q.eq('company_id', companyId)
         return q.order('pl_date').order('id').range(from, to)
       })
+
+      setProjectRows(plEntries || [])
 
       const revenue = (plEntries || []).filter(e => e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue').reduce((s, e) => s + amt(e), 0)
       const expenses = (plEntries || []).filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').reduce((s, e) => s + amt(e), 0)
@@ -604,6 +617,26 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
+
+            {/* Top projects by margin: revenue less the project's own direct
+                cost, for the period on screen. Overhead stays off the list —
+                it is nobody's margin — and is on the Projects page. */}
+            {topProjects.length > 0 && (
+              <div style={s.card}>
+                <div style={s.cardHeader}>
+                  <div style={s.cardTitle}>Top projects by margin</div>
+                  <span style={{ fontSize: '11px', color: '#7A9BB8', cursor: 'pointer' }} onClick={() => setPage('projects')}>All →</span>
+                </div>
+                {topProjects.map(p => (
+                  <div key={p.projectId || 'overhead'} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+                    <span style={{ fontSize: '12px', color: '#DCE9F6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, maxWidth: '140px' }} title={p.label}>{p.label}</span>
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: p.margin >= 0 ? '#00D47E' : '#FF5B5A', whiteSpace: 'nowrap' as const }}>
+                      {money(p.margin)}{p.marginPct !== null ? ` · ${p.marginPct.toFixed(1)}%` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* At a glance */}
             <div style={s.card}>

@@ -2,37 +2,32 @@
 //
 // Pure logic — no UI, no database — so the numbers can be tested.
 //
-// FOUR branches over the same rows:
+// THREE branches over the same rows:
 //
 //   pl          P&L Category → P&L Sub-category        "what kind of cost"
 //   department  Department → Sub-category → Expense    "who spends it"
-//   stream      Revenue stream → P&L Cat → Sub-cat     "which business pays"
-//   type        OPEX / Performance → P&L Cat → Sub-cat "fixed, or bought growth"
+//   project     Project → P&L Cat → Sub-cat            "which site pays"
 //
-// All four MUST total the same. Rows missing a level are placed under an
+// All three MUST total the same. Rows missing a level are placed under an
 // explicit Unassigned node rather than dropped, so the totals always tie and
 // the unclassified amount is a visible item to fix instead of a silent
 // shortfall.
 //
-// ── Why a row is a set of contributions and not a path ──────────────────────
+// ── Every branch FILES a row ────────────────────────────────────────────────
 //
-// The first two branches FILE a row: one invoice belongs to one category and
-// one department, so its whole amount goes down one path. The last two
-// ALLOCATE it: a 100,000 RSD bill can be 60% Social Growth and 40% Aimfox,
-// and there is no single path it belongs to. Forcing it down one would either
-// hand a stream money it did not spend or drop 40,000 RSD on the floor.
+// Mintflow had two branches that ALLOCATED a row by value between two
+// businesses. MCFlow has no allocation keys (see services/projects.ts): a row
+// belongs to one project or to none, and a document shared by several sites
+// is split with pl_splits, which v_pl_entries already returns as one row per
+// split line, each carrying its OWN project. So a split bill lands under each
+// of its projects (and under overhead, for a line without one) for exactly
+// that line's amount, and nothing here has to divide anything.
 //
-// So `contributionsFor` returns a LIST — one entry for the filing branches,
-// up to two for the allocating ones — and the tree adds each of them where it
-// belongs. That is what keeps the four totals equal: the shares of a row sum
-// to the row, by the arithmetic in services/allocation.ts.
+// A row with no project goes under OVERHEAD_LABEL ("Opšti troškovi"), never
+// spread over the projects.
 //
-// The consequence to remember when reading the screen: in an allocated branch
-// a transaction appears under BOTH halves, at part of its value each. The
-// drill-down says so rather than letting the reader try to add the list up.
-//
-// `side` exists so the revenue half can be added later without reshaping any
-// of this; today every caller passes 'expense'.
+// `contributionsFor` still returns a list — always of one — so the drill-down
+// and the charts read every branch through the same three functions.
 //
 // ── Which figure ────────────────────────────────────────────────────────────
 //
@@ -41,42 +36,35 @@
 // total converted afterwards at one rate. A row with no EUR figure counts as
 // zero in the EUR view.
 
-import { allocAmount, opexAlloc, bookAmount, type AllocEntry } from './allocation'
-import type { DisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { OVERHEAD_LABEL } from './projects'
 
-export type Branch = 'pl' | 'department' | 'stream' | 'type'
+export type Branch = 'pl' | 'department' | 'project'
 export type Side = 'expense' | 'revenue'
 
 export const UNASSIGNED = 'Unassigned'
 
-/** Branch roots that are a share of each row rather than a home for it. */
-export const SOCIAL_GROWTH = 'Social Growth'
-export const AIMFOX = 'Aimfox'
-export const OPEX = 'OPEX'
-export const PERFORMANCE = 'Performance'
+/** What a project-branch root is called when the row names a project id the view gave no name for. */
+export const UNKNOWN_PROJECT = 'Nepoznat projekat'
 
-/** Whether a branch splits rows by value. Drives the drill-down's wording. */
-export function isAllocated(branch: Branch): boolean {
-  return branch === 'stream' || branch === 'type'
-}
+export const BRANCHES: readonly Branch[] = ['pl', 'department', 'project']
 
 export const BRANCH_LABEL: Record<Branch, string> = {
   pl: 'By P&L category',
   department: 'By department',
-  stream: 'By revenue stream',
-  type: 'Performance vs OPEX',
+  project: 'By project',
 }
 
 /** Column heading over the tree's first column, per branch. */
 export const BRANCH_COLUMNS: Record<Branch, string> = {
   pl: 'Category / sub-category',
   department: 'Department / sub-category / description',
-  stream: 'Revenue stream / category / sub-category',
-  type: 'Cost type / category / sub-category',
+  project: 'Project / category / sub-category',
 }
 
-export interface PlEntry extends AllocEntry {
+export interface PlEntry {
   id?: string
+  amount?: number | null
   tx_type?: string | null
   amount_rsd: number | null
   amount_eur?: number | null
@@ -88,6 +76,9 @@ export interface PlEntry extends AllocEntry {
   pl_date: string                 // 'YYYY-MM-DD'
   company_id?: string | null
   source?: string | null
+  /** The row's own project (a split line's, not its document's); null is overhead. */
+  project_id?: string | null
+  project_name?: string | null
 }
 
 export interface TreeNode {
@@ -160,65 +151,45 @@ const norm = (v: string | null | undefined): string => {
   return s || UNASSIGNED
 }
 
-/**
- * Path of a row within a FILING branch. Missing levels collapse to Unassigned.
- *
- * Only `pl` and `department` have one. An allocated branch puts a row in two
- * places at once, so asking it for "the" path is a question with no answer —
- * which is why the type refuses it rather than returning a half-truth.
- */
-export function pathFor(e: PlEntry, branch: 'pl' | 'department'): string[] {
-  return branch === 'pl'
-    ? [norm(e.pl_category), norm(e.pl_subcategory)]
-    : [norm(e.department), norm(e.dept_subcategory), norm(e.expense_description)]
+/** The row's book figure in `currency`; a missing figure (no EUR yet) is 0. */
+export function bookAmount(e: Pick<PlEntry, 'amount_rsd' | 'amount_eur'>, currency: DisplayCurrency): number {
+  return pickAmount(e, currency) ?? 0
 }
 
-/** A row's amount under one path. A row may have several. */
+/**
+ * The project-branch root a row goes under: its project's name, or
+ * OVERHEAD_LABEL when it has none. A project id without a name (a project the
+ * view could not join) is UNKNOWN_PROJECT — never silently overhead.
+ */
+export function projectRootOf(e: Pick<PlEntry, 'project_id' | 'project_name'>): string {
+  const id = (e.project_id || '').trim()
+  if (!id) return OVERHEAD_LABEL
+  return (e.project_name || '').trim() || UNKNOWN_PROJECT
+}
+
+/** Path of a row within a branch. Missing levels collapse to Unassigned. */
+export function pathFor(e: PlEntry, branch: Branch): string[] {
+  if (branch === 'pl') return [norm(e.pl_category), norm(e.pl_subcategory)]
+  if (branch === 'department') return [norm(e.department), norm(e.dept_subcategory), norm(e.expense_description)]
+  // Under each project, the same breakdown the P&L itself uses: by category.
+  return [projectRootOf(e), norm(e.pl_category), norm(e.pl_subcategory)]
+}
+
+/** A row's amount under one path. */
 export interface Contribution {
   path: string[]
   amount: number
 }
 
 /**
- * Everywhere a row belongs in a branch, and for how much.
+ * Everywhere a row belongs in a branch, and for how much: one contribution
+ * carrying the whole row, on every branch.
  *
- * The filing branches give one contribution carrying the whole row. The
- * allocating ones give two, whose amounts come from services/allocation.ts —
- * the same functions the old P&L page's two analytic columns were printed
- * from, including the currency factor that stops a 1,886 EUR split being
- * read as dinars.
- *
- * `Math.abs` for the same reason the rest of this file uses it: an expense is
- * shown as a positive cost whichever sign it was stored with. Applied to each
- * share rather than to the row, so a 60/40 split of an 80,000 RSD credit note
- * is 48,000 and 32,000 — and still adds back to 80,000.
- *
- * Zero-value contributions are returned rather than filtered: `buildTree`
- * skips them, and a caller asking "does this row touch Aimfox" gets a truthful
- * zero instead of a missing entry it has to interpret.
+ * `Math.abs`: an expense is shown as a positive cost whichever sign it was
+ * stored with.
  */
 export function contributionsFor(e: PlEntry, branch: Branch, currency: DisplayCurrency): Contribution[] {
-  const whole = Math.abs(bookAmount(e, currency))
-
-  if (branch === 'pl' || branch === 'department') {
-    return [{ path: pathFor(e, branch), amount: whole }]
-  }
-
-  // Both allocated branches then break down the same way the P&L itself did:
-  // by cost category. "Aimfox spent 1.2m" is a fact; "Aimfox spent 1.2m, of
-  // which 900k on ads" is the one that can be acted on.
-  const tail = [norm(e.pl_category), norm(e.pl_subcategory)]
-
-  if (branch === 'stream') {
-    return [
-      { path: [SOCIAL_GROWTH, ...tail], amount: Math.abs(allocAmount(e, 'sg', currency)) },
-      { path: [AIMFOX, ...tail], amount: Math.abs(allocAmount(e, 'af', currency)) },
-    ]
-  }
-  return [
-    { path: [OPEX, ...tail], amount: Math.abs(opexAlloc(e, 'opex', currency)) },
-    { path: [PERFORMANCE, ...tail], amount: Math.abs(opexAlloc(e, 'performance', currency)) },
-  ]
+  return [{ path: pathFor(e, branch), amount: Math.abs(bookAmount(e, currency)) }]
 }
 
 /** Whether a row puts any money under `path` — the drill-down's predicate. */
@@ -227,7 +198,7 @@ export function contributesTo(e: PlEntry, branch: Branch, path: string[], curren
     c => c.amount > 0 && path.every((seg, i) => c.path[i] === seg))
 }
 
-/** How much of a row sits under `path`. Equals the row in a filing branch. */
+/** How much of a row sits under `path`: the whole row, or nothing. */
 export function contributionTo(e: PlEntry, branch: Branch, path: string[], currency: DisplayCurrency): number {
   return contributionsFor(e, branch, currency)
     .filter(c => path.every((seg, i) => c.path[i] === seg))

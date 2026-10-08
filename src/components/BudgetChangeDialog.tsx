@@ -4,6 +4,9 @@ import { DIALOG, chrome } from './dialogTheme'
 import { deltaForTarget } from '../services/budgetForecast'
 import { getBookRates, rsdToEur } from '../services/bookAmounts'
 import { fmtRSD } from '../utils/formatters'
+import ProjectSelect from './ProjectSelect'
+import { useProjects } from '../contexts/ProjectsContext'
+import { projectLabelById } from '../services/projects'
 
 // ─── The budget change dialog ────────────────────────────────────────────────
 //
@@ -23,6 +26,20 @@ import { fmtRSD } from '../utils/formatters'
 // here for a company picker to answer, and the refusal that used to stand in
 // its place — "pick one in the selector before changing a budget" — was
 // refusing on behalf of a per-company budget that no longer exists.
+//
+// ── For one project, or for overhead ────────────────────────────────────────
+//
+// A budget line may target a project (`project_id`; null is an overhead line,
+// Opšti troškovi). The page hands over the project the change is for and
+// whether it is fixed: narrowed to one project — or to overhead — the change
+// is for that scope and the dialog only names it; on the all-projects view
+// the user picks, starting from the project the line's own keys agree on.
+//
+// The seed recorded is THAT project's seed on the row (`seedForProject`), not
+// the row's whole seed: the ledger is replayed per project, and pinning a
+// site's entry to the seed of every project on the row would carry the others'
+// money under the site's base. The delta is still taken against the figure the
+// cell shows, so the cell reads back what was typed whichever project it is.
 //
 // ── In dinars, with euros beside them ───────────────────────────────────────
 //
@@ -148,6 +165,7 @@ export function scopeOfChange(rowLabel: string, childLabels?: string[] | null): 
 
 export default function BudgetChangeDialog({
   month, monthLabel, level, classification, rowLabel, current, seed, seedEur = null, childLabels,
+  projectId = null, projectLocked = false, seedForProject,
   onClose, onSaved, onExplain,
 }: {
   month: string
@@ -176,6 +194,15 @@ export default function BudgetChangeDialog({
    * EUR reading of this budget. Recorded as `seed_eur`.
    */
   seedEur?: number | null
+  /** The project the change is for, to start with; null is an overhead line. */
+  projectId?: string | null
+  /** True when the page is narrowed to one scope: the project is named, not picked. */
+  projectLocked?: boolean
+  /**
+   * The row's own seed for one project (RSD, and EUR or null). When given it
+   * replaces `seed` / `seedEur` for whichever project is chosen.
+   */
+  seedForProject?: (projectId: string | null) => { seed: number; seedEur: number | null }
   /**
    * The labels of the row's direct children, or omitted where the caller has
    * no tree to read them from. An empty array is a leaf and says so; omitting
@@ -188,6 +215,9 @@ export default function BudgetChangeDialog({
   onExplain?: () => void
 }) {
   const [target, setTarget] = useState(current.toFixed(2))
+  const [project, setProject] = useState<string | null>(projectId)
+  const { projects } = useProjects()
+  const pinned = seedForProject ? seedForProject(project) : { seed, seedEur }
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -211,10 +241,11 @@ export default function BudgetChangeDialog({
     // The EUR reading, both halves or neither. See the note at the top.
     let eur: { amount_eur: number; seed_eur: number } | { amount_eur: null; seed_eur: null } =
       { amount_eur: null, seed_eur: null }
-    if (seedEur !== null && seedEur !== undefined && Number.isFinite(seedEur)) {
+    const pinnedEur = pinned.seedEur
+    if (pinnedEur !== null && pinnedEur !== undefined && Number.isFinite(pinnedEur)) {
       try {
         const rates = await getBookRates(new Date().toISOString().slice(0, 10))
-        eur = { amount_eur: rsdToEur(delta, rates.eurRate), seed_eur: seedEur }
+        eur = { amount_eur: rsdToEur(delta, rates.eurRate), seed_eur: pinnedEur }
       } catch {
         // Not a reason to refuse a budget planned in dinars.
       }
@@ -228,11 +259,13 @@ export default function BudgetChangeDialog({
       budget_month: `${month}-01`,
       level,
       ...classification,
+      // Null is an overhead line, as on every other table with the column.
+      project_id: project,
       kind: 'adjust',
       amount_rsd: delta,
       // See the prop. Without this the figure typed above drifts the moment
       // the month turns over.
-      seed_rsd: seed,
+      seed_rsd: pinned.seed,
       ...eur,
       reason: reason.trim(),
     })
@@ -264,6 +297,13 @@ export default function BudgetChangeDialog({
                 {scope.text}
               </div>
             ))}
+
+          <div>
+            <div style={s.lbl}>Project</div>
+            {projectLocked
+              ? <div style={{ fontSize: '13px', color: DIALOG.text }} data-testid="budget-change-project">{projectLabelById(projects, project)}</div>
+              : <ProjectSelect value={project} onChange={setProject} title="Project" />}
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>

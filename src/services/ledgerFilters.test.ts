@@ -4,6 +4,7 @@ import {
   presetRange, buildPredicates, activeChips, hasActiveFilters,
   clearFields, clearTab, parseAmount, plCategoryColumn,
   lastPageIndex, pageRange, pageLabel, hasPrevPage, hasNextPage,
+  PROJECT_FILTER_OVERHEAD, matchesProjectFilter, projectFilterLabel,
   type FilterState, type Predicate, type Tab, type FilterField,
 } from './ledgerFilters'
 
@@ -266,13 +267,13 @@ describe('the classification pickers', () => {
   it('reads revenue_stream instead of pl_category once direction is revenue', () => {
     expect(plCategoryColumn('transactions', f({ direction: 'revenue' }))).toBe('revenue_stream')
     expect(plCategoryColumn('transactions', f({ direction: 'expense' }))).toBe('pl_category')
-    const preds = build('transactions', { direction: 'revenue', plCategory: 'Aimfox' })
-    expect(on(preds, 'revenue_stream')).toEqual({ op: 'eq', column: 'revenue_stream', value: 'Aimfox' })
+    const preds = build('transactions', { direction: 'revenue', plCategory: 'Građevinske situacije' })
+    expect(on(preds, 'revenue_stream')).toEqual({ op: 'eq', column: 'revenue_stream', value: 'Građevinske situacije' })
     expect(on(preds, 'pl_category')).toBeUndefined()
   })
 
   it('drops a stale P&L sub-category rather than narrowing a revenue query with it', () => {
-    const preds = build('transactions', { direction: 'revenue', plCategory: 'Aimfox', plSubcategory: 'Software' })
+    const preds = build('transactions', { direction: 'revenue', plCategory: 'Građevinske situacije', plSubcategory: 'Software' })
     expect(on(preds, 'pl_subcategory')).toBeUndefined()
     expect(activeChips('transactions', f({ direction: 'revenue', plSubcategory: 'Software' })).map(c => c.id))
       .not.toContain('plSubcategory')
@@ -436,8 +437,8 @@ describe('the chips', () => {
   })
 
   it('labels the P&L chip as a revenue stream when that is what it filters', () => {
-    expect(activeChips('transactions', f({ plCategory: 'Aimfox', direction: 'revenue' })).map(c => c.label))
-      .toContain('Revenue stream: Aimfox')
+    expect(activeChips('transactions', f({ plCategory: 'Građevinske situacije', direction: 'revenue' })).map(c => c.label))
+      .toContain('Revenue stream: Građevinske situacije')
     expect(activeChips('transactions', f({ plCategory: 'Payroll' })).map(c => c.label))
       .toContain('P&L: Payroll')
   })
@@ -559,5 +560,51 @@ describe('paging', () => {
   it('disables next only on the last page', () => {
     expect(hasNextPage(2, PAGE_SIZE, 142)).toBe(false)
     expect(hasNextPage(1, PAGE_SIZE, 142)).toBe(true)
+  })
+})
+
+describe('the project filter', () => {
+  it('narrows invoices and transactions to one project by id', () => {
+    for (const tab of ['invoices', 'transactions'] as Tab[]) {
+      expect(on(build(tab, { projectId: 'p1' }), 'project_id'))
+        .toEqual({ op: 'eq', column: 'project_id', value: 'p1' })
+    }
+  })
+
+  it('asks for rows with no project when overhead is chosen, not for a project called that', () => {
+    const preds = build('transactions', { projectId: PROJECT_FILTER_OVERHEAD })
+    expect(on(preds, 'project_id')).toEqual({ op: 'is', column: 'project_id', value: null })
+    expect(preds.some(p => p.op === 'eq' && p.value === PROJECT_FILTER_OVERHEAD)).toBe(false)
+  })
+
+  it('never filters a pass-through by project, which has no such column', () => {
+    expect(appliesTo('passthrough', 'projectId')).toBe(false)
+    expect(on(build('passthrough', { projectId: 'p1' }), 'project_id')).toBeUndefined()
+    expect(activeChips('passthrough', f({ projectId: 'p1' }))).toEqual([])
+  })
+
+  it('names the project in its chip, and overhead by its label', () => {
+    const names = { project: (id: string) => (id === 'p1' ? 'Zgrada A' : '') }
+    expect(activeChips('invoices', f({ projectId: 'p1' }), names).map(c => c.label)).toContain('Project: Zgrada A')
+    expect(activeChips('invoices', f({ projectId: PROJECT_FILTER_OVERHEAD }), names).map(c => c.label))
+      .toContain('Project: Opšti troškovi')
+    const chip = activeChips('invoices', f({ projectId: 'p1' })).find(c => c.id === 'project')!
+    expect(clearFields(f({ projectId: 'p1' }), chip.clears).projectId).toBe('')
+  })
+
+  it('matches rows it already holds the same way', () => {
+    expect(matchesProjectFilter('p1', '')).toBe(true)
+    expect(matchesProjectFilter(null, '')).toBe(true)
+    expect(matchesProjectFilter('p1', 'p1')).toBe(true)
+    expect(matchesProjectFilter('p2', 'p1')).toBe(false)
+    expect(matchesProjectFilter(null, 'p1')).toBe(false)
+    expect(matchesProjectFilter(null, PROJECT_FILTER_OVERHEAD)).toBe(true)
+    expect(matchesProjectFilter('', PROJECT_FILTER_OVERHEAD)).toBe(true)
+    expect(matchesProjectFilter('p1', PROJECT_FILTER_OVERHEAD)).toBe(false)
+  })
+
+  it('reads "all projects" when unset', () => {
+    expect(projectFilterLabel('')).toBe('All projects')
+    expect(projectFilterLabel('p9')).toBe('p9')
   })
 })

@@ -24,21 +24,9 @@ import {
 
 const BLANK: ScriptDraft = {
   name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '',
-  dept_subcategory: '', expense_description: '', rev_alloc: 'shared',
-  opex_type: 'opex', cf_type: '',
+  dept_subcategory: '', expense_description: '', cf_type: '',
 }
 
-const REV_ALLOC = [
-  { value: 'sg100', label: '100% Social Growth' },
-  { value: 'af100', label: '100% Aimfox' },
-  { value: 'shared', label: 'Shared 50/50' },
-  { value: 'byval', label: 'By value' },
-]
-const OPEX = [
-  { value: 'opex', label: '100% OPEX' },
-  { value: 'performance', label: '100% Performance' },
-  { value: 'split', label: 'Split by value' },
-]
 const CF = [
   { value: '', label: '— none —' },
   { value: 'recurring', label: 'Recurring' },
@@ -162,8 +150,6 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
             {field('Department', 'department')}
             {field('Dept. sub-category', 'dept_subcategory')}
             {field('Expense description', 'expense_description')}
-            {choice('Revenue allocation', 'rev_alloc', REV_ALLOC)}
-            {choice('Expense type', 'opex_type', OPEX)}
             {choice('Cash flow type', 'cf_type', CF)}
           </div>
           <div style={s.editorFoot}>

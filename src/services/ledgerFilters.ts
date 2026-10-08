@@ -30,6 +30,7 @@ import { DOCUMENT_CURRENCIES } from './bookAmounts'
 import { normaliseDigits } from './entryGroups'
 import { fmtMoney } from '../utils/formatters'
 import { amountField, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { OVERHEAD_LABEL } from './projects'
 
 export type Tab = 'invoices' | 'transactions' | 'passthrough'
 
@@ -40,12 +41,37 @@ export type DatePreset = 'custom' | 'this_month' | 'last_month' | 'this_quarter'
 /** The document currencies, from the one list in bookAmounts. */
 export const CURRENCIES = DOCUMENT_CURRENCIES
 
-/** Duplicated from the dialogs, which each keep their own copy of this list.
- *  Revenue rows carry their classification here and not in `pl_category`. */
-export const REVENUE_STREAMS = [
-  'Social Growth', 'Aimfox', 'Outsourced Services',
-  'VAT Claimed', 'Interest Received', 'Loans', 'Credit', 'Other',
-]
+/** The one list, from ./revenueStreams. Revenue rows carry their
+ *  classification in `revenue_stream` and not in `pl_category`. */
+export { REVENUE_STREAMS } from './revenueStreams'
+
+// ── The project filter ──────────────────────────────────────────────────────
+//
+// One value, three meanings: '' is "every project and overhead" (not
+// filtering), PROJECT_FILTER_OVERHEAD is "only rows with no project" —
+// Opšti troškovi, null in the database — and anything else is a project id.
+// The ledger turns it into a predicate; pages that filter rows they already
+// hold (P&L analysis, Budgeting) call `matchesProjectFilter`.
+
+/** The project filter's value for "no project" (overhead). Not a uuid, so it cannot collide with one. */
+export const PROJECT_FILTER_OVERHEAD = '__overhead__'
+
+/** Whether a row with `projectId` passes the project filter `filter`. */
+export function matchesProjectFilter(projectId: string | null | undefined, filter: string): boolean {
+  const f = (filter || '').trim()
+  if (!f) return true
+  const id = (projectId || '').trim()
+  if (f === PROJECT_FILTER_OVERHEAD) return !id
+  return id === f
+}
+
+/** How the project filter reads in a chip or a subtitle. */
+export function projectFilterLabel(filter: string, nameOf?: (id: string) => string): string {
+  const f = (filter || '').trim()
+  if (!f) return 'All projects'
+  if (f === PROJECT_FILTER_OVERHEAD) return OVERHEAD_LABEL
+  return (nameOf ? nameOf(f) : '') || f
+}
 
 /**
  * One shape, one copy per tab.
@@ -71,6 +97,8 @@ export interface FilterState {
   deptSubcategory: string
   plCategory: string
   plSubcategory: string
+  /** '' (all), PROJECT_FILTER_OVERHEAD (no project), or a project id. */
+  projectId: string
 
   // expense / revenue. `invoices.type` on one tab, `transactions.tx_subtype`
   // on the other — the same question asked of two different columns, which is
@@ -105,7 +133,7 @@ export function emptyFilters(): FilterState {
     companyId: '', datePreset: 'custom', dateFrom: '', dateTo: '',
     amountFrom: '', amountTo: '', currency: '', search: '',
     expenseDescription: '', department: '', deptSubcategory: '',
-    plCategory: '', plSubcategory: '', direction: '',
+    plCategory: '', plSubcategory: '', projectId: '', direction: '',
     txType: '', unclassified: false,
     invoiceStatus: '', overdue: false, dueFrom: '', dueTo: '',
     partnerId: '',
@@ -124,6 +152,9 @@ const SHARED: FilterField[] = [
 
 const CLASSIFICATION: FilterField[] = [
   'expenseDescription', 'department', 'deptSubcategory', 'plCategory', 'plSubcategory',
+  // A pass-through has no project (see the projects migration), so this sits
+  // with the classification fields that only invoices and transactions own.
+  'projectId',
 ]
 
 export const FIELDS_BY_TAB: Record<Tab, FilterField[]> = {
@@ -246,6 +277,7 @@ export type Predicate =
   | { op: 'eq'; column: string; value: string | number | boolean }
   | { op: 'gte' | 'lte' | 'lt' | 'gt'; column: string; value: string | number }
   | { op: 'in'; column: string; value: string[] }
+  | { op: 'is'; column: string; value: null }
   | { op: 'or'; value: string }
 
 export interface BuildContext {
@@ -334,6 +366,14 @@ export function buildPredicates(tab: Tab, f: FilterState, ctx: BuildContext): Pr
     out.push({ op: 'eq', column: 'pl_subcategory', value: f.plSubcategory })
   }
 
+  if (on('projectId') && isSet(f.projectId)) {
+    // The document's own project. A split document's lines carry their own
+    // projects (v_pl_entries reads those); the ledger lists documents.
+    out.push(f.projectId === PROJECT_FILTER_OVERHEAD
+      ? { op: 'is', column: 'project_id', value: null }
+      : { op: 'eq', column: 'project_id', value: f.projectId })
+  }
+
   if (on('unclassified') && f.unclassified) {
     out.push({ op: 'or', value: 'department.is.null,expense_description.is.null' })
   }
@@ -376,6 +416,7 @@ export interface Chip {
 /** Id → display name, for the filters that hold a foreign key. */
 export interface ChipNames {
   company?: (id: string) => string
+  project?: (id: string) => string
   partner?: (id: string) => string
   bank?: (id: string) => string
 }
@@ -466,6 +507,10 @@ export function activeChips(
   }
   if (on('plSubcategory') && isSet(f.plSubcategory) && plCategoryColumn(tab, f) === 'pl_category') {
     out.push({ id: 'plSubcategory', label: `P&L sub: ${f.plSubcategory}`, clears: ['plSubcategory'] })
+  }
+
+  if (on('projectId') && isSet(f.projectId)) {
+    out.push({ id: 'project', label: `Project: ${projectFilterLabel(f.projectId, names.project)}`, clears: ['projectId'] })
   }
 
   if (on('unclassified') && f.unclassified) {

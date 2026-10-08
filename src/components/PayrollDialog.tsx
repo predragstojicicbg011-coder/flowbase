@@ -3,6 +3,7 @@ import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { DIALOG } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
+import ProjectSelect from './ProjectSelect'
 import { obligationRows, obligationTotal, employeesMissingDepartment, PL_CATEGORY } from '../services/payrollAllocation'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
 import { fetchAllPartners } from '../services/allPartners'
@@ -43,8 +44,8 @@ interface EmployeeLine {
   contrib_employer: string
   deductions_third_party: Deduction[]
   deductions_retained: RetainedDeduction[]
-  rev_alloc_type: string
-  opex_type: string
+  /** The project this person's cost goes to; null is overhead. */
+  project_id: string | null
   cf_type: string
   cf_frequency: string
   expanded: boolean
@@ -70,8 +71,7 @@ function makeEmployee(): EmployeeLine {
     contrib_employer: '',
     deductions_third_party: [],
     deductions_retained: [],
-    rev_alloc_type: 'sg100',
-    opex_type: 'opex',
+    project_id: null,
     cf_type: 'recurring',
     cf_frequency: 'monthly',
     expanded: true,
@@ -288,8 +288,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           contrib_employer: parseFloat(emp.contrib_employer) || 0,
           deductions_third_party: emp.deductions_third_party.map(d => ({ name: d.name, amount: parseFloat(d.amount) || 0 })),
           deductions_retained: emp.deductions_retained.map(d => ({ type: d.type, amount: parseFloat(d.amount) || 0 })),
-          rev_alloc_type: emp.rev_alloc_type,
-          opex_type: emp.opex_type,
           cf_type: emp.cf_type,
           cf_frequency: emp.cf_frequency,
         })
@@ -313,8 +311,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           department: emp.department_name || null,
           dept_subcategory: emp.dept_subcategory_name || null,
           expense_description: emp.employee_name,
-          rev_alloc_type: emp.rev_alloc_type || 'sg100',
-          opex_type: emp.opex_type || 'opex',
+          project_id: emp.project_id || null,
           cf_type: emp.cf_type || 'recurring',
           cf_frequency: emp.cf_frequency || 'monthly',
           cf_next_month_est: netAmt,
@@ -344,8 +341,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
             department: emp.department_name || null,
             dept_subcategory: emp.dept_subcategory_name || null,
             expense_description: emp.employee_name,
-            rev_alloc_type: emp.rev_alloc_type || 'sg100',
-            opex_type: emp.opex_type || 'opex',
+            project_id: emp.project_id || null,
             cf_type: emp.cf_type || 'recurring',
             cf_frequency: emp.cf_frequency || 'monthly',
             cf_next_month_est: dedAmt,
@@ -384,8 +380,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           department: 'General Business Expenses',
           dept_subcategory: 'General expenses',
           expense_description: 'Penalty, fines and other forced fees',
-          rev_alloc_type: 'sg100',
-          opex_type: 'opex',
           note: `Payroll ${periodMonth} — Retained deduction (storno): Penalties${note ? ' — ' + note : ''}`,
           status: 'posted',
         })
@@ -408,8 +402,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           department: 'General Business Expenses',
           dept_subcategory: 'Labour related expenses',
           expense_description: 'FitPass expenses',
-          rev_alloc_type: 'sg100',
-          opex_type: 'opex',
           note: `Payroll ${periodMonth} — Retained deduction (storno): FitPass${note ? ' — ' + note : ''}`,
           status: 'posted',
         })
@@ -435,8 +427,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           pl_category: PL_CATEGORY,
           pl_subcategory: 'Tax on salary',
           expense_description: `Tax & contributions — ${taxFilingRef || periodMonth}`,
-          rev_alloc_type: 'sg100',
-          opex_type: 'opex',
           cf_type: 'recurring',
           cf_frequency: 'monthly',
           cf_next_month_est: totalObl,
@@ -486,8 +476,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
             department: r.department,
             dept_subcategory: r.dept_subcategory,
             expense_description: r.expense_description,
-            rev_alloc_type: emp?.rev_alloc_type || 'sg100',
-            opex_type: emp?.opex_type || 'opex',
+            project_id: emp?.project_id || null,
             cf_type: 'recurring',
             cf_frequency: 'monthly',
             cf_next_month_est: r.amount,
@@ -897,29 +886,12 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
                           ))
                         }
 
-                        {/* P&L allocation */}
-                        <div style={s.empSection}>P&L allocation</div>
-                        <div style={s.allocGrid}>
-                          {[{ id: 'sg100', label: '100% SG' }, { id: 'af100', label: '100% AF' }, { id: 'shared', label: '50/50' }, { id: 'byval', label: 'By value' }].map(a => (
-                            <div key={a.id} style={{ ...s.allocBtn, ...(emp.rev_alloc_type === a.id ? s.allocBtnActive : {}) }}
-                              onClick={() => updateEmployee(emp.id, { rev_alloc_type: a.id })}>
-                              {a.label}
-                            </div>
-                          ))}
-                        </div>
+                        {/* Project */}
+                        <div style={s.empSection}>Projekat</div>
+                        <ProjectSelect value={emp.project_id}
+                          onChange={v => updateEmployee(emp.id, { project_id: v })} />
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
-                          <div style={s.field}>
-                            <label style={s.lbl}>Expense type</label>
-                            <div style={{ display: 'flex', gap: '6px' }}>
-                              {[{ id: 'opex', label: '🏢 OPEX' }, { id: 'performance', label: '🚀 Performance' }].map(a => (
-                                <div key={a.id} style={{ flex: 1, padding: '7px 6px', border: emp.opex_type === a.id ? '2px solid #00D47E' : '1px solid rgba(255,255,255,0.08)', borderRadius: '7px', background: emp.opex_type === a.id ? 'rgba(0,212,126,0.08)' : 'transparent', cursor: 'pointer', textAlign: 'center' as const, fontSize: '11px', fontWeight: '500', color: emp.opex_type === a.id ? '#00D47E' : '#7A9BB8' }}
-                                  onClick={() => updateEmployee(emp.id, { opex_type: a.id })}>
-                                  {a.label}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px', marginTop: '10px' }}>
                           <div style={s.field}>
                             <label style={s.lbl}>CF classification</label>
                             <div style={{ display: 'flex', gap: '6px' }}>
@@ -1110,9 +1082,6 @@ const s: Record<string, React.CSSProperties> = {
   addSmallBtn: { fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '3px 8px', border: '1px solid rgba(0,212,126,0.3)', borderRadius: '5px', background: 'rgba(0,212,126,0.06)', color: '#00D47E', cursor: 'pointer' },
   removeSmallBtn: { background: 'none', border: '1px solid rgba(255,91,90,0.3)', borderRadius: '5px', color: '#FF5B5A', fontSize: '14px', cursor: 'pointer', padding: '2px 8px', lineHeight: 1 },
   emptyHint: { fontSize: '12px', color: 'rgba(255,255,255,0.2)', padding: '6px 0', fontStyle: 'italic' },
-  allocGrid: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '6px', marginBottom: '8px' },
-  allocBtn: { border: '1px solid rgba(255,255,255,0.08)', borderRadius: '7px', padding: '7px 4px', background: 'rgba(255,255,255,0.03)', cursor: 'pointer', textAlign: 'center' as const, fontSize: '11px', fontWeight: '500', color: '#7A9BB8' },
-  allocBtnActive: { border: '2px solid #00D47E', background: 'rgba(0,212,126,0.08)', color: '#00D47E' },
   reviewGrid: { background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '10px', padding: '4px 0', overflow: 'hidden' },
   reviewRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.04)' },
   empReviewRow: { display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '10px 14px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' },

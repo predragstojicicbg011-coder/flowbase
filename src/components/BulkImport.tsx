@@ -13,6 +13,7 @@ import PartnerDialog from './PartnerDialog'
 import CreditInstallmentSelector from './CreditInstallmentSelector'
 import { DIALOG } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
+import { REVENUE_STREAMS } from '../services/revenueStreams'
 import { decodeStatement, hasLostCharacters } from '../services/decodeUpload'
 import { differenceFor, entryNote, isBookable } from '../services/currencyDifference'
 import {
@@ -24,8 +25,10 @@ import {
 import { formatMoney, toOwn, toRsd } from '../services/allocationDisplay'
 import { sameName } from '../services/lookupNames'
 import SplitEditor from './SplitEditor'
+import ProjectSelect from './ProjectSelect'
+import { projectIdFromInput, projectIdToInput } from '../services/projects'
 import {
-  whySplitNotSavable, classificationFromSplit, type SplitLine,
+  whySplitNotSavable, classificationFromSplit, splitProjectChange, type SplitLine,
 } from '../services/expenseSplit'
 import { saveSplits } from '../services/saveSplits'
 import { linkAmountsFromOwn } from '../services/invoiceLinks'
@@ -115,12 +118,8 @@ interface ImportRow {
   override_dept_subcategory_name: string
   override_expense_description: string
   override_revenue_stream: string
-  override_rev_alloc: string
-  override_aimfox_val: string
-  override_sg_val: string
-  override_opex_type: string
-  override_opex_val: string
-  override_performance_val: string
+  /** The line's project: an id, or '' for company overhead. '' while split. */
+  override_project_id: string
   override_cf_type: string
   override_cf_frequency: string
   override_cf_next_month_est: string
@@ -136,7 +135,6 @@ interface ImportRow {
 }
 
 const PAYMENT_METHODS = ['Wire transfer', 'ACH transfer', 'Cash', 'Check', 'Credit card', 'Direct debit', 'Other']
-const REVENUE_STREAMS = ['Social Growth', 'Aimfox', 'Outsourced Services', 'VAT Claimed', 'Interest Received', 'Loans', 'Credit', 'Other']
 
 function detectFormat(content: string, fileName: string): 'raiffeisen' | 'truist' | 'boa' | 'amex' | 'wio' | 'paypal' | 'unknown' {
   if (fileName.toLowerCase().endsWith('.xlsx') || fileName.toLowerCase().endsWith('.xls')) return 'amex'
@@ -441,10 +439,7 @@ function makeImportRow(parsed: ParsedRow): ImportRow {
     override_department_id: '', override_department_name: '',
     override_dept_subcategory_id: '', override_dept_subcategory_name: '',
     override_expense_description: '', override_revenue_stream: '',
-    override_rev_alloc: 'sg100',
-    override_aimfox_val: '', override_sg_val: '',
-    override_opex_type: 'opex',
-    override_opex_val: '', override_performance_val: '',
+    override_project_id: '',
     override_cf_type: '',
     override_cf_frequency: 'monthly',
     override_cf_next_month_est: '',
@@ -530,8 +525,6 @@ export default function BulkImport({ onClose, onImported }: Props) {
     department: string
     dept_subcategory: string
     expense_description: string
-    rev_alloc: string
-    opex_type: string
     cf_type: string
   }
   // The starter set that used to live here is gone with the localStorage
@@ -564,7 +557,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
   const [qfEditing, setQfEditing] = useState<QuickFillScript | null>(null)
   const [qfSearch, setQfSearch] = useState('')
   const [qfOpen, setQfOpen] = useState<string | null>(null)
-  const EMPTY_SCRIPT: QuickFillScript = { id: '', name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '', dept_subcategory: '', expense_description: '', rev_alloc: 'sg100', opex_type: 'opex', cf_type: 'recurring' }
+  const EMPTY_SCRIPT: QuickFillScript = { id: '', name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '', dept_subcategory: '', expense_description: '', cf_type: 'recurring' }
 
   useEffect(() => {
     const load = async () => {
@@ -1049,21 +1042,10 @@ export default function BulkImport({ onClose, onImported }: Props) {
       const rowBook = await bookFor(p, amount)
       /** This bank line as a parent, for its own parts. */
       const rowParent = { currency: p.currency, exchange_rate: rowBook.exchange_rate, eur_rate: rowBook.eur_rate }
-      // The split is stored in the currency of the bill, which is the currency
-      // the inputs above are labelled in and the currency every other writer
-      // uses — TransactionDialog, InvoiceDialog and BankStatementDialog all
-      // store what was typed. Converting here would leave this import's rows
-      // the odd ones out: reopened in a dialog they would show another
-      // currency under the row's label, and the P&L converts on read
-      // (src/services/allocation.ts) and would convert them a second time.
-      const typed = (val: string) => {
-        const raw = parseFloat(val) || 0
-        return raw || null
-      }
-      const aimfoxAmount = row.override_rev_alloc === 'byval' ? typed(row.override_aimfox_val) : null
-      const sgAmount = row.override_rev_alloc === 'byval' ? typed(row.override_sg_val) : null
-      const opexAmount = row.override_opex_type === 'split' ? typed(row.override_opex_val) : null
-      const perfAmount = row.override_opex_type === 'split' ? typed(row.override_performance_val) : null
+      // Only a direct row has a P&L of its own to put on a project, and a
+      // split row's projects are on its lines.
+      const rowProjectId = isDirectWithPL && row.override_pl_splits.length === 0
+        ? projectIdFromInput(row.override_project_id) : null
       // Refused before the row is written rather than after. An import posts
       // seventy rows in a loop, and a split that cannot be stored would leave
       // one line booked as a single expense among sixty-nine booked right —
@@ -1080,7 +1062,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
         import_hash: importHash, import_batch_id: importBatchId,
         company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), statement_number: p.statement_number || null, type: row.override_tx_type, tx_subtype: row.override_tx_subtype, payment_method: row.override_payment_method || null, currency: p.currency, amount, ...rowBook, pl_impact: isDirectWithPL,
         pl_category: isDirectWithPL ? (row.override_pl_category_name || null) : null, pl_subcategory: isDirectWithPL ? (row.override_pl_subcategory_name || null) : null, department: isDirectWithPL ? (row.override_department_name || null) : null, dept_subcategory: isDirectWithPL ? (row.override_dept_subcategory_name || null) : null, expense_description: isDirectWithPL ? (row.override_expense_description || null) : null, revenue_stream: isDirectWithPL ? (row.override_revenue_stream || null) : null,
-        rev_alloc_type: row.override_rev_alloc || 'sg100', rev_alloc_aimfox: aimfoxAmount, rev_alloc_sg: sgAmount, opex_type: isDirectWithPL && row.override_tx_subtype === 'expense' ? (row.override_opex_type || 'opex') : null, opex_amount: opexAmount, performance_amount: perfAmount,
+        project_id: rowProjectId,
         cf_type: isDirectWithPL && row.override_tx_subtype === 'expense' ? (row.override_cf_type || null) : null, cf_frequency: row.override_cf_type === 'recurring' ? row.override_cf_frequency : null, cf_next_month_est: row.override_cf_type === 'recurring' ? (row.override_cf_next_month_est ? parseFloat(row.override_cf_next_month_est) : amount) : null,
         account_number: p.account_number || null, model: p.model || null, reference_number: p.reference_number || null, note: row.override_note || p.description || null, status: 'posted',
       }).select().single()
@@ -1332,7 +1314,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
 
           if (row.override_fx_book && invoiceIds.length === 1 && fxScript) {
             const { data: inv } = await supabase.from('invoices')
-              .select('id, invoice_number, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate')
+              .select('id, invoice_number, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, project_id')
               .eq('id', invoiceIds[0]).single()
             const { data: st } = await supabase.from('v_invoice_status')
               .select('amount, paid_amount').eq('id', invoiceIds[0]).maybeSingle()
@@ -1385,8 +1367,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
                   department: fxScript.department || null,
                   dept_subcategory: fxScript.dept_subcategory || null,
                   expense_description: fxScript.expense_description || null,
-                  rev_alloc_type: fxScript.rev_alloc || 'shared',
-                  opex_type: isGain ? null : (fxScript.opex_type || 'opex'),
+                  // On the bill's project: the difference is part of what that
+                  // bill cost or earned.
+                  project_id: inv.project_id ?? null,
                   // A gain never touched the bank — see services/cashBasis.ts.
                   cf_type: isGain ? 'accrual' : (fxScript.cf_type || null),
                   status: 'posted',
@@ -2183,8 +2166,13 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                   // row showing nothing under P&L Category
                                   // reads as one somebody forgot.
                                   const from = classificationFromSplit(lines)
+                                  // The project moves between the row and its
+                                  // lines by one rule — never on both at once.
+                                  const moved = splitProjectChange(
+                                    row.override_pl_splits, lines, projectIdFromInput(row.override_project_id))
                                   updateRow(p.id, {
-                                    override_pl_splits: lines,
+                                    override_pl_splits: moved.lines,
+                                    override_project_id: projectIdToInput(moved.parentProjectId),
                                     ...(from ? {
                                       override_pl_category_name: from.pl_category,
                                       override_pl_subcategory_name: from.pl_subcategory,
@@ -2194,6 +2182,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                     } : {}),
                                   })
                                 }}
+                                companyId={company || null}
                                 scripts={quickFillScripts as any}
                                 classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
                                 client={supabase}
@@ -2205,7 +2194,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                 <div style={{ fontSize: '11.5px', color: DIALOG.amber, margin: '2px 0 10px', lineHeight: 1.55 }}>
                                   The classification below is taken from the largest line of the
                                   split and locked while it stands. The split is what the P&amp;L
-                                  reads; this is what the ledger lists the line under.
+                                  reads; this is what the ledger lists the line under. Each line
+                                  carries its own project.
                                 </div>
                               )}
                               <div style={{
@@ -2265,8 +2255,6 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                                     override_dept_subcategory_id: matchDeptSub?.id || '',
                                                     override_dept_subcategory_name: matchDeptSub?.name || sc.dept_subcategory,
                                                     override_expense_description: sc.expense_description,
-                                                    override_rev_alloc: sc.rev_alloc,
-                                                    override_opex_type: sc.opex_type,
                                                     override_cf_type: sc.cf_type,
                                                     status: 'accepted' as RowStatus,
                                                   })
@@ -2369,49 +2357,6 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                   </div>
                                 </div>
                               </div>
-                              <div style={s.editSectionTitle}>Revenue stream allocation</div>
-                              <div style={s.allocGrid}>
-                                {[{ id: 'sg100', label: '100% Social Growth', sub: 'Full allocation' }, { id: 'af100', label: '100% Aimfox', sub: 'Full allocation' }, { id: 'shared', label: 'Shared 50/50', sub: 'Both streams' }, { id: 'byval', label: 'By value', sub: 'Custom split' }].map(a => (
-                                  <div key={a.id} style={{ ...s.allocBtn, ...(row.override_rev_alloc === a.id ? s.allocBtnActive : {}) }} onClick={() => updateRow(p.id, { override_rev_alloc: a.id, override_aimfox_val: '', override_sg_val: '' })}>
-                                    <div style={{ fontSize: '11px', fontWeight: '500', color: DIALOG.text }}>{a.label}</div>
-                                    <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px' }}>{a.sub}</div>
-                                  </div>
-                                ))}
-                              </div>
-                              {row.override_rev_alloc === 'byval' && (() => {
-                                const total = (p.debit || 0); const af = parseFloat(row.override_aimfox_val) || 0; const sg = parseFloat(row.override_sg_val) || 0
-                                const splitOk = total > 0 && Math.abs(af + sg - total) < 0.01
-                                const afPct = total > 0 ? (af / total * 100).toFixed(1) : '0'; const sgPct = total > 0 ? (sg / total * 100).toFixed(1) : '0'
-                                return (
-                                  <div style={{ marginTop: '10px', background: DIALOG.raised, borderRadius: '8px', padding: '12px', border: '0.5px solid ' + DIALOG.border }}>
-                                    <div style={s.editGrid2}>
-                                      <div style={s.editField}>
-                                        <label style={s.editLbl}>Aimfox ({p.currency})</label>
-                                        <input type="number" style={s.editInput} value={row.override_aimfox_val}
-                                          onChange={e => { const val = e.target.value; const afNum = parseFloat(val) || 0; updateRow(p.id, { override_aimfox_val: val, override_sg_val: total > 0 && afNum >= 0 && afNum <= total ? (total - afNum).toFixed(2) : row.override_sg_val }) }} placeholder="0.00" />
-                                        {row.override_aimfox_val && total > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>{afPct}%</div>}
-                                      </div>
-                                      <div style={s.editField}>
-                                        <label style={s.editLbl}>Social Growth ({p.currency})</label>
-                                        <input type="number" style={s.editInput} value={row.override_sg_val}
-                                          onChange={e => { const val = e.target.value; const sgNum = parseFloat(val) || 0; updateRow(p.id, { override_sg_val: val, override_aimfox_val: total > 0 && sgNum >= 0 && sgNum <= total ? (total - sgNum).toFixed(2) : row.override_aimfox_val }) }} placeholder="0.00" />
-                                        {row.override_sg_val && total > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>{sgPct}%</div>}
-                                      </div>
-                                    </div>
-                                    {af > 0 && sg > 0 && <div style={{ marginTop: '6px', fontSize: '10px', color: splitOk ? DIALOG.accent : DIALOG.red }}>{splitOk ? '✓ Split adds up' : '⚠ The two parts do not add up to the total'}</div>}
-                                  </div>
-                                )
-                              })()}
-                              <div style={s.editSectionTitle}>Expense type — OPEX vs Performance</div>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '6px' }}>
-                                {[{ id: 'opex', label: '🏢 100% OPEX', sub: 'Fixed operational', color: DIALOG.blue, bg: DIALOG.blueFill }, { id: 'performance', label: '🚀 100% Performance', sub: 'Revenue-driven', color: DIALOG.amber, bg: DIALOG.amberFill }, { id: 'split', label: '⚖️ Split by value', sub: 'Custom allocation', color: DIALOG.dim, bg: DIALOG.raised }].map(a => (
-                                  <div key={a.id} style={{ ...s.allocBtn, ...(row.override_opex_type === a.id ? { border: `2px solid ${a.color}`, background: a.bg } : {}) }}
-                                    onClick={() => updateRow(p.id, { override_opex_type: a.id, override_opex_val: '', override_performance_val: '' })}>
-                                    <div style={{ fontSize: '11px', fontWeight: '600', color: row.override_opex_type === a.id ? a.color : DIALOG.text }}>{a.label}</div>
-                                    <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px' }}>{a.sub}</div>
-                                  </div>
-                                ))}
-                              </div>
                               <div style={s.editSectionTitle}>Cash flow classification</div>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '6px', marginTop: '6px' }}>
                                 {[{ id: 'recurring', label: '🔁 Recurring' }, { id: 'one_time', label: '1️⃣ One-time' }, { id: 'accrual', label: '📅 Accrual' }, { id: 'capex', label: '🏗 CapEx' }, { id: 'reimbursable', label: '↩️ Reimb.' }].map(a => (
@@ -2474,6 +2419,20 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                   <option value="">Select stream...</option>
                                   {REVENUE_STREAMS.map(r => <option key={r}>{r}</option>)}
                                 </select>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Project — one per line; a split line's are on its parts. */}
+                          {row.override_tx_type === 'direct' && row.override_pl_splits.length === 0 && (
+                            <div style={{ marginTop: '8px' }}>
+                              <div style={s.editField}>
+                                <label style={s.editLbl}>Project</label>
+                                <ProjectSelect
+                                  value={projectIdFromInput(row.override_project_id)}
+                                  onChange={id => updateRow(p.id, { override_project_id: projectIdToInput(id) })}
+                                  companyId={company || null}
+                                  style={pickerChrome} />
                               </div>
                             </div>
                           )}
@@ -2602,22 +2561,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                         : <input style={s.editInput} value={qfEditing.expense_description} onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })} placeholder="e.g. AWS, Telekom..." />
                     })()}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Revenue Alloc</div>
-                      <select style={s.editSelect} value={qfEditing.rev_alloc} onChange={e => setQfEditing({ ...qfEditing, rev_alloc: e.target.value })}>
-                        <option value="sg100">100% Social Growth</option>
-                        <option value="af100">100% Aimfox</option>
-                        <option value="shared">Shared 50/50</option>
-                      </select>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>OPEX Type</div>
-                      <select style={s.editSelect} value={qfEditing.opex_type} onChange={e => setQfEditing({ ...qfEditing, opex_type: e.target.value })}>
-                        <option value="opex">OPEX</option>
-                        <option value="performance">Performance</option>
-                      </select>
-                    </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
                     <div>
                       <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>CF Type</div>
                       <select style={s.editSelect} value={qfEditing.cf_type} onChange={e => setQfEditing({ ...qfEditing, cf_type: e.target.value })}>

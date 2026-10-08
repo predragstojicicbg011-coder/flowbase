@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import {
-  TreeNode, ComparedNode,
-  Branch, isAllocated, SOCIAL_GROWTH, AIMFOX, OPEX, PERFORMANCE,
+  TreeNode, ComparedNode, Branch,
 } from '../services/expenseTree'
 import {
   C, deck, useWidth, colorFor, MUTED, Empty, TipHead, TipRow, type Tip,
@@ -10,7 +9,7 @@ import {
   monthlySeries, bridgeSteps, paretoSeries, branchRoots,
   axisTicks, niceMax, bridgeScale, shortMoney, monthLabel,
 } from '../services/expenseCharts'
-import { MoversChart, HeatChart, HeatLegend, FacingChart, SIDE_LEFT, SIDE_RIGHT } from './SpendPanels'
+import { MoversChart, HeatChart, HeatLegend } from './SpendPanels'
 import ExpenseBranches, { type ExpenseBranchNode } from './ExpenseBranches'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
@@ -179,65 +178,45 @@ function Sparkline({ values, months }: { values: number[]; months: string[] }) {
 
 // ── Chart deck ──────────────────────────────────────────────────────────────
 //
-// SEVEN panels, and which seven depends on the tab that is open. That is the
-// point: a branch with two roots and a branch with forty leaves are not asking
-// the same question, and offering both the same four charts was how the deck
-// managed to be busy and uninformative at once.
+// SIX panels, the same on every branch:
 //
 //   trend          how the shape of the month moves
-//   split          ONLY on an allocated tab — which costs lean which way
 //   movers         which lines moved, ranked, direction kept
 //   heatmap        every line, every month, at once
 //   bridge         what turned the prior total into this one
 //   composition    the period branching down to the lines themselves
 //   concentration  how few lines carry most of it
 //
-// The hints are written per branch too. "Monthly composition" says nothing on
-// a tab whose two bands are Social Growth and Aimfox; there the question is
-// whether the split is drifting, and the label now says so.
+// Mintflow had a seventh, "The split", on its two allocated branches. MCFlow
+// files every row under one project (see services/expenseTree.ts), so there
+// is no two-sided split to draw; on the project branch the trend's bands are
+// the projects and overhead.
 
 export type ChartTab =
-  'trend' | 'split' | 'movers' | 'heatmap' | 'bridge' | 'composition' | 'concentration'
-
-/** The two roots of an allocated branch, left then right. */
-export function sidesOf(branch: Branch): [string, string] {
-  return branch === 'stream' ? [SOCIAL_GROWTH, AIMFOX] : [OPEX, PERFORMANCE]
-}
+  'trend' | 'movers' | 'heatmap' | 'bridge' | 'composition' | 'concentration'
 
 function tabsFor(branch: Branch): { key: ChartTab; label: string; hint: string }[] {
-  const allocated = isAllocated(branch)
-  const [left, right] = sidesOf(branch)
-
-  const out: { key: ChartTab; label: string; hint: string }[] = [{
-    key: 'trend',
-    label: 'Trend & mix',
-    hint: allocated
-      ? `Month by month — is the ${left} / ${right} split drifting, or only the size`
-      : 'Monthly composition — is the shape changing, or only the size',
-  }]
-
-  if (allocated) {
-    out.push({
-      key: 'split', label: 'The split',
-      hint: `Which costs lean ${left} and which lean ${right}`,
-    })
-  }
-
-  out.push(
+  return [
+    {
+      key: 'trend',
+      label: 'Trend & mix',
+      hint: branch === 'project'
+        ? 'Month by month — which projects carry the cost, and whether overhead is growing'
+        : 'Monthly composition — is the shape changing, or only the size',
+    },
     { key: 'movers', label: 'What moved', hint: 'The lines behind the change, biggest movement first' },
     { key: 'heatmap', label: 'Every line', hint: 'All of them, month by month — spikes, seasons and lines that stopped' },
     { key: 'bridge', label: 'Bridge', hint: 'What turned the prior total into this one' },
     { key: 'composition', label: 'Composition', hint: 'The period branching into categories, into lines — each branch as thick as the money it carries' },
     { key: 'concentration', label: 'Concentration', hint: 'How few lines carry most of the spend' },
-  )
-  return out
+  ]
 }
 
 /**
  * What each level of a branch is actually called.
  *
  * The depth picker used to offer "Detail" as a third option on every branch
- * that had one, which on the stream branch meant a sub-category wearing a
+ * that had one, which on a three-level branch meant a sub-category wearing a
  * label that said nothing. A level picker whose buttons do not name the
  * levels is a level picker you have to click to understand.
  */
@@ -245,8 +224,7 @@ function levelNames(branch: Branch): string[] {
   switch (branch) {
     case 'pl': return ['Category', 'Sub-category']
     case 'department': return ['Department', 'Sub-category', 'Description']
-    case 'stream': return ['Stream', 'Category', 'Sub-category']
-    default: return ['Cost type', 'Category', 'Sub-category']
+    default: return ['Project', 'Category', 'Sub-category']
   }
 }
 
@@ -272,11 +250,10 @@ export function ChartDeck(p: DeckProps) {
   const [tip, setTip] = useState<Tip>(null)
   const [ref, w] = useWidth(900)
 
-  const [leftLabel, rightLabel] = sidesOf(p.branch)
   const tabs = useMemo(() => tabsFor(p.branch), [p.branch])
 
-  // A tab that does not exist on the branch just selected must not leave the
-  // deck blank. Switching from the stream tab with The split open used to do
+  // A tab that does not exist (an `initialTab` from an old link) must not
+  // leave the deck blank. Switching away from a branch-only tab used to do
   // exactly that — an empty panel and no way to tell what had happened.
   const tab_ = tabs.some(t => t.key === tab) ? tab : 'trend'
   useEffect(() => { if (tab_ !== tab) setTab(tab_) }, [tab_, tab])
@@ -350,7 +327,6 @@ export function ChartDeck(p: DeckProps) {
 
       <div ref={ref} style={{ position: 'relative' }} onMouseLeave={() => setTip(null)}>
         {tab_ === 'trend' && <TrendChart series={series} w={w} h={H} normalized={normalized} onTip={setTip} onSelect={p.onSelect} tree={visible} muted={muted} />}
-        {tab_ === 'split' && <FacingChart tree={visible} leftLabel={leftLabel} rightLabel={rightLabel} limit={12} w={w} onTip={setTip} onSelect={p.onSelect} />}
         {tab_ === 'movers' && <MoversChart compared={comparedVisible} depth={depth_} limit={12} w={w} onTip={setTip} onSelect={p.onSelect} priorLabel={p.priorLabel} periodLabel={p.periodLabel} />}
         {tab_ === 'heatmap' && <HeatChart tree={visible} months={p.months} depth={depth_} limit={14} byRow={byRow} w={w} onTip={setTip} onSelect={p.onSelect} selected={p.selected} />}
         {tab_ === 'bridge' && <BridgeChart steps={bridge} w={w} h={H} onTip={setTip} onSelect={p.onSelect} priorLabel={p.priorLabel} periodLabel={p.periodLabel} />}
@@ -406,15 +382,6 @@ export function ChartDeck(p: DeckProps) {
         </div>
       )}
 
-      {tab_ === 'split' && (
-        <div style={deck.legend}>
-          <span style={deck.legendItem}><i style={{ ...deck.swatch, background: SIDE_LEFT }} />{leftLabel}</span>
-          <span style={deck.legendItem}><i style={{ ...deck.swatch, background: SIDE_RIGHT }} />{rightLabel}</span>
-          <span style={{ fontSize: '10.5px', color: C.faint }}>
-            A transaction split by value appears on both sides, at part of its worth each.
-          </span>
-        </div>
-      )}
     </div>
   )
 }

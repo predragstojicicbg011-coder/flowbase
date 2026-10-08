@@ -1,5 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react'
 import SearchableSelect from './SearchableSelect'
+import ProjectSelect from './ProjectSelect'
+import type { Project } from '../services/projects'
 import SplitScriptBuilder, { type ClassificationOptions } from './SplitScriptBuilder'
 import { DIALOG } from './dialogTheme'
 import { fmtMoney, fmtNum } from '../utils/formatters'
@@ -17,10 +19,19 @@ import {
 //
 // ── A line is a script and a figure ─────────────────────────────────────────
 //
-// Eight classification fields per line, three lines, is twenty-four dropdowns
+// Six classification fields per line, three lines, is eighteen dropdowns
 // on a form whose whole point was to be unobtrusive. A quick-fill script
-// carries all eight and is what people actually think in — "this half is
+// carries all six and is what people actually think in — "this half is
 // Figma, that half is the laptop".
+//
+// ── Each line has its own project ──────────────────────────────────────────
+//
+// Splitting is also how one document is shared between several construction
+// sites: one line per project, each with its own picker (null = company
+// overhead). A template carries no project, so picking one leaves the line's
+// project alone. While lines exist the parent document carries NO project of
+// its own — the dialogs clear and hide theirs — because the lines are what
+// the P&L reads.
 //
 // ── The sum is on screen at all times ───────────────────────────────────────
 //
@@ -50,6 +61,10 @@ export interface SplitEditorProps {
   client?: any
   /** Called after one is saved, so the dialog can refetch its list. */
   onScriptsChanged?: () => void
+  /** Narrow each line's project picker to one company's projects. */
+  companyId?: string | null
+  /** Override the project list (tests). Defaults to useProjects(). */
+  projects?: readonly Project[]
 }
 
 const money = (n: number, currency?: string | null) =>
@@ -57,7 +72,7 @@ const money = (n: number, currency?: string | null) =>
 
 export default function SplitEditor({
   parent, lines, onChange, scripts, disabled = false, hint,
-  classification, client, onScriptsChanged,
+  classification, client, onScriptsChanged, companyId, projects,
 }: SplitEditorProps) {
   /** The line whose `+` is open, if any. One at a time: two half-filled
    *  template forms on one screen is two chances to save the wrong one. */
@@ -217,7 +232,7 @@ export default function SplitEditor({
                   onSaved={saved => {
                     // The line takes the classification straight away. The
                     // id it was given is not needed for that — `applyScript`
-                    // copies the eight fields and nothing else — and the
+                    // copies the six fields and nothing else — and the
                     // picker will show it by name once the dialog refetches.
                     set(i, applyScript(line, saved))
                     setBuilding(null)
@@ -225,6 +240,19 @@ export default function SplitEditor({
                   }}
                 />
               )}
+
+              {/* Which site or building this part belongs to. */}
+              <div style={{ marginTop: '6px' }} data-testid={`split-project-${i}`}>
+                <ProjectSelect
+                  value={line.project_id}
+                  onChange={project_id => set(i, { project_id })}
+                  companyId={companyId}
+                  projects={projects}
+                  disabled={disabled}
+                  title="Projekat ovog dela"
+                  style={s.input}
+                />
+              </div>
 
               {/* What the line will actually be filed as. A template name is
                   not a classification, and the two can drift. */}

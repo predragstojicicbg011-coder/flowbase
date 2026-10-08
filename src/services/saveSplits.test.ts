@@ -1,5 +1,5 @@
 import { saveSplits, loadSplits } from './saveSplits'
-import { emptyLine, type SplitLine } from './expenseSplit'
+import { emptyLine, linesFrom, type SplitLine } from './expenseSplit'
 
 const line = (amount: number, category = 'General Business'): SplitLine => ({
   ...emptyLine(`k${amount}`), amount, pl_category: category,
@@ -65,6 +65,18 @@ describe('writing a split', () => {
     // 40000 / 117.5 = 340.43; the last line takes 1021.28 - 340.43.
     expect(calls[1].payload.map((r: any) => [r.amount_rsd, r.amount_eur]))
       .toEqual([[40000, 340.43], [80000, 680.85]])
+  })
+
+  /** A bill shared by two sites is split one line per project. */
+  it('writes each line’s project, and overhead as null', async () => {
+    const { client, calls } = fakeClient()
+    await saveSplits(client, 'invoice', 'inv-1', parent, [
+      { ...line(40000), project_id: 'site-1' },
+      { ...line(80000), project_id: null },
+    ])
+    expect(calls[1].payload.map((r: any) => r.project_id)).toEqual(['site-1', null])
+    expect(calls[1].payload.every((r: any) => !('rev_alloc_type' in r) && !('opex_type' in r)))
+      .toBe(true)
   })
 
   it('reports how many lines the payment now carries', async () => {
@@ -147,5 +159,19 @@ describe('reading a split back', () => {
       select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: null }) }) }) }),
     }) }
     expect(await loadSplits(empty, 'invoice', 'inv-1')).toEqual([])
+  })
+
+  it('gives back the projects it was saved with', async () => {
+    const { client, calls } = fakeClient()
+    await saveSplits(client, 'transaction', 'tx-1', parent, [
+      { ...line(40000), project_id: 'site-1' },
+      { ...line(80000), project_id: 'site-2' },
+    ])
+    const stored = calls[1].payload
+    const reader = { from: () => ({
+      select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: stored }) }) }) }),
+    }) }
+    const back = linesFrom(await loadSplits(reader, 'transaction', 'tx-1'), n => `k${n}`)
+    expect(back.map(l => [l.amount, l.project_id])).toEqual([[40000, 'site-1'], [80000, 'site-2']])
   })
 })

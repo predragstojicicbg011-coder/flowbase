@@ -651,8 +651,8 @@ export default function Reports() {
   ]
 
   const reports = [
-    { id: 'pl-by-stream',     title: 'Cost by Revenue Stream', desc: 'Every cost allocated to Social Growth or Aimfox, by category',  category: 'P&L',        icon: '🧭', color: '#0F6E56', bg: '#E1F5EE', page: 'expenses' as Page,     action: null },
-    { id: 'pl-by-type',       title: 'Performance vs OPEX',  desc: 'Fixed running cost against spend that chases revenue',            category: 'P&L',        icon: '⚡', color: '#0F6E56', bg: '#E1F5EE', page: 'expenses' as Page,     action: null },
+    { id: 'project-profit',   title: 'Project Profitability', desc: 'Revenue, direct cost and margin per site, with overhead on its own line', category: 'P&L', icon: '🏗', color: '#0F6E56', bg: '#E1F5EE', page: 'projects' as Page,     action: null },
+    { id: 'pl-by-project',    title: 'Cost by Project',      desc: 'Every cost by project and category; Opšti troškovi for overhead',   category: 'P&L',        icon: '🧭', color: '#0F6E56', bg: '#E1F5EE', page: 'expenses' as Page,     action: null },
     { id: 'pl-by-dept',       title: 'P&L by Department',    desc: 'Expense breakdown per organizational unit',                       category: 'P&L',        icon: '👥', color: '#0F6E56', bg: '#E1F5EE', page: 'expenses' as Page,     action: null },
     { id: 'cashflow-monthly', title: 'Monthly Cash Flow',    desc: 'Operating and financing activities by period',                    category: 'Cash Flow',  icon: '💰', color: '#0C447C', bg: '#E6F1FB', page: 'cashflow' as Page,     action: null },
     { id: 'bank-rec',         title: 'Bank Reconciliation',  desc: 'Statement vs. recorded transactions per account',                 category: 'Cash Flow',  icon: '🏦', color: '#0C447C', bg: '#E6F1FB', page: 'cashflow' as Page,     action: null },

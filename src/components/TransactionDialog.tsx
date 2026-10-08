@@ -4,8 +4,11 @@ import { useCompanies } from '../contexts/CompaniesContext'
 import { fetchScripts, saveScript, whyNotSavable } from '../services/quickFillStore'
 import SplitEditor from './SplitEditor'
 import {
-  linesFrom, whySplitNotSavable, classificationFromSplit, type SplitLine,
+  linesFrom, whySplitNotSavable, classificationFromSplit, splitProjectChange, type SplitLine,
 } from '../services/expenseSplit'
+import ProjectSelect from './ProjectSelect'
+import { useProjects } from '../contexts/ProjectsContext'
+import { projectLabelById } from '../services/projects'
 import { saveSplits, loadSplits } from '../services/saveSplits'
 import InlineCategoryAdd from './InlineCategoryAdd'
 
@@ -14,6 +17,7 @@ import { useCreditPayment } from './useCreditPayment'
 import { chooseAccount, carriedAccountOf } from '../services/partnerAccountChoice'
 import { DIALOG, chrome } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
+import { REVENUE_STREAMS } from '../services/revenueStreams'
 import { linkAmountsFromOwn } from '../services/invoiceLinks'
 import { outstandingOwn, settlementFor } from '../services/settleInvoice'
 import { planLinkChanges, describeChanges } from '../services/linkPlan'
@@ -83,14 +87,12 @@ interface LinkedInvoice {
    * after you leave it is how one gets corrected twice.
    */
   allocated_own: number
+  /** The bill's project, so a currency difference on it lands on the same site. */
+  project_id?: string | null
 }
 
 interface ValidationErrors { [key: string]: string }
 
-const REVENUE_STREAMS = [
-  'Social Growth', 'Aimfox', 'Outsourced Services',
-  'VAT Claimed', 'Interest Received', 'Loans', 'Credit', 'Other',
-]
 
 export default function TransactionDialog({ onClose, transaction, sourceTable = 'transactions' }: Props) {
   // The row being edited, and where it lives. Null on both counts for a new
@@ -115,6 +117,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const [postError, setPostError] = useState('')
 
   const { companies, defaultCompany, showPicker } = useCompanies()
+  const { projects } = useProjects()
   const [banks, setBanks] = useState<any[]>([])
   const [allBanks, setAllBanks] = useState<any[]>([])
   const [partners, setPartners] = useState<any[]>([])
@@ -191,19 +194,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const [deptSubName, setDeptSubName] = useState('')
   const [expDesc, setExpDesc] = useState('')
   const [revStream, setRevStream] = useState('')
-  const [revAlloc, setRevAlloc] = useState('sg100')
+  // The site or building this payment belongs to; null is company overhead.
+  // Null while the payment is split — the lines carry the projects then.
+  const [projectId, setProjectId] = useState<string | null>(null)
   const [deptSplit, setDeptSplit] = useState('none')
   const [note, setNote] = useState('')
   const [tags, setTags] = useState<string[]>([])
-
-  // Revenue stream by-value split
-  const [aimfoxVal, setAimfoxVal] = useState('')
-  const [sgVal, setSgVal] = useState('')
-
-  // OPEX / Performance split
-  const [opexType, setOpexType] = useState('opex')
-  const [opexVal, setOpexVal] = useState('')
-  const [performanceVal, setPerformanceVal] = useState('')
 
   // Cash Flow Classification
   const [cfType, setCfType] = useState(transaction?.cf_type || '')
@@ -219,8 +215,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     id: string; name: string; icon: string
     pl_category: string; pl_subcategory: string
     department: string; dept_subcategory: string
-    expense_description: string; rev_alloc: string
-    opex_type: string; cf_type: string
+    expense_description: string; cf_type: string
   }
   // Read from the shared table rather than from this browser — see
   // 20260922140000. Nothing is thrown when it cannot be read: a dialog whose
@@ -252,8 +247,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       department: deptName || '',
       dept_subcategory: deptSubName || '',
       expense_description: expDesc || '',
-      rev_alloc: revAlloc || 'sg100',
-      opex_type: opexType || 'opex',
       cf_type: cfType || '',
     }
     const why = whyNotSavable(draft, quickFillScripts)
@@ -277,8 +270,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     if (matchDept) { setDeptId(matchDept.id); setDeptName(matchDept.name) }
     if (matchDeptSub) { setDeptSubId(matchDeptSub.id); setDeptSubName(matchDeptSub.name) }
     setExpDesc(script.expense_description || '')
-    setRevAlloc(script.rev_alloc || 'sg100')
-    setOpexType(script.opex_type || 'opex')
     setCfType(script.cf_type || '')
   }
 
@@ -352,6 +343,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
   const splitActive = txType === 'direct' && splitLines.length > 0
 
+  /** Lines changed in the editor: the project moves between the payment and
+   *  its lines by one rule (splitProjectChange) — never on both at once. */
+  const changeSplitLines = (next: SplitLine[]) => {
+    const out = splitProjectChange(splitLines, next, projectId)
+    setSplitLines(out.lines)
+    setProjectId(out.parentProjectId)
+  }
+
   /**
    * While a payment is split, its own classification is TAKEN from the split
    * rather than typed — the ledger lists it and the cash side reads it, but
@@ -381,58 +380,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   /** In RSD: the payment at its own rate, less the allocations at the invoices'. */
   const unallocatedRsd = amountRsd - totalAllocatedRsd
 
-  // Revenue stream split handlers
-  const handleAimfoxChange = (val: string) => {
-    setAimfoxVal(val)
-    const af = parseFloat(val) || 0
-    const total = parseFloat(amount) || 0
-    if (total > 0 && af >= 0 && af <= total) setSgVal((total - af).toFixed(2))
-    else setSgVal('')
-  }
-  const handleSgChange = (val: string) => {
-    setSgVal(val)
-    const sg = parseFloat(val) || 0
-    const total = parseFloat(amount) || 0
-    if (total > 0 && sg >= 0 && sg <= total) setAimfoxVal((total - sg).toFixed(2))
-    else setAimfoxVal('')
-  }
-
-  // OPEX / Performance split handlers
-  const handleOpexChange = (val: string) => {
-    setOpexVal(val)
-    const op = parseFloat(val) || 0
-    const total = parseFloat(amount) || 0
-    if (total > 0 && op >= 0 && op <= total) setPerformanceVal((total - op).toFixed(2))
-    else setPerformanceVal('')
-  }
-  const handlePerformanceChange = (val: string) => {
-    setPerformanceVal(val)
-    const perf = parseFloat(val) || 0
-    const total = parseFloat(amount) || 0
-    if (total > 0 && perf >= 0 && perf <= total) setOpexVal((total - perf).toFixed(2))
-    else setOpexVal('')
-  }
-
-  useEffect(() => {
-    if (revAlloc === 'byval') { setAimfoxVal(''); setSgVal('') }
-  }, [amount]) // eslint-disable-line
-
-  useEffect(() => {
-    if (opexType === 'split') { setOpexVal(''); setPerformanceVal('') }
-  }, [amount]) // eslint-disable-line
-
-  const splitTotal = (parseFloat(aimfoxVal) || 0) + (parseFloat(sgVal) || 0)
-  const splitOk = revAlloc !== 'byval' || Math.abs(splitTotal - (parseFloat(amount) || 0)) < 0.01
-  const splitPct = parseFloat(amount) > 0
-    ? { af: ((parseFloat(aimfoxVal) || 0) / parseFloat(amount) * 100).toFixed(1), sg: ((parseFloat(sgVal) || 0) / parseFloat(amount) * 100).toFixed(1) }
-    : { af: '0', sg: '0' }
-
-  const opexSplitTotal = (parseFloat(opexVal) || 0) + (parseFloat(performanceVal) || 0)
-  const opexSplitOk = opexType !== 'split' || Math.abs(opexSplitTotal - (parseFloat(amount) || 0)) < 0.01
-  const opexPct = parseFloat(amount) > 0
-    ? { op: ((parseFloat(opexVal) || 0) / parseFloat(amount) * 100).toFixed(1), perf: ((parseFloat(performanceVal) || 0) / parseFloat(amount) * 100).toFixed(1) }
-    : { op: '0', perf: '0' }
-
   const expenseCategories = plCategories.filter(c => c.type !== 'revenue')
   const getPlSubs = (catId: string) => plSubcategories.filter(s => s.category_id === catId)
   const getDeptSubs = (dId: string) => deptSubcategories.filter(s => s.department_id === dId)
@@ -459,8 +406,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         // that is fully classified.
         if (!plCatId && !splitActive) e.plCat = 'P&L Category is required'
         if (!deptId && !splitActive) e.dept = 'Department is required'
-        if (revAlloc === 'byval' && !splitOk) e.split = 'Split values must sum to total amount'
-        if (opexType === 'split' && !opexSplitOk) e.opexSplit = 'OPEX split values must sum to total amount'
       }
       if (directSubtype === 'revenue' && !revStream) e.revStream = 'Revenue stream is required'
     }
@@ -469,7 +414,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, bankId, currency, txDate, amount, exRate, eurRate, txType, linkedInvoices, selectedInstallmentIds, directSubtype, plCatId, deptId, revStream, revAlloc, aimfoxVal, sgVal, opexType, opexVal, performanceVal]) // eslint-disable-line
+  }, [companyId, bankId, currency, txDate, amount, exRate, eurRate, txType, linkedInvoices, selectedInstallmentIds, directSubtype, plCatId, deptId, revStream]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -587,15 +532,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     setDeptSubName(transaction.dept_subcategory || '')
     setExpDesc(transaction.expense_description || '')
     setRevStream(transaction.revenue_stream || '')
-    setRevAlloc(transaction.rev_alloc_type || 'sg100')
+    setProjectId(transaction.project_id ?? null)
     setDeptSplit(transaction.dept_split_type || 'none')
     setTags(transaction.tags || [])
     setAccNum(transaction.account_number || '')
     setModel(transaction.model || '')
     setRefNum(transaction.reference_number || '')
-    setOpexType(transaction.opex_type || 'opex')
-    setOpexVal(transaction.opex_amount?.toString() || '')
-    setPerformanceVal(transaction.performance_amount?.toString() || '')
     setCfType(transaction.cf_type || '')
     setCfFrequency(transaction.cf_frequency || 'monthly')
     setCfNextMonthEst(transaction.cf_next_month_est?.toString() || '')
@@ -647,13 +589,13 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const touchStep = (n: number) => {
     if (n === 1) setTouched(p => ({ ...p, companyId: true, bankId: true, currency: true, txDate: true }))
     if (n === 2) setTouched(p => ({ ...p, amount: true, exRate: true }))
-    if (n === 3) setTouched(p => ({ ...p, linkedInvoices: true, creditInstallments: true, plCat: true, dept: true, revStream: true, split: true, opexSplit: true }))
+    if (n === 3) setTouched(p => ({ ...p, linkedInvoices: true, creditInstallments: true, plCat: true, dept: true, revStream: true }))
   }
   const stepHasError = (n: number) => {
     const stepFields: Record<number, string[]> = {
       1: ['companyId', 'bankId', 'currency', 'txDate'],
       2: ['amount', 'exRate'],
-      3: ['linkedInvoices', 'creditInstallments', 'plCat', 'dept', 'revStream', 'split', 'opexSplit'],
+      3: ['linkedInvoices', 'creditInstallments', 'plCat', 'dept', 'revStream'],
     }
     return (stepFields[n] || []).some(f => !!errors[f])
   }
@@ -671,7 +613,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       setLinksLoading(true)
       const { data, error } = await supabase
         .from('invoice_transaction_links')
-        .select('invoice_id, allocated_amount, allocated_amount_rsd, invoices(id, invoice_number, invoice_date, due_date, currency, amount, amount_rsd, exchange_rate, eur_rate, partners(name))')
+        .select('invoice_id, allocated_amount, allocated_amount_rsd, invoices(id, invoice_number, invoice_date, due_date, currency, amount, amount_rsd, exchange_rate, eur_rate, project_id, partners(name))')
         .eq('transaction_id', rowId)
       // What is actually left on each of them. The invoice's own amount is not
       // that: a partly paid invoice would show its full value as outstanding,
@@ -705,6 +647,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         amount_rsd: l.invoices?.amount_rsd,
         exchange_rate: l.invoices?.exchange_rate ?? null,
         eur_rate: l.invoices?.eur_rate ?? null,
+        project_id: l.invoices?.project_id ?? null,
         // What the bill is owed with this payment's own link taken back out,
         // which is what the figure beside it has to be judged against.
         outstanding_own: outstandingOwn({
@@ -814,6 +757,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       amount_rsd: inv.amount_rsd,
       exchange_rate: inv.exchange_rate ?? null,
       eur_rate: inv.eur_rate ?? null,
+      project_id: inv.project_id ?? null,
       outstanding_own: outstanding,
       allocated_rsd: settlement.rsd,
       allocated_own: settlement.own,
@@ -872,20 +816,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     return map[status] || { background: DIALOG.raised, color: DIALOG.dim }
   }
 
-  const revAllocLabel = () => {
-    if (revAlloc === 'sg100') return '100% Social Growth'
-    if (revAlloc === 'af100') return '100% Aimfox'
-    if (revAlloc === 'shared') return 'Shared 50/50'
-    if (revAlloc === 'byval') return `By value — AF: ${currency} ${parseFloat(aimfoxVal || '0').toFixed(2)} / SG: ${currency} ${parseFloat(sgVal || '0').toFixed(2)}`
-    return '—'
-  }
-
-  const opexLabel = () => {
-    if (opexType === 'opex') return '100% OPEX'
-    if (opexType === 'performance') return '100% Performance'
-    return `Split — OPEX: ${currency} ${parseFloat(opexVal || '0').toFixed(2)} / Perf: ${currency} ${parseFloat(performanceVal || '0').toFixed(2)}`
-  }
-
   const cfLabel = () => {
     if (!cfType) return '—'
     if (cfType === 'recurring') return `Recurring ${cfFrequency}`
@@ -903,7 +833,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     const upFront = planSave({ rowId, sourceTable: rowTable, currentType: rowType, nextType: txType })
     if (upFront.kind === 'refuse') { setShowValidationSummary(false); setPostError(upFront.reason); return }
 
-    setTouched({ companyId: true, bankId: true, currency: true, txDate: true, linkedInvoices: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true, split: true, opexSplit: true })
+    setTouched({ companyId: true, bankId: true, currency: true, txDate: true, linkedInvoices: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true })
     const e = runValidation()
     if (Object.keys(e).length > 0) { setShowValidationSummary(true); return }
     setPostError('')
@@ -970,10 +900,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         if (newP) finalPartnerId = newP.id
       }
       const isDirectWithPL = txType === 'direct'
-      const aimfoxAmount = revAlloc === 'byval' ? (parseFloat(aimfoxVal) || 0) : null
-      const sgAmount = revAlloc === 'byval' ? (parseFloat(sgVal) || 0) : null
-      const opexAmount = opexType === 'split' ? (parseFloat(opexVal) || 0) : null
-      const perfAmount = opexType === 'split' ? (parseFloat(performanceVal) || 0) : null
 
       const payload = {
         company_id: companyId || null, bank_id: bankId || null,
@@ -990,10 +916,11 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         dept_subcategory: isDirectWithPL ? (deptSubName || null) : null,
         expense_description: isDirectWithPL ? (expDesc || null) : null,
         revenue_stream: isDirectWithPL ? (revStream || null) : null,
-        rev_alloc_type: revAlloc, dept_split_type: deptSplit,
-        rev_alloc_aimfox: aimfoxAmount, rev_alloc_sg: sgAmount,
-        opex_type: isDirectWithPL && directSubtype === 'expense' ? opexType : null,
-        opex_amount: opexAmount, performance_amount: perfAmount,
+        // Only a direct row has a P&L of its own to put on a project (an
+        // invoice payment's project is the invoice's), and a split row's
+        // projects are on its lines.
+        project_id: isDirectWithPL && !splitActive ? projectId : null,
+        dept_split_type: deptSplit,
         cf_type: isDirectWithPL && directSubtype === 'expense' ? (cfType || null) : null,
         cf_frequency: cfType === 'recurring' ? cfFrequency : null,
         cf_next_month_est: cfType === 'recurring' ? (cfNextMonthEst ? parseFloat(cfNextMonthEst) : (amount ? parseFloat(amount) : null)) : null,
@@ -1339,8 +1266,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               department: fxScript.department || null,
               dept_subcategory: fxScript.dept_subcategory || null,
               expense_description: fxScript.expense_description || null,
-              rev_alloc_type: fxScript.rev_alloc || 'shared',
-              opex_type: isGain ? null : (fxScript.opex_type || 'opex'),
+              // On the bill's project: the difference is part of what that
+              // bill cost or earned.
+              project_id: fxInvoice.project_id ?? null,
               // A gain is not cash. Nothing arrived in the bank: the entry
               // exists to extinguish the rest of an invoice the exchange rate
               // made unpayable. `accrual` is the marker for that, so Cash Flow
@@ -1446,71 +1374,20 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     </div>
   )
 
-  // ── OPEX/Performance split panel (reusable JSX) ──────
-  const opexPanel = (
+  // ── Project panel (reusable JSX) ──────
+  // One picker; null is company overhead. Hidden while the payment is split,
+  // because then each line carries its own project and this one is null.
+  const projectPanel = (
     <div style={s.section}>
-      <div style={s.sectionTitle}>Expense type — OPEX vs Performance</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-        {[
-          { id: 'opex', label: '🏢 100% OPEX', sub: 'Fixed operational cost', color: DIALOG.blue, bg: DIALOG.blueFill },
-          { id: 'performance', label: '🚀 100% Performance', sub: 'Revenue-driven cost', color: DIALOG.amber, bg: DIALOG.amberFill },
-          { id: 'split', label: '⚖️ Split by value', sub: 'Custom allocation', color: DIALOG.dim, bg: DIALOG.raised },
-        ].map(a => (
-          <div key={a.id}
-            style={{ ...s.allocBtn, ...(opexType === a.id ? { border: `2px solid ${a.color}`, background: a.bg } : {}) }}
-            onClick={() => { setOpexType(a.id); setOpexVal(''); setPerformanceVal('') }}>
-            <div style={{ fontSize: '11px', fontWeight: '600', color: opexType === a.id ? a.color : DIALOG.text }}>{a.label}</div>
-            <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px' }}>{a.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {opexType === 'split' && (
-        <div style={{ marginTop: '14px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
-          <div style={{ fontSize: '11px', color: DIALOG.dim, fontWeight: '500', marginBottom: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.07em' }}>
-            Split by value — total: {amount ? fmtMoney(parseFloat(amount), currency) : '—'}
-          </div>
-          <div style={s.row2}>
-            <div style={s.field}>
-              <label style={s.lbl}>OPEX ({currency || '—'})</label>
-              <input type="number" style={{ ...s.input, ...(fieldErr('opexSplit') ? s.inputError : {}) }}
-                value={opexVal} onChange={e => handleOpexChange(e.target.value)}
-                placeholder="0.00" min="0" max={amount} />
-              {opexVal && parseFloat(amount) > 0 && (
-                <div style={{ fontSize: '10px', color: DIALOG.blue, marginTop: '2px' }}>{opexPct.op}% of total</div>
-              )}
-            </div>
-            <div style={s.field}>
-              <label style={s.lbl}>Performance ({currency || '—'})</label>
-              <input type="number" style={{ ...s.input, ...(fieldErr('opexSplit') ? s.inputError : {}) }}
-                value={performanceVal} onChange={e => handlePerformanceChange(e.target.value)}
-                placeholder="0.00" min="0" max={amount} />
-              {performanceVal && parseFloat(amount) > 0 && (
-                <div style={{ fontSize: '10px', color: DIALOG.amber, marginTop: '2px' }}>{opexPct.perf}% of total</div>
-              )}
-            </div>
-          </div>
-          {opexVal && performanceVal && parseFloat(amount) > 0 && (
-            <div style={{ marginTop: '10px', background: DIALOG.panel, borderRadius: '8px', padding: '10px 12px', border: '0.5px solid ' + DIALOG.border }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                <span style={{ color: DIALOG.dim }}>OPEX</span>
-                <span style={{ fontWeight: '500', color: DIALOG.blue }}>{fmtMoney(parseFloat(opexVal), currency)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '8px' }}>
-                <span style={{ color: DIALOG.dim }}>Performance</span>
-                <span style={{ fontWeight: '500', color: DIALOG.amber }}>{fmtMoney(parseFloat(performanceVal), currency)}</span>
-              </div>
-              <div style={{ height: '6px', borderRadius: '3px', background: DIALOG.border, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${opexPct.op}%`, background: DIALOG.blue, borderRadius: '3px', display: 'inline-block' }} />
-                <div style={{ height: '100%', width: `${opexPct.perf}%`, background: DIALOG.amber, borderRadius: '3px', display: 'inline-block' }} />
-              </div>
-              {!opexSplitOk
-                ? <div style={{ fontSize: '11px', color: DIALOG.red, marginTop: '6px' }}>⚠️ Sum ({fmtMoney(opexSplitTotal, currency)}) ≠ total ({fmtMoney(parseFloat(amount), currency)})</div>
-                : <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '6px' }}>✓ Split is valid</div>
-              }
-            </div>
-          )}
+      <div style={s.sectionTitle}>Project</div>
+      {splitActive ? (
+        <div style={{ fontSize: '11.5px', color: DIALOG.dim, lineHeight: 1.5 }}>
+          This payment is split — each line above carries its own project.
+          Remove the split to put the whole payment on one project.
         </div>
+      ) : (
+        <ProjectSelect value={projectId} onChange={setProjectId} companyId={companyId || null}
+          style={pickerChrome} />
       )}
     </div>
   )
@@ -1855,7 +1732,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                 <SplitEditor
                   parent={paymentRow}
                   lines={splitLines}
-                  onChange={setSplitLines}
+                  onChange={changeSplitLines}
+                  companyId={companyId || null}
                   scripts={quickFillScripts as any}
                   classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
                   client={supabase}
@@ -2315,59 +2193,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                         </div>
                       </div>
 
-                      <div style={s.section}>
-                        <div style={s.sectionTitle}>Revenue stream allocation</div>
-                        <div style={s.allocGrid}>
-                          {[
-                            { id: 'sg100', label: '100% Social Growth', sub: 'Full allocation' },
-                            { id: 'af100', label: '100% Aimfox', sub: 'Full allocation' },
-                            { id: 'shared', label: 'Shared 50/50', sub: 'Both streams' },
-                            { id: 'byval', label: 'By value', sub: 'Custom split' },
-                          ].map(a => (
-                            <div key={a.id} style={{ ...s.allocBtn, ...(revAlloc === a.id ? s.allocBtnActive : {}) }}
-                              onClick={() => { setRevAlloc(a.id); setAimfoxVal(''); setSgVal('') }}>
-                              <div style={s.allocBtnLabel}>{a.label}</div>
-                              <div style={s.allocBtnSub}>{a.sub}</div>
-                            </div>
-                          ))}
-                        </div>
-                        {revAlloc === 'byval' && (
-                          <div style={{ marginTop: '14px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
-                            <div style={{ fontSize: '11px', color: DIALOG.dim, fontWeight: '500', marginBottom: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.07em' }}>
-                              Split by value — total: {amount ? fmtMoney(parseFloat(amount), currency) : '—'}
-                            </div>
-                            <div style={s.row2}>
-                              <div style={s.field}>
-                                <label style={s.lbl}>Aimfox ({currency || '—'})</label>
-                                <input type="number" style={{ ...s.input, ...(fieldErr('split') ? s.inputError : {}) }}
-                                  value={aimfoxVal} onChange={e => handleAimfoxChange(e.target.value)} placeholder="0.00" min="0" max={amount} />
-                                {aimfoxVal && parseFloat(amount) > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>{splitPct.af}% of total</div>}
-                              </div>
-                              <div style={s.field}>
-                                <label style={s.lbl}>Social Growth ({currency || '—'})</label>
-                                <input type="number" style={{ ...s.input, ...(fieldErr('split') ? s.inputError : {}) }}
-                                  value={sgVal} onChange={e => handleSgChange(e.target.value)} placeholder="0.00" min="0" max={amount} />
-                                {sgVal && parseFloat(amount) > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>{splitPct.sg}% of total</div>}
-                              </div>
-                            </div>
-                            {aimfoxVal && sgVal && (
-                              <div style={{ marginTop: '8px', background: DIALOG.panel, borderRadius: '8px', padding: '10px 12px', border: '0.5px solid ' + DIALOG.border }}>
-                                <div style={{ height: '6px', borderRadius: '3px', background: DIALOG.border, overflow: 'hidden' }}>
-                                  <div style={{ height: '100%', width: `${splitPct.af}%`, background: DIALOG.blue, display: 'inline-block' }} />
-                                  <div style={{ height: '100%', width: `${splitPct.sg}%`, background: DIALOG.accent, display: 'inline-block' }} />
-                                </div>
-                                {!splitOk
-                                  ? <div style={{ fontSize: '11px', color: DIALOG.red, marginTop: '6px' }}>⚠️ Sum ≠ total</div>
-                                  : <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '6px' }}>✓ Split valid</div>
-                                }
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* ── OPEX / Performance split ── */}
-                      {opexPanel}
+                      {/* ── Project ── */}
+                      {projectPanel}
 
                       {/* ── Cash Flow Classification ── */}
                       {cfPanel}
@@ -2388,56 +2215,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                         {fieldErr('revStream') && <span style={s.errorMsg}>{fieldErr('revStream')}</span>}
                       </div>
                     </div>
-                    <div style={s.section}>
-                      <div style={s.sectionTitle}>Revenue stream allocation</div>
-                      <div style={s.allocGrid}>
-                        {[
-                          { id: 'sg100', label: '100% Social Growth', sub: 'Full allocation' },
-                          { id: 'af100', label: '100% Aimfox', sub: 'Full allocation' },
-                          { id: 'shared', label: 'Shared 50/50', sub: 'Both streams' },
-                          { id: 'byval', label: 'By value', sub: 'Custom split' },
-                        ].map(a => (
-                          <div key={a.id} style={{ ...s.allocBtn, ...(revAlloc === a.id ? s.allocBtnActive : {}) }}
-                            onClick={() => { setRevAlloc(a.id); setAimfoxVal(''); setSgVal('') }}>
-                            <div style={s.allocBtnLabel}>{a.label}</div>
-                            <div style={s.allocBtnSub}>{a.sub}</div>
-                          </div>
-                        ))}
-                      </div>
-                      {revAlloc === 'byval' && (
-                        <div style={{ marginTop: '14px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
-                          <div style={{ fontSize: '11px', color: DIALOG.dim, fontWeight: '500', marginBottom: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.07em' }}>
-                            Split by value — total: {amount ? fmtMoney(parseFloat(amount), currency) : '—'}
-                          </div>
-                          <div style={s.row2}>
-                            <div style={s.field}>
-                              <label style={s.lbl}>Aimfox ({currency || '—'})</label>
-                              <input type="number" style={{ ...s.input, ...(fieldErr('split') ? s.inputError : {}) }}
-                                value={aimfoxVal} onChange={e => handleAimfoxChange(e.target.value)} placeholder="0.00" min="0" max={amount} />
-                              {aimfoxVal && parseFloat(amount) > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>{splitPct.af}% of total</div>}
-                            </div>
-                            <div style={s.field}>
-                              <label style={s.lbl}>Social Growth ({currency || '—'})</label>
-                              <input type="number" style={{ ...s.input, ...(fieldErr('split') ? s.inputError : {}) }}
-                                value={sgVal} onChange={e => handleSgChange(e.target.value)} placeholder="0.00" min="0" max={amount} />
-                              {sgVal && parseFloat(amount) > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>{splitPct.sg}% of total</div>}
-                            </div>
-                          </div>
-                          {aimfoxVal && sgVal && (
-                            <div style={{ marginTop: '8px', background: DIALOG.panel, borderRadius: '8px', padding: '10px 12px', border: '0.5px solid ' + DIALOG.border }}>
-                              <div style={{ height: '6px', borderRadius: '3px', background: DIALOG.border, overflow: 'hidden' }}>
-                                <div style={{ height: '100%', width: `${splitPct.af}%`, background: DIALOG.blue, display: 'inline-block' }} />
-                                <div style={{ height: '100%', width: `${splitPct.sg}%`, background: DIALOG.accent, display: 'inline-block' }} />
-                              </div>
-                              {!splitOk
-                                ? <div style={{ fontSize: '11px', color: DIALOG.red, marginTop: '6px' }}>⚠ Sum ≠ total</div>
-                                : <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '6px' }}>✓ Split valid</div>
-                              }
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    {projectPanel}
                     </>
                   )}
 
@@ -2505,8 +2283,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   ['P&L Category', plCatName || '—'],
                   ['Department', deptName || '—'],
                   ['Description', expDesc || '—'],
-                  ['Rev. stream alloc.', revAllocLabel()],
-                  ['Expense type', opexLabel()],
+                  ['Project', splitActive ? 'By split line' : projectLabelById(projects, projectId)],
                   ['CF Classification', cfLabel()],
                 ]}] : []),
                 { title: 'Amounts', rows: [

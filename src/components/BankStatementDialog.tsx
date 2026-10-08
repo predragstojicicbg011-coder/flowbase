@@ -9,6 +9,7 @@ import { softDeleteRow } from '../services/writeOrder'
 import CreditInstallmentSelector from './CreditInstallmentSelector'
 import { DIALOG, chrome } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
+import { REVENUE_STREAMS } from '../services/revenueStreams'
 import {
   claimNotice, freeForRow, isHiddenForRow, type ClaimRow, type OpenInvoice,
 } from '../services/invoiceClaims'
@@ -30,8 +31,10 @@ import {
 } from '../services/statementEdit'
 import { fetchAllPartners } from '../services/allPartners'
 import SplitEditor from './SplitEditor'
+import ProjectSelect from './ProjectSelect'
+import { projectIdFromInput, projectIdToInput } from '../services/projects'
 import {
-  whySplitNotSavable, classificationFromSplit, type SplitLine,
+  whySplitNotSavable, classificationFromSplit, splitProjectChange, type SplitLine,
 } from '../services/expenseSplit'
 import { saveSplits } from '../services/saveSplits'
 import {
@@ -82,6 +85,13 @@ interface StatementRow {
    * thing to keep in step. Empty means a single expense.
    */
   pl_splits: SplitLine[]
+  /**
+   * A posted row, reopened for editing, that already has split lines stored.
+   * This dialog does not load or rewrite them, so the row must not gain a
+   * project of its own on top: its projects are on those lines, and a second
+   * one would count the cost twice.
+   */
+  stored_split: boolean
   /** Book the leftover against this invoice as a currency difference. */
   fx_book: boolean
   /** Which quick-fill template classifies it. Empty means the default one. */
@@ -96,12 +106,8 @@ interface StatementRow {
   dept_subcategory_name: string
   expense_description: string
   revenue_stream: string
-  rev_alloc: string
-  aimfox_val: string
-  sg_val: string
-  opex_type: string
-  opex_val: string
-  performance_val: string
+  /** The row's project: an id, or '' for company overhead. '' while split. */
+  project_id: string
   cf_type: string
   cf_frequency: string
   cf_next_month_est: string
@@ -110,7 +116,6 @@ interface StatementRow {
   selected_installment_ids: string[]
 }
 
-const REVENUE_STREAMS = ['Social Growth', 'Aimfox', 'Outsourced Services', 'VAT Claimed', 'Interest Received', 'Loans', 'Credit', 'Other']
 
 let rowCounter = 0
 /** Today, in the form every row's date input uses. */
@@ -128,14 +133,13 @@ function makeRow(defaultCurrency = 'RSD', date = ''): StatementRow {
     tx_type: 'direct', tx_subtype: 'expense',
     pt_direction: 'out', pt_period: new Date().toISOString().slice(0, 7),
     linked_invoice_id: '', fx_book: false, fx_script_id: '',
-    pl_splits: [],
+    pl_splits: [], stored_split: false,
     pl_category_id: '', pl_category_name: '',
     pl_subcategory_id: '', pl_subcategory_name: '',
     department_id: '', department_name: '',
     dept_subcategory_id: '', dept_subcategory_name: '',
     expense_description: '', revenue_stream: '',
-    rev_alloc: 'sg100', aimfox_val: '', sg_val: '',
-    opex_type: 'opex', opex_val: '', performance_val: '',
+    project_id: '',
     cf_type: '', cf_frequency: 'monthly', cf_next_month_est: '',
     note: '',
     selected_credit_id: '',
@@ -185,8 +189,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
     id: string; name: string; icon: string
     pl_category: string; pl_subcategory: string
     department: string; dept_subcategory: string
-    expense_description: string; rev_alloc: string
-    opex_type: string; cf_type: string
+    expense_description: string; cf_type: string
   }
 
   const [qfSearch, setQfSearch] = useState<Record<string, string>>({})
@@ -217,7 +220,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
   useEffect(() => { refreshQfScripts() }, [refreshQfScripts])
   const [qfDialogOpen, setQfDialogOpen] = useState(false)
   const [qfEditing, setQfEditing] = useState<QuickFillScript | null>(null)
-  const EMPTY_SCRIPT: QuickFillScript = { id: '', name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '', dept_subcategory: '', expense_description: '', rev_alloc: 'sg100', opex_type: 'opex', cf_type: 'recurring' }
+  const EMPTY_SCRIPT: QuickFillScript = { id: '', name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '', dept_subcategory: '', expense_description: '', cf_type: 'recurring' }
 
   // ── Posted statements ─────────────────────────────────────────────────────
   const [importHistory, setImportHistory] = useState<any[]>([])
@@ -281,8 +284,6 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       dept_subcategory_id: matchDeptSub?.id || '',
       dept_subcategory_name: matchDeptSub?.name || script.dept_subcategory,
       expense_description: script.expense_description || '',
-      rev_alloc: script.rev_alloc || 'sg100',
-      opex_type: script.opex_type || 'opex',
       cf_type: script.cf_type || '',
     })
   }
@@ -632,6 +633,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       // Which invoice each payment row closed. Without this the link is
       // invisible in the grid and would be dropped on the next save.
       const linkByTx: Record<string, string> = {}
+      const splitTx = new Set<string>()
       const txIds = txRows.map(t => t.id)
       if (txIds.length > 0) {
         const { data: links } = await supabase
@@ -639,6 +641,12 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           .select('invoice_id,transaction_id')
           .in('transaction_id', txIds)
         for (const l of links || []) linkByTx[l.transaction_id] = l.invoice_id
+
+        const { data: splitRows, error: splitErr } = await supabase
+          .from('pl_splits').select('source_id')
+          .eq('source', 'transaction').in('source_id', txIds)
+        if (splitErr) throw splitErr
+        for (const sp of splitRows || []) splitTx.add(sp.source_id)
 
         // An invoice these rows already settled is no longer open, so the
         // picker would not list it. Add it back or the selection reads blank.
@@ -656,7 +664,11 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
 
       const nameOf = (pid: string | null) => partners.find(p => p.id === pid)?.name || ''
       const seeds: RowSeed[] = [
-        ...txRows.map(t => ({ ...txToSeed(t, nameOf(t.partner_id)), linked_invoice_id: linkByTx[t.id] || '' })),
+        ...txRows.map(t => ({
+          ...txToSeed(t, nameOf(t.partner_id)),
+          linked_invoice_id: linkByTx[t.id] || '',
+          stored_split: splitTx.has(t.id),
+        })),
         ...ptRows.map(p => passthroughToSeed(p, nameOf(p.partner_id))),
       ]
 
@@ -913,10 +925,10 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         }
 
         const isDirectWithPL = row.tx_type === 'direct'
-        const aimfoxAmount = row.rev_alloc === 'byval' ? (parseFloat(row.aimfox_val) || null) : null
-        const sgAmount = row.rev_alloc === 'byval' ? (parseFloat(row.sg_val) || null) : null
-        const opexAmount = row.opex_type === 'split' ? (parseFloat(row.opex_val) || null) : null
-        const perfAmount = row.opex_type === 'split' ? (parseFloat(row.performance_val) || null) : null
+        // Only a direct row has a P&L of its own to put on a project, and a
+        // split row's projects are on its lines.
+        const rowProjectId = isDirectWithPL && row.pl_splits.length === 0 && !row.stored_split
+          ? projectIdFromInput(row.project_id) : null
 
         // Refused before the row is written rather than after. A statement
         // posts many rows in a loop, and a split that cannot be stored would
@@ -942,10 +954,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           dept_subcategory: isDirectWithPL ? (row.dept_subcategory_name || null) : null,
           expense_description: isDirectWithPL ? (row.expense_description || null) : null,
           revenue_stream: isDirectWithPL ? (row.revenue_stream || null) : null,
-          rev_alloc_type: row.rev_alloc || 'sg100',
-          rev_alloc_aimfox: aimfoxAmount, rev_alloc_sg: sgAmount,
-          opex_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.opex_type || 'opex') : null,
-          opex_amount: opexAmount, performance_amount: perfAmount,
+          project_id: rowProjectId,
           cf_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.cf_type || null) : null,
           cf_frequency: row.cf_type === 'recurring' ? row.cf_frequency : null,
           cf_next_month_est: row.cf_type === 'recurring' ? (row.cf_next_month_est ? parseFloat(row.cf_next_month_est) : (parseFloat(row.debit) || null)) : null,
@@ -1059,7 +1068,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         if (row.tx_type === 'invoice_payment' && row.linked_invoice_id && newTx?.id) {
           // Fetch invoice to determine correct rate
           const { data: inv } = await supabase.from('invoices')
-            .select('id, invoice_number, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, is_indexed')
+            .select('id, invoice_number, amount, amount_rsd, amount_eur, currency, exchange_rate, eur_rate, is_indexed, project_id')
             .eq('id', row.linked_invoice_id).single()
 
           if (inv) {
@@ -1168,8 +1177,9 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                 department: fxScript.department || null,
                 dept_subcategory: fxScript.dept_subcategory || null,
                 expense_description: fxScript.expense_description || null,
-                rev_alloc_type: fxScript.rev_alloc || 'shared',
-                opex_type: isGain ? null : (fxScript.opex_type || 'opex'),
+                // On the bill's project: the difference is part of what that
+                // bill cost or earned.
+                project_id: inv.project_id ?? null,
                 // A gain never touched the bank — see services/cashBasis.ts.
                 cf_type: isGain ? 'accrual' : (fxScript.cf_type || null),
                 status: 'posted',
@@ -1356,10 +1366,10 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
         }
 
         const isDirectWithPL = row.tx_type === 'direct'
-        const aimfoxAmount = row.rev_alloc === 'byval' ? (parseFloat(row.aimfox_val) || null) : null
-        const sgAmount = row.rev_alloc === 'byval' ? (parseFloat(row.sg_val) || null) : null
-        const opexAmount = row.opex_type === 'split' ? (parseFloat(row.opex_val) || null) : null
-        const perfAmount = row.opex_type === 'split' ? (parseFloat(row.performance_val) || null) : null
+        // Only a direct row has a P&L of its own to put on a project, and a
+        // split row's projects are on its lines.
+        const rowProjectId = isDirectWithPL && row.pl_splits.length === 0 && !row.stored_split
+          ? projectIdFromInput(row.project_id) : null
 
         const payload = {
           company_id: company, bank_id: bank, partner_id: partnerId,
@@ -1373,10 +1383,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           dept_subcategory: isDirectWithPL ? (row.dept_subcategory_name || null) : null,
           expense_description: isDirectWithPL ? (row.expense_description || null) : null,
           revenue_stream: isDirectWithPL ? (row.revenue_stream || null) : null,
-          rev_alloc_type: row.rev_alloc || 'sg100',
-          rev_alloc_aimfox: aimfoxAmount, rev_alloc_sg: sgAmount,
-          opex_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.opex_type || 'opex') : null,
-          opex_amount: opexAmount, performance_amount: perfAmount,
+          project_id: rowProjectId,
           cf_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.cf_type || null) : null,
           cf_frequency: row.cf_type === 'recurring' ? row.cf_frequency : null,
           cf_next_month_est: row.cf_type === 'recurring'
@@ -2061,8 +2068,13 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                 // and a row showing nothing under P&L
                                 // Category reads as one somebody forgot.
                                 const from = classificationFromSplit(lines)
+                                // The project moves between the row and its
+                                // lines by one rule — never on both at once.
+                                const moved = splitProjectChange(
+                                  row.pl_splits, lines, projectIdFromInput(row.project_id))
                                 updateRow(row.id, {
-                                  pl_splits: lines,
+                                  pl_splits: moved.lines,
+                                  project_id: projectIdToInput(moved.parentProjectId),
                                   ...(from ? {
                                     pl_category_name: from.pl_category,
                                     pl_subcategory_name: from.pl_subcategory,
@@ -2072,6 +2084,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                   } : {}),
                                 })
                               }}
+                              companyId={company || null}
                               scripts={quickFillScripts as any}
                               classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
                               client={supabase}
@@ -2083,7 +2096,8 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                               <div style={{ fontSize: '11.5px', color: DIALOG.amber, margin: '2px 0 10px', lineHeight: 1.55 }}>
                                 The classification below is taken from the largest line of the
                                 split and locked while it stands. The split is what the P&amp;L
-                                reads; this is what the ledger lists the line under.
+                                reads; this is what the ledger lists the line under. Each line
+                                carries its own project.
                               </div>
                             )}
                             <div style={{
@@ -2241,78 +2255,6 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                   </div>
                                 </div>
 
-                                {/* Revenue stream allocation */}
-                                <div style={s.classTitle}>Revenue stream allocation</div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px', marginBottom: '10px' }}>
-                                  {[
-                                    { id: 'sg100', label: '100% Social Growth' },
-                                    { id: 'af100', label: '100% Aimfox' },
-                                    { id: 'shared', label: 'Shared 50/50' },
-                                    { id: 'byval', label: 'By value' },
-                                  ].map(a => (
-                                    <div key={a.id} style={{ ...s.allocBtn, ...(row.rev_alloc === a.id ? s.allocBtnActive : {}) }}
-                                      onClick={() => updateRow(row.id, { rev_alloc: a.id, aimfox_val: '', sg_val: '' })}>
-                                      <div style={{ fontSize: '11px', fontWeight: '500' }}>{a.label}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                                {row.rev_alloc === 'byval' && (() => {
-                                  const total = parseFloat(row.debit) || 0
-                                  const af = parseFloat(row.aimfox_val) || 0
-                                  const sg = parseFloat(row.sg_val) || 0
-                                  const ok = total > 0 && Math.abs(af + sg - total) < 0.01
-                                  return (
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px', background: DIALOG.raised, padding: '10px', borderRadius: '8px' }}>
-                                      <div style={s.field}>
-                                        <label style={s.lbl}>Aimfox ({row.currency})</label>
-                                        <input type="number" style={s.input} value={row.aimfox_val}
-                                          onChange={e => { const v = parseFloat(e.target.value) || 0; updateRow(row.id, { aimfox_val: e.target.value, sg_val: total > 0 && v <= total ? (total - v).toFixed(2) : row.sg_val }) }} placeholder="0.00" />
-                                      </div>
-                                      <div style={s.field}>
-                                        <label style={s.lbl}>Social Growth ({row.currency})</label>
-                                        <input type="number" style={s.input} value={row.sg_val}
-                                          onChange={e => { const v = parseFloat(e.target.value) || 0; updateRow(row.id, { sg_val: e.target.value, aimfox_val: total > 0 && v <= total ? (total - v).toFixed(2) : row.aimfox_val }) }} placeholder="0.00" />
-                                      </div>
-                                      {af > 0 && sg > 0 && <div style={{ gridColumn: '1/-1', fontSize: '11px', color: ok ? DIALOG.accent : DIALOG.red }}>{ok ? '✓ Split valid' : `⚠ Sum ${(af+sg).toFixed(2)} ≠ total ${total.toFixed(2)}`}</div>}
-                                    </div>
-                                  )
-                                })()}
-
-                                {/* OPEX vs Performance */}
-                                <div style={s.classTitle}>Expense type — OPEX vs Performance</div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '10px' }}>
-                                  {[
-                                    { id: 'opex', label: '🏢 100% OPEX', color: DIALOG.blue, bg: DIALOG.blueFill },
-                                    { id: 'performance', label: '🚀 100% Performance', color: DIALOG.amber, bg: DIALOG.amberFill },
-                                    { id: 'split', label: '⚖️ Split by value', color: DIALOG.dim, bg: DIALOG.raised },
-                                  ].map(a => (
-                                    <div key={a.id} style={{ ...s.allocBtn, ...(row.opex_type === a.id ? { border: `2px solid ${a.color}`, background: a.bg } : {}) }}
-                                      onClick={() => updateRow(row.id, { opex_type: a.id, opex_val: '', performance_val: '' })}>
-                                      <div style={{ fontSize: '11px', fontWeight: '600', color: row.opex_type === a.id ? a.color : DIALOG.text }}>{a.label}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                                {row.opex_type === 'split' && (() => {
-                                  const total = parseFloat(row.debit) || 0
-                                  const op = parseFloat(row.opex_val) || 0
-                                  const perf = parseFloat(row.performance_val) || 0
-                                  const ok = total > 0 && Math.abs(op + perf - total) < 0.01
-                                  return (
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px', background: DIALOG.raised, padding: '10px', borderRadius: '8px' }}>
-                                      <div style={s.field}>
-                                        <label style={s.lbl}>OPEX ({row.currency})</label>
-                                        <input type="number" style={s.input} value={row.opex_val}
-                                          onChange={e => { const v = parseFloat(e.target.value) || 0; updateRow(row.id, { opex_val: e.target.value, performance_val: total > 0 && v <= total ? (total - v).toFixed(2) : row.performance_val }) }} placeholder="0.00" />
-                                      </div>
-                                      <div style={s.field}>
-                                        <label style={s.lbl}>Performance ({row.currency})</label>
-                                        <input type="number" style={s.input} value={row.performance_val}
-                                          onChange={e => { const v = parseFloat(e.target.value) || 0; updateRow(row.id, { performance_val: e.target.value, opex_val: total > 0 && v <= total ? (total - v).toFixed(2) : row.opex_val }) }} placeholder="0.00" />
-                                      </div>
-                                      {op > 0 && perf > 0 && <div style={{ gridColumn: '1/-1', fontSize: '11px', color: ok ? DIALOG.accent : DIALOG.red }}>{ok ? '✓ Split valid' : `⚠ Sum ${(op+perf).toFixed(2)} ≠ total ${total.toFixed(2)}`}</div>}
-                                    </div>
-                                  )
-                                })()}
                               </>
                             )}
 
@@ -2381,6 +2323,28 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                     <option value="">Select stream...</option>
                                     {REVENUE_STREAMS.map(r => <option key={r}>{r}</option>)}
                                   </select>
+                                </div>
+                              </>
+                            )}
+
+                            {/* Project — one per row; a split row's are on its lines. */}
+                            {row.stored_split && (
+                              <>
+                                <div style={s.classTitle}>Project</div>
+                                <div style={{ marginBottom: '10px', fontSize: '12px', color: DIALOG.dim }}>
+                                  This row is split across projects. Change the split from the General Ledger.
+                                </div>
+                              </>
+                            )}
+                            {row.pl_splits.length === 0 && !row.stored_split && (
+                              <>
+                                <div style={s.classTitle}>Project</div>
+                                <div style={{ marginBottom: '10px' }}>
+                                  <ProjectSelect
+                                    value={projectIdFromInput(row.project_id)}
+                                    onChange={id => updateRow(row.id, { project_id: projectIdToInput(id) })}
+                                    companyId={company || null}
+                                    style={{ ...pickerChrome, width: '100%' }} />
                                 </div>
                               </>
                             )}
@@ -2598,24 +2562,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                             placeholder="e.g. AWS, Telekom..." />
                     })()}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Revenue Alloc</div>
-                      <select style={s.select} value={qfEditing.rev_alloc}
-                        onChange={e => setQfEditing({ ...qfEditing, rev_alloc: e.target.value })}>
-                        <option value="sg100">100% Social Growth</option>
-                        <option value="af100">100% Aimfox</option>
-                        <option value="shared">Shared 50/50</option>
-                      </select>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>OPEX Type</div>
-                      <select style={s.select} value={qfEditing.opex_type}
-                        onChange={e => setQfEditing({ ...qfEditing, opex_type: e.target.value })}>
-                        <option value="opex">OPEX</option>
-                        <option value="performance">Performance</option>
-                      </select>
-                    </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
                     <div>
                       <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>CF Type</div>
                       <select style={s.select} value={qfEditing.cf_type}

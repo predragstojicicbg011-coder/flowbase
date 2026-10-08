@@ -323,3 +323,16 @@ describe('the real September files against the real register', () => {
     expect(without.map(e => e.full_name)).toContain('Gavrilov Ivona')
   })
 })
+
+describe('projectHoursAboveWorked', () => {
+  const { projectHoursAboveWorked } = require('./timesheetImport')
+  const { emptyTimesheet } = require('./timesheets')
+  it('names only the people whose imported work falls below their project hours', () => {
+    const a = { ...emptyTimesheet('a', '2026-09'), regular_hours: 100 }
+    const b = { ...emptyTimesheet('b', '2026-09'), regular_hours: 160 }
+    expect(projectHoursAboveWorked([a, b], {
+      a: [{ hours: 80 }, { hours: 40 }],
+      b: [{ hours: 160 }],
+    })).toEqual([{ employeeId: 'a', worked: 100, onProjects: 120 }])
+  })
+})

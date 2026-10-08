@@ -310,3 +310,32 @@ export function toTimesheet(
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100
+
+// ─── Project hours survive an import ────────────────────────────────────────
+//
+// An import writes payroll_timesheets only. The hours on each project live in
+// payroll_timesheet_projects and are never touched by it, so importing a month
+// again cannot wipe them. What it CAN do is bring somebody's worked hours
+// below what is already on their projects — and that is said before saving,
+// because the posting will refuse the month until one of the two is corrected.
+
+export interface ProjectHoursClash {
+  employeeId: string
+  worked: number
+  onProjects: number
+}
+
+/** People whose imported worked hours fall below the hours already on their projects. */
+export function projectHoursAboveWorked(
+  sheets: readonly TimesheetRow[],
+  projectHours: Readonly<Record<string, readonly { hours: number }[]>>,
+): ProjectHoursClash[] {
+  const out: ProjectHoursClash[] = []
+  for (const t of sheets) {
+    const onProjects = round2((projectHours[t.employee_id] ?? [])
+      .reduce((s, r) => s + (Number(r.hours) || 0), 0))
+    const worked = round2(Number(t.regular_hours) || 0)
+    if (onProjects > worked + 0.005) out.push({ employeeId: t.employee_id, worked, onProjects })
+  }
+  return out
+}

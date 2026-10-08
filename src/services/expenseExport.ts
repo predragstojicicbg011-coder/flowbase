@@ -26,12 +26,12 @@
 // Everything here is a pure function of rows in and rows out, so it is tested
 // directly. Fetching lives in the page; `xlsx` is never imported here.
 
-import type { Branch, ComparedNode, PlEntry } from './expenseTree'
+import { projectRootOf, type Branch, type ComparedNode, type PlEntry } from './expenseTree'
 import type { DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 /** The classification levels, in the order they are written out. */
 export const CLASS_COLUMNS = [
-  'Allocated to',
+  'Project',
   'P&L category', 'P&L sub-category',
   'Department', 'Dept. sub-category', 'Expense description',
 ] as const
@@ -40,8 +40,8 @@ export interface SummaryRow {
   Branch: string
   Level: number
   Line: string
-  /** The stream or cost type a share was allocated to; blank on a filing branch. */
-  'Allocated to': string
+  /** The project (or Opšti troškovi) on the project branch; blank on the others. */
+  Project: string
   'P&L category': string
   'P&L sub-category': string
   Department: string
@@ -62,24 +62,22 @@ const pct1 = (n: number) => Math.round(n * 10) / 10
 /**
  * Which classification column a branch's level N fills.
  *
- * The two branches are the same five levels in a different order and each
- * shows three of them, so a node's path has to be mapped back to the columns
+ * The branches are the same six levels in a different order and each shows
+ * two or three of them, so a node's path has to be mapped back to the columns
  * it actually stands for rather than written into fixed "level 1, 2, 3" slots
  * that mean something different per branch.
  */
 export const BRANCH_LEVELS: Record<Branch, readonly string[]> = {
   pl: ['P&L category', 'P&L sub-category', 'Expense description'],
   department: ['Department', 'Dept. sub-category', 'Expense description'],
-  // The allocated branches put the share first and then break it down the
+  // The project branch puts the project first and then breaks it down the
   // same way the P&L branch does, so the two can be read side by side.
-  stream: ['Allocated to', 'P&L category', 'P&L sub-category'],
-  type: ['Allocated to', 'P&L category', 'P&L sub-category'],
+  project: ['Project', 'P&L category', 'P&L sub-category'],
 }
 
 /** What the `Branch` column of a summary sheet says. */
 export const BRANCH_NAME: Record<Branch, string> = {
-  pl: 'P&L', department: 'Department',
-  stream: 'Revenue stream', type: 'Cost type',
+  pl: 'P&L', department: 'Department', project: 'Project',
 }
 
 /**
@@ -101,7 +99,7 @@ export function summaryRows(
   const walk = (list: ComparedNode[]) => {
     for (const n of list) {
       const cls: Record<string, string> = {
-        'Allocated to': '',
+        Project: '',
         'P&L category': '', 'P&L sub-category': '',
         Department: '', 'Dept. sub-category': '', 'Expense description': '',
       }
@@ -111,7 +109,7 @@ export function summaryRows(
         Branch: BRANCH_NAME[branch],
         Level: n.depth + 1,
         Line: n.label,
-        'Allocated to': cls['Allocated to'],
+        Project: cls.Project,
         'P&L category': cls['P&L category'],
         'P&L sub-category': cls['P&L sub-category'],
         Department: cls.Department,
@@ -152,6 +150,8 @@ export interface EntryRowOut {
   'Document no.': string
   Partner: string
   Company: string
+  /** The row's own project — a split line's, not its document's — or Opšti troškovi. */
+  Project: string
   'P&L category': string
   'P&L sub-category': string
   Department: string
@@ -189,6 +189,7 @@ export function entryRows(
         'Document no.': d?.documentNo || '',
         Partner: d?.partner || '',
         Company: d?.company || '',
+        Project: projectRootOf(e),
         'P&L category': e.pl_category || '',
         'P&L sub-category': e.pl_subcategory || '',
         Department: e.department || '',
@@ -245,7 +246,8 @@ export function preambleRows(f: PreambleFacts): { Field: string; Value: string |
     { Field: 'Entries listed', Value: f.entryCount },
     { Field: '', Value: '' },
     { Field: 'Sheet: By department', Value: 'The tree grouped department first. One row per line, with every classification level in its own column.' },
-    { Field: 'Sheet: By P&L', Value: 'The same money grouped by P&L category. Both branches total the same figure.' },
+    { Field: 'Sheet: By P&L', Value: 'The same money grouped by P&L category. Every branch totals the same figure.' },
+    { Field: 'Sheet: By project', Value: 'The same money grouped by project, then P&L category. A split document counts on each project for its own line; rows with no project are Opšti troškovi (overhead).' },
     { Field: 'Sheet: Entries', Value: 'One row per transaction or invoice, with its full classification repeated on it. This is the sheet to pivot, filter or hand to an analysis tool.' },
     { Field: '', Value: '' },
     { Field: 'Amounts', Value: `Totals are in ${c}, summed from each entry's Amount ${c}. Amount RSD and Amount EUR are the book figures every entry carries; Currency and Amount are the document's own.` },

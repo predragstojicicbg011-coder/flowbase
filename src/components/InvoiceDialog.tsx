@@ -4,8 +4,11 @@ import { useCompanies } from '../contexts/CompaniesContext'
 import { fetchScripts, saveScript, whyNotSavable } from '../services/quickFillStore'
 import SplitEditor from './SplitEditor'
 import {
-  linesFrom, whySplitNotSavable, classificationFromSplit, type SplitLine,
+  linesFrom, whySplitNotSavable, classificationFromSplit, splitProjectChange, type SplitLine,
 } from '../services/expenseSplit'
+import ProjectSelect from './ProjectSelect'
+import { useProjects } from '../contexts/ProjectsContext'
+import { projectLabelById } from '../services/projects'
 import { saveSplits, loadSplits } from '../services/saveSplits'
 import InlineCategoryAdd from './InlineCategoryAdd'
 import { bookAmountsAtRate, getBookRates, rateFor, type BookAmounts } from '../services/bookAmounts'
@@ -19,6 +22,7 @@ import {
 import { fmtLocal, fmtMoney, fmtNum } from '../utils/formatters'
 import { fetchAllPartners } from '../services/allPartners'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
+import { REVENUE_STREAMS } from '../services/revenueStreams'
 
 interface Props {
   onClose: () => void
@@ -38,6 +42,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const [saveError, setSaveError] = useState('')
 
   const { companies, defaultCompany, showPicker } = useCompanies()
+  const { projects } = useProjects()
   const [partners, setPartners] = useState<any[]>([])
   const [plCategories, setPlCategories] = useState<any[]>([])
   const [plSubcategories, setPlSubcategories] = useState<any[]>([])
@@ -77,7 +82,9 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const [deptSubName, setDeptSubName] = useState('')
   const [expDesc, setExpDesc] = useState('')
   const [revStream, setRevStream] = useState('')
-  const [revAlloc, setRevAlloc] = useState('sg100')
+  // The site or building this bill belongs to; null is company overhead.
+  // Null while the bill is split — the lines carry the projects then.
+  const [projectId, setProjectId] = useState<string | null>(null)
   const [deptSplit, setDeptSplit] = useState('none')
   const [note, setNote] = useState('')
   const [tags, setTags] = useState<string[]>([])
@@ -95,15 +102,6 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const [rateMissing, setRateMissing] = useState(false)
   const [fetchingRate, setFetchingRate] = useState(false)
 
-  // By value split
-  const [aimfoxVal, setAimfoxVal] = useState('')
-  const [sgVal, setSgVal] = useState('')
-
-  // OPEX / Performance split
-  const [opexType, setOpexType] = useState('opex')
-  const [opexVal, setOpexVal] = useState('')
-  const [performanceVal, setPerformanceVal] = useState('')
-
   // Cash Flow Classification
   const [cfType, setCfType] = useState(invoice?.cf_type || '')
   const [cfFrequency, setCfFrequency] = useState(invoice?.cf_frequency || 'monthly')
@@ -118,8 +116,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     id: string; name: string; icon: string
     pl_category: string; pl_subcategory: string
     department: string; dept_subcategory: string
-    expense_description: string; rev_alloc: string
-    opex_type: string; cf_type: string
+    expense_description: string; cf_type: string
   }
   // Read from the shared table rather than from this browser — see
   // 20260922140000. Nothing is thrown when it cannot be read: a dialog whose
@@ -170,8 +167,6 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       department: deptName || '',
       dept_subcategory: deptSubName || '',
       expense_description: expDesc || '',
-      rev_alloc: revAlloc || 'sg100',
-      opex_type: opexType || 'opex',
       cf_type: cfType || '',
     }
     const why = whyNotSavable(draft, quickFillScripts)
@@ -195,61 +190,9 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     if (matchDept) { setDeptId(matchDept.id); setDeptName(matchDept.name) }
     if (matchDeptSub) { setDeptSubId(matchDeptSub.id); setDeptSubName(matchDeptSub.name) }
     setExpDesc(script.expense_description || '')
-    setRevAlloc(script.rev_alloc || 'sg100')
-    setOpexType(script.opex_type || 'opex')
     setCfType(script.cf_type || '')
   }
 
-  const handleAimfoxChange = (val: string) => {
-    setAimfoxVal(val)
-    const af = parseFloat(val) || 0
-    const total = parseFloat(amount) || 0
-    if (total > 0 && af >= 0 && af <= total) setSgVal((total - af).toFixed(2))
-    else setSgVal('')
-  }
-
-  const handleSgChange = (val: string) => {
-    setSgVal(val)
-    const sg = parseFloat(val) || 0
-    const total = parseFloat(amount) || 0
-    if (total > 0 && sg >= 0 && sg <= total) setAimfoxVal((total - sg).toFixed(2))
-    else setAimfoxVal('')
-  }
-
-  const handleOpexChange = (val: string) => {
-    setOpexVal(val)
-    const op = parseFloat(val) || 0
-    const total = parseFloat(amount) || 0
-    if (total > 0 && op >= 0 && op <= total) setPerformanceVal((total - op).toFixed(2))
-    else setPerformanceVal('')
-  }
-  const handlePerformanceChange = (val: string) => {
-    setPerformanceVal(val)
-    const perf = parseFloat(val) || 0
-    const total = parseFloat(amount) || 0
-    if (total > 0 && perf >= 0 && perf <= total) setOpexVal((total - perf).toFixed(2))
-    else setOpexVal('')
-  }
-
-  useEffect(() => {
-    if (revAlloc === 'byval') { setAimfoxVal(''); setSgVal('') }
-  }, [amount]) // eslint-disable-line
-
-  useEffect(() => {
-    if (opexType === 'split') { setOpexVal(''); setPerformanceVal('') }
-  }, [amount]) // eslint-disable-line
-
-  const splitTotal = (parseFloat(aimfoxVal) || 0) + (parseFloat(sgVal) || 0)
-  const splitOk = revAlloc !== 'byval' || Math.abs(splitTotal - (parseFloat(amount) || 0)) < 0.01
-  const splitPct = parseFloat(amount) > 0
-    ? { af: ((parseFloat(aimfoxVal) || 0) / parseFloat(amount) * 100).toFixed(1), sg: ((parseFloat(sgVal) || 0) / parseFloat(amount) * 100).toFixed(1) }
-    : { af: '0', sg: '0' }
-
-  const opexSplitTotal = (parseFloat(opexVal) || 0) + (parseFloat(performanceVal) || 0)
-  const opexSplitOk = opexType !== 'split' || Math.abs(opexSplitTotal - (parseFloat(amount) || 0)) < 0.01
-  const opexPct = parseFloat(amount) > 0
-    ? { op: ((parseFloat(opexVal) || 0) / parseFloat(amount) * 100).toFixed(1), perf: ((parseFloat(performanceVal) || 0) / parseFloat(amount) * 100).toFixed(1) }
-    : { op: '0', perf: '0' }
 
   // The four stored columns, from the rates in hand (bookAmountsAtRate, so a
   // hand-typed rate is booked exactly like a fetched one). A missing rate is
@@ -287,6 +230,14 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
 
   const splitActive = splitLines.length > 0
 
+  /** Lines changed in the editor: the project moves between the bill and
+   *  its lines by one rule (splitProjectChange) — never on both at once. */
+  const changeSplitLines = (next: SplitLine[]) => {
+    const out = splitProjectChange(splitLines, next, projectId)
+    setSplitLines(out.lines)
+    setProjectId(out.parentProjectId)
+  }
+
   /**
    * While a bill is split, its own classification is TAKEN from the split
    * rather than typed.
@@ -315,7 +266,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const getPlSubs = (catId: string) => plSubcategories.filter(s => s.category_id === catId)
   const getDeptSubs = (dId: string) => deptSubcategories.filter(s => s.department_id === dId)
   const getExpDescs = (subId: string) => expenseDescriptions.filter(e => e.dept_subcategory_id === subId)
-  const revenueStreams = ['Social Growth', 'Aimfox', 'Outsourced Services', 'VAT Claimed', 'Interest Received', 'Loans', 'Credit', 'Other']
+  const revenueStreams = REVENUE_STREAMS
 
   const runValidation = () => {
     const e: ValidationErrors = {}
@@ -331,8 +282,6 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       // fully classified, which is how a correct entry comes to look wrong.
       if (!plCatId && !splitActive) e.plCat = 'P&L Category is required'
       if (!deptId && !splitActive) e.dept = 'Department is required'
-      if (revAlloc === 'byval' && !splitOk) e.split = 'Split values must sum to total amount'
-      if (opexType === 'split' && !opexSplitOk) e.opexSplit = 'OPEX split values must sum to total amount'
     }
     if (invType === 'revenue' && !revStream) e.revStream = 'Revenue stream is required'
     return e
@@ -340,7 +289,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, revAlloc, aimfoxVal, sgVal, opexType, opexVal, performanceVal]) // eslint-disable-line
+  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -371,7 +320,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     const load = async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('id, transaction_date, amount, amount_rsd, amount_eur, currency, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, rev_alloc_type, dept_split_type, tags, note, exchange_rate, eur_rate, is_indexed, banks(id,name), partners(id,name)')
+        .select('id, transaction_date, amount, amount_rsd, amount_eur, currency, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, project_id, dept_split_type, tags, note, exchange_rate, eur_rate, is_indexed, banks(id,name), partners(id,name)')
         .eq('company_id', companyId).eq('type', 'direct').eq('status', 'posted')
         .order('transaction_date', { ascending: false }).limit(150)
       if (error) console.error('transactions load error:', error)
@@ -455,7 +404,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     if (tx.dept_subcategory) { setDeptSubName(tx.dept_subcategory); const sub = deptSubcategories.find(s => s.name === tx.dept_subcategory); if (sub) setDeptSubId(sub.id) }
     if (tx.expense_description) setExpDesc(tx.expense_description)
     if (tx.revenue_stream) setRevStream(tx.revenue_stream)
-    if (tx.rev_alloc_type) setRevAlloc(tx.rev_alloc_type)
+    if (tx.project_id) setProjectId(tx.project_id)
     if (tx.dept_split_type) setDeptSplit(tx.dept_split_type)
     if (tx.tags) setTags(tx.tags)
     if (tx.note) setNote(tx.note)
@@ -477,7 +426,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     setInvType(invoice.type || 'expense'); setPlCatName(invoice.pl_category || '')
     setPlSubName(invoice.pl_subcategory || ''); setDeptName(invoice.department || '')
     setDeptSubName(invoice.dept_subcategory || ''); setExpDesc(invoice.expense_description || '')
-    setRevStream(invoice.revenue_stream || ''); setRevAlloc(invoice.rev_alloc_type || 'sg100')
+    setRevStream(invoice.revenue_stream || ''); setProjectId(invoice.project_id ?? null)
     setDeptSplit(invoice.dept_split_type || 'none'); setNote(invoice.note || '')
     setTags(invoice.tags || []); setAccNum(invoice.account_number || '')
     setModel(invoice.model || ''); setRefNum(invoice.reference_number || '')
@@ -485,9 +434,6 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     setExRate(invoice.exchange_rate?.toString() || ''); setIsIndexed(invoice.is_indexed || false)
     setEurRate(invoice.eur_rate?.toString() || '')
     setPlImpact(invoice.pl_impact !== false)
-    setOpexType(invoice.opex_type || 'opex')
-    setOpexVal(invoice.opex_amount?.toString() || '')
-    setPerformanceVal(invoice.performance_amount?.toString() || '')
     setCfType(invoice.cf_type || '')
     setCfFrequency(invoice.cf_frequency || 'monthly')
     setCfNextMonthEst(invoice.cf_next_month_est?.toString() || '')
@@ -519,14 +465,14 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const touchStep = (n: number) => {
     if (n === 1) setTouched(p => ({ ...p, companyId: true, currency: true, invoiceDate: true, partnerId: true }))
     if (n === 2) setTouched(p => ({ ...p, amount: true, exRate: true }))
-    if (n === 3) setTouched(p => ({ ...p, plCat: true, dept: true, revStream: true, split: true, opexSplit: true }))
+    if (n === 3) setTouched(p => ({ ...p, plCat: true, dept: true, revStream: true }))
   }
 
   const stepHasError = (n: number) => {
     const stepFields: Record<number, string[]> = {
       1: ['companyId', 'currency', 'invoiceDate', 'partnerId'],
       2: ['amount', 'exRate'],
-      3: ['plCat', 'dept', 'revStream', 'split', 'opexSplit'],
+      3: ['plCat', 'dept', 'revStream'],
     }
     return (stepFields[n] || []).some(f => !!errors[f])
   }
@@ -553,23 +499,6 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
 
   const toggleTag = (t: string) => setTags(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
 
-  const revAllocLabel = () => {
-    if (revAlloc === 'sg100') return '100% Social Growth'
-    if (revAlloc === 'af100') return '100% Aimfox'
-    if (revAlloc === 'shared') return 'Shared 50/50'
-    if (revAlloc === 'byval') {
-      const af = parseFloat(aimfoxVal) || 0; const sg = parseFloat(sgVal) || 0
-      return `By value — Aimfox: ${currency} ${af.toFixed(2)} / SG: ${currency} ${sg.toFixed(2)}`
-    }
-    return '—'
-  }
-
-  const opexLabel = () => {
-    if (opexType === 'opex') return '100% OPEX'
-    if (opexType === 'performance') return '100% Performance'
-    return `Split — OPEX: ${currency} ${parseFloat(opexVal || '0').toFixed(2)} / Perf: ${currency} ${parseFloat(performanceVal || '0').toFixed(2)}`
-  }
-
   const cfLabel = () => {
     if (!cfType) return '—'
     if (cfType === 'recurring') return `Recurring ${cfFrequency}`
@@ -583,7 +512,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const stepTitles = ['Basic information', 'Amount & currency', 'Classification & P&L', 'Review & post']
 
   const handlePost = async () => {
-    setTouched({ companyId: true, currency: true, invoiceDate: true, partnerId: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true, split: true, opexSplit: true })
+    setTouched({ companyId: true, currency: true, invoiceDate: true, partnerId: true, plCat: true, dept: true, revStream: true, amount: true, exRate: true })
     const e = runValidation()
     if (Object.keys(e).length > 0) { setShowValidationSummary(true); return }
     const booked = book.amounts
@@ -600,10 +529,8 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
       }
       const effectivePlImpact = linkedTxId ? false : plImpact
       const effectiveStatus = linkedTxId ? 'paid' : 'unpaid'
-      const aimfoxAmount = revAlloc === 'byval' ? (parseFloat(aimfoxVal) || 0) : null
-      const sgAmount = revAlloc === 'byval' ? (parseFloat(sgVal) || 0) : null
-      const opexAmount = opexType === 'split' ? (parseFloat(opexVal) || 0) : null
-      const perfAmount = opexType === 'split' ? (parseFloat(performanceVal) || 0) : null
+      // A split bill's projects are on its lines; the bill itself is on none.
+      const ownProjectId = splitActive ? null : projectId
 
       const payload = {
         company_id: companyId || null, partner_id: finalPartnerId || null,
@@ -613,10 +540,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         department: deptName || null, dept_subcategory: deptSubName || null,
         expense_description: expDesc || null,
         revenue_stream: invType === 'revenue' ? (revStream || null) : null,
-        rev_alloc_type: revAlloc, dept_split_type: deptSplit,
-        rev_alloc_aimfox: aimfoxAmount, rev_alloc_sg: sgAmount,
-        opex_type: invType === 'expense' ? opexType : null,
-        opex_amount: opexAmount, performance_amount: perfAmount,
+        project_id: ownProjectId, dept_split_type: deptSplit,
         cf_type: invType === 'expense' ? (cfType || null) : null,
         cf_frequency: cfType === 'recurring' ? cfFrequency : null,
         cf_next_month_est: cfType === 'recurring' ? (cfNextMonthEst ? parseFloat(cfNextMonthEst) : (amount ? parseFloat(amount) : null)) : null,
@@ -645,7 +569,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
           throw new Error(`No invoice with id ${invoice.id} was updated — nothing was saved.`)
         invoiceId = invoice.id
         if (linkedTxId && plCatName) {
-          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, revenue_stream: revStream || null }).eq('id', linkedTxId).select('id')
+          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, revenue_stream: revStream || null, project_id: ownProjectId }).eq('id', linkedTxId).select('id')
           if (txErr) throw txErr
           if (!tx || tx.length === 0)
             throw new Error(`The invoice was saved, but no transaction with id ${linkedTxId} was updated — its P&L classification is now out of step with the invoice.`)
@@ -660,7 +584,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         if (!newInv?.id) throw new Error('The invoice was not saved — the database returned no row.')
         invoiceId = newInv.id
         if (linkedTxId && plCatName) {
-          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null }).eq('id', linkedTxId).select('id')
+          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, project_id: ownProjectId }).eq('id', linkedTxId).select('id')
           if (txErr) throw txErr
           if (!tx || tx.length === 0)
             throw new Error(`The invoice was saved, but no transaction with id ${linkedTxId} was updated — its P&L classification is now out of step with the invoice.`)
@@ -737,56 +661,20 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
   const currentDeptSubs = getDeptSubs(deptId)
   const currentExpDescs = getExpDescs(deptSubId)
 
-  // ── OPEX/Performance panel ────────────────────────────
-  const opexPanel = (
+  // ── Project panel ────────────────────────────
+  // One picker; null is company overhead. Hidden while the bill is split,
+  // because then each line carries its own project and this one is null.
+  const projectPanel = (
     <div style={s.section}>
-      <div style={s.sectionTitle}>Expense type — OPEX vs Performance</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-        {[
-          { id: 'opex', label: '🏢 100% OPEX', sub: 'Fixed operational cost', color: DIALOG.blue, bg: DIALOG.blueFill },
-          { id: 'performance', label: '🚀 100% Performance', sub: 'Revenue-driven cost', color: DIALOG.amber, bg: DIALOG.amberFill },
-          { id: 'split', label: '⚖️ Split by value', sub: 'Custom allocation', color: DIALOG.dim, bg: DIALOG.raised },
-        ].map(a => (
-          <div key={a.id}
-            style={{ ...s.allocBtn, ...(opexType === a.id ? { border: `2px solid ${a.color}`, background: a.bg } : {}) }}
-            onClick={() => { setOpexType(a.id); setOpexVal(''); setPerformanceVal('') }}>
-            <div style={{ fontSize: '11px', fontWeight: '600', color: opexType === a.id ? a.color : DIALOG.text }}>{a.label}</div>
-            <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px' }}>{a.sub}</div>
-          </div>
-        ))}
-      </div>
-      {opexType === 'split' && (
-        <div style={{ marginTop: '14px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
-          <div style={{ fontSize: '11px', color: DIALOG.dim, fontWeight: '500', marginBottom: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.07em' }}>
-            Split by value — total: {amount ? fmtMoney(parseFloat(amount), currency) : '—'}
-          </div>
-          <div style={s.row2}>
-            <div style={s.field}>
-              <label style={s.lbl}>OPEX ({currency || '—'})</label>
-              <input type="number" style={{ ...s.input, ...(fieldErr('opexSplit') ? s.inputError : {}) }}
-                value={opexVal} onChange={e => handleOpexChange(e.target.value)} placeholder="0.00" min="0" max={amount} />
-              {opexVal && parseFloat(amount) > 0 && <div style={{ fontSize: '10px', color: DIALOG.blue, marginTop: '2px' }}>{opexPct.op}% of total</div>}
-            </div>
-            <div style={s.field}>
-              <label style={s.lbl}>Performance ({currency || '—'})</label>
-              <input type="number" style={{ ...s.input, ...(fieldErr('opexSplit') ? s.inputError : {}) }}
-                value={performanceVal} onChange={e => handlePerformanceChange(e.target.value)} placeholder="0.00" min="0" max={amount} />
-              {performanceVal && parseFloat(amount) > 0 && <div style={{ fontSize: '10px', color: DIALOG.amber, marginTop: '2px' }}>{opexPct.perf}% of total</div>}
-            </div>
-          </div>
-          {opexVal && performanceVal && parseFloat(amount) > 0 && (
-            <div style={{ marginTop: '10px', background: DIALOG.panel, borderRadius: '8px', padding: '10px 12px', border: '0.5px solid ' + DIALOG.border }}>
-              <div style={{ height: '6px', borderRadius: '3px', background: DIALOG.border, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${opexPct.op}%`, background: DIALOG.blue, display: 'inline-block' }} />
-                <div style={{ height: '100%', width: `${opexPct.perf}%`, background: DIALOG.amber, display: 'inline-block' }} />
-              </div>
-              {!opexSplitOk
-                ? <div style={{ fontSize: '11px', color: DIALOG.red, marginTop: '6px' }}>⚠️ Sum ≠ total</div>
-                : <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '6px' }}>✓ Split is valid</div>
-              }
-            </div>
-          )}
+      <div style={s.sectionTitle}>Project</div>
+      {splitActive ? (
+        <div style={{ fontSize: '11.5px', color: DIALOG.dim, lineHeight: 1.5 }}>
+          This bill is split — each line above carries its own project.
+          Remove the split to put the whole bill on one project.
         </div>
+      ) : (
+        <ProjectSelect value={projectId} onChange={setProjectId} companyId={companyId || null}
+          style={pickerChrome} />
       )}
     </div>
   )
@@ -1196,7 +1084,8 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
               <SplitEditor
                 parent={splitParent}
                 lines={splitLines}
-                onChange={setSplitLines}
+                onChange={changeSplitLines}
+                companyId={companyId || null}
                 scripts={quickFillScripts as any}
                 classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
                 client={supabase}
@@ -1359,38 +1248,8 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                     </div>
                   </div>
 
-                  <div style={s.section}>
-                    <div style={s.sectionTitle}>Revenue stream allocation</div>
-                    <div style={s.allocGrid}>
-                      {[{ id: 'sg100', label: '100% Social Growth', sub: 'Full allocation' }, { id: 'af100', label: '100% Aimfox', sub: 'Full allocation' }, { id: 'shared', label: 'Shared 50/50', sub: 'Both streams' }, { id: 'byval', label: 'By value', sub: 'Custom split' }].map(a => (
-                        <div key={a.id} style={{ ...s.allocBtn, ...(revAlloc === a.id ? s.allocBtnActive : {}) }} onClick={() => { setRevAlloc(a.id); setAimfoxVal(''); setSgVal('') }}>
-                          <div style={s.allocLabel}>{a.label}</div>
-                          <div style={s.allocSub}>{a.sub}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {revAlloc === 'byval' && (
-                      <div style={{ marginTop: '14px', background: DIALOG.raised, borderRadius: '10px', padding: '14px', border: '0.5px solid ' + DIALOG.border }}>
-                        <div style={s.row2}>
-                          <div style={s.field}>
-                            <label style={s.lbl}>Aimfox ({currency || '—'})</label>
-                            <input type="number" style={s.input} value={aimfoxVal} onChange={e => handleAimfoxChange(e.target.value)} placeholder="0.00" />
-                            {aimfoxVal && parseFloat(amount) > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>{splitPct.af}% od ukupnog</div>}
-                          </div>
-                          <div style={s.field}>
-                            <label style={s.lbl}>Social Growth ({currency || '—'})</label>
-                            <input type="number" style={s.input} value={sgVal} onChange={e => handleSgChange(e.target.value)} placeholder="0.00" />
-                            {sgVal && parseFloat(amount) > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>{splitPct.sg}% od ukupnog</div>}
-                          </div>
-                        </div>
-                        {aimfoxVal && sgVal && splitOk && <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '6px' }}>✓ Split je ispravan</div>}
-                        {aimfoxVal && sgVal && !splitOk && <div style={{ fontSize: '11px', color: DIALOG.red, marginTop: '6px' }}>⚠️ Zbir ne odgovara ukupnom</div>}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* ── OPEX / Performance ── */}
-                  {opexPanel}
+                  {/* ── Project ── */}
+                  {projectPanel}
 
                   {/* ── Cash Flow Classification ── */}
                   {cfPanel}
@@ -1411,6 +1270,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                   </div>
                 </div>
               )}
+              {invType === 'revenue' && projectPanel}
 
               <div style={s.section}>
                 <div style={s.sectionTitle}>Tags & note</div>
@@ -1446,6 +1306,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                     <div key={l.key} style={{ fontSize: '11.5px', opacity: 0.9, lineHeight: 1.7 }}>
                       {i + 1}. {[l.pl_category, l.pl_subcategory, l.department, l.expense_description]
                         .filter(Boolean).join(' › ') || 'nothing picked'}
+                      {' · '}{projectLabelById(projects, l.project_id)}
                       {' — '}
                       <strong>
                         {currency ? fmtMoney(l.amount || 0, currency) : fmtNum(l.amount || 0)}
@@ -1493,8 +1354,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
                   ['P&L Category', plCatName || '—'],
                   ['Department', deptName || '—'],
                   ['Description', expDesc || '—'],
-                  ['Rev. stream alloc.', revAllocLabel()],
-                  ['Expense type', opexLabel()],
+                  ['Project', splitActive ? 'By split line' : projectLabelById(projects, projectId)],
                   ['CF Classification', cfLabel()],
                 ]},
               ].map(sec => (

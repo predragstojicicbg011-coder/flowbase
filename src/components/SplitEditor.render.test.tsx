@@ -2,31 +2,44 @@ import React, { useState } from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import SplitEditor from './SplitEditor'
 import { type SplitLine, type ScriptLike } from '../services/expenseSplit'
+import type { Project } from '../services/projects'
 
 jest.mock('../supabase', () => ({ supabase: {} }))
+// The editor is given its projects; nothing here should read the table.
+jest.mock('../contexts/ProjectsContext', () => ({
+  useProjects: () => ({ projects: [], activeProjects: [], loading: false, error: null, refresh: async () => {} }),
+}))
 
 const SCRIPTS: ScriptLike[] = [
   {
     id: 's1', name: 'Figma', icon: '⚡',
     pl_category: 'General Business', pl_subcategory: 'Software subscriptions',
     department: 'Admin', dept_subcategory: 'Tools', expense_description: 'Figma',
-    rev_alloc: 'sg100', opex_type: 'opex', cf_type: 'recurring',
+    cf_type: 'recurring',
   },
   {
     id: 's2', name: 'Laptops', icon: '💻',
     pl_category: 'Capital expenditures', pl_subcategory: 'Hardware',
     department: 'Product', dept_subcategory: 'Equipment', expense_description: 'Laptop',
-    rev_alloc: 'shared', opex_type: 'opex', cf_type: 'one_off',
+    cf_type: 'one_off',
   },
 ]
 
+const project = (id: string, name: string, over: Partial<Project> = {}): Project => ({
+  id, company_id: 'c1', name, code: null, kind: 'construction', investor_partner_id: null,
+  contract_value: null, contract_currency: null, contract_date: null,
+  contract_value_rsd: null, contract_value_eur: null, active: true, note: null, ...over,
+})
+const PROJECTS: Project[] = [project('p1', 'Zgrada Vračar'), project('p2', 'Hala Zemun')]
+
 /** The editor hands lines back; a host has to keep them. */
-function Host({ amount = 120000 }: { amount?: number }) {
+function Host({ amount = 120000, seen }: { amount?: number; seen?: (l: SplitLine[]) => void }) {
   const [lines, setLines] = useState<SplitLine[]>([])
   return (
     <SplitEditor
       parent={{ amount, currency: 'RSD', exchange_rate: 1, eur_rate: 117.5, amount_rsd: amount }}
-      lines={lines} onChange={setLines} scripts={SCRIPTS} />
+      lines={lines} onChange={l => { setLines(l); seen?.(l) }} scripts={SCRIPTS}
+      projects={PROJECTS} />
   )
 }
 
@@ -184,6 +197,38 @@ describe('a line is a template and a figure', () => {
   })
 })
 
+describe('a line is on a project', () => {
+  const open = () => {
+    let latest: SplitLine[] = []
+    render(<Host seen={l => { latest = l }} />)
+    fireEvent.click(screen.getByText(/Split across several costs/))
+    return () => latest
+  }
+
+  it('opens every line on company overhead', () => {
+    const lines = open()
+    expect(lines().map(l => l.project_id)).toEqual([null, null])
+    expect(screen.getAllByText('Opšti troškovi (bez projekta)')).toHaveLength(2)
+  })
+
+  /** One bill shared by two sites: each line is put on its own project. */
+  it('puts a line on the project picked for it, and only that line', () => {
+    const lines = open()
+    fireEvent.click(screen.getAllByTitle('Projekat ovog dela')[1])
+    fireEvent.click(screen.getByText('Hala Zemun'))
+    expect(lines().map(l => l.project_id)).toEqual([null, 'p2'])
+  })
+
+  /** A template is a classification; it must not move a line off its site. */
+  it('keeps the line’s project when a template is picked', () => {
+    const lines = open()
+    fireEvent.click(screen.getAllByTitle('Projekat ovog dela')[0])
+    fireEvent.click(screen.getByText('Zgrada Vračar'))
+    fireEvent.click(screen.getAllByText(/pick what this part is for/)[0])
+    fireEvent.click(screen.getByText(/💻 Laptops/))
+    expect(lines()[0]).toMatchObject({ project_id: 'p1', pl_category: 'Capital expenditures' })
+  })
+})
 
 describe('typing an amount', () => {
   const open = () => {
