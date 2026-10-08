@@ -124,6 +124,8 @@ fajl.
 | Subtype (expense / revenue) | Podtip (trošak / prihod) |
 | Expense category | Kategorija troška |
 | Budget line | Budžetska stavka |
+| System category (where the app posts on its own) | Sistemska kategorija |
+| Set / not set (a system category) | Podešeno / nije podešeno |
 
 
 ## Status i iznosi

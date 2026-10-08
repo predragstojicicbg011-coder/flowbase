@@ -8,64 +8,29 @@
 // from what the amount is, and are set out here so they are in one place rather
 // than spelled out at four call sites that can drift apart.
 //
-//   pl_category          always Employee and Labour
-//   pl_subcategory       follows the component — net, tax, or which side's
-//                        contributions. Nobody chooses it.
-//   department           THE ONE CHOICE. Which team carries this person's cost:
-//                        Development, Marketing, CS, Office & Administration…
-//   dept_subcategory     Salary expenses domestic
+//   pl_category          \ follow the component — net, tax, which side's
+//   pl_subcategory       / contributions, other income. Nobody chooses them
+//                        per person: each component is a SYSTEM CATEGORY
+//                        role (services/systemCategories.ts), set once by the
+//                        owner in Podešavanja → Sistemske kategorije.
+//   department           THE ONE CHOICE. Which sector carries this person's
+//                        cost — from their dated allocation
+//                        (employee_cost_allocation), else the unit mapping.
+//   dept_subcategory     the allocation's own, else the role
+//                        `payroll_salary_dept_subcategory`
 //   expense_description  the employee's name
 //
 // OTHER INCOME follows the person the same way, under their department, but
-// it is not a salary and so does not post under Net Salaries.
+// it is not a salary and so does not post under the net-salary role.
 //
-// The names here are the ones the ledger already uses. They are matched
-// against `pl_subcategories`, `departments` and `dept_subcategories` when a
-// posting is planned, and a name that is not in those tables is reported
-// rather than written — a category invented by this module would create a
-// second heading one character away from the real one, and the P&L would show
-// both.
-
-export const PL_CATEGORY = 'Employee and Labour'
-
-/** Which sub-category each part of a salary posts under. */
-export const SUBCATEGORY = {
-  net: 'Net Salaries',
-  tax: 'Tax on salary',
-  employee: 'Contributions on behalf of the employee',
-  employer: 'Contributions on behalf of the employer',
-} as const
-
-/** Под-категорија за зараде, the same for every employee. */
-export const SALARY_DEPT_SUBCATEGORY = 'Salary expenses domestic'
-
-/**
- * Where an addition paid outside the salary posts: other income, and the
- * untaxed kind. Under the person's own department, like their salary, but not
- * among the net salaries — it is not one. Spelled as the ledger spells it.
- */
-export const OTHER_INCOME_SUBCATEGORY = 'Renumeration, allowances and other benefits'
-
-/**
- * The departments a salary is expected to be allocated to.
- *
- * Informational — the dropdown reads the real `departments` table, and this
- * list exists so a test can catch it drifting. Spelled as the ledger spells
- * them, which is not how anybody says them out loud: capital E on Expenses,
- * and "Office & Administration" carries no "expenses" at all. That last one is
- * why the first attempt at the unit mapping rolled back, which is exactly what
- * it was supposed to do.
- */
-export const SALARY_DEPARTMENTS = [
-  'Marketing Expenses',
-  'Development Expenses',
-  'Product Expenses',
-  'Design Expenses',
-  'Sales Expenses',
-  'CS Expenses',
-  'Office & Administration',
-  'Shareholder Expenses',
-] as const
+// No heading is named in this code. Mintflow's English names ('Employee and
+// Labour', 'Net Salaries', 'Salary expenses domestic' …) were hardcoded here;
+// MCFlow's P&L is the owner's own, in Serbian, and an unset role refuses the
+// posting rather than inventing a heading. The names a role resolves to are
+// still matched against `pl_subcategories`, `departments` and
+// `dept_subcategories` when a posting is planned (`unknownNames`): a name
+// that is not in those tables is reported rather than written — a renamed
+// heading would otherwise come back as a second one beside it.
 
 /**
  * `cf_type` for a payroll entry.

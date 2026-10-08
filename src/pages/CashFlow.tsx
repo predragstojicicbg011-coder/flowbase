@@ -11,10 +11,15 @@ import { loadCashTimeline, type LoadedCashTimeline } from '../services/loadCashT
 import { cashDirection, previousMonth } from '../services/cashTimeline'
 import { monthLongLabel, capitalize } from '../utils/months'
 import { countOf } from '../utils/plural'
+import { useSystemCategories } from '../contexts/SystemCategoriesContext'
+import { classificationOrNull } from '../services/systemCategories'
+import SystemCategoryNotice from '../components/SystemCategoryNotice'
 
 export default function CashFlow() {
 
   const { companies, showPicker } = useCompanies()
+  /** Which P&L categories are banking and taxes — the owner's, see systemCategories. */
+  const systemCategories = useSystemCategories()
   // Every total below sums each transaction's own figure in the display
   // currency (amount_rsd or amount_eur); a row with none counts as zero.
   const { currency, pick, format } = useDisplayCurrency()
@@ -132,16 +137,26 @@ export default function CashFlow() {
   // Outflows, excluding banking and taxes (separate line items). Those two
   // are read from OUTFLOWS only: interest received is classified under
   // banking too, and it is already in the inflow.
+  //
+  // Which P&L category is "banking" and which is "taxes" is the owner's
+  // choice — the system categories `cashflow_banking` and `cashflow_taxes`.
+  // Unset, nothing is singled out: every outflow stays operating, the two
+  // lines read zero, and the notice above the table says why.
+  const bankingCategory = classificationOrNull('cashflow_banking', systemCategories.map)?.pl_category ?? null
+  const taxCategory = classificationOrNull('cashflow_taxes', systemCategories.map)?.pl_category ?? null
+  const isBanking = (t: any) => bankingCategory !== null && t.pl_category === bankingCategory
+  const isTax = (t: any) => taxCategory !== null && t.pl_category === taxCategory
+
   const operatingOut = outflowTx
-    .filter(t => !['Banking and Finance', 'Taxes'].includes(t.pl_category || ''))
+    .filter(t => !isBanking(t) && !isTax(t))
     .reduce((s, t) => s + amt(t), 0)
 
   const bankingOut = outflowTx
-    .filter(t => t.pl_category === 'Banking and Finance')
+    .filter(isBanking)
     .reduce((s, t) => s + amt(t), 0)
 
   const taxOut = outflowTx
-    .filter(t => t.pl_category === 'Taxes')
+    .filter(isTax)
     .reduce((s, t) => s + amt(t), 0)
 
   // ── A TRANSFER BETWEEN OUR OWN ACCOUNTS IS NOT CASH FLOW ────────────────
@@ -239,6 +254,10 @@ export default function CashFlow() {
             </select>
           </div>
         </div>
+
+        <SystemCategoryNotice what="Novčani tok" roles={['cashflow_banking', 'cashflow_taxes']}
+          map={systemCategories.map} loading={systemCategories.loading}
+          lead="Bankarski troškovi i porezi se ne izdvajaju iz poslovnih odliva." />
 
         {/* ── The line, before the period ──────────────────────────────
             Twelve months whatever period is selected below. The question it

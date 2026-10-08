@@ -26,6 +26,9 @@ import {
   saveRun, fetchRuns, type SavedRun, type SaveContext,
 } from '../services/payroll/savedRuns'
 import PayrollPostingPanel from '../components/PayrollPostingPanel'
+import SystemCategoryNotice from '../components/SystemCategoryNotice'
+import { useSystemCategories } from '../contexts/SystemCategoriesContext'
+import { PAYROLL_ROLES } from '../services/systemCategories'
 import PayrollMonths from '../components/PayrollMonths'
 import PayslipDialog from '../components/PayslipDialog'
 import { fmtNum } from '../utils/formatters'
@@ -49,6 +52,7 @@ import { srDate } from '../utils/months'
  */
 export default function Payroll() {
   const { companies, defaultCompany, showPicker } = useCompanies()
+  const systemCategories = useSystemCategories()
   const [companyId, setCompanyId] = useState<string>('')
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
   /**
@@ -284,6 +288,9 @@ export default function Payroll() {
         </div>
 
         <PayrollMonths companyId={companyId} current={month} onPick={setMonth} />
+
+        <SystemCategoryNotice what="Zarade" roles={PAYROLL_ROLES}
+          map={systemCategories.map} loading={systemCategories.loading} />
 
         {error && <div style={s.error}>{error}</div>}
 

@@ -16,9 +16,9 @@ import { fmtLocal, fmtNum } from '../utils/formatters'
 import { countOf } from '../utils/plural'
 import { srDate } from '../utils/months'
 import { OVERHEAD_LABEL } from '../services/projects'
-import {
-  PL_CATEGORY, SUBCATEGORY, SALARY_DEPT_SUBCATEGORY, OTHER_INCOME_SUBCATEGORY,
-} from '../services/payroll/booking'
+import { useSystemCategories } from '../contexts/SystemCategoriesContext'
+import { classificationOrNull, type SystemRole } from '../services/systemCategories'
+import SystemCategoryNotice from './SystemCategoryNotice'
 
 /**
  * One employee: who they are, the contracts they have had, and what is
@@ -1006,6 +1006,15 @@ function AllocationTab({ employee, rows, onChanged }: {
 }) {
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([])
   const [subcategories, setSubcategories] = useState<{ id: string; name: string; department_id: string }[]>([])
+  // The P&L half of every line below is a system category, set by the owner
+  // in Podešavanja → Sistemske kategorije; this tab only shows it.
+  const system = useSystemCategories()
+  const heading = (role: SystemRole) => {
+    const c = classificationOrNull(role, system.map)
+    return c ? `${c.pl_category} › ${c.pl_subcategory}` : '(sistemska kategorija nije podešena)'
+  }
+  const defaultSub = classificationOrNull('payroll_salary_dept_subcategory', system.map)?.dept_subcategory
+    || 'podsektor za zarade iz Podešavanja'
 
   useEffect(() => {
     // Straight from the ledger's own lists rather than typed. A department
@@ -1086,20 +1095,23 @@ function AllocationTab({ employee, rows, onChanged }: {
 
       <div style={s.chainBox}>
         <div style={s.chainTitle}>Šta će se proknjižiti za {employee.full_name}</div>
+        <SystemCategoryNotice what="Zarade" map={system.map} loading={system.loading}
+          roles={['payroll_net_salary', 'payroll_income_tax', 'payroll_employee_contributions',
+            'payroll_employer_contributions', 'payroll_other_income']} />
         {([
-          ['Neto zarada', SUBCATEGORY.net],
-          ['Porez na zarade', SUBCATEGORY.tax],
-          ['Doprinosi na teret zaposlenog', SUBCATEGORY.employee],
-          ['Doprinosi na teret poslodavca', SUBCATEGORY.employer],
-        ] as const).map(([what, sub]) => (
-          <div key={sub} style={s.chainRow}>
+          ['Neto zarada', 'payroll_net_salary'],
+          ['Porez na zarade', 'payroll_income_tax'],
+          ['Doprinosi na teret zaposlenog', 'payroll_employee_contributions'],
+          ['Doprinosi na teret poslodavca', 'payroll_employer_contributions'],
+        ] as const).map(([what, role]) => (
+          <div key={role} style={s.chainRow}>
             <span style={s.chainWhat}>{what}</span>
             <span style={s.chainPath}>
-              {PL_CATEGORY} &rsaquo; {sub} &rsaquo;{' '}
+              {heading(role)} &rsaquo;{' '}
               <b style={{ color: draft.department ? '#00D47E' : '#C8A24A' }}>
                 {draft.department || 'izaberite sektor'}
               </b>
-              {' '}&rsaquo; {draft.dept_subcategory || SALARY_DEPT_SUBCATEGORY}
+              {' '}&rsaquo; {draft.dept_subcategory || defaultSub}
               {' '}&rsaquo; {employee.full_name}
             </span>
           </div>
@@ -1107,11 +1119,11 @@ function AllocationTab({ employee, rows, onChanged }: {
         <div style={{ ...s.chainRow, borderTop: '0.5px solid rgba(255,255,255,0.08)', paddingTop: '7px' }}>
           <span style={s.chainWhat}>Ostala primanja</span>
           <span style={s.chainPath}>
-            {PL_CATEGORY} &rsaquo; {OTHER_INCOME_SUBCATEGORY} &rsaquo;{' '}
+            {heading('payroll_other_income')} &rsaquo;{' '}
             <b style={{ color: draft.department ? '#00D47E' : '#C8A24A' }}>
               {draft.department || 'izaberite sektor'}
             </b>
-            {' '}&rsaquo; {draft.dept_subcategory || SALARY_DEPT_SUBCATEGORY}
+            {' '}&rsaquo; {draft.dept_subcategory || defaultSub}
             {' '}&rsaquo; {employee.full_name}
           </span>
         </div>
@@ -1163,12 +1175,12 @@ function AllocationTab({ employee, rows, onChanged }: {
           </select>
         </Field>
         <Field label="Podsektor"
-          hint={`Obično ${SALARY_DEPT_SUBCATEGORY}`}>
+          hint={`Obično ${defaultSub}`}>
           <select style={s.input} value={draft.dept_subcategory}
             disabled={!chosenDept}
             onChange={e => setDraft({ ...draft, dept_subcategory: e.target.value })}>
             <option value="">
-              {chosenDept ? `— ${SALARY_DEPT_SUBCATEGORY} —` : 'prvo izaberite sektor'}
+              {chosenDept ? `— ${defaultSub} —` : 'prvo izaberite sektor'}
             </option>
             {subsForDept.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>

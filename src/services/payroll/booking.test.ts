@@ -1,44 +1,14 @@
-import {
-  PL_CATEGORY, SUBCATEGORY, SALARY_DEPT_SUBCATEGORY, OTHER_INCOME_SUBCATEGORY, SALARY_DEPARTMENTS,
-  cashFlowTypeFor, endOfMonth, unknownNames,
-} from './booking'
+import { cashFlowTypeFor, endOfMonth, unknownNames } from './booking'
+import * as booking from './booking'
 
 describe('the salary chain', () => {
-  it('books every part under one P&L category', () => {
-    expect(PL_CATEGORY).toBe('Employee and Labour')
-  })
-
-  it('names a sub-category per component, so nobody has to choose one', () => {
-    // The component decides it. A dropdown here would be a chance to file the
-    // employer's contributions under the employee's, which nothing downstream
-    // would question.
-    expect(SUBCATEGORY.net).toBe('Net Salaries')
-    expect(SUBCATEGORY.tax).toBe('Tax on salary')
-    expect(SUBCATEGORY.employee).toBe('Contributions on behalf of the employee')
-    expect(SUBCATEGORY.employer).toBe('Contributions on behalf of the employer')
-  })
-
-  it('puts every salary under the same department sub-category', () => {
-    expect(SALARY_DEPT_SUBCATEGORY).toBe('Salary expenses domestic')
-  })
-
-  it('spells the departments the way the ledger does, not the way people say them', () => {
-    // Read off the real `departments` table. Capital E on Expenses, and
-    // "Office & Administration" has no "expenses" on the end at all — which
-    // is what rolled the first unit-mapping migration back.
-    expect(SALARY_DEPARTMENTS).toContain('Development Expenses')
-    expect(SALARY_DEPARTMENTS).toContain('Office & Administration')
-    expect(SALARY_DEPARTMENTS).toContain('Shareholder Expenses')
-    expect(SALARY_DEPARTMENTS).not.toContain('Office & Administration expenses' as any)
-  })
-})
-
-describe('the other-income chain', () => {
-  it('is not filed among the net salaries', () => {
-    // An addition paid outside the salary is not a salary, and the people
-    // reading Net Salaries are looking for wages.
-    expect(OTHER_INCOME_SUBCATEGORY).toBe('Renumeration, allowances and other benefits')
-    expect(Object.values(SUBCATEGORY)).not.toContain(OTHER_INCOME_SUBCATEGORY as any)
+  it('names no P&L heading of its own any more', () => {
+    // The headings are the owner's, from the system categories. A Mintflow
+    // name left in this module would be a heading MCFlow's P&L never has.
+    for (const k of ['PL_CATEGORY', 'SUBCATEGORY', 'SALARY_DEPT_SUBCATEGORY',
+      'OTHER_INCOME_SUBCATEGORY', 'SALARY_DEPARTMENTS']) {
+      expect((booking as any)[k]).toBeUndefined()
+    }
   })
 })
 
@@ -110,49 +80,5 @@ describe('unknownNames', () => {
     expect(unknownNames([
       { pl_subcategory: 'Net Salaries', department: null, dept_subcategory: null },
     ], known)).toEqual([])
-  })
-})
-
-describe('every name this module posts to exists in the ledger', () => {
-  // Read off the real tables on 2026-09-23. This is the one test that would
-  // catch somebody renaming a heading in Settings and quietly splitting the
-  // payroll across the old one and the new.
-  const LEDGER = {
-    plSubcategories: [
-      'Contributions on behalf of the employee', 'Contributions on behalf of the employer',
-      'Education and training of employees', 'Employee participation in benefits',
-      'Expenses for Financing Disability Funds', 'FitPass expenses',
-      'Health care expenses paid by employer', 'Health care expenses paid by the employer',
-      'Net Salaries', 'Private Health insurance',
-      'Renumeration, allowances and other benefits', 'Salary Expenses Abroad',
-      'Tax on salary', 'Team Building expenses', 'Transportation cost',
-      'Warm Meal expenses',
-    ],
-    departments: [
-      'CS Expenses', 'Design Expenses', 'Development Expenses', 'General Business Expenses',
-      'Loans/Credits/Dividend', 'Marketing Expenses', 'Office & Administration',
-      'Product Expenses', 'Sales Expenses', 'Shareholder Expenses',
-    ],
-    deptSubcategories: [
-      'Salary expenses abroad', 'Salary expenses domestic', 'Labour related expenses',
-    ],
-  }
-
-  it('has every salary sub-category', () => {
-    for (const sub of Object.values(SUBCATEGORY)) {
-      expect(LEDGER.plSubcategories).toContain(sub)
-    }
-  })
-
-  it('has the salary department sub-category', () => {
-    expect(LEDGER.deptSubcategories).toContain(SALARY_DEPT_SUBCATEGORY)
-  })
-
-  it('has every department a salary may be allocated to', () => {
-    for (const d of SALARY_DEPARTMENTS) expect(LEDGER.departments).toContain(d)
-  })
-
-  it('has the other-income sub-category', () => {
-    expect(LEDGER.plSubcategories).toContain(OTHER_INCOME_SUBCATEGORY)
   })
 })

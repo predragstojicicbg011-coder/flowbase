@@ -29,7 +29,10 @@ import {
   describeMismatches, mismatches, type Expectation, type Settlement,
 } from '../services/settlementCheck'
 import { orderedForDifference, findCurrencyDifference } from '../services/quickFillStore'
-import { CREDIT_PRINCIPAL, CREDIT_INTEREST, creditNote, allocatePayment } from '../services/creditClassification'
+import { creditLegsFrom, creditNote, allocatePayment, type CreditLegs } from '../services/creditClassification'
+import { CREDIT_ROLES } from '../services/systemCategories'
+import { useSystemCategories } from '../contexts/SystemCategoriesContext'
+import SystemCategoryNotice from './SystemCategoryNotice'
 import { creditLegBooker } from '../services/creditPayment'
 import { planSave, isCrossTableMove, type TxTable, type TxType } from '../services/transactionMove'
 import { softDeleteRow } from '../services/writeOrder'
@@ -131,6 +134,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const [postError, setPostError] = useState('')
 
   const { companies, defaultCompany, showPicker } = useCompanies()
+  /** Where a credit instalment's two legs post — see services/systemCategories. */
+  const systemCategories = useSystemCategories()
   const { projects } = useProjects()
   const [banks, setBanks] = useState<any[]>([])
   const [allBanks, setAllBanks] = useState<any[]>([])
@@ -914,8 +919,17 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       return
     }
     let creditLegs: ReturnType<typeof creditLegBooker> | null = null
+    // The two legs' headings, before anything is written: unset, the payment
+    // is refused rather than booked under no heading.
+    let creditHeads: CreditLegs | null = null
     if (txType === 'credit_payment') {
       const credit = credits.find(c => c.id === selectedCreditId)
+      try {
+        creditHeads = creditLegsFrom(systemCategories.map)
+      } catch (err: any) {
+        setPostError(`${err.message} Ništa nije proknjiženo.`)
+        return
+      }
       try {
         creditLegs = creditLegBooker(credit?.currency, booked, credit?.name)
       } catch (err: any) {
@@ -1082,7 +1096,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           // they were equal, the totals hid it.
           const legSplit = allocatePayment(remaining, remainingPrincipal, remainingInterest)
 
-          // 1. Principal → Loans/Credits/Dividend
+          // 1. Principal → system category credit_principal
           if (legSplit.principal > 0) {
             const paidPrincipal = legSplit.principal
             const principalMoney = legs.book(paidPrincipal)
@@ -1099,7 +1113,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               tx_subtype: 'expense',
               ...principalMoney,
               pl_impact: true,
-              ...CREDIT_PRINCIPAL,
+              ...creditHeads!.principal,
               cf_type: 'recurring',
               cf_frequency: 'monthly',
               note: creditNote('principal', creditName, inst.installment_no, paidPrincipal, note, legs.currency),
@@ -1109,7 +1123,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
             if (txP?.id) firstTxId.push(txP.id)
           }
 
-          // 2. Interest → Loans/Credits/Dividend / Paid Interest on credit
+          // 2. Interest → system category credit_interest
           if (legSplit.interest > 0) {
             const paidInterest = legSplit.interest
             const interestMoney = legs.book(paidInterest)
@@ -1126,7 +1140,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               tx_subtype: 'expense',
               ...interestMoney,
               pl_impact: true,
-              ...CREDIT_INTEREST,
+              ...creditHeads!.interest,
               cf_type: 'recurring',
               cf_frequency: 'monthly',
               note: creditNote('interest', creditName, inst.installment_no, paidInterest, note, legs.currency),
@@ -1843,6 +1857,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
               {txType === 'credit_payment' && (
                 <div style={s.section}>
+                  <SystemCategoryNotice what="Otplate kredita" roles={CREDIT_ROLES}
+                    map={systemCategories.map} loading={systemCategories.loading} />
                   <CreditInstallmentSelector
                     credits={credits}
                     selectedCreditId={selectedCreditId}

@@ -1,7 +1,10 @@
 import React from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import Budgeting from './Budgeting'
-import { CREDIT_DEPARTMENT } from '../services/creditClassification'
+import { TEST_SYSTEM_CATEGORIES, testSystemCategoryRows } from '../services/systemCategories.fixture'
+
+/** The department the owner put both credit legs under — see the fixture. */
+const CREDIT_DEPARTMENT = TEST_SYSTEM_CATEGORIES.credit_principal!.department!
 
 // A thousand commitment rows is a real render, several times over. The default
 // five seconds is not about the code under test.
@@ -207,6 +210,9 @@ const seedDb = (over: Partial<MockDb['rows']> = {}) => {
     v_pl_entries: [expenseRow()],
     budget_adjustments: [],
     credit_installments: [],
+    // Where the credit legs post. Without them there is no row for the
+    // schedule to land on (see `creditUnclassified`).
+    system_categories: testSystemCategoryRows(COMPANY_A),
     v_invoice_status: [],
     // The classification lookups. These are the tables a name has to reach for
     // a future transaction to be classifiable to it — a budget line that exists

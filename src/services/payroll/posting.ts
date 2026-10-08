@@ -37,17 +37,18 @@ import type { HoursAtRate } from './timesheets'
 import type { EmployeeForMonth } from './employees'
 import { deductionAmount } from './employees'
 import { countOf } from '../../utils/plural'
-import { obligationRows, obligationTotal } from '../payrollAllocation'
+import { obligationRows, obligationTotal, type ObligationClasses } from '../payrollAllocation'
+import {
+  classificationFor, plPartFor, SystemCategoryMissing,
+  type SystemCategoryMap, type SystemRole,
+} from '../systemCategories'
 import {
   projectShares, distributeAmount, totalsByProject,
   type DistributedLine, type HoursBasis, type ProjectShare,
 } from './projectHours'
 import {
-  PL_CATEGORY, SUBCATEGORY, OTHER_INCOME_SUBCATEGORY, SALARY_DEPT_SUBCATEGORY,
   cashFlowTypeFor, endOfMonth, unknownNames, type LedgerNames,
 } from './booking'
-
-export const NET_SUBCATEGORY = SUBCATEGORY.net
 
 export interface UnitMapping {
   organisational_unit: string
@@ -110,6 +111,12 @@ export interface PostingPlan {
    * be a guess about which site they were on.
    */
   projectErrors: string[]
+  /**
+   * System categories this plan needed and found unset, by message. A plan
+   * with any of these is refused by `checkPlan` — first, before anything
+   * else: its rows would carry an empty heading.
+   */
+  classificationErrors?: string[]
 }
 
 export interface PlanInput {
@@ -137,6 +144,12 @@ export interface PlanInput {
   employeePartners?: Record<string, string | null>
   /** The month's rates, for euro deductions. */
   currencyRates?: Record<string, number>
+  /**
+   * Where each component posts — the owner's own headings, from
+   * `system_categories`. Only the roles this run actually needs are read; one
+   * that is unset lands in `classificationErrors` and the plan is refused.
+   */
+  system: SystemCategoryMap
   /** Where a retained deduction's storno goes, by deduction label. */
   retainedCategories?: Record<string, { pl_category: string; pl_subcategory: string }>
   /**
@@ -153,47 +166,41 @@ export interface PlanInput {
 }
 
 /**
- * The default home for a retained deduction whose label nobody has mapped.
+ * Retained deductions whose heading is a system category of its own, by the
+ * start of the label (case-insensitive — the register spells it "Fitpass
+ * mesečna članarina").
  *
- * It used to be 'Other labour related expenses', which does not exist —
- * every unmapped deduction would have been refused by the ledger check, and
- * before that check existed it would have created the heading. This one is
- * real, and generic enough to be honest about being a default. The note on
- * the entry names the deduction, so it can be found and moved.
+ * The storno has to land where the expense was booked when the company
+ * bought the thing: a FitPass withholding cancelled anywhere else would leave
+ * the FitPass expense standing with the reversal sitting beside it under
+ * another heading. Anything not listed goes to `payroll_retained_fallback`,
+ * and the note on the entry names the deduction, so it can be found and moved.
  */
-export const RETAINED_FALLBACK = {
-  pl_category: 'Employee and Labour',
-  pl_subcategory: 'Renumeration, allowances and other benefits',
+export const KNOWN_RETAINED: { prefix: string; role: SystemRole }[] = [
+  { prefix: 'fitpass', role: 'payroll_fitpass' },
+  // "Privatno zdravstveno osiguranje <person>" and "Osigurani članovi
+  // porodice …" — both cover somebody's family.
+  { prefix: 'privatno zdravstveno', role: 'payroll_health_insurance' },
+  { prefix: 'osigurani članovi', role: 'payroll_health_insurance' },
+]
+
+/** The role a retained deduction's storno posts under, by its label. */
+export function retainedRoleFor(label: string): SystemRole {
+  const lower = label.trim().toLowerCase()
+  return KNOWN_RETAINED.find(k => lower.startsWith(k.prefix))?.role ?? 'payroll_retained_fallback'
 }
 
 /**
- * Retained deductions whose category this ledger already has.
- *
- * Only labels that are certain. The manual payroll dialog books FitPass
- * withholdings to 'FitPass expenses', so a storno that went anywhere else
- * would leave the expense standing and the reversal sitting beside it. Matched
- * case-insensitively on the start of the label, because the register spells it
- * "Fitpass mesečna članarina".
+ * Where a retained deduction's storno goes: an explicit override by label,
+ * else its role. Throws `SystemCategoryMissing` when that role is unset.
  */
-export const KNOWN_RETAINED: { prefix: string; pl_category: string; pl_subcategory: string }[] = [
-  // Thirteen of the twenty deductions.
-  { prefix: 'fitpass', pl_category: 'Employee and Labour', pl_subcategory: 'FitPass expenses' },
-  // The other seven: six named "Privatno zdravstveno osiguranje <person>" and
-  // one "Osigurani članovi porodice …", all cover for somebody's family.
-  { prefix: 'privatno zdravstveno', pl_category: 'Employee and Labour', pl_subcategory: 'Private Health insurance' },
-  { prefix: 'osigurani članovi', pl_category: 'Employee and Labour', pl_subcategory: 'Private Health insurance' },
-]
-
 export function retainedCategoryFor(
   label: string,
+  system: SystemCategoryMap,
   overrides: Record<string, { pl_category: string; pl_subcategory: string }> = {},
 ): { pl_category: string; pl_subcategory: string } {
   if (overrides[label]) return overrides[label]
-  const lower = label.trim().toLowerCase()
-  const known = KNOWN_RETAINED.find(k => lower.startsWith(k.prefix))
-  return known
-    ? { pl_category: known.pl_category, pl_subcategory: known.pl_subcategory }
-    : RETAINED_FALLBACK
+  return plPartFor(retainedRoleFor(label), system)
 }
 
 export interface Placement {
@@ -264,6 +271,31 @@ export function planFor(input: PlanInput): PostingPlan {
   const partners = input.deductionPartners ?? {}
   const staffPartners = input.employeePartners ?? {}
   const retained = input.retainedCategories ?? {}
+  const system = input.system ?? {}
+
+  // ── The headings, from the system categories ─────────────────────────
+  // Resolved only when something in the run needs them, so a month with no
+  // other income does not refuse over an unset other-income role. An unset
+  // one is collected, the row gets an empty heading, and `checkPlan` refuses
+  // the whole plan before any of it could be written.
+  const classificationErrors = new Set<string>()
+  const NONE = { pl_category: '', pl_subcategory: '' }
+  const unset = (e: unknown) => {
+    if (e instanceof SystemCategoryMissing) { classificationErrors.add(e.message); return }
+    throw e
+  }
+  const headingOf = (role: SystemRole) => {
+    try { return plPartFor(role, system) } catch (e) { unset(e); return NONE }
+  }
+  const retainedHeading = (label: string) => {
+    try { return retainedCategoryFor(label, system, retained) } catch (e) { unset(e); return NONE }
+  }
+  /** The salary podsektor when the person's allocation names none. */
+  const defaultDeptSub = (): string => {
+    try {
+      return classificationFor('payroll_salary_dept_subcategory', system).dept_subcategory || ''
+    } catch (e) { unset(e); return '' }
+  }
 
   const invoices: PlannedInvoice[] = []
   const transactions: PlannedTransaction[] = []
@@ -299,7 +331,7 @@ export function planFor(input: PlanInput): PostingPlan {
     const department = where.department
     // Every salary lands under the one sub-category, whichever department
     // carries it. The allocation may name another, and then it is theirs.
-    const deptSub = where.dept_subcategory || SALARY_DEPT_SUBCATEGORY
+    const deptSub = where.dept_subcategory || defaultDeptSub()
     const cf = cashFlowTypeFor(p?.employee ?? {}, monthEnd)
 
     // Only the deductions this run carries. `runsFor` puts a person's whole
@@ -336,8 +368,7 @@ export function planFor(input: PlanInput): PostingPlan {
           employeeId: line.employeeId,
           employeeName: line.name,
           partnerId: partners[d.id] ?? null,
-          pl_category: PL_CATEGORY,
-          pl_subcategory: NET_SUBCATEGORY,
+          ...headingOf('payroll_net_salary'),
           department, dept_subcategory: deptSub,
           cf_type: cf,
           expense_description: line.name,
@@ -357,7 +388,7 @@ export function planFor(input: PlanInput): PostingPlan {
         // bought themselves.
         retainedTotal += amount
         retainedAcrossRun += amount
-        const retainedWhere = retainedCategoryFor(d.label, retained)
+        const retainedWhere = retainedHeading(d.label)
         transactions.push({
           kind: 'retained_storno',
           employeeName: line.name,
@@ -381,8 +412,7 @@ export function planFor(input: PlanInput): PostingPlan {
         employeeId: line.employeeId,
         employeeName: line.name,
         partnerId: staffPartners[line.employeeId] ?? null,
-        pl_category: PL_CATEGORY,
-        pl_subcategory: NET_SUBCATEGORY,
+        ...headingOf('payroll_net_salary'),
         department, dept_subcategory: deptSub,
         cf_type: cf,
         expense_description: line.name,
@@ -408,7 +438,7 @@ export function planFor(input: PlanInput): PostingPlan {
   for (const line of run.otherIncome) {
     const p = people[line.employeeId]
     const where = placementFor(p, mapping)
-    const deptSub = where.dept_subcategory || SALARY_DEPT_SUBCATEGORY
+    const deptSub = where.dept_subcategory || defaultDeptSub()
     // Under the person's own department, like their salary, but not among
     // the net salaries: an addition paid outside the salary is not one.
     invoices.push({
@@ -416,8 +446,7 @@ export function planFor(input: PlanInput): PostingPlan {
       employeeId: line.employeeId,
       employeeName: line.name,
       partnerId: staffPartners[line.employeeId] ?? null,
-      pl_category: PL_CATEGORY,
-      pl_subcategory: OTHER_INCOME_SUBCATEGORY,
+      ...headingOf('payroll_other_income'),
       department: where.department,
       dept_subcategory: deptSub,
       cf_type: cashFlowTypeFor(p?.employee ?? {}, monthEnd),
@@ -446,7 +475,12 @@ export function planFor(input: PlanInput): PostingPlan {
     cfByName.set(line.name, cashFlowTypeFor(p?.employee ?? {}, monthEnd))
   }
 
-  const children = obligationRows(obligations)
+  const classes: ObligationClasses | null = obligations.length === 0 ? null : {
+    tax: headingOf('payroll_income_tax'),
+    employee: headingOf('payroll_employee_contributions'),
+    employer: headingOf('payroll_employer_contributions'),
+  }
+  const children = classes ? obligationRows(obligations, classes) : []
   const owed = obligationTotal(children)
   if (owed > 0) {
     invoices.push({
@@ -454,8 +488,9 @@ export function planFor(input: PlanInput): PostingPlan {
       employeeId: null,
       employeeName: '',
       partnerId: input.taxPartnerId ?? null,
-      pl_category: PL_CATEGORY,
-      pl_subcategory: SUBCATEGORY.tax,
+      // The payable carries the tax heading; it is pl_impact false, so the
+      // heading is for finding it, not for the P&L.
+      ...classes!.tax,
       department: null, dept_subcategory: null,
       cf_type: 'recurring',
       expense_description: `Porez i doprinosi — ${month} ${run.label}`,
@@ -472,7 +507,7 @@ export function planFor(input: PlanInput): PostingPlan {
         employeeId: null,
         employeeName: r.employee_name,
         partnerId: input.taxPartnerId ?? null,
-        pl_category: PL_CATEGORY,
+        pl_category: r.pl_category,
         pl_subcategory: r.pl_subcategory,
         department: r.department,
         dept_subcategory: r.dept_subcategory,
@@ -506,6 +541,7 @@ export function planFor(input: PlanInput): PostingPlan {
     // cost less the part of it the employee paid for themselves.
     expectedTotalCost: round2(run.totals.totalCost - retainedAcrossRun),
     projectErrors,
+    classificationErrors: [...classificationErrors],
   }
 }
 
@@ -572,6 +608,20 @@ export function stornoTotal(plan: PostingPlan): number {
  * the amount that was withheld.
  */
 export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null {
+  // First of all: a heading that is not set. Every row it touches would be
+  // written under an empty category, and every other check below would be
+  // reasoning about rows that must not exist.
+  if (plan.classificationErrors && plan.classificationErrors.length > 0) {
+    return `${plan.classificationErrors.join(' ')} Ništa nije upisano.`
+  }
+  // And whatever built the plan: no row goes out without its P&L heading.
+  const headless = [...plan.invoices, ...plan.transactions]
+    .find(r => !(r.pl_category || '').trim() || !(r.pl_subcategory || '').trim())
+  if (headless) {
+    return `„${headless.expense_description}“ nema P&L kategoriju ili potkategoriju. `
+      + 'Ništa nije upisano. Podesite sistemske kategorije u Podešavanja → Sistemske kategorije.'
+  }
+
   // Before anything else: does the ledger recognise every heading this would
   // post to? A near miss is the worst outcome available — one character out
   // creates a second heading beside the real one and the P&L shows both, each

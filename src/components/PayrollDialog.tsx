@@ -4,7 +4,10 @@ import { useCompanies } from '../contexts/CompaniesContext'
 import { DIALOG } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
 import ProjectSelect from './ProjectSelect'
-import { obligationRows, obligationTotal, employeesMissingDepartment, PL_CATEGORY } from '../services/payrollAllocation'
+import { obligationRows, obligationTotal, employeesMissingDepartment, obligationClassesFrom } from '../services/payrollAllocation'
+import { classificationFor, plPartFor, PAYROLL_ROLES } from '../services/systemCategories'
+import { useSystemCategories } from '../contexts/SystemCategoriesContext'
+import SystemCategoryNotice from './SystemCategoryNotice'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
 import { fetchAllPartners } from '../services/allPartners'
 import { BOOK_CURRENCY, bookAmountsAtRate, getBookRates, type BookAmounts } from '../services/bookAmounts'
@@ -101,6 +104,8 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
 
   // Header fields
   const { companies, defaultCompany, showPicker } = useCompanies()
+  /** Where each part posts — the owner's headings, see services/systemCategories. */
+  const systemCategories = useSystemCategories()
   const [partners, setPartners] = useState<any[]>([])
   const [departments, setDepartments] = useState<any[]>([])
   const [deptSubcategories, setDeptSubcategories] = useState<any[]>([])
@@ -249,6 +254,33 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
         `Njihova zarada i deo poreske prijave završili bi u „Nedodeljeno“. Izaberite sektor.`)
       return
     }
+
+    // Retained deductions, by type, over every line as before.
+    const penaltyTotal = employees.reduce((s, e) =>
+      s + e.deductions_retained.filter(d => d.type === 'penalty').reduce((ss, d) => ss + (parseFloat(d.amount) || 0), 0), 0)
+    const fitpassTotal = employees.reduce((s, e) =>
+      s + e.deductions_retained.filter(d => d.type === 'fitpass').reduce((ss, d) => ss + (parseFloat(d.amount) || 0), 0), 0)
+
+    // Every heading this posting will write, resolved BEFORE the first write.
+    // An unset system category refuses the whole payroll here, with nothing
+    // in the ledger, rather than halfway through it.
+    let heads: {
+      net: { pl_category: string; pl_subcategory: string }
+      obligations: ReturnType<typeof obligationClassesFrom>
+      penalty: ReturnType<typeof classificationFor> | null
+      fitpass: ReturnType<typeof classificationFor> | null
+    }
+    try {
+      heads = {
+        net: plPartFor('payroll_net_salary', systemCategories.map),
+        obligations: obligationClassesFrom(systemCategories.map),
+        penalty: penaltyTotal > 0 ? classificationFor('payroll_penalty', systemCategories.map) : null,
+        fitpass: fitpassTotal > 0 ? classificationFor('payroll_fitpass', systemCategories.map) : null,
+      }
+    } catch (e: any) {
+      setError(`${e?.message || String(e)} Ništa nije proknjiženo.`)
+      return
+    }
     setPosting(true); setError('')
 
     // Declared outside the try so the catch can read it. A refusal partway
@@ -308,8 +340,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           invoice_date: paymentDate,
           due_date: dueDate || null,
           type: 'expense',
-          pl_category: 'Employee and Labour',
-          pl_subcategory: 'Net Salaries',
+          ...heads.net,
           department: emp.department_name || null,
           dept_subcategory: emp.dept_subcategory_name || null,
           expense_description: emp.employee_name,
@@ -338,8 +369,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
             invoice_date: paymentDate,
             due_date: dueDate || null,
             type: 'expense',
-            pl_category: 'Employee and Labour',
-            pl_subcategory: 'Net Salaries',
+            ...heads.net,
             department: emp.department_name || null,
             dept_subcategory: emp.dept_subcategory_name || null,
             expense_description: emp.employee_name,
@@ -358,14 +388,10 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
         }
       }
 
-      // 5. Retained deductions — storno P&L (direct transaction, no invoice)
-      // Group by type
-      const penaltyTotal = employees.reduce((s, e) =>
-        s + e.deductions_retained.filter(d => d.type === 'penalty').reduce((ss, d) => ss + (parseFloat(d.amount) || 0), 0), 0)
-      const fitpassTotal = employees.reduce((s, e) =>
-        s + e.deductions_retained.filter(d => d.type === 'fitpass').reduce((ss, d) => ss + (parseFloat(d.amount) || 0), 0), 0)
+      // 5. Retained deductions — storno P&L (direct transaction, no invoice),
+      // one per type, totalled above.
 
-      if (penaltyTotal > 0) {
+      if (penaltyTotal > 0 && heads.penalty) {
         // Negative expense (storno) — posted as direct transaction with negative amount
         const { error: stornoErr } = await supabase.from('transactions').insert({
           company_id: companyId,
@@ -377,18 +403,14 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           amount: -penaltyTotal, // negative = storno
           ...book(-penaltyTotal),
           pl_impact: true,
-          pl_category: 'General Business Expenses',
-          pl_subcategory: 'Penalty, fines and other forced fees',
-          department: 'General Business Expenses',
-          dept_subcategory: 'General expenses',
-          expense_description: 'Penalty, fines and other forced fees',
+          ...heads.penalty,
           note: `Zarade ${periodMonth} — Zadržana obustava (storno): Kazne${note ? ' — ' + note : ''}`,
           status: 'posted',
         })
         if (stornoErr) throw new PostFailure('stavke zadržanih obustava', stornoErr.message)
       }
 
-      if (fitpassTotal > 0) {
+      if (fitpassTotal > 0 && heads.fitpass) {
         const { error: stornoErr } = await supabase.from('transactions').insert({
           company_id: companyId,
             partner_id: null,
@@ -399,11 +421,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           amount: -fitpassTotal,
           ...book(-fitpassTotal),
           pl_impact: true,
-          pl_category: 'Employee and Labour',
-          pl_subcategory: 'FitPass expenses',
-          department: 'General Business Expenses',
-          dept_subcategory: 'Labour related expenses',
-          expense_description: 'FitPass expenses',
+          ...heads.fitpass,
           note: `Zarade ${periodMonth} — Zadržana obustava (storno): FitPass${note ? ' — ' + note : ''}`,
           status: 'posted',
         })
@@ -426,8 +444,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           invoice_date: paymentDate,
           due_date: dueDate || null,
           type: 'expense',
-          pl_category: PL_CATEGORY,
-          pl_subcategory: 'Tax on salary',
+          ...heads.obligations.tax,
           expense_description: `Porez i doprinosi — ${taxFilingRef || periodMonth}`,
           cf_type: 'recurring',
           cf_frequency: 'monthly',
@@ -456,7 +473,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           tax: parseFloat(e.tax_on_salary) || 0,
           contributionsEmployee: parseFloat(e.contrib_employee) || 0,
           contributionsEmployer: parseFloat(e.contrib_employer) || 0,
-        })))
+        })), heads.obligations)
 
         const rowsTotal = obligationTotal(rows)
         if (Math.abs(rowsTotal - totalObl) > 0.02) {
@@ -473,7 +490,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
             invoice_date: paymentDate,
             due_date: dueDate || null,
             type: 'expense',
-            pl_category: PL_CATEGORY,
+            pl_category: r.pl_category,
             pl_subcategory: r.pl_subcategory,
             department: r.department,
             dept_subcategory: r.dept_subcategory,
@@ -1004,6 +1021,11 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
                       'transakcija', 'transakcije', 'transakcija')}
                   </span>
                 </div>
+              </div>
+
+              <div style={{ marginTop: '14px' }}>
+                <SystemCategoryNotice what="Zarade" roles={PAYROLL_ROLES}
+                  map={systemCategories.map} loading={systemCategories.loading} />
               </div>
 
               {error && (

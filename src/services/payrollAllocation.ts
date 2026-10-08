@@ -12,20 +12,36 @@
 // This splits those children per employee, so each one carries the employee's
 // department. Both branches of the expense report then work:
 //
-//   P&L branch          Employee and Labour > Tax on salary / Contributions …
+//   P&L branch          <category> > <tax / contributions sub-category>
 //   Department branch   <department> > <sub-category> > <employee>
+//
+// The P&L headings are the owner's, from the system categories
+// (services/systemCategories.ts) — passed in as `ObligationClasses`, never
+// named here.
 //
 // The two conventions for `contributionsEmployee` differ between the manual
 // dialog and the import — in one it includes the tax, in the other it does not —
 // so this takes the components already separated and does not try to guess.
 
-export const PL_CATEGORY = 'Employee and Labour'
+import { plPartFor, type SystemCategoryMap } from './systemCategories'
 
-export const SUBCATEGORY = {
-  tax: 'Tax on salary',
-  employee: 'Contributions on behalf of the employee',
-  employer: 'Contributions on behalf of the employer',
-} as const
+export type ObligationComponent = 'tax' | 'employee' | 'employer'
+
+/** The P&L heading each component of a filing posts under. */
+export type ObligationClasses = Record<ObligationComponent, { pl_category: string; pl_subcategory: string }>
+
+/**
+ * The three headings from the system categories. Throws
+ * `SystemCategoryMissing` for the first one that is not set — a filing is
+ * not posted with a component under no heading.
+ */
+export function obligationClassesFrom(map: SystemCategoryMap | null | undefined): ObligationClasses {
+  return {
+    tax: plPartFor('payroll_income_tax', map),
+    employee: plPartFor('payroll_employee_contributions', map),
+    employer: plPartFor('payroll_employer_contributions', map),
+  }
+}
 
 export interface EmployeeObligation {
   /** Carried onto the rows, so a row can follow its person over projects. */
@@ -41,6 +57,7 @@ export interface EmployeeObligation {
 }
 
 export interface ObligationRow {
+  pl_category: string
   pl_subcategory: string
   department: string | null
   dept_subcategory: string | null
@@ -49,7 +66,7 @@ export interface ObligationRow {
   /** Which employee and component this row came from, for the note. */
   employee_id: string | null
   employee_name: string
-  component: 'tax' | 'employee' | 'employer'
+  component: ObligationComponent
   /** True when the filing's rounding adjustment was folded into this row. */
   carriesRounding?: boolean
 }
@@ -66,20 +83,21 @@ const round2 = (n: number) => Math.round(n * 100) / 100
  * problem this function exists to remove.
  */
 export function obligationRows(
-  employees: EmployeeObligation[], rounding = 0,
+  employees: EmployeeObligation[], classes: ObligationClasses, rounding = 0,
 ): ObligationRow[] {
   const rows: ObligationRow[] = []
 
   for (const e of employees) {
-    const parts: [ObligationRow['component'], string, number][] = [
-      ['tax', SUBCATEGORY.tax, e.tax],
-      ['employee', SUBCATEGORY.employee, e.contributionsEmployee],
-      ['employer', SUBCATEGORY.employer, e.contributionsEmployer],
+    const parts: [ObligationComponent, number][] = [
+      ['tax', e.tax],
+      ['employee', e.contributionsEmployee],
+      ['employer', e.contributionsEmployer],
     ]
-    for (const [component, pl_subcategory, amount] of parts) {
+    for (const [component, amount] of parts) {
       if (!(round2(amount) > 0)) continue
       rows.push({
-        pl_subcategory,
+        pl_category: classes[component].pl_category,
+        pl_subcategory: classes[component].pl_subcategory,
         department: e.department_name || null,
         dept_subcategory: e.dept_subcategory_name || null,
         expense_description: e.employee_name,

@@ -1,10 +1,13 @@
 import {
-  CREDIT_PRINCIPAL, CREDIT_INTEREST, CREDIT_DEPARTMENT, CREDIT_DEPT_SUBCATEGORY,
-  creditNote, allocatePayment,
+  creditLegsFrom, creditLegsOrNull, creditNote, allocatePayment, type CreditClassification,
 } from './creditClassification'
 import { buildTree, UNASSIGNED, PlEntry } from './expenseTree'
+import { TEST_SYSTEM_CATEGORIES } from './systemCategories.fixture'
+import { SystemCategoryMissing } from './systemCategories'
 
-const leg = (c: typeof CREDIT_PRINCIPAL, amount: number): PlEntry => ({
+const { principal: CREDIT_PRINCIPAL, interest: CREDIT_INTEREST } = creditLegsFrom(TEST_SYSTEM_CATEGORIES)
+
+const leg = (c: CreditClassification, amount: number): PlEntry => ({
   tx_type: 'expense', pl_date: '2026-08-31', amount_rsd: amount, amount_eur: null,
   pl_category: c.pl_category, pl_subcategory: c.pl_subcategory,
   department: c.department, dept_subcategory: c.dept_subcategory,
@@ -12,43 +15,35 @@ const leg = (c: typeof CREDIT_PRINCIPAL, amount: number): PlEntry => ({
 })
 
 describe('credit classification', () => {
-  it('sends principal down the branch the business asked for', () => {
+  it('reads both legs from the system categories, all five fields', () => {
     expect(CREDIT_PRINCIPAL).toEqual({
-      pl_category: 'Loans/Credits/Dividend',
-      pl_subcategory: 'Bank Credits',
-      department: 'Loans/Credits/Dividend',
-      dept_subcategory: 'Credit',
-      expense_description: 'Credit',
+      pl_category: 'Krediti',
+      pl_subcategory: 'Otplata glavnice',
+      department: 'Krediti',
+      dept_subcategory: 'Bankarski krediti',
+      expense_description: 'Glavnica',
     })
+    expect(CREDIT_INTEREST.pl_subcategory).toBe('Kamata na kredite')
   })
 
-  it('puts interest under the credit category, as its own line', () => {
-    // Both legs on one category, so the cost of a credit is one number in the
-    // P&L branch too — but still two lines, so interest stays readable.
-    expect(CREDIT_INTEREST.pl_category).toBe('Loans/Credits/Dividend')
-    expect(CREDIT_INTEREST.pl_subcategory).toBe('Paid Interest on credit')
+  it('REFUSES when either leg is not set, rather than booking under an English name', () => {
+    const { credit_interest: _, ...noInterest } = TEST_SYSTEM_CATEGORIES
+    expect(() => creditLegsFrom(noInterest)).toThrow(SystemCategoryMissing)
+    expect(() => creditLegsFrom(noInterest)).toThrow('„Kamata na kredit“ nije podešena')
+    expect(() => creditLegsFrom({})).toThrow('„Otplata glavnice kredita“')
   })
 
-  it('shares the P&L category with principal but not the sub-category', () => {
-    expect(CREDIT_INTEREST.pl_category).toBe(CREDIT_PRINCIPAL.pl_category)
-    expect(CREDIT_INTEREST.pl_subcategory).not.toBe(CREDIT_PRINCIPAL.pl_subcategory)
-  })
-
-  it('leaves Financial Expenses / Interest free for other interest', () => {
-    expect(CREDIT_INTEREST.pl_category).not.toBe('Financial Expenses')
-  })
-
-  it('puts both legs in the same department, so both leave Unassigned', () => {
-    for (const c of [CREDIT_PRINCIPAL, CREDIT_INTEREST]) {
-      expect(c.department).toBe(CREDIT_DEPARTMENT)
-      expect(c.dept_subcategory).toBe(CREDIT_DEPT_SUBCATEGORY)
-      expect(c.department).not.toBe(UNASSIGNED)
+  it('refuses a leg with a field left empty', () => {
+    const partial = {
+      ...TEST_SYSTEM_CATEGORIES,
+      credit_principal: { ...TEST_SYSTEM_CATEGORIES.credit_principal!, department: '  ' },
     }
+    expect(() => creditLegsFrom(partial)).toThrow(SystemCategoryMissing)
   })
 
-  it('tells the two legs apart by expense description', () => {
-    expect(CREDIT_PRINCIPAL.expense_description)
-      .not.toBe(CREDIT_INTEREST.expense_description)
+  it('gives a reader null, not a throw, when they are unset', () => {
+    expect(creditLegsOrNull({})).toBeNull()
+    expect(creditLegsOrNull(TEST_SYSTEM_CATEGORIES)!.interest.expense_description).toBe('Kamata')
   })
 
   it('leaves no credit row under Unassigned in either branch', () => {

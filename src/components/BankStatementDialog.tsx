@@ -26,7 +26,10 @@ import { outstandingOwn, settlementFor } from '../services/settleInvoice'
 import {
   fetchScripts, saveScript, removeScript, orderedForDifference, findCurrencyDifference,
 } from '../services/quickFillStore'
-import { CREDIT_PRINCIPAL, CREDIT_INTEREST, creditNote, allocatePayment } from '../services/creditClassification'
+import { creditLegsFrom, creditNote, allocatePayment, type CreditLegs } from '../services/creditClassification'
+import { CREDIT_ROLES } from '../services/systemCategories'
+import { useSystemCategories } from '../contexts/SystemCategoriesContext'
+import SystemCategoryNotice from './SystemCategoryNotice'
 import { creditLegBooker, checkCreditCurrency } from '../services/creditPayment'
 import {
   txToSeed, passthroughToSeed, allowedTypes, statementSpan, statementLabel,
@@ -156,6 +159,8 @@ function makeRow(defaultCurrency = 'RSD', date = ''): StatementRow {
 
 export default function BankStatementDialog({ onClose, onImported }: Props) {
   const { companies, defaultCompany, showPicker } = useCompanies()
+  /** Where a credit instalment's two legs post — see services/systemCategories. */
+  const systemCategories = useSystemCategories()
   const [company, setCompany] = useState('')
 
   // One company: it is the company, and nobody is asked to choose it.
@@ -908,6 +913,19 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
 
     const bookRow = makeBooker()
 
+    // The credit legs' headings, before the first write: a statement with a
+    // credit payment and no system category for it is refused whole.
+    let creditHeads: CreditLegs | null = null
+    if (validRows.some(r => r.tx_type === 'credit_payment' && r.selected_installment_ids.length > 0)) {
+      try {
+        creditHeads = creditLegsFrom(systemCategories.map)
+      } catch (err: any) {
+        setError(`${err.message} Ništa nije sačuvano.`)
+        setPosting(false)
+        return
+      }
+    }
+
     // Pre-flight: check every rate BEFORE the first write, so a statement
     // cannot end up half in the database and half not.
     try {
@@ -1064,7 +1082,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                 statement_number: statementNumber || null,
                 type: 'credit_payment', tx_subtype: 'expense',
                 ...legs.book(split.principal),
-                pl_impact: true, ...CREDIT_PRINCIPAL,
+                pl_impact: true, ...creditHeads!.principal,
                 cf_type: 'recurring', cf_frequency: 'monthly',
                 note: creditNote('principal', creditName, inst.installment_no, split.principal, row.note || row.description, legs.currency),
                 status: 'posted',
@@ -1077,7 +1095,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                 statement_number: statementNumber || null,
                 type: 'credit_payment', tx_subtype: 'expense',
                 ...legs.book(split.interest),
-                pl_impact: true, ...CREDIT_INTEREST,
+                pl_impact: true, ...creditHeads!.interest,
                 cf_type: 'recurring', cf_frequency: 'monthly',
                 note: creditNote('interest', creditName, inst.installment_no, split.interest, row.note || row.description, legs.currency),
                 status: 'posted',
@@ -2438,6 +2456,8 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                         {row.tx_type === 'credit_payment' && (
                           <>
                             <div style={s.classTitle}>Rate kredita</div>
+                            <SystemCategoryNotice what="Otplate kredita" roles={CREDIT_ROLES}
+                              map={systemCategories.map} loading={systemCategories.loading} />
                             <div style={{ marginBottom: '14px' }}>
                               <CreditInstallmentSelector
                                 credits={credits}

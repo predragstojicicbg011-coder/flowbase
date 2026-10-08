@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
@@ -9,6 +10,7 @@ import PayrollSettingsTab from '../components/PayrollSettingsTab'
 import UserManagement from '../components/UserManagement'
 import ClosedPeriodsTab from '../components/ClosedPeriodsTab'
 import BanksTab from '../components/BanksTab'
+import SystemCategoriesTab from '../components/SystemCategoriesTab'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 import { countOf } from '../utils/plural'
 
@@ -16,7 +18,15 @@ import { countOf } from '../utils/plural'
 const inUse = (name: string, n: number, one: string, few: string, many: string) =>
   `„${name}“ ne može da se obriše — koristi se u ${countOf(n, one, few, many)}.`
 
-type SettingsTab = 'companies' | 'banks' | 'pl' | 'departments' | 'descriptions' | 'users' | 'periods' | 'templates' | 'payroll'
+type SettingsTab = 'companies' | 'banks' | 'pl' | 'departments' | 'descriptions' | 'system' | 'users' | 'periods' | 'templates' | 'payroll'
+
+const TAB_IDS: readonly SettingsTab[] = ['companies', 'banks', 'pl', 'departments', 'descriptions', 'system', 'users', 'periods', 'templates', 'payroll']
+
+/** `#/settings?tab=system` opens that tab — the notices on Zarade and Krediti link there. */
+function tabFromSearch(search: string): SettingsTab | null {
+  const t = new URLSearchParams(search).get('tab')
+  return t && (TAB_IDS as readonly string[]).includes(t) ? t as SettingsTab : null
+}
 
 /**
  * Run a change and, if the database refuses it, say so.
@@ -35,7 +45,12 @@ async function reportWrite(label: string, q: any): Promise<boolean> {
 
 export default function Settings() {
   const { canManageSettings, canManageUsers } = useAuth()
-  const [activeTab, setActiveTab] = useState<SettingsTab>('companies')
+  const location = useLocation()
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => tabFromSearch(location.search) ?? 'companies')
+  useEffect(() => {
+    const t = tabFromSearch(location.search)
+    if (t) setActiveTab(t)
+  }, [location.search])
 
   return (
     <div style={s.root} className="app-surface">
@@ -54,6 +69,7 @@ export default function Settings() {
             { id: 'pl',           label: '📊 P&L kategorije',       show: true },
             { id: 'departments',  label: '🏗 Sektori',              show: true },
             { id: 'descriptions', label: '🏷 Opisi troškova',       show: true },
+            { id: 'system',       label: '⚙ Sistemske kategorije', show: true },
             { id: 'templates',    label: '⚡ Šabloni brze popune',  show: true },
             { id: 'payroll',      label: '💼 Podešavanja zarada',   show: true },
             { id: 'periods',      label: '🔒 Zaključani periodi',   show: true },
@@ -72,6 +88,7 @@ export default function Settings() {
         {activeTab === 'pl'           && <PLCategoriesTab canEdit={canManageSettings} />}
         {activeTab === 'departments'  && <DepartmentsTab canEdit={canManageSettings} />}
         {activeTab === 'descriptions' && <DescriptionsTab canEdit={canManageSettings} />}
+        {activeTab === 'system'       && <SystemCategoriesTab canEdit={canManageSettings} />}
         {activeTab === 'templates'    && <QuickFillTab canEdit={canManageSettings} />}
         {activeTab === 'payroll'      && <PayrollSettingsTab canEdit={canManageSettings} />}
         {activeTab === 'periods'      && <ClosedPeriodsTab canEdit={canManageSettings} />}

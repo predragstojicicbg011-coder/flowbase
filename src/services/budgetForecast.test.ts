@@ -1,4 +1,11 @@
 import { carriesInto, classificationKey, creditScheduleByMonth, seedFromEntries, type SourceEntry } from './budgetForecast'
+import { creditLegsFrom } from './creditClassification'
+import { TEST_SYSTEM_CATEGORIES } from './systemCategories.fixture'
+
+/** The credit legs as the owner set them — see systemCategories.fixture. */
+const LEGS = creditLegsFrom(TEST_SYSTEM_CATEGORIES)
+const CREDIT_PRINCIPAL = LEGS.principal
+const CREDIT_INTEREST = LEGS.interest
 
 const entry = (over: Partial<SourceEntry> = {}): SourceEntry => ({
   pl_category: 'Operating Expenses',
@@ -28,36 +35,36 @@ describe('classificationKey', () => {
 
 describe('seedFromEntries', () => {
   it('carries a monthly recurring amount into every month', () => {
-    const { byKey } = seedFromEntries([entry()], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry()], MONTHS, '2026-08', 'RSD', LEGS)
     const k = classificationKey(entry())
     expect(MONTHS.map(m => byKey[k][m])).toEqual([100, 100, 100, 100])
   })
 
   it('lands a quarterly amount every third month, not smeared across them', () => {
-    const { byKey } = seedFromEntries([entry({ cf_frequency: 'quarterly' })], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry({ cf_frequency: 'quarterly' })], MONTHS, '2026-08', 'RSD', LEGS)
     const k = classificationKey(entry())
     expect(MONTHS.map(m => byKey[k][m] || 0)).toEqual([0, 0, 100, 0])
   })
 
   it('lands a yearly amount in the same month next year', () => {
     const months = ['2026-09', '2027-07', '2027-08', '2027-09']
-    const { byKey } = seedFromEntries([entry({ cf_frequency: 'yearly' })], months, '2026-08')
+    const { byKey } = seedFromEntries([entry({ cf_frequency: 'yearly' })], months, '2026-08', 'RSD', LEGS)
     const k = classificationKey(entry())
     expect(months.map(m => byKey[k][m] || 0)).toEqual([0, 0, 100, 0])
   })
 
   it('does not carry a one-time cost forward', () => {
-    const { byKey } = seedFromEntries([entry({ cf_type: 'one_time' })], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry({ cf_type: 'one_time' })], MONTHS, '2026-08', 'RSD', LEGS)
     expect(Object.keys(byKey)).toEqual([])
   })
 
   it('does not carry capex forward', () => {
-    const { byKey } = seedFromEntries([entry({ cf_type: 'capex' })], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry({ cf_type: 'capex' })], MONTHS, '2026-08', 'RSD', LEGS)
     expect(Object.keys(byKey)).toEqual([])
   })
 
   it('does not carry an unclassified cost forward', () => {
-    const { byKey } = seedFromEntries([entry({ cf_type: null })], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry({ cf_type: null })], MONTHS, '2026-08', 'RSD', LEGS)
     expect(Object.keys(byKey)).toEqual([])
   })
 
@@ -66,30 +73,30 @@ describe('seedFromEntries', () => {
       entry({ cf_type: 'one_time', amount_rsd: 300 }),
       entry({ cf_type: null, amount_rsd: 40 }),
       entry({ amount_rsd: 100 }),
-    ], MONTHS, '2026-08')
+    ], MONTHS, '2026-08', 'RSD', LEGS)
     expect(notCarried).toBe(340)
   })
 
   it('ignores entries outside the benchmark month', () => {
     const { byKey, notCarried } = seedFromEntries([
       entry({ pl_date: '2026-07-14' }),
-    ], MONTHS, '2026-08')
+    ], MONTHS, '2026-08', 'RSD', LEGS)
     expect(Object.keys(byKey)).toEqual([])
     expect(notCarried).toBe(0)
   })
 
   it('adds up two entries of the same classification', () => {
-    const { byKey } = seedFromEntries([entry({ amount_rsd: 60 }), entry({ amount_rsd: 40 })], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry({ amount_rsd: 60 }), entry({ amount_rsd: 40 })], MONTHS, '2026-08', 'RSD', LEGS)
     expect(byKey[classificationKey(entry())]['2026-09']).toBe(100)
   })
 
   it('treats a missing amount as zero rather than NaN', () => {
-    const { byKey } = seedFromEntries([entry({ amount_rsd: null })], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry({ amount_rsd: null })], MONTHS, '2026-08', 'RSD', LEGS)
     expect(byKey[classificationKey(entry())]['2026-09']).toBe(0)
   })
 
   it('defaults a recurring entry with no frequency to monthly', () => {
-    const { byKey } = seedFromEntries([entry({ cf_frequency: null })], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([entry({ cf_frequency: null })], MONTHS, '2026-08', 'RSD', LEGS)
     expect(byKey[classificationKey(entry())]['2026-09']).toBe(100)
   })
 })
@@ -298,7 +305,7 @@ describe('the credit schedule, on the rows it is classified to', () => {
     // them apart. A single total throws that away on the way in.
     // A EUR credit, priced in dinars at the planning rate of 117.2:
     // 5,343.90 × 117.2 = 626,305.08 and 241.83 × 117.2 = 28,342.476 → 28,342.48.
-    const { byKey } = creditScheduleByMonth([inst2()], HZ)
+    const { byKey } = creditScheduleByMonth([inst2()], HZ, 'RSD', LEGS)
     expect(byKey[pKey]['2026-10']).toBe(626305.08)
     expect(byKey[iKey]['2026-10']).toBe(28342.48)
   })
@@ -306,7 +313,7 @@ describe('the credit schedule, on the rows it is classified to', () => {
   it('keys both legs exactly as the dialogs that book a payment do', () => {
     // So the estimate and the actual beside it are the same two rows, in
     // both branches of the tree.
-    const { byKey } = creditScheduleByMonth([inst2()], HZ)
+    const { byKey } = creditScheduleByMonth([inst2()], HZ, 'RSD', LEGS)
     expect(Object.keys(byKey).sort()).toEqual([pKey, iKey].sort())
   })
 
@@ -317,62 +324,62 @@ describe('the credit schedule, on the rows it is classified to', () => {
     // The cents, stated, because each leg is rounded to them on the way in
     // and the unrounded product is not what any column shows.
     // 626,305.08 + 28,342.48.
-    const { total } = creditScheduleByMonth([inst2({ status: 'paid' })], HZ)
+    const { total } = creditScheduleByMonth([inst2({ status: 'paid' })], HZ, 'RSD', LEGS)
     expect(total).toBe(654647.56)
   })
 
   it('files each instalment in the month it falls due', () => {
     const { byKey } = creditScheduleByMonth(
-      [inst2(), inst2({ id: 'i2', due_date: '2026-11-05' })], HZ)
+      [inst2(), inst2({ id: 'i2', due_date: '2026-11-05' })], HZ, 'RSD', LEGS)
     expect(byKey[pKey]['2026-10']).toBeGreaterThan(0)
     expect(byKey[pKey]['2026-11']).toBeGreaterThan(0)
   })
 
   it('adds two instalments falling in one month together', () => {
     const { byKey } = creditScheduleByMonth(
-      [inst2(), inst2({ id: 'i2', principal_amount: 1000, interest_amount: 0 })], HZ)
+      [inst2(), inst2({ id: 'i2', principal_amount: 1000, interest_amount: 0 })], HZ, 'RSD', LEGS)
     // 626,305.08 + 1,000 × 117.2 = 743,505.08
     expect(byKey[pKey]['2026-10']).toBe(743505.08)
   })
 
   it('leaves out anything outside the horizon', () => {
-    expect(creditScheduleByMonth([inst2({ due_date: '2027-05-05' })], HZ).total).toBe(0)
+    expect(creditScheduleByMonth([inst2({ due_date: '2027-05-05' })], HZ, 'RSD', LEGS).total).toBe(0)
   })
 
   it('leaves out an instalment with no due date rather than guessing one', () => {
-    expect(creditScheduleByMonth([inst2({ due_date: '' })], HZ).total).toBe(0)
+    expect(creditScheduleByMonth([inst2({ due_date: '' })], HZ, 'RSD', LEGS).total).toBe(0)
   })
 
   it('writes no row for a leg worth nothing', () => {
-    const { byKey } = creditScheduleByMonth([inst2({ interest_amount: 0 })], HZ)
+    const { byKey } = creditScheduleByMonth([inst2({ interest_amount: 0 })], HZ, 'RSD', LEGS)
     expect(byKey[iKey]).toBeUndefined()
   })
 
   it('prices a EUR schedule in dinars, and reads it in euros as it stands', () => {
-    const inRsd = creditScheduleByMonth([inst2()], HZ, 'RSD').total
-    const inEur = creditScheduleByMonth([inst2()], HZ, 'EUR').total
+    const inRsd = creditScheduleByMonth([inst2()], HZ, 'RSD', LEGS).total
+    const inEur = creditScheduleByMonth([inst2()], HZ, 'EUR', LEGS).total
     expect(inEur).toBe(5585.73)          // the euros, unconverted
     expect(inRsd).toBe(654647.56)        // at 117.2 RSD per EUR
     // A dearer euro is a dearer instalment in dinars, and the same in euros.
     const dear = { currency: 'EUR', exchangeRate: 118, eurRate: 118 }
-    expect(creditScheduleByMonth([inst2(dear)], HZ, 'RSD').total).toBe(659116.14) // 630,580.20 + 28,535.94
-    expect(creditScheduleByMonth([inst2(dear)], HZ, 'EUR').total).toBe(5585.73)
+    expect(creditScheduleByMonth([inst2(dear)], HZ, 'RSD', LEGS).total).toBe(659116.14) // 630,580.20 + 28,535.94
+    expect(creditScheduleByMonth([inst2(dear)], HZ, 'EUR', LEGS).total).toBe(5585.73)
   })
 
   it('prices an RSD credit in dinars without any rate, and in euros at the EUR rate', () => {
     const rsd = { currency: 'RSD', exchangeRate: null, eurRate: null }
-    expect(creditScheduleByMonth([inst2(rsd)], HZ, 'RSD').total).toBe(5585.73)
+    expect(creditScheduleByMonth([inst2(rsd)], HZ, 'RSD', LEGS).total).toBe(5585.73)
     // 5,343.90 / 117.2 = 45.596 → 45.60; 241.83 / 117.2 = 2.063 → 2.06
-    expect(creditScheduleByMonth([inst2({ currency: 'RSD', exchangeRate: 1, eurRate: 117.2 })], HZ, 'EUR').total)
+    expect(creditScheduleByMonth([inst2({ currency: 'RSD', exchangeRate: 1, eurRate: 117.2 })], HZ, 'EUR', LEGS).total)
       .toBe(47.66)
   })
 
   it('LEAVES OUT AND NAMES an instalment it has no rate for, rather than guessing one', () => {
-    const r = creditScheduleByMonth([inst2({ exchangeRate: null, eurRate: null })], HZ, 'RSD')
+    const r = creditScheduleByMonth([inst2({ exchangeRate: null, eurRate: null })], HZ, 'RSD', LEGS)
     expect(r.total).toBe(0)
     expect(r.unpriced).toEqual(['i1'])
     // In its own currency it needs no rate at all.
-    expect(creditScheduleByMonth([inst2({ exchangeRate: null, eurRate: null })], HZ, 'EUR').total).toBe(5585.73)
+    expect(creditScheduleByMonth([inst2({ exchangeRate: null, eurRate: null })], HZ, 'EUR', LEGS).total).toBe(5585.73)
   })
 })
 
@@ -390,19 +397,18 @@ describe('the credit schedule, on the rows it is classified to', () => {
 // apart, to the cent — and the seed is a worse approximation of the same thing.
 
 import { isCreditPayment } from './budgetForecast'
-import { CREDIT_PRINCIPAL, CREDIT_INTEREST } from './creditClassification'
 
 describe('isCreditPayment', () => {
   it('recognises the principal leg this app writes', () => {
-    expect(isCreditPayment(CREDIT_PRINCIPAL)).toBe(true)
+    expect(isCreditPayment(CREDIT_PRINCIPAL, LEGS)).toBe(true)
   })
 
   it('recognises the interest leg this app writes', () => {
-    expect(isCreditPayment(CREDIT_INTEREST)).toBe(true)
+    expect(isCreditPayment(CREDIT_INTEREST, LEGS)).toBe(true)
   })
 
   it('does not recognise ordinary spend', () => {
-    expect(isCreditPayment(entry())).toBe(false)
+    expect(isCreditPayment(entry(), LEGS)).toBe(false)
   })
 
   // The reason it matches the whole classification rather than a name or a
@@ -414,14 +420,14 @@ describe('isCreditPayment', () => {
     ['dept_subcategory', { dept_subcategory: 'Office' }],
     ['expense_description', { expense_description: 'Credit card' }],
   ])('is not fooled by a row differing only in %s', (_level, over) => {
-    expect(isCreditPayment({ ...CREDIT_PRINCIPAL, ...over })).toBe(false)
+    expect(isCreditPayment({ ...CREDIT_PRINCIPAL, ...over }, LEGS)).toBe(false)
   })
 
   it('does not take an empty classification for a credit payment', () => {
     expect(isCreditPayment({
       pl_category: null, pl_subcategory: null, department: null,
       dept_subcategory: null, expense_description: null,
-    })).toBe(false)
+    }, LEGS)).toBe(false)
   })
 })
 
@@ -432,13 +438,13 @@ describe('seedFromEntries and a credit instalment', () => {
   it('seeds a credit payment into no month at all', () => {
     const { byKey } = seedFromEntries(
       [creditEntry(CREDIT_PRINCIPAL, 20000), creditEntry(CREDIT_INTEREST, 6000)],
-      MONTHS, '2026-08')
+      MONTHS, '2026-08', 'RSD', LEGS)
     expect(Object.keys(byKey)).toEqual([])
   })
 
   it('keeps it out of the per-company seed as well, not only the merged one', () => {
     const { byCompany } = seedFromEntries(
-      [creditEntry(CREDIT_PRINCIPAL, 20000)], MONTHS, '2026-08')
+      [creditEntry(CREDIT_PRINCIPAL, 20000)], MONTHS, '2026-08', 'RSD', LEGS)
     expect(Object.keys(byCompany[''] || {})).toEqual([])
   })
 
@@ -449,14 +455,14 @@ describe('seedFromEntries and a credit instalment', () => {
   it('does not report it as a shortfall, because it is not missing', () => {
     const { notCarried } = seedFromEntries(
       [creditEntry(CREDIT_PRINCIPAL, 20000), creditEntry(CREDIT_INTEREST, 6000)],
-      MONTHS, '2026-08')
+      MONTHS, '2026-08', 'RSD', LEGS)
     expect(notCarried).toBe(0)
   })
 
   it('does not report it as a shortfall even when it was booked one-time', () => {
     const { notCarried } = seedFromEntries(
       [entry({ ...CREDIT_PRINCIPAL, amount_rsd: 20000, cf_type: 'one_time' })],
-      MONTHS, '2026-08')
+      MONTHS, '2026-08', 'RSD', LEGS)
     expect(notCarried).toBe(0)
   })
 
@@ -464,7 +470,7 @@ describe('seedFromEntries and a credit instalment', () => {
     const { byKey, notCarried } = seedFromEntries([
       creditEntry(CREDIT_PRINCIPAL, 20000),
       entry({ amount_rsd: 100 }),
-    ], MONTHS, '2026-08')
+    ], MONTHS, '2026-08', 'RSD', LEGS)
     expect(byKey[classificationKey(entry())]['2026-09']).toBe(100)
     expect(Object.keys(byKey)).toHaveLength(1)
     expect(notCarried).toBe(0)
@@ -472,7 +478,7 @@ describe('seedFromEntries and a credit instalment', () => {
 
   it('still seeds spend that matches only part of the credit classification', () => {
     const almost = entry({ ...CREDIT_PRINCIPAL, department: 'Administration', amount_rsd: 900 })
-    const { byKey } = seedFromEntries([almost], MONTHS, '2026-08')
+    const { byKey } = seedFromEntries([almost], MONTHS, '2026-08', 'RSD', LEGS)
     expect(byKey[classificationKey(almost)]['2026-09']).toBe(900)
   })
 })
@@ -502,8 +508,8 @@ describe('a benchmark-month credit payment and its schedule, end to end', () => 
 
 
   it('produces the schedule figure once across the horizon, not twice', () => {
-    const { byKey } = seedFromEntries(paid, HORIZON, BENCHMARK)
-    const sched = creditScheduleByMonth(schedule, HORIZON)
+    const { byKey } = seedFromEntries(paid, HORIZON, BENCHMARK, 'RSD', LEGS)
+    const sched = creditScheduleByMonth(schedule, HORIZON, 'RSD', LEGS)
 
     const seeded = seededOver(HORIZON, byKey)
 
@@ -523,16 +529,16 @@ describe('a benchmark-month credit payment and its schedule, end to end', () => 
       ...e, department: 'Administration', dept_subcategory: 'Office',
       expense_description: `Leg ${i}`,
     }))
-    const { byKey } = seedFromEntries(asOrdinarySpend, HORIZON, BENCHMARK)
-    const sched = creditScheduleByMonth(schedule, HORIZON)
+    const { byKey } = seedFromEntries(asOrdinarySpend, HORIZON, BENCHMARK, 'RSD', LEGS)
+    const sched = creditScheduleByMonth(schedule, HORIZON, 'RSD', LEGS)
 
     expect(seededOver(HORIZON, byKey)).toBe(312000)
     expect(seededOver(HORIZON, byKey) + sched.total).toBe(624000)
   })
 
   it('leaves a single month reading 26,000 RSD rather than 52,000 RSD', () => {
-    const { byKey } = seedFromEntries(paid, HORIZON, BENCHMARK)
-    const sched = creditScheduleByMonth(schedule, ['2026-09'])
+    const { byKey } = seedFromEntries(paid, HORIZON, BENCHMARK, 'RSD', LEGS)
+    const sched = creditScheduleByMonth(schedule, ['2026-09'], 'RSD', LEGS)
     expect(seededOver(['2026-09'], byKey) + sched.total).toBe(26000)
   })
 })
@@ -777,7 +783,7 @@ describe('carriesInto', () => {
 
   it('agrees with the seed, month for month, for every frequency', () => {
     for (const freq of ['monthly', 'quarterly', 'yearly']) {
-      const { byKey } = seedFromEntries([entry({ cf_frequency: freq })], MONTHS, '2026-08')
+      const { byKey } = seedFromEntries([entry({ cf_frequency: freq })], MONTHS, '2026-08', 'RSD', LEGS)
       const k = classificationKey(entry())
       for (const m of MONTHS) {
         expect(asks({ cf_frequency: freq }, m)).toBe((byKey[k]?.[m] || 0) > 0)
@@ -813,15 +819,15 @@ describe('reading the budget in EUR', () => {
 
   it('seeds from the EUR actuals, not from the RSD ones', () => {
     const e = entry({ amount_rsd: 11720, amount_eur: 100 })
-    expect(seedFromEntries([e], MONTHS, '2026-08', 'EUR').byKey[classificationKey(e)]['2026-09']).toBe(100)
-    expect(seedFromEntries([e], MONTHS, '2026-08', 'RSD').byKey[classificationKey(e)]['2026-09']).toBe(11720)
-    expect(seedFromEntries([e], MONTHS, '2026-08').byKey[classificationKey(e)]['2026-09']).toBe(11720)
+    expect(seedFromEntries([e], MONTHS, '2026-08', 'EUR', LEGS).byKey[classificationKey(e)]['2026-09']).toBe(100)
+    expect(seedFromEntries([e], MONTHS, '2026-08', 'RSD', LEGS).byKey[classificationKey(e)]['2026-09']).toBe(11720)
+    expect(seedFromEntries([e], MONTHS, '2026-08', 'RSD', LEGS).byKey[classificationKey(e)]['2026-09']).toBe(11720)
   })
 
   it('counts what is not carried in the currency asked for', () => {
     const e = entry({ cf_type: 'one_time', amount_rsd: 23440, amount_eur: 200 })
-    expect(seedFromEntries([e], MONTHS, '2026-08', 'EUR').notCarried).toBe(200)
-    expect(seedFromEntries([e], MONTHS, '2026-08', 'RSD').notCarried).toBe(23440)
+    expect(seedFromEntries([e], MONTHS, '2026-08', 'EUR', LEGS).notCarried).toBe(200)
+    expect(seedFromEntries([e], MONTHS, '2026-08', 'RSD', LEGS).notCarried).toBe(23440)
   })
 
   it('replays the ledger on the EUR seed with the EUR amounts', () => {
@@ -869,7 +875,7 @@ describe('the seed, per project', () => {
       entry({ amount_rsd: 100 }),
       entry({ amount_rsd: 60, project_id: 'p1' }),
       entry({ amount_rsd: 40, project_id: 'p2' }),
-    ], MONTHS, '2026-08')
+    ], MONTHS, '2026-08', 'RSD', LEGS)
     expect(byKey[classificationKey(entry())]['2026-09']).toBe(100)
     expect(byKey[budgetLineKey(entry({ project_id: 'p1' }))]['2026-09']).toBe(60)
     expect(byKey[budgetLineKey(entry({ project_id: 'p2' }))]['2026-09']).toBe(40)
@@ -882,8 +888,26 @@ describe('the seed, per project', () => {
 
   it('still recognises a credit instalment on a project, and seeds none of it', () => {
     const { byKey, notCarried } = seedFromEntries(
-      [{ ...entry(), ...CREDIT_PRINCIPAL, project_id: 'p1' } as SourceEntry], MONTHS, '2026-08')
+      [{ ...entry(), ...CREDIT_PRINCIPAL, project_id: 'p1' } as SourceEntry], MONTHS, '2026-08', 'RSD', LEGS)
     expect(Object.keys(byKey)).toEqual([])
     expect(notCarried).toBe(0)
+  })
+})
+
+describe('the credit legs not set', () => {
+  it('takes nothing for a credit payment — nothing can have been posted as one', () => {
+    expect(isCreditPayment(CREDIT_PRINCIPAL, null)).toBe(false)
+  })
+
+  it('schedules nothing and names the instalments left out', () => {
+    const inst: Installment = {
+      id: 'i1', credit_name: 'Intesa', installment_no: 1, due_date: '2026-09-05',
+      principal_amount: 100, interest_amount: 10, status: 'outstanding',
+      currency: 'RSD', exchangeRate: 1, eurRate: 117.2,
+    }
+    const r = creditScheduleByMonth([inst, { ...inst, id: 'i2', due_date: '2030-01-05' }], ['2026-09'], 'RSD', null)
+    expect(r.total).toBe(0)
+    expect(r.byKey).toEqual({})
+    expect(r.unclassified).toEqual(['i1'])
   })
 })

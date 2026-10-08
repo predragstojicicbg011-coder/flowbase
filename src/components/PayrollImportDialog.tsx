@@ -4,7 +4,10 @@ import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { DIALOG } from './dialogTheme'
 import ProjectSelect from './ProjectSelect'
-import { obligationRows, obligationTotal, employeesMissingDepartment, PL_CATEGORY } from '../services/payrollAllocation'
+import { obligationRows, obligationTotal, employeesMissingDepartment, obligationClassesFrom } from '../services/payrollAllocation'
+import { classificationFor, plPartFor, PAYROLL_ROLES } from '../services/systemCategories'
+import { useSystemCategories } from '../contexts/SystemCategoriesContext'
+import SystemCategoryNotice from './SystemCategoryNotice'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
 import { fetchAllPartners } from '../services/allPartners'
 import { BOOK_CURRENCY, bookAmountsAtRate, getBookRates, type BookAmounts } from '../services/bookAmounts'
@@ -261,6 +264,8 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
   const [fetchingRate, setFetchingRate] = useState(false)
   const [rateWarning, setRateWarning] = useState('')
   const { companies, defaultCompany, showPicker } = useCompanies()
+  /** Where each part posts — the owner's headings, see services/systemCategories. */
+  const systemCategories = useSystemCategories()
   const [companyId, setCompanyId] = useState('')
   // Preselected: the payroll is the default company's unless somebody picks another.
   React.useEffect(() => {
@@ -431,6 +436,28 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
       return
     }
 
+    // Every heading this import will write, resolved BEFORE the first write.
+    // An unset system category refuses the whole import here, with nothing in
+    // the ledger, rather than partway through it.
+    const retainedTypes = new Set(accepted.flatMap(e => e.deductions.map(d => d.type)))
+    let heads: {
+      net: { pl_category: string; pl_subcategory: string }
+      obligations: ReturnType<typeof obligationClassesFrom>
+      fitpass: ReturnType<typeof classificationFor> | null
+      penalty: ReturnType<typeof classificationFor> | null
+    }
+    try {
+      heads = {
+        net: plPartFor('payroll_net_salary', systemCategories.map),
+        obligations: obligationClassesFrom(systemCategories.map),
+        fitpass: retainedTypes.has('fitpass') ? classificationFor('payroll_fitpass', systemCategories.map) : null,
+        penalty: retainedTypes.has('penalty') ? classificationFor('payroll_penalty', systemCategories.map) : null,
+      }
+    } catch (e: any) {
+      alert(`${e?.message || String(e)} Ništa nije proknjiženo.`)
+      return
+    }
+
     // Guard: provjeri da li već postoji import za ovaj period
     const periodMonth = invDate.slice(0, 7)
     const { data: existingImport } = await supabase
@@ -503,7 +530,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           const { error: invErr } = await supabase.from('invoices').insert({
             company_id: companyId, partner_id: partnerId,
             invoice_date: invDate, due_date: dueDate || null,
-            type: 'expense', pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries',
+            type: 'expense', ...heads.net,
             department: emp.department_name || null, dept_subcategory: emp.dept_subcategory_name || null,
             expense_description: emp.employee_name,
             project_id: emp.project_id || null,
@@ -523,7 +550,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           const { error: invErr } = await supabase.from('invoices').insert({
             company_id: companyId, partner_id: dPartnerId,
             invoice_date: invDate, due_date: dueDate || null,
-            type: 'expense', pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries',
+            type: 'expense', ...heads.net,
             department: emp.department_name || null, dept_subcategory: emp.dept_subcategory_name || null,
             expense_description: emp.employee_name,
             project_id: emp.project_id || null,
@@ -535,17 +562,14 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           if (invErr) throw new PostFailure('fakture za zarade i obustave', invErr.message)
         }
         for (const ded of emp.deductions.filter(d => d.type !== 'third_party')) {
-          const isFit = ded.type === 'fitpass'
+          const where = ded.type === 'fitpass' ? heads.fitpass : heads.penalty
+          if (!where) throw new Error('Zadržana obustava nema sistemsku kategoriju. Dalje ništa nije proknjiženo.')
           const { error: txErr } = await supabase.from('transactions').insert({
             company_id: companyId, partner_id: null,
             transaction_date: payDate, type: 'direct', tx_subtype: 'expense',
             currency, amount: -ded.amount, ...book(-ded.amount),
             pl_impact: true,
-            pl_category: isFit ? 'Employee and Labour' : 'General Business Expenses',
-            pl_subcategory: isFit ? 'FitPass expenses' : 'Penalty, fines and other forced fees',
-            department: 'General Business Expenses',
-            dept_subcategory: isFit ? 'Labour related expenses' : 'General expenses',
-            expense_description: isFit ? 'FitPass expenses' : 'Penalty, fines and other forced fees',
+            ...where,
             note: `Zarade ${invDate.slice(0, 7)} — Storno: ${ded.name} — ${emp.employee_name}`, status: 'posted',
           })
           if (txErr) throw new PostFailure('stavke zadržanih obustava', txErr.message)
@@ -559,7 +583,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
         const { data: parentInv, error: parentErr } = await supabase.from('invoices').insert({
           company_id: companyId, partner_id: taxPartnerId || null,
           invoice_date: invDate, due_date: dueDate || null,
-          type: 'expense', pl_category: PL_CATEGORY, pl_subcategory: 'Tax on salary',
+          type: 'expense', ...heads.obligations.tax,
           expense_description: `Objedinjena naplata — ${taxFilingRef || invDate.slice(0, 7)} (${taxMode === 'incentive' ? 'poreske olakšice' : 'standardno'})`,
           cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: totalTaxObl,
           currency, amount: totalTaxObl, ...book(totalTaxObl),
@@ -589,6 +613,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             contributionsEmployee: e.contrib_employee - e.tax_on_salary,
             contributionsEmployer: e.contrib_employer,
           })),
+          heads.obligations,
           parseFloat(taxRounding) || 0,
         )
 
@@ -605,7 +630,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           const { error: invErr } = await supabase.from('invoices').insert({
             company_id: companyId, partner_id: taxPartnerId || null,
             invoice_date: invDate, due_date: dueDate || null,
-            type: 'expense', pl_category: PL_CATEGORY, pl_subcategory: r.pl_subcategory,
+            type: 'expense', pl_category: r.pl_category, pl_subcategory: r.pl_subcategory,
             department: r.department, dept_subcategory: r.dept_subcategory,
             expense_description: r.expense_description,
             project_id: emp?.project_id || null,
@@ -736,6 +761,8 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
 
           {step === 'review' && header && (
             <>
+              <SystemCategoryNotice what="Zarade" roles={PAYROLL_ROLES}
+                map={systemCategories.map} loading={systemCategories.loading} />
               <div style={s.section}>
                 <div style={s.sectionTitle}>Podešavanja</div>
                 <div style={{ display: 'grid', gridTemplateColumns: showPicker ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr', gap: '10px', marginBottom: '12px' }}>

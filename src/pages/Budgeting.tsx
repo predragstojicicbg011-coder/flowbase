@@ -21,6 +21,7 @@ import {
   type BranchId, type BudgetRow,
 } from '../services/budgetTree'
 import BudgetDrillModal, { type DrillState } from '../components/BudgetDrillModal'
+import { SYSTEM_CATEGORIES_HREF } from '../components/SystemCategoryNotice'
 import { DIALOG } from '../components/dialogTheme'
 import BudgetChangeDialog from '../components/BudgetChangeDialog'
 import AddBudgetLineDialog from '../components/AddBudgetLineDialog'
@@ -216,6 +217,8 @@ export default function Budgeting() {
    * than priced at a guess, and counted here so the page can say so.
    */
   const [creditUnpriced, setCreditUnpriced] = useState<Record<BudgetCurrency, number>>({ RSD: 0, EUR: 0 })
+  /** Instalments left out because the credit system categories are not set. */
+  const [creditUnclassified, setCreditUnclassified] = useState(0)
   /**
    * The budget cell a change is being made to, and which of the two things the
    * cell offers is open: the dialog that records a change, or the drill that
@@ -343,6 +346,7 @@ export default function Budgeting() {
       setNotCarriedByCurrency({ RSD: tree.notCarried, EUR: tree.notCarriedEur })
       setLedgerByNode(tree.ledgerByNode)
       setCreditUnpriced(tree.creditUnpriced)
+      setCreditUnclassified(tree.creditUnclassified)
     }
     // Every query `run` makes reaches the database through `fetchAllPages`,
     // which throws on `error` rather than handing back an empty page — so a
@@ -1297,6 +1301,20 @@ export default function Budgeting() {
           ⚠ Kurs NBS nije dostupan, pa {countOf(creditUnpriced[shownCurrency], 'rata kredita', 'rate kredita', 'rata kredita')}{' '}
           {plural(creditUnpriced[shownCurrency], 'nije uračunata', 'nisu uračunate', 'nije uračunato')} u procene
           za kredite — naredni meseci su za toliko potcenjeni. Pokušajte ponovo kasnije.
+        </div>
+      )}
+
+      {consolidated && !loading && creditUnclassified > 0 && (
+        <div role="alert" style={{
+          marginTop: '14px', padding: '10px 14px',
+          background: 'rgba(245,166,35,0.12)', border: '0.5px solid rgba(245,166,35,0.3)',
+          borderRadius: '8px', fontSize: '12px', color: '#F5A623',
+        }}>
+          ⚠ {countOf(creditUnclassified, 'rata kredita', 'rate kredita', 'rata kredita')}{' '}
+          {plural(creditUnclassified, 'nije uračunata', 'nisu uračunate', 'nije uračunato')} u procene:
+          sistemske kategorije „Otplata glavnice kredita“ i „Kamata na kredit“ nisu podešene, pa
+          nema reda na koji bi se rata stavila. Podesite ih u{' '}
+          <a href={SYSTEM_CATEGORIES_HREF} style={{ color: '#F5A623' }}>Podešavanja → Sistemske kategorije</a>.
         </div>
       )}
 

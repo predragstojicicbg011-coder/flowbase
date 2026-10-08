@@ -252,6 +252,27 @@ describe('refusing to post a plan that does not add up', () => {
       .rejects.toThrow(/se ne slaže|Stavke iznose/)
     expect(c.calls.postings).toHaveLength(0)
   })
+
+  it('REFUSES, writing nothing, when a system category the plan needed is not set', async () => {
+    // `planFor` collects the unset roles; the write checks them again, first.
+    const c = client()
+    const why = 'Sistemska kategorija „Neto zarade“ nije podešena. '
+      + 'Podesite je u Podešavanja → Sistemske kategorije.'
+    await expect(postPlan(c, plan({ classificationErrors: [why] }), CONTEXT, 'Salaries'))
+      .rejects.toThrow('„Neto zarade“ nije podešena')
+    expect(c.calls.postings).toHaveLength(0)
+    expect(c.calls.invoices).toHaveLength(0)
+    expect(c.calls.transactions).toHaveLength(0)
+  })
+
+  it('refuses a row with no P&L heading, however the plan was built', async () => {
+    const c = client()
+    const headless = plan()
+    headless.invoices = headless.invoices.map(i => i.kind === 'net' ? { ...i, pl_subcategory: '' } : i)
+    await expect(postPlan(c, headless, CONTEXT, 'Salaries')).rejects.toThrow(/nema P&L kategoriju/)
+    expect(c.calls.postings).toHaveLength(0)
+    expect(c.calls.invoices).toHaveLength(0)
+  })
 })
 
 describe('undoPosting', () => {

@@ -31,6 +31,8 @@ import {
   type Adjustment, type Installment, type BudgetCurrency,
   type ForecastNode, type RolledNode, type Level,
 } from './budgetForecast'
+import { fetchSystemCategories } from './systemCategories'
+import { creditLegsOrNull } from './creditClassification'
 
 /** Which way the same money is read. */
 export type BranchId = 'department' | 'pl'
@@ -154,6 +156,12 @@ export interface BudgetTree {
    * says how many.
    */
   creditUnpriced: Record<BudgetCurrency, number>
+  /**
+   * Instalments in the horizon left out because the system categories for
+   * the credit legs are not set — there is no row to put them on. The page
+   * says how many and where to set them.
+   */
+  creditUnclassified: number
 }
 
 /**
@@ -189,6 +197,11 @@ export async function loadBudgetTree(
     const [y, m] = mk.split('-').map(Number)
     return `${mk}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`
   }
+
+  // The credit legs' classifications — the owner's system categories. A
+  // credit payment is recognised by them, and the credit schedule is put on
+  // their rows; unset, there is neither (see `creditUnclassified`).
+  const creditLegs = creditLegsOrNull(await fetchSystemCategories(client))
 
   // v_pl_entries is transactions and invoices together — the same universe
   // Expense Analysis and the Dashboard report on. Reading `transactions` alone
@@ -228,8 +241,8 @@ export async function loadBudgetTree(
   // Seeded twice, once per currency, from the same rows: each actual carries
   // its figure in both, so the EUR seed is read, not converted.
   const seeded = {
-    RSD: seedFromEntries(actuals, monthKeys, benchmark, 'RSD'),
-    EUR: seedFromEntries(actuals, monthKeys, benchmark, 'EUR'),
+    RSD: seedFromEntries(actuals, monthKeys, benchmark, 'RSD', creditLegs),
+    EUR: seedFromEntries(actuals, monthKeys, benchmark, 'EUR', creditLegs),
   }
 
   // The change ledger. Append-only, so this is every change ever recorded
@@ -405,8 +418,8 @@ export async function loadBudgetTree(
 
   const CURRENCIES: BudgetCurrency[] = ['RSD', 'EUR']
   const schedule = {
-    RSD: creditScheduleByMonth(installments, monthKeys, 'RSD'),
-    EUR: creditScheduleByMonth(installments, monthKeys, 'EUR'),
+    RSD: creditScheduleByMonth(installments, monthKeys, 'RSD', creditLegs),
+    EUR: creditScheduleByMonth(installments, monthKeys, 'EUR', creditLegs),
   }
 
   // nodeKey -> month -> actual recorded against this node itself, before
@@ -638,6 +651,7 @@ export async function loadBudgetTree(
     notCarriedEur: seeded.EUR.notCarried,
     creditScheduled: schedule.RSD.total,
     creditUnpriced: { RSD: schedule.RSD.unpriced.length, EUR: schedule.EUR.unpriced.length },
+    creditUnclassified: schedule.RSD.unclassified.length,
     ledgerByNode: ledger,
     seedByNodeProject,
   }

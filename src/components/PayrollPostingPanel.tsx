@@ -9,6 +9,7 @@ import {
   fetchProjectHours, projectHoursByEmployee, type ProjectHoursRow,
 } from '../services/payroll/projectHours'
 import { useProjects } from '../contexts/ProjectsContext'
+import { useSystemCategories } from '../contexts/SystemCategoriesContext'
 import { OVERHEAD_LABEL, projectLabelById } from '../services/projects'
 import { postPlan, undoPosting, fetchPostings, type PostContext } from '../services/payroll/post'
 import { fetchHolidays, lastWorkingDayOf, type HolidayRow } from '../services/payroll/holidays'
@@ -87,6 +88,8 @@ export default function PayrollPostingPanel({
   /** Sati po projektima for the month, by employee — how the cost is shared. */
   const [projectHours, setProjectHours] = useState<Record<string, ProjectHoursRow[]>>({})
   const { projects } = useProjects()
+  /** Where each component posts — the owner's headings, see systemCategories. */
+  const { map: system } = useSystemCategories()
 
   const reload = useCallback(async () => {
     setError(null)
@@ -226,6 +229,7 @@ export default function PayrollPostingPanel({
         currencyRates: exchangeRate ? { EUR: exchangeRate } : {},
         projectHours,
         hoursBasis,
+        system,
       })
       // WHAT LANDS IN THE LEDGER HAS TO BE THE THING THAT WAS KEPT. The only
       // way to be sure is to insist the two agree at the moment of posting:
@@ -251,7 +255,7 @@ export default function PayrollPostingPanel({
     }
     return out
   }, [runs, month, people, mapping, exchangeRate, ledger, savedRuns,
-      employeePartners, deductionPartners, taxPartner, projectHours, hoursBasis])
+      employeePartners, deductionPartners, taxPartner, projectHours, hoursBasis, system])
 
   /**
    * The already-posted rows this can put a partner on, by the SAME matcher

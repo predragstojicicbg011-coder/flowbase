@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { DataRefreshProvider } from './contexts/DataRefreshContext'
 import { CompaniesProvider } from './contexts/CompaniesContext'
 import { ProjectsProvider } from './contexts/ProjectsContext'
+import { SystemCategoriesProvider } from './contexts/SystemCategoriesContext'
 import { DisplayCurrencyProvider } from './contexts/DisplayCurrencyContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -73,11 +74,13 @@ function App() {
       <AuthProvider>
         <CompaniesProvider>
           <ProjectsProvider>
-            <DataRefreshProvider>
-              <DisplayCurrencyProvider>
-                <AppContent />
-              </DisplayCurrencyProvider>
-            </DataRefreshProvider>
+            <SystemCategoriesProvider>
+              <DataRefreshProvider>
+                <DisplayCurrencyProvider>
+                  <AppContent />
+                </DisplayCurrencyProvider>
+              </DataRefreshProvider>
+            </SystemCategoriesProvider>
           </ProjectsProvider>
         </CompaniesProvider>
       </AuthProvider>

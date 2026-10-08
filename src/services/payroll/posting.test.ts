@@ -1,7 +1,12 @@
 import {
   planFor, planTotal, stornoTotal, checkPlan, unmappedUnits, departmentFor,
-  NET_SUBCATEGORY, RETAINED_FALLBACK, hoursBasisFromRuns, planProjectTotals, type UnitMapping,
+  retainedRoleFor, hoursBasisFromRuns, planProjectTotals, type UnitMapping,
 } from './posting'
+import { TEST_SYSTEM_CATEGORIES as SYSTEM } from '../systemCategories.fixture'
+import type { SystemCategoryMap } from '../systemCategories'
+
+/** What the fixture's owner calls the net-salary heading. */
+const NET_SUBCATEGORY = SYSTEM.payroll_net_salary!.pl_subcategory
 import { runsFor, RUN_LABELS, type RunInput } from './runs'
 import { RATES_2026, splitContractedNet } from './engine'
 import { emptyTimesheet, type TimesheetRow } from './timesheets'
@@ -50,7 +55,7 @@ const sheet = (over: Partial<TimesheetRow> = {}): TimesheetRow =>
 /** A run and the plan for it, from one description of a month. */
 function plan(
   people: EmployeeForMonth[], timesheets: Record<string, TimesheetRow>, runKey = 'regular',
-  over: Partial<RunInput> = {},
+  over: Partial<RunInput> = {}, system: SystemCategoryMap = SYSTEM,
 ) {
   const input: RunInput = {
     people, timesheets, rates: RATES_2026, monthHours: FUND,
@@ -62,7 +67,9 @@ function plan(
   for (const p of people) byId[p.employee.id] = p
   return {
     run,
-    plan: planFor({ run, month: MONTH, people: byId, mapping: MAPPING, currencyRates: { EUR: 117.3586 } }),
+    plan: planFor({
+      run, month: MONTH, people: byId, mapping: MAPPING, currencyRates: { EUR: 117.3586 }, system,
+    }),
   }
 }
 
@@ -188,17 +195,17 @@ describe('what each deduction does to the entries', () => {
       rates: RATES_2026, monthHours: FUND,
     }).runs.find(r => r.key === 'regular')!
     const p = planFor({
-      run, month: MONTH, people: byId, mapping: MAPPING,
-      retainedCategories: { Fitpass: { pl_category: 'Employee and Labour', pl_subcategory: 'FitPass expenses' } },
+      run, month: MONTH, people: byId, mapping: MAPPING, system: SYSTEM,
+      retainedCategories: { Fitpass: { pl_category: 'Zarade', pl_subcategory: 'Rekreacija' } },
     })
-    expect(p.transactions[0].pl_subcategory).toBe('FitPass expenses')
+    expect(p.transactions[0].pl_subcategory).toBe('Rekreacija')
   })
 
   it('falls back to a named category rather than to nothing', () => {
     const { plan: p } = plan(
       [person({ deductions: [deduction({ label: 'Something new' })] })],
       { e1: sheet({ regular_hours: FUND }) })
-    expect(p.transactions[0].pl_subcategory).toBe(RETAINED_FALLBACK.pl_subcategory)
+    expect(p.transactions[0].pl_subcategory).toBe(SYSTEM.payroll_retained_fallback!.pl_subcategory)
   })
 
   it('sends a FitPass withholding where the manual dialog already sends it', () => {
@@ -208,7 +215,7 @@ describe('what each deduction does to the entries', () => {
     const { plan: p } = plan(
       [person({ deductions: [deduction({ label: 'Fitpass mesečna članarina' })] })],
       { e1: sheet({ regular_hours: FUND }) })
-    expect(p.transactions[0].pl_subcategory).toBe('FitPass expenses')
+    expect(p.transactions[0].pl_subcategory).toBe(SYSTEM.payroll_fitpass!.pl_subcategory)
   })
 })
 
@@ -258,7 +265,7 @@ describe('departments', () => {
       people: [p], timesheets: { e1: sheet({ regular_hours: FUND }) },
       rates: RATES_2026, monthHours: FUND,
     }).runs.find(r => r.key === 'regular')!
-    const q = planFor({ run, month: MONTH, people: { e1: p }, mapping: [] })
+    const q = planFor({ run, month: MONTH, people: { e1: p }, mapping: [], system: SYSTEM })
     expect(checkPlan(q)).toContain('bez sektora')
   })
 })
@@ -311,11 +318,11 @@ const round = (n: number) => Math.round(n * 100) / 100
 
 describe('the ledger has to recognise every heading', () => {
   const known = {
-    plSubcategories: ['Net Salaries', 'Tax on salary',
-      'Contributions on behalf of the employee',
-      'Contributions on behalf of the employer'],
+    plSubcategories: ['Neto zarade', 'Porez na zarade',
+      'Doprinosi na teret zaposlenog',
+      'Doprinosi na teret poslodavca'],
     departments: ['Development'],
-    deptSubcategories: ['Engineering', 'Salary expenses domestic'],
+    deptSubcategories: ['Engineering', 'Zarade u zemlji'],
   }
 
   it('passes a plan whose every name the ledger already has', () => {
@@ -347,7 +354,7 @@ describe('other income does not post as a salary', () => {
         label: 'Referral', treatment: 'other_income', amount: 20000, currency: 'RSD', note: null,
       }] })
     const o = p.invoices.find(i => i.kind === 'other_income')!
-    expect(o.pl_subcategory).toBe('Renumeration, allowances and other benefits')
+    expect(o.pl_subcategory).toBe('Naknade i ostala primanja')
     expect(o.pl_subcategory).not.toBe(NET_SUBCATEGORY)
     expect(o.department).toBe('Development')
     expect(o.amount).toBe(20000)
@@ -369,19 +376,19 @@ describe('where a retained deduction is cancelled', () => {
     const { plan: a } = plan(
       [person({ deductions: [deduction({ label: 'Privatno zdravstveno osiguranje Lena Gavrilov' })] })],
       { e1: sheet({ regular_hours: FUND }) })
-    expect(a.transactions[0].pl_subcategory).toBe('Private Health insurance')
+    expect(a.transactions[0].pl_subcategory).toBe('Privatno zdravstveno osiguranje')
 
     const { plan: b } = plan(
       [person({ deductions: [deduction({ label: 'Osigurani članovi porodice Jovana' })] })],
       { e1: sheet({ regular_hours: FUND }) })
-    expect(b.transactions[0].pl_subcategory).toBe('Private Health insurance')
+    expect(b.transactions[0].pl_subcategory).toBe('Privatno zdravstveno osiguranje')
   })
 
-  it('falls back to a heading that actually exists', () => {
-    // It used to fall back to "Other labour related expenses", which is not a
-    // sub-category anywhere — so every unmapped deduction would have been
-    // refused, and before the ledger check existed it would have created it.
-    expect(RETAINED_FALLBACK.pl_subcategory).toBe('Renumeration, allowances and other benefits')
+  it('falls back to the fallback role, not to a name written in code', () => {
+    // It used to fall back to a Mintflow name; MCFlow's P&L is the owner's own.
+    expect(retainedRoleFor('Nešto novo')).toBe('payroll_retained_fallback')
+    expect(retainedRoleFor('Fitpass mesečna članarina')).toBe('payroll_fitpass')
+    expect(retainedRoleFor('Osigurani članovi porodice Jovana')).toBe('payroll_health_insurance')
   })
 })
 
@@ -399,7 +406,7 @@ describe('projects, by hours', () => {
       run,
       plan: planFor({
         run, month: MONTH, people: { e1: input.people[0] }, mapping: MAPPING,
-        currencyRates: { EUR: 117.3586 },
+        currencyRates: { EUR: 117.3586 }, system: SYSTEM,
         projectHours, hoursBasis: hoursBasisFromRuns(result.runs),
       }),
     }
@@ -450,5 +457,75 @@ describe('projects, by hours', () => {
       expect('rev_alloc_type' in i).toBe(false)
       expect('opex_type' in i).toBe(false)
     }
+  })
+})
+
+describe('the system categories decide every heading', () => {
+  const without = (...roles: (keyof typeof SYSTEM)[]): SystemCategoryMap => {
+    const m: SystemCategoryMap = { ...SYSTEM }
+    for (const r of roles) delete m[r]
+    return m
+  }
+
+  it('posts under the owner\'s own names and nothing else', () => {
+    const { plan: p } = plan([person()], { e1: sheet({ regular_hours: FUND }) })
+    const cats = new Set([...p.invoices, ...p.transactions].map(i => i.pl_category))
+    expect([...cats]).toEqual(['Zarade'])
+    expect(p.invoices.filter(i => i.kind === 'obligation_child').map(i => i.pl_subcategory).sort())
+      .toEqual(['Doprinosi na teret poslodavca', 'Doprinosi na teret zaposlenog', 'Porez na zarade'])
+    expect(p.classificationErrors).toEqual([])
+  })
+
+  it('REFUSES the plan when the net-salary role is not set', () => {
+    const { plan: p } = plan([person()], { e1: sheet({ regular_hours: FUND }) }, 'regular', {},
+      without('payroll_net_salary'))
+    const why = checkPlan(p)!
+    expect(why).toContain('Sistemska kategorija „Neto zarade“ nije podešena')
+    expect(why).toContain('Podešavanja → Sistemske kategorije')
+    expect(why).toContain('Ništa nije upisano')
+  })
+
+  it('refuses when a contribution role is not set', () => {
+    const { plan: p } = plan([person()], { e1: sheet({ regular_hours: FUND }) }, 'regular', {},
+      without('payroll_employer_contributions'))
+    expect(checkPlan(p)).toContain('„Doprinosi na teret poslodavca“')
+  })
+
+  it('asks only for the roles the month needs', () => {
+    // No other income, no retained deduction, every allocation names its
+    // podsektor: those three roles may stay unset.
+    const { plan: p } = plan([person()], { e1: sheet({ regular_hours: FUND }) }, 'regular', {},
+      without('payroll_other_income', 'payroll_retained_fallback', 'payroll_fitpass',
+        'payroll_salary_dept_subcategory', 'credit_principal'))
+    expect(checkPlan(p)).toBeNull()
+  })
+
+  it('refuses a FitPass withholding when the FitPass role is not set', () => {
+    const { plan: p } = plan(
+      [person({ deductions: [deduction({ label: 'Fitpass mesečna članarina' })] })],
+      { e1: sheet({ regular_hours: FUND }) }, 'regular', {}, without('payroll_fitpass'))
+    expect(checkPlan(p)).toContain('„FitPass“ nije podešena')
+  })
+
+  it('uses the salary podsektor role when the mapping names none', () => {
+    const noSub: UnitMapping[] = [{ ...MAPPING[0], dept_subcategory: null }]
+    const p = person()
+    const run = runsFor({
+      people: [p], timesheets: { e1: sheet({ regular_hours: FUND }) },
+      rates: RATES_2026, monthHours: FUND,
+    }).runs.find(r => r.key === 'regular')!
+    const q = planFor({ run, month: MONTH, people: { e1: p }, mapping: noSub, system: SYSTEM })
+    expect(q.invoices.find(i => i.kind === 'net')!.dept_subcategory).toBe('Zarade u zemlji')
+    const r = planFor({
+      run, month: MONTH, people: { e1: p }, mapping: noSub,
+      system: without('payroll_salary_dept_subcategory'),
+    })
+    expect(checkPlan(r)).toContain('„Podsektor za zarade“')
+  })
+
+  it('refuses a hand-built plan with a row under no heading', () => {
+    const { plan: p } = plan([person()], { e1: sheet({ regular_hours: FUND }) })
+    const broken = { ...p, invoices: p.invoices.map(i => i.kind === 'net' ? { ...i, pl_category: '' } : i) }
+    expect(checkPlan(broken)).toContain('nema P&L kategoriju')
   })
 })

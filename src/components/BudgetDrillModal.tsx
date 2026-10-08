@@ -6,6 +6,8 @@ import { makeClassKey } from '../services/budgetKeys'
 import { countOf, plural } from '../utils/plural'
 import { srDate } from '../utils/months'
 import { carriesInto, isCreditPayment, figureIn, type Adjustment, type BudgetCurrency } from '../services/budgetForecast'
+import { fetchSystemCategories } from '../services/systemCategories'
+import { creditLegsOrNull } from '../services/creditClassification'
 import {
   EntriesModal, EntryRow, useEntryEditor, em,
   EntryItem, buildEntryItems,
@@ -180,6 +182,9 @@ export default function BudgetDrillModal({
           return q.order('pl_date').order('id').range(from, to)
         })
 
+        // The same credit legs the tree recognised credit payments by.
+        const creditLegs = drill.mode === 'actual' ? null
+          : creditLegsOrNull(await fetchSystemCategories(supabase))
         const rows = monthRows
           .filter(r => wanted.has(makeClassKey(r)))
           // An estimate is not the benchmark month: it is the part of it that
@@ -190,7 +195,7 @@ export default function BudgetDrillModal({
           // the schedule, not from here — so listing it under "What seeds this"
           // would show an entry that contributed none of the figure.
           .filter(r => drill.mode === 'actual'
-            || (carriesInto(r, benchmark, drill.month) && !isCreditPayment(r)))
+            || (carriesInto(r, benchmark, drill.month) && !isCreditPayment(r, creditLegs)))
 
         const built = await buildEntryItems(rows, supabase)
         setEntries(built.items)

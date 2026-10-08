@@ -1,5 +1,6 @@
 import { loadBudgetTree, type QueryClient } from './budgetTree'
 import { PROJECT_FILTER_OVERHEAD } from './ledgerFilters'
+import { testSystemCategoryRows } from './systemCategories.fixture'
 
 // ─── The budget tree, with projects in it ────────────────────────────────────
 //
@@ -70,7 +71,9 @@ const ROWS = [
 const NODE = 'department:Admin'
 
 const load = (tables: Record<string, any[]>, project?: string) => {
-  const { client, requests } = fakeClient({ credit_installments: [], ...tables })
+  const { client, requests } = fakeClient({
+    credit_installments: [], system_categories: testSystemCategoryRows(CO), ...tables,
+  })
   return loadBudgetTree(client, {
     monthKeys: [MONTH], benchmark: BENCH, companyIds: [CO], companyId: '',
     branch: 'department', project,
@@ -148,5 +151,17 @@ describe('the budget tree with projects', () => {
     expect(all.tree.creditScheduled).toBe(1000)
     const one = await load({ v_pl_entries: [], budget_adjustments: [], credit_installments: [inst] }, 'p1')
     expect(one.tree.creditScheduled).toBe(0)
+  })
+
+  it('schedules no instalment, and counts it, while the credit system categories are unset', async () => {
+    const inst = {
+      id: 'i1', installment_no: 1, due_date: `${MONTH}-15`, principal_amount: 900,
+      interest_amount: 100, status: 'due', credits: { name: 'Loan', company_id: CO, currency: 'RSD' },
+    }
+    const { tree } = await load({
+      v_pl_entries: [], budget_adjustments: [], credit_installments: [inst], system_categories: [],
+    })
+    expect(tree.creditScheduled).toBe(0)
+    expect(tree.creditUnclassified).toBe(1)
   })
 })

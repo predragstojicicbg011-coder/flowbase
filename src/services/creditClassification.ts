@@ -5,23 +5,24 @@
 // landed under Unassigned in the department branch of the report. Roughly $23k
 // of the unclassified total was this.
 //
-// The classification is declared here rather than inline in the three dialogs
+// The classification is declared ONCE rather than inline in the three dialogs
 // that post credit payments (transaction, bank statement, bulk import). They
 // had three copies of the same object literal, which is how they came to differ
 // from what the business actually wanted.
 //
-// Principal and interest are still separate lines, but both now sit under
-// Loans/Credits/Dividend on the P&L side too. Splitting them across two P&L
-// categories meant the cost of a credit was never one number anywhere: the P&L
-// branch showed 24,104 under Loans/Credits/Dividend while the department branch
-// showed 26,270, and the difference was the interest sitting in Financial
-// Expenses. Both are correct and the branches reconcile, but nobody reading it
-// should have to reconcile them in their head.
-//
-// Financial Expenses / Interest is left alone — it is still where interest that
-// is not a credit instalment belongs.
+// Principal and interest are separate lines, each with all five fields, so
+// both branches of the expense report place them. WHICH headings is the
+// owner's choice: the system categories `credit_principal` and
+// `credit_interest` (services/systemCategories.ts), set in Podešavanja →
+// Sistemske kategorije. Mintflow's 'Loans/Credits/Dividend' names were
+// hardcoded here; MCFlow's P&L is in Serbian and has its own. Unset, a credit
+// payment is refused before anything is written.
 
 import { fmtMoney } from '../utils/formatters'
+import {
+  classificationFor, classificationOrNull,
+  type Classification, type SystemCategoryMap,
+} from './systemCategories'
 
 export interface CreditClassification {
   pl_category: string
@@ -31,23 +32,33 @@ export interface CreditClassification {
   expense_description: string
 }
 
-export const CREDIT_DEPARTMENT = 'Loans/Credits/Dividend'
-export const CREDIT_DEPT_SUBCATEGORY = 'Credit'
-
-export const CREDIT_PRINCIPAL: CreditClassification = {
-  pl_category: 'Loans/Credits/Dividend',
-  pl_subcategory: 'Bank Credits',
-  department: CREDIT_DEPARTMENT,
-  dept_subcategory: CREDIT_DEPT_SUBCATEGORY,
-  expense_description: 'Credit',
+export interface CreditLegs {
+  principal: CreditClassification
+  interest: CreditClassification
 }
 
-export const CREDIT_INTEREST: CreditClassification = {
-  pl_category: 'Loans/Credits/Dividend',
-  pl_subcategory: 'Paid Interest on credit',
-  department: CREDIT_DEPARTMENT,
-  dept_subcategory: CREDIT_DEPT_SUBCATEGORY,
-  expense_description: 'Interest',
+const asCredit = (c: Classification): CreditClassification => ({
+  pl_category: c.pl_category!, pl_subcategory: c.pl_subcategory!,
+  department: c.department!, dept_subcategory: c.dept_subcategory!,
+  expense_description: c.expense_description!,
+})
+
+/**
+ * The two legs' classifications. Throws `SystemCategoryMissing` when either
+ * is unset — call it BEFORE the first write of a credit payment.
+ */
+export function creditLegsFrom(map: SystemCategoryMap | null | undefined): CreditLegs {
+  return {
+    principal: asCredit(classificationFor('credit_principal', map)),
+    interest: asCredit(classificationFor('credit_interest', map)),
+  }
+}
+
+/** The same for a reader (the budget): null when either leg is unset. */
+export function creditLegsOrNull(map: SystemCategoryMap | null | undefined): CreditLegs | null {
+  const p = classificationOrNull('credit_principal', map)
+  const i = classificationOrNull('credit_interest', map)
+  return p && i ? { principal: asCredit(p), interest: asCredit(i) } : null
 }
 
 /**

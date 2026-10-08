@@ -39,7 +39,10 @@ import { outstandingOwn, settledStatus, settlementFor } from '../services/settle
 import {
   claimNotice, freeForRow, isHiddenForRow, type ClaimRow, type OpenInvoice,
 } from '../services/invoiceClaims'
-import { CREDIT_PRINCIPAL, CREDIT_INTEREST, creditNote, allocatePayment } from '../services/creditClassification'
+import { creditLegsFrom, creditNote, allocatePayment, type CreditLegs } from '../services/creditClassification'
+import { CREDIT_ROLES } from '../services/systemCategories'
+import { useSystemCategories } from '../contexts/SystemCategoriesContext'
+import SystemCategoryNotice from './SystemCategoryNotice'
 import { creditLegBooker, checkCreditCurrency, UnsupportedCreditCurrencyError } from '../services/creditPayment'
 import { fetchAllPartners } from '../services/allPartners'
 import { countOf } from '../utils/plural'
@@ -479,6 +482,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
   const [progress, setProgress] = useState(0)
   const [analyzeError, setAnalyzeError] = useState('')
   const { companies, defaultCompany, showPicker } = useCompanies()
+  /** Where a credit instalment's two legs post — see services/systemCategories. */
+  const systemCategories = useSystemCategories()
   const [company, setCompany] = useState('')
 
   // One company: it is the company, and nobody is asked to choose it.
@@ -1015,6 +1020,18 @@ export default function BulkImport({ onClose, onImported }: Props) {
         return
       }
     }
+    // The credit legs' headings, before the first write: an import with a
+    // credit payment and no system category for it is refused whole.
+    let creditHeads: CreditLegs | null = null
+    if (accepted.some(r => r.override_tx_type === 'credit_payment' && r.override_installment_ids.length > 0)) {
+      try {
+        creditHeads = creditLegsFrom(systemCategories.map)
+      } catch (err: any) {
+        setAnalyzeError(`${err.message} Ništa nije proknjiženo.`)
+        setStep('review')
+        return
+      }
+    }
     try {
       for (const row of accepted) {
         const p = row.parsed
@@ -1158,7 +1175,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
           // line paid, instead of principal always going first.
           const legSplit = allocatePayment(remaining, remainingPrincipal, remainingInterest)
 
-          // 1. Glavnica → Loans/Credits/Dividend
+          // 1. Glavnica → system category credit_principal
           if (legSplit.principal > 0.005) {
             const paidPrincipal = legSplit.principal
             remaining = Math.max(0, remaining - paidPrincipal)
@@ -1170,14 +1187,14 @@ export default function BulkImport({ onClose, onImported }: Props) {
               statement_number: p.statement_number || null,
               type: 'credit_payment', tx_subtype: 'expense',
               ...legs.book(paidPrincipal),
-              pl_impact: true, ...CREDIT_PRINCIPAL,
+              pl_impact: true, ...creditHeads!.principal,
               cf_type: 'recurring', cf_frequency: 'monthly',
               note: creditNote('principal', creditName, inst.installment_no, paidPrincipal, row.override_note || p.description, legs.currency),
               status: 'posted',
             })
           }
 
-          // 2. Kamata → Loans/Credits/Dividend / Paid Interest on credit
+          // 2. Kamata → system category credit_interest
           if (legSplit.interest > 0.005) {
             const paidInterest = legSplit.interest
             remaining = Math.max(0, remaining - paidInterest)
@@ -1189,7 +1206,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
               statement_number: p.statement_number || null,
               type: 'credit_payment', tx_subtype: 'expense',
               ...legs.book(paidInterest),
-              pl_impact: true, ...CREDIT_INTEREST,
+              pl_impact: true, ...creditHeads!.interest,
               cf_type: 'recurring', cf_frequency: 'monthly',
               note: creditNote('interest', creditName, inst.installment_no, paidInterest, row.override_note || p.description, legs.currency),
               status: 'posted',
@@ -1940,6 +1957,8 @@ export default function BulkImport({ onClose, onImported }: Props) {
                           {row.override_tx_type === 'credit_payment' && (
                             <div style={{ gridColumn: '1 / -1', marginTop: '8px' }}>
                               <div style={s.editSectionTitle}>Rate kredita</div>
+                              <SystemCategoryNotice what="Otplate kredita" roles={CREDIT_ROLES}
+                                map={systemCategories.map} loading={systemCategories.loading} />
                               <CreditInstallmentSelector
                                 credits={credits}
                                 selectedCreditId={row.override_credit_id}

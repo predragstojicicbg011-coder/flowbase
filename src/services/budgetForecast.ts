@@ -19,7 +19,7 @@
 // to RSD. A figure missing in the currency asked for is never read as zero
 // where that would move a typed budget: see `ledgerFigure`.
 
-import { CREDIT_PRINCIPAL, CREDIT_INTEREST } from './creditClassification'
+import type { CreditLegs } from './creditClassification'
 import { bookAmountsAtRate, round2 } from './bookAmounts'
 import { projectKeySuffix } from './budgetKeys'
 
@@ -107,14 +107,17 @@ export function budgetLineKey(e: Parameters<typeof classificationKey>[0] & { pro
  * Whether an entry is one leg of a credit instalment payment.
  *
  * Exact, by construction: the two classifications this app writes for the two
- * legs are declared once in `creditClassification` and compared here on all
- * five levels at once, through the same `classificationKey` everything else
+ * legs are the system categories `credit_principal` and `credit_interest`
+ * (`creditLegsOrNull`), handed in as `legs` and compared here on all five
+ * levels at once, through the same `classificationKey` everything else
  * groups by. A row agreeing on four of the five is not a credit payment and is
  * not treated as one — which is the whole point of matching the classification
  * rather than a name or a substring of one.
  *
  * It exists because a credit payment is the one spend whose FUTURE the app
- * already knows exactly. See the call site in `seedFromEntries`.
+ * already knows exactly. See the call site in `seedFromEntries`. With the
+ * legs unset (`null`) nothing is a credit payment — nothing can have been
+ * posted as one.
  */
 export function isCreditPayment(e: {
   pl_category: string | null
@@ -122,10 +125,11 @@ export function isCreditPayment(e: {
   department: string | null
   dept_subcategory: string | null
   expense_description: string | null
-}): boolean {
+}, legs: CreditLegs | null): boolean {
+  if (!legs) return false
   const key = classificationKey(e)
-  return key === classificationKey(CREDIT_PRINCIPAL)
-    || key === classificationKey(CREDIT_INTEREST)
+  return key === classificationKey(legs.principal)
+    || key === classificationKey(legs.interest)
 }
 
 export interface SeedResult {
@@ -205,6 +209,8 @@ export function seedFromEntries(
   months: MonthKey[],
   benchmark: MonthKey,
   currency: BudgetCurrency = 'RSD',
+  /** The credit legs' classifications (`creditLegsOrNull`); see `isCreditPayment`. */
+  creditLegs: CreditLegs | null = null,
 ): SeedResult {
   const byKey: Record<string, Record<MonthKey, number>> = {}
   const byCompany: SeedResult['byCompany'] = {}
@@ -241,7 +247,7 @@ export function seedFromEntries(
     // there. Checked BEFORE `carryStep` for exactly that reason, so a credit
     // leg booked as anything other than recurring is left out too rather than
     // reported missing.
-    if (isCreditPayment(e)) continue
+    if (isCreditPayment(e, creditLegs)) continue
 
     if (carryStep(e) === 0) { notCarried += amount; continue }
 
@@ -272,9 +278,10 @@ export function seedFromEntries(
  * years ago. Estimating it from last month's payment would be replacing the
  * answer with a guess at it.
  *
- * It is keyed on `CREDIT_PRINCIPAL` and `CREDIT_INTEREST` — the same two
- * classifications the three dialogs that book a credit payment write, declared
- * once in `creditClassification`. So the schedule lands on exactly the rows
+ * It is keyed on the credit legs (`legs`, the system categories
+ * `credit_principal` and `credit_interest`) — the same two classifications the
+ * three dialogs that book a credit payment write. With them unset there is no
+ * row to put the schedule on, and nothing is scheduled (`unclassified`). So the schedule lands on exactly the rows
  * the actual payments land on, in both branches of the tree, and the estimate
  * and the actual beside it are the same two lines.
  *
@@ -287,15 +294,26 @@ export function seedFromEntries(
  */
 export function creditScheduleByMonth(
   installments: Installment[], months: MonthKey[], currency: BudgetCurrency = 'RSD',
-): { byKey: Record<string, Record<MonthKey, number>>; total: number; unpriced: string[] } {
+  legs: CreditLegs | null = null,
+): {
+  byKey: Record<string, Record<MonthKey, number>>; total: number; unpriced: string[]
+  /** Instalments in the horizon left out because the legs are not set. */
+  unclassified: string[]
+} {
   const horizon = new Set(months)
   const byKey: Record<string, Record<MonthKey, number>> = {}
   let total = 0
   /** Instalments that could not be priced in `currency` — no rate for them. */
   const unpriced: string[] = []
 
-  const principalKey = classificationKey(CREDIT_PRINCIPAL)
-  const interestKey = classificationKey(CREDIT_INTEREST)
+  if (!legs) {
+    const unclassified = installments
+      .filter(i => horizon.has((i.due_date || '').slice(0, 7)))
+      .map(i => i.id)
+    return { byKey, total: 0, unpriced, unclassified }
+  }
+  const principalKey = classificationKey(legs.principal)
+  const interestKey = classificationKey(legs.interest)
 
   const add = (key: string, month: MonthKey, amount: number) => {
     const cents = Math.round(amount * 100) / 100
@@ -317,7 +335,7 @@ export function creditScheduleByMonth(
     add(interestKey, month, interest)
   }
 
-  return { byKey, total: Math.round(total * 100) / 100, unpriced }
+  return { byKey, total: Math.round(total * 100) / 100, unpriced, unclassified: [] }
 }
 
 /**
