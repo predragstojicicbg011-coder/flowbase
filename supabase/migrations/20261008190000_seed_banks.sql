@@ -1,26 +1,14 @@
--- The banks Milinković Company works with. A row here is what a statement is
--- imported against; its currencies are the accounts the company holds there,
--- RSD and EUR to start with, to be narrowed in Podešavanja → Banke.
+-- The banks a client works with.
 --
--- Idempotent: a bank already on the list (by name, in any case) is left alone.
+-- This migration used to insert the first client's ten banks. Migrations are
+-- FlowBase's shared schema and carry no client data any more: the bank list
+-- (with the ten banks most Serbian clients use as an optional block) lives in
+-- the client's own supabase/client/seed.sql, made from
+-- supabase/client/seed.example.sql and run with scripts/seed-client.sh.
+-- Banks can also be added in Podešavanja → Banke. Databases where the old
+-- insert already ran keep their rows.
+--
+-- The version stays so that databases which applied it see no change, and
+-- the statement below only keeps the file from being empty.
 
-insert into public.banks (company_id, name, type, currencies, is_active)
-select c.id, b.name, 'bank', array['RSD', 'EUR'], true
-  from public.companies c
- cross join (values
-   ('Alta banka'),
-   ('NLB Komercijalna banka'),
-   ('ProCredit Bank'),
-   ('Addiko Bank'),
-   ('AIK Banka'),
-   ('UniCredit Bank'),
-   ('Halkbank'),
-   ('Banca Intesa'),
-   ('Raiffeisen banka'),
-   ('OTP banka')
- ) as b(name)
- where c.name = 'Milinković Company doo'
-   and not exists (
-     select 1 from public.banks x
-      where x.company_id = c.id and lower(x.name) = lower(b.name)
-   );
+select 1;

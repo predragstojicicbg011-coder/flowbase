@@ -1,5 +1,5 @@
 -- ============================================================================
--- One legal entity: Milinković Company doo
+-- One legal entity per client app
 --
 -- The `companies` table and every `company_id` stay. This code is also the
 -- starting point for clients with several entities; the app shows no company
@@ -13,13 +13,12 @@
 
 
 -- ── The company ─────────────────────────────────────────────────────────────
--- A fixed id, so running this twice adds nothing. Skipped as well when a
--- company of that name was already entered by hand.
-
-insert into public.companies (id, name, country, currency, currencies)
-select '6d1c0f5e-2a3b-4c7d-9e8f-000000000001', 'Milinković Company doo', 'Srbija', 'RSD', '{RSD,EUR}'
-where not exists (select 1 from public.companies where name = 'Milinković Company doo')
-on conflict (id) do nothing;
+-- This migration used to insert the first client's company row. Migrations
+-- are FlowBase's shared schema and carry no client data any more: the
+-- company row (name, currency RSD, currencies {RSD,EUR}) is written by the
+-- client's own supabase/client/seed.sql, made from
+-- supabase/client/seed.example.sql and run with scripts/seed-client.sh.
+-- Databases where the old insert already ran keep their row.
 
 
 -- ── user_access ─────────────────────────────────────────────────────────────
