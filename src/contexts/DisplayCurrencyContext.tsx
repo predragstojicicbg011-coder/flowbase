@@ -6,7 +6,7 @@
 // is a choice of column, never a conversion at display time.
 //
 // The choice is per viewer, remembered in localStorage under
-// `mcflow_display_currency`. Storage may be missing or throw (a private
+// `<app>_display_currency` (e.g. `alfaflow_display_currency`). Storage may be missing or throw (a private
 // window, blocked site data); the app then starts in RSD and the toggle still
 // works for the session.
 //
@@ -27,10 +27,11 @@
 
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import { fmtMoney } from '../utils/formatters'
+import { brand } from '../config/brand'
 
 export type DisplayCurrency = 'RSD' | 'EUR'
 export const DISPLAY_CURRENCIES: readonly DisplayCurrency[] = ['RSD', 'EUR']
-export const DISPLAY_CURRENCY_KEY = 'mcflow_display_currency'
+export const DISPLAY_CURRENCY_KEY = `${brand.storagePrefix}_display_currency`
 export const DEFAULT_DISPLAY_CURRENCY: DisplayCurrency = 'RSD'
 
 /** The column holding `base` in `currency`: amount → amount_rsd / amount_eur. */

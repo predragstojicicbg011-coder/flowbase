@@ -37,7 +37,7 @@ const daysAgo = (n: number) => iso(new Date(Date.now() - n * 86400000))
 
 const empty = () => {
   for (const k of Object.keys(mockDb)) delete mockDb[k]
-  mockDb.companies = [{ id: 'c1', name: 'Milinković Company doo' }]
+  mockDb.companies = [{ id: 'c1', name: 'Demo d.o.o.' }]
 }
 
 const show = () => render(<DisplayCurrencyProvider initial="RSD"><Revenue /></DisplayCurrencyProvider>)

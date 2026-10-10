@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import App from './App'
+import { brand } from './config/brand'
 
 // AuthContext i stranice zovu supabase pri montiranju. Mock drzi test offline
 // i deterministicnim — bez njega test zavisi od mreze i od stanja baze.
@@ -47,7 +48,8 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText(/dobro došli/i)).toBeInTheDocument()
     })
-    expect(screen.getByText(/prijavite se na svoj mcflow nalog/i)).toBeInTheDocument()
+    expect(screen.getByText(`Prijavite se na svoj ${brand.appName} nalog`)).toBeInTheDocument()
+    expect(brand.appName).toBe('FlowBase')
   })
 
   it('does not show navigation to a signed-out user', async () => {

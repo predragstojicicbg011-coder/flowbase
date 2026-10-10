@@ -16,7 +16,7 @@
 // ── Every branch FILES a row ────────────────────────────────────────────────
 //
 // Mintflow had two branches that ALLOCATED a row by value between two
-// businesses. MCFlow has no allocation keys (see services/projects.ts): a row
+// businesses. FlowBase has no allocation keys (see services/projects.ts): a row
 // belongs to one project or to none, and a document shared by several sites
 // is split with pl_splits, which v_pl_entries already returns as one row per
 // split line, each carrying its OWN project. So a split bill lands under each

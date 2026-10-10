@@ -14,3 +14,10 @@ if (typeof global.TextEncoder === 'undefined') {
 if (typeof global.TextDecoder === 'undefined') {
   (global as any).TextDecoder = TextDecoder;
 }
+
+// Testovi nikad ne zovu pravu bazu, a src/supabase.ts pravi klijenta cim se
+// ucita. Bez .env (svez klon FlowBase-a, CI) createClient bi pukao, a sa
+// .env-om klijenta testovi bi drzali adresu njegove baze. Zato uvek lazna,
+// lokalna adresa.
+process.env.REACT_APP_SUPABASE_URL = 'http://localhost:54321';
+process.env.REACT_APP_SUPABASE_ANON_KEY = 'test-anon-key';

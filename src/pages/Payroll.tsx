@@ -38,7 +38,7 @@ import { srDate } from '../utils/months'
 /**
  * The monthly calculations.
  *
- * WHAT THIS PAGE IS FOR decides how it behaves. MCFlow does not file
+ * WHAT THIS PAGE IS FOR decides how it behaves. FlowBase does not file
  * anything and does not pay anybody: this is a second opinion, produced
  * independently, to be held against what the accountant's software produced.
  * A figure that is arguably right and differs from MPP is a failed check, not

@@ -4,7 +4,7 @@ import * as booking from './booking'
 describe('the salary chain', () => {
   it('names no P&L heading of its own any more', () => {
     // The headings are the owner's, from the system categories. A Mintflow
-    // name left in this module would be a heading MCFlow's P&L never has.
+    // name left in this module would be a heading FlowBase's P&L never has.
     for (const k of ['PL_CATEGORY', 'SUBCATEGORY', 'SALARY_DEPT_SUBCATEGORY',
       'OTHER_INCOME_SUBCATEGORY', 'SALARY_DEPARTMENTS']) {
       expect((booking as any)[k]).toBeUndefined()

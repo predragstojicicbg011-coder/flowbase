@@ -385,7 +385,7 @@ describe('where a retained deduction is cancelled', () => {
   })
 
   it('falls back to the fallback role, not to a name written in code', () => {
-    // It used to fall back to a Mintflow name; MCFlow's P&L is the owner's own.
+    // It used to fall back to a Mintflow name; FlowBase's P&L is the owner's own.
     expect(retainedRoleFor('Nešto novo')).toBe('payroll_retained_fallback')
     expect(retainedRoleFor('Fitpass mesečna članarina')).toBe('payroll_fitpass')
     expect(retainedRoleFor('Osigurani članovi porodice Jovana')).toBe('payroll_health_insurance')

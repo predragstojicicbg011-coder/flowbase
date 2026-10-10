@@ -25,7 +25,7 @@
 //
 // No heading is named in this code. Mintflow's English names ('Employee and
 // Labour', 'Net Salaries', 'Salary expenses domestic' …) were hardcoded here;
-// MCFlow's P&L is the owner's own, in Serbian, and an unset role refuses the
+// FlowBase's P&L is the owner's own, in Serbian, and an unset role refuses the
 // posting rather than inventing a heading. The names a role resolves to are
 // still matched against `pl_subcategories`, `departments` and
 // `dept_subcategories` when a posting is planned (`unknownNames`): a name

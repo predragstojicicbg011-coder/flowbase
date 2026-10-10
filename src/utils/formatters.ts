@@ -1,4 +1,4 @@
-// ── Money in MCFlow: RSD books, EUR beside them ───────────
+// ── Money in FlowBase: RSD books, EUR beside them ───────────
 //
 // ONE CONVENTION, for every currency: the figure in Serbian notation, a space,
 // then the ISO code — `1.234.567,89 RSD`, `1.234,56 EUR`, `1.234,56 USD`.
@@ -61,7 +61,7 @@ export const fmtMoneyWhole = (n: number | null | undefined, currency: string, sh
 // ── Mintflow's USD formatters ─────────────────────────────
 // Kept so pages not yet moved to RSD/EUR compile. Every one is deprecated.
 
-/** @deprecated USD is not a reporting currency in MCFlow — use fmtMoney / fmtRSD / fmtEUR. */
+/** @deprecated USD is not a reporting currency in FlowBase — use fmtMoney / fmtRSD / fmtEUR. */
 export const fmtUSD = (n: number, decimals = 0): string => {
   if (!n && n !== 0) return '—'
   return '$' + Math.abs(n).toLocaleString('en-US', {

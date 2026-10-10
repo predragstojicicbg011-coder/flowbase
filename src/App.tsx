@@ -6,6 +6,7 @@ import { CompaniesProvider } from './contexts/CompaniesContext'
 import { ProjectsProvider } from './contexts/ProjectsContext'
 import { SystemCategoriesProvider } from './contexts/SystemCategoriesContext'
 import { DisplayCurrencyProvider } from './contexts/DisplayCurrencyContext'
+import { brand } from './config/brand'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Transactions from './pages/Transactions'
@@ -31,7 +32,7 @@ function AppContent() {
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: "'Inter', system-ui, sans-serif", color: '#888' }}>
-      Učitavanje MCFlow…
+      Učitavanje {brand.appName}…
     </div>
   )
 

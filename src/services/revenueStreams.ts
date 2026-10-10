@@ -3,7 +3,7 @@
 // `revenue_stream` on transactions and invoices CLASSIFIES
 // income. It says nothing about who earned it — that is the project
 // (`project_id`, see ./projects.ts). Mintflow used this column for its two
-// businesses, Aimfox and Social Growth; MCFlow is one construction company,
+// businesses, Aimfox and Social Growth; FlowBase is built for a construction company,
 // so the list is the kinds of money a construction company takes in.
 //
 // The stored values are Serbian, because the UI is, and they are stable: a

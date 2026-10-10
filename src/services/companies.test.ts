@@ -4,7 +4,7 @@ const co = (id: string, name: string): Company => ({ id, name })
 
 describe('pickDefaultCompany', () => {
   it('is the only company when there is one', () => {
-    expect(pickDefaultCompany([co('m', 'Milinković Company doo')])?.id).toBe('m')
+    expect(pickDefaultCompany([co('m', 'Demo d.o.o.')])?.id).toBe('m')
   })
 
   it('is the first in name order when there are several', () => {
@@ -20,7 +20,7 @@ describe('pickDefaultCompany', () => {
 describe('showCompanyPicker', () => {
   it('asks nothing when there is nothing to choose between', () => {
     expect(showCompanyPicker([])).toBe(false)
-    expect(showCompanyPicker([co('m', 'Milinković Company doo')])).toBe(false)
+    expect(showCompanyPicker([co('m', 'Demo d.o.o.')])).toBe(false)
   })
 
   it('offers the choice from two companies on', () => {

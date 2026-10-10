@@ -48,9 +48,9 @@ function Probe() {
 
 describe('useCompanies outside the provider', () => {
   it('picks the one company and shows no picker', async () => {
-    mockTable.rows = [{ id: 'm', name: 'Milinković Company doo' }]
+    mockTable.rows = [{ id: 'm', name: 'Demo d.o.o.' }]
     render(<Probe />)
-    await waitFor(() => expect(screen.getByTestId('default').textContent).toBe('Milinković Company doo'))
+    await waitFor(() => expect(screen.getByTestId('default').textContent).toBe('Demo d.o.o.'))
     expect(screen.getByTestId('picker').textContent).toBe('no picker')
   })
 
@@ -72,10 +72,10 @@ describe('useCompanies outside the provider', () => {
 
 describe('useCompanies inside the provider', () => {
   it('reads the table once for every component under it', async () => {
-    mockTable.rows = [{ id: 'm', name: 'Milinković Company doo' }]
+    mockTable.rows = [{ id: 'm', name: 'Demo d.o.o.' }]
     const Name = () => <span>{useCompanies().defaultCompany?.name ?? '…'}</span>
     render(<CompaniesProvider><Name /><Name /><Name /></CompaniesProvider>)
-    await waitFor(() => expect(screen.getAllByText('Milinković Company doo')).toHaveLength(3))
+    await waitFor(() => expect(screen.getAllByText('Demo d.o.o.')).toHaveLength(3))
     expect(mockTable.reads).toBe(1)
   })
 })

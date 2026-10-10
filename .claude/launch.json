@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "mcflow-dev",
+      "name": "app-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "start"

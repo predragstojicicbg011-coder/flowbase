@@ -2,7 +2,7 @@
 //
 // How a money row is booked: in dinars, with euros beside them.
 //
-// MCFlow keeps its books in RSD (BOOK_CURRENCY), the functional currency of a
+// FlowBase keeps its books in RSD (BOOK_CURRENCY), the functional currency of a
 // Serbian company, and carries EUR (INDEX_CURRENCY) on every row because that
 // is how contracts, loans and management read figures. A document may be in
 // RSD, EUR or USD (DOCUMENT_CURRENCIES); USD is only ever the currency a

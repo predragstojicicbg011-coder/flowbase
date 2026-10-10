@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabase'
+import { brand } from '../config/brand'
 import { useCompanies } from '../contexts/CompaniesContext'
 import InlineCategoryAdd from './InlineCategoryAdd'
 
@@ -1563,7 +1564,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={s.plBadge}>Utiče na P&amp;L</div>
-            <span style={s.logoText}>MCFlow</span>
+            <span style={s.logoText}>{brand.appName}</span>
             <button style={s.closeBtn} onClick={onClose}>×</button>
           </div>
         </div>

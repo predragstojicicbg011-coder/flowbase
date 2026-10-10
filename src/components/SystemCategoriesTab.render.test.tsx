@@ -45,7 +45,7 @@ beforeEach(() => {
   mockUpserts.length = 0
   for (const k of Object.keys(mockTables)) delete mockTables[k]
   Object.assign(mockTables, {
-    companies: [{ id: COMPANY, name: 'Milinković Company doo' }],
+    companies: [{ id: COMPANY, name: 'Demo d.o.o.' }],
     pl_categories: [
       { id: 'c1', name: 'Zarade', sort_order: 1 },
       { id: 'c2', name: 'Krediti', sort_order: 2 },

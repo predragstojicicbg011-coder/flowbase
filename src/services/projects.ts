@@ -1,6 +1,6 @@
 // ─── Projects: construction sites and rental buildings ──────────────────────
 //
-// MCFlow's replacement for Mintflow's Aimfox / Social Growth allocation.
+// FlowBase's replacement for Mintflow's Aimfox / Social Growth allocation.
 // Schema: supabase/migrations/20261008170000_projects.sql.
 //
 // ── THE CONTRACT ────────────────────────────────────────────────────────────

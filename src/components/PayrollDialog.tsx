@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../supabase'
+import { brand } from '../config/brand'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { DIALOG } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
@@ -553,7 +554,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={s.logoBadge}>MCFlow</span>
+            <span style={s.logoBadge}>{brand.appName}</span>
             <button style={s.closeBtn} onClick={onClose} aria-label="Zatvori" title="Zatvori">×</button>
           </div>
         </div>

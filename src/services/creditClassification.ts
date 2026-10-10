@@ -15,7 +15,7 @@
 // owner's choice: the system categories `credit_principal` and
 // `credit_interest` (services/systemCategories.ts), set in Podešavanja →
 // Sistemske kategorije. Mintflow's 'Loans/Credits/Dividend' names were
-// hardcoded here; MCFlow's P&L is in Serbian and has its own. Unset, a credit
+// hardcoded here; FlowBase's P&L is in Serbian and has its own. Unset, a credit
 // payment is refused before anything is written.
 
 import { fmtMoney } from '../utils/formatters'

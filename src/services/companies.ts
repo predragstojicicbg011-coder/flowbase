@@ -1,8 +1,8 @@
 // ─── The legal entities the books are kept for ──────────────────────────────
 //
-// MCFlow keeps the `companies` table and every `company_id` column, because
+// FlowBase keeps the `companies` table and every `company_id` column, because
 // the same code is the starting point for clients who run several entities.
-// Milinković Company runs one. With one company there is nothing to choose,
+// A typical client runs one. With one company there is nothing to choose,
 // so no screen asks: the one company is simply the company.
 //
 // The rule lives here, once, instead of in every page that used to read the

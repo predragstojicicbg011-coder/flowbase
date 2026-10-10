@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
+import { brand } from '../config/brand'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
 import { DIALOG } from './dialogTheme'
@@ -299,7 +300,7 @@ export default function PassthroughDialog({ onClose, passthrough }: Props) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={s.ptBadge}>Samo novčani tok</div>
-            <span style={s.logoText}>MCFlow</span>
+            <span style={s.logoText}>{brand.appName}</span>
             <button style={s.closeBtn} onClick={onClose}>×</button>
           </div>
         </div>

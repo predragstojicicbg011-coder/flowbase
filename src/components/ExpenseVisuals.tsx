@@ -188,7 +188,7 @@ function Sparkline({ values, months }: { values: number[]; months: string[] }) {
 //   composition    the period branching down to the lines themselves
 //   concentration  how few lines carry most of it
 //
-// Mintflow had a seventh, "The split", on its two allocated branches. MCFlow
+// Mintflow had a seventh, "The split", on its two allocated branches. FlowBase
 // files every row under one project (see services/expenseTree.ts), so there
 // is no two-sided split to draw; on the project branch the trend's bands are
 // the projects and overhead.

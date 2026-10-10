@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { supabase } from '../supabase'
+import { brand } from '../config/brand'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -32,23 +33,23 @@ export default function Login() {
             <circle cx="2" cy="30" r="2" fill="#9FE1CB"/>
           </svg>
           <div>
-            <div style={styles.logoText}>MC<span style={styles.logoAccent}>Flow</span></div>
-            <div style={styles.logoSub}>Milinković Company</div>
+            <div style={styles.logoText}>{brand.logo[0]}<span style={styles.logoAccent}>{brand.logo[1]}</span></div>
+            <div style={styles.logoSub}>{brand.companyShort}</div>
           </div>
         </div>
         <div style={styles.heroWrap}>
           <div style={styles.heroTitle}>Pratite<br/>finansije <span style={styles.heroAccent}>jasno</span><br/>i na vreme.</div>
-          <div style={styles.heroDesc}>Novac, fakture, krediti i zarade za Milinković Company — na jednom mestu.</div>
+          <div style={styles.heroDesc}>{brand.tagline}</div>
         </div>
       </div>
 
       <div style={styles.right}>
         <div style={styles.badge}>
           <div style={styles.badgeDot}/>
-          Milinković Company
+          {brand.companyShort}
         </div>
         <div style={styles.formTitle}>Dobro došli</div>
-        <div style={styles.formSub}>Prijavite se na svoj MCFlow nalog</div>
+        <div style={styles.formSub}>Prijavite se na svoj {brand.appName} nalog</div>
 
         {error && <div style={styles.errorBox}>{error}</div>}
 
@@ -86,7 +87,7 @@ export default function Login() {
         </form>
 
         <div style={styles.footer}>
-          <span style={styles.version}>v1.0.0 — MCFlow</span>
+          <span style={styles.version}>v1.0.0 — {brand.appName}</span>
           <span style={styles.secure}>
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{marginRight:4}}>
               <path d="M6 1L10 3V6.5C10 8.5 8 10.5 6 11C4 10.5 2 8.5 2 6.5V3L6 1Z" stroke="#1D9E75" strokeWidth="1" fill="none"/>

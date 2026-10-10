@@ -168,7 +168,7 @@ describe('a local amount with its currency', () => {
   })
 })
 
-// ─── MCFlow's money: RSD books, EUR beside them ──────────────────────────────
+// ─── FlowBase's money: RSD books, EUR beside them ──────────────────────────────
 //
 // One convention for every currency: Serbian notation, a space, the ISO code.
 

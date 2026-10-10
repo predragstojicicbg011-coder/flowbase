@@ -2,7 +2,7 @@
 //
 // What this is for, because it changes what "correct" means.
 //
-// MCFlow does not file returns and does not pay anybody. This module exists
+// FlowBase does not file returns and does not pay anybody. This module exists
 // to work out what a month SHOULD cost and to be checked against what the
 // accountant's software (MPP / Mali privredni savetnik, PSIT 2.4) produced.
 // So the standard it is held to is "the same figure as MPP", not "a defensible

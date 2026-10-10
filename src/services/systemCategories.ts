@@ -5,7 +5,7 @@
 //
 // Mintflow found those headings by their English names ('Employee and Labour'
 // › 'Net Salaries', 'Loans/Credits/Dividend' › 'Bank Credits', 'Banking and
-// Finance', 'Taxes'). MCFlow's owner builds his own P&L in Serbian, so none of
+// Finance', 'Taxes'). FlowBase's owner builds his own P&L in Serbian, so none of
 // those names exists here. Instead, each automatic posting has a ROLE, and
 // the table `system_categories` (one row per company and role) says which of
 // the owner's headings that role posts to.

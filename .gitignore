@@ -28,5 +28,5 @@ supabase/.temp/
 supabase/.branches/
 .supabase/
 
-# Supabase CLI kredencijali za MCFlow nalog (nikad u git)
+# Supabase CLI kredencijali za Supabase nalog klijenta (nikad u git)
 .supabase-cli.env

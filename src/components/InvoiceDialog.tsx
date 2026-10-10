@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
+import { brand } from '../config/brand'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { fetchScripts, saveScript, whyNotSavable } from '../services/quickFillStore'
 import SplitEditor from './SplitEditor'
@@ -898,7 +899,7 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
             <div style={{ ...s.invBadge, ...(linkedTxId ? { background: 'rgba(12,68,124,0.2)', color: DIALOG.blue, borderColor: 'rgba(12,68,124,0.3)' } : {}) }}>
               {linkedTxId ? '🔗 Uparena' : 'Utiče na P&L'}
             </div>
-            <span style={s.logoText}>MCFlow</span>
+            <span style={s.logoText}>{brand.appName}</span>
             <button style={s.closeBtn} onClick={onClose}>×</button>
           </div>
         </div>

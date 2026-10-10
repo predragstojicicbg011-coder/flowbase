@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { supabase } from '../supabase'
+import { brand } from '../config/brand'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { fetchScripts, saveScript, whyNotSavable } from '../services/quickFillStore'
 import SplitEditor from './SplitEditor'
@@ -1568,7 +1569,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
             {advance && <span style={{ ...ADVANCE_BADGE_STYLE, marginLeft: '6px' }}>{ADVANCE_LABEL}</span>}
             {txType === 'passthrough' && <div style={{ ...s.cashBadge, background: 'rgba(230,180,50,0.2)', color: DIALOG.amber, border: '0.5px solid rgba(230,180,50,0.3)' }}>Prolazna stavka</div>}
             {txType === 'credit_payment' && <div style={{ ...s.cashBadge, background: 'rgba(78,168,255,0.2)', color: '#4EA8FF', border: '0.5px solid rgba(78,168,255,0.3)' }}>Otplata kredita</div>}
-            <span style={s.logoText}>MCFlow</span>
+            <span style={s.logoText}>{brand.appName}</span>
             <button style={s.closeBtn} onClick={onClose}>×</button>
           </div>
         </div>

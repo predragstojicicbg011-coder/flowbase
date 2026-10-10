@@ -27,7 +27,7 @@ jest.mock('../supabase', () => {
 jest.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: null }) }))
 
 beforeEach(() => {
-  mockDb.companies = [{ id: 'c1', name: 'Milinković Company doo' }]
+  mockDb.companies = [{ id: 'c1', name: 'Demo d.o.o.' }]
   mockDb.partners = [{ id: 'inv1', name: 'Investitor d.o.o.' }]
   mockDb.projects = [
     { id: 'a', company_id: 'c1', name: 'Novi Beograd A1', code: 'NB-01', kind: 'construction',
