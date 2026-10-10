@@ -1,4 +1,4 @@
-# MCFlow rečnik (engleski → srpski, latinica)
+# Rečnik (engleski → srpski, latinica)
 
 Jedan izvor istine za prevod interfejsa. Ako termin nije ovde, prevedi ga
 prirodno, kako bi ga rekao finansijski direktor u Srbiji, i dodaj ga u ovaj

@@ -1,46 +1,86 @@
-# Getting Started with Create React App
+# FlowBase
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+FlowBase je šablon aplikacije za finansije jedne firme u Srbiji. Od njega
+se pravi aplikacija svakog klijenta,
+i svaki klijent posle dobija izmene FlowBase-a običnim `git merge`.
 
-## Available Scripts
+Kod šablona ne pominje nijednog klijenta: ime aplikacije i firme dolaze iz
+promenljivih okruženja, podaci klijenta iz njegovog `supabase/client/seed.sql`.
 
-In the project directory, you can run:
+## Šta aplikacija radi
 
-### `npm start`
+- **Glavna knjiga i transakcije**: unos, uvoz bankovnih izvoda, povezivanje
+  sa fakturama.
+- **Fakture i partneri**: ulazne i izlazne fakture, ugovori, plaćeno kad je
+  otvoreno najviše 1 RSD.
+- **Prihodi**: građevinske situacije, zakup, avansi; prihod po fakturisanju
+  (accrual).
+- **Projekti**: gradilišta i objekti u zakupu; trošak bez projekta je opšti
+  trošak.
+- **P&L, novčani tok, budžet i prognoza, analiza troškova, izveštaji.**
+- **Krediti**: rate, produženja, knjiženje kamate.
+- **Zarade**: obračun po srpskim propisima, raspodela po satima na projekte.
+- **Valute**: knjige u RSD, uz svaki zapis i EUR po srednjem kursu NBS na
+  dan (Edge funkcija `nbs-rate`).
+- **Korisnici i uloge**: administrator, vlasnik, menadžer, administrativni
+  asistent; nalog bez profila ne vidi ništa.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+Interfejs je na srpskom, latinicom ([docs/recnik.md](docs/recnik.md)).
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+## Tehnologije
 
-### `npm test`
+- React 19 + TypeScript, Create React App (`react-scripts` 5), React Router
+- Supabase: Postgres sa RLS, Auth, Edge Functions (Deno)
+- Vercel za hosting, iz GitHub repoa klijenta
+- Jest + Testing Library
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## Struktura
 
-### `npm run build`
+| Putanja | Šta je |
+|---|---|
+| `src/config/brand.ts` | jedino mesto koje čita ime aplikacije i firme |
+| `supabase/migrations/` | zajednička šema; menja se samo u FlowBase-u |
+| `supabase/functions/` | Edge funkcije (`nbs-rate`, `exchange-rate`) |
+| `supabase/client/seed.example.sql` | primer podataka klijenta; klijent pravi svoj `seed.sql` |
+| `scripts/db-push.sh` | migracije na linkovani projekat (`npx supabase db push`) |
+| `scripts/seed-client.sh` | `seed.sql` klijenta kroz psql |
+| `docs/` | uputstva; dokumentacija jednog klijenta ide u `docs/klijent/` u njegovom repou |
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Lokalno pokretanje
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```bash
+npm ci
+cp .env.example .env      # popuni Supabase URL i anon ključ, ime aplikacije i firme
+npm start
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+`.env`:
 
-### `npm run eject`
+```
+REACT_APP_SUPABASE_URL=https://<ref>.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=<anon public ključ>
+REACT_APP_APP_NAME=FlowBase
+REACT_APP_COMPANY_NAME=Demo d.o.o.
+REACT_APP_COMPANY_SHORT=
+REACT_APP_TAGLINE=
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+Sve `REACT_APP_*` vrednosti završe u javnom JS-u. Tajne (lozinka baze,
+access token) idu samo u gitignored `.supabase-cli.env`.
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+Provere pre svakog commit-a:
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+```bash
+npx tsc --noEmit -p .
+CI=true npx react-scripts test --watchAll=false
+CI=true npm run build
+```
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+Testovi ne traže `.env` i nikad ne zovu pravu bazu.
 
-## Learn More
+## Uputstva
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
+- [docs/NOVI-KLIJENT.md](docs/NOVI-KLIJENT.md) — pokretanje aplikacije za
+  novog klijenta, korak po korak.
+- [docs/NADOGRADNJA.md](docs/NADOGRADNJA.md) — kako izmene FlowBase-a stižu
+  do klijenata i pravila koja to omogućavaju.
