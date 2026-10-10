@@ -1,0 +1,3 @@
+# Bash skripte moraju imati LF i na Windows-u: core.autocrlf=true bi im
+# dodao CR na kraj reda i bash bi pukao.
+*.sh text eol=lf
