@@ -120,7 +120,14 @@ zajedničke commit-e, pa se nadogradnje spajaju same (vidi
   | `REACT_APP_TAGLINE` | opciono |
 
   Sve `REACT_APP_*` vrednosti završe u javnom JS-u; tu ne sme ništa tajno.
-  Promena promenljive važi tek posle novog deploy-a (Redeploy).
+  Zato je tip **Config**, ne Secret: vrednost se posle čuvanja i dalje vidi.
+
+  Promenljive se upisuju u kod **u trenutku build-a**. Unesi ih **pre**
+  prvog deploy-a. Ako ih menjaš kasnije: sačuvaj, pa tek onda Deployments →
+  ⋯ → Redeploy. Redeploy pokrenut pre čuvanja uzima stare vrednosti, i
+  aplikacija tada prikazuje „FlowBase / Demo d.o.o.“. Tako se desilo na
+  MCFlow-u 10.10.2026. Proveri: kad promenljive stignu, menja se ime
+  `main.*.js` fajla u izvornom kodu strane.
 - [ ] Deploy. **Produkcioni domen** (`alfaflow.vercel.app`) je javan i njega
       klijent koristi. Adrese pojedinačnih deploy-eva (sa hešom u imenu)
       stoje iza Vercel prijave (Deployment Protection); klijentu se nikad ne
