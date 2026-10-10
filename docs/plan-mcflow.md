@@ -10,7 +10,7 @@ Odluke od 2026-10-08:
 
 ## Faze
 
-Status (2026-10-08): faze 1–6 su završene i migracije su primenjene.
+Status (2026-10-10): faze 1–7 su završene. Aplikacija radi na https://mcflow.vercel.app. Ostaje samo profil firme (PIB, MB, adresa, računi).
 
 1. **Uklanjanje onoga što je samo za Aimfox**: Chargebee, Braintree i sinhronizacija procesora, Integrations tab, Simulation tab, Aftwrk uvoz, R&D i subvencija u platama, prevoz.
 2. **Jedno pravno lice**: izbacuju se biranje firme, pretraga firme po imenu ("Constellation LLC"), "Constel Group" i oznake pravnih lica.
