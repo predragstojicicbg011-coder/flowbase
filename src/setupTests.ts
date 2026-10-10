@@ -21,3 +21,11 @@ if (typeof global.TextDecoder === 'undefined') {
 // lokalna adresa.
 process.env.REACT_APP_SUPABASE_URL = 'http://localhost:54321';
 process.env.REACT_APP_SUPABASE_ANON_KEY = 'test-anon-key';
+
+// Isto i za ime klijenta: Jest ucitava .env, pa bi testovi u repou klijenta
+// videli njegovo ime umesto FlowBase podrazumevanih vrednosti na koje
+// racunaju. Testovi uvek rade na podrazumevanim vrednostima.
+delete process.env.REACT_APP_APP_NAME;
+delete process.env.REACT_APP_COMPANY_NAME;
+delete process.env.REACT_APP_COMPANY_SHORT;
+delete process.env.REACT_APP_TAGLINE;
