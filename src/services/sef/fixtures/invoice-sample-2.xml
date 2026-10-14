@@ -1,0 +1,351 @@
+<?xml version="1.0" encoding="utf-8"?>
+<env:DocumentEnvelope xmlns:env="urn:eFaktura:MinFinrs:envelop:schema">
+  <env:DocumentHeader>
+    <env:SalesInvoiceId>477422952</env:SalesInvoiceId>
+    <env:PurchaseInvoiceId>472902033</env:PurchaseInvoiceId>
+    <env:DocumentId>ee5c706f-168f-4160-8fa4-bad2a012b528</env:DocumentId>
+    <env:CreationDate>2026-09-14</env:CreationDate>
+    <env:SendingDate>2026-09-14</env:SendingDate>
+    <env:DocumentPdf mimeCode="application/pdf">REMOVED_FROM_FIXTURE</env:DocumentPdf>
+  </env:DocumentHeader>
+  <env:DocumentBody>
+    <Invoice xmlns:cec="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:sbt="http://mfin.gov.rs/srbdt/srbdtext" xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+      <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:mfin.gov.rs:srbdt:2022</cbc:CustomizationID>
+      <cbc:ID>R-26215/26-VP</cbc:ID>
+      <cbc:IssueDate>2026-09-14</cbc:IssueDate>
+      <cbc:DueDate>2026-09-08</cbc:DueDate>
+      <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+      <cbc:Note>Slovima: Trinaesthiljadačetiristotinetridesetšestdinara i 42/100
+Napomena o poreskom oslobađanju : Nema
+Roba navedena na ovom dokumentu je vlasništvo isporučioca sve do momenta isplate na račun u celini. 
+U slučaju prekoračenja roka plaćanja, zadržavamo pravo obračunavanja zakonske zatezne kamate. 
+U slučaju spora nadležan je Privredni sud u Beogradu.
+Reklamacije na kvalitet isporučene robe uvažavamo u roku od 8 dana.
+Odgovorno lice za izdavanje robe: Miroslav Kovačević tel.: 064 9928 313.
+
+Robu primio :________________________ br.l.k __________________
+
+
+Adresa odredišta:  RESAVSKA 23 I PA1 11000 Beograd </cbc:Note>
+      <cbc:DocumentCurrencyCode>RSD</cbc:DocumentCurrencyCode>
+      <cac:InvoicePeriod>
+        <cbc:DescriptionCode>35</cbc:DescriptionCode>
+      </cac:InvoicePeriod>
+      <cac:AccountingSupplierParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000003</cbc:EndpointID>
+          <cac:PartyIdentification>
+            <cbc:ID schemeID="0088">8606019060008</cbc:ID>
+          </cac:PartyIdentification>
+          <cac:PartyName>
+            <cbc:Name>KANCELARIJA DOO BEOGRAD</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:ID schemeID="0088">8606019060008</cbc:ID>
+            <cbc:StreetName>Autoput za Novi Sad 96a, 11080 Beograd (Zemun)</cbc:StreetName>
+            <cbc:CityName>Beograd</cbc:CityName>
+            <cbc:PostalZone>11080</cbc:PostalZone>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000003</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>KANCELARIJA DOO BEOGRAD</cbc:RegistrationName>
+            <cbc:CompanyID>20000003</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+          <cac:Contact>
+            <cbc:Name>Marko Marković</cbc:Name>
+          </cac:Contact>
+        </cac:Party>
+      </cac:AccountingSupplierParty>
+      <cac:AccountingCustomerParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000001</cbc:EndpointID>
+          <cac:PartyName>
+            <cbc:Name>PRIMALAC D.O.O.</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>RESAVSKA 23 I PA1</cbc:StreetName>
+            <cbc:CityName>BEOGRAD (VRACAR)</cbc:CityName>
+            <cbc:PostalZone>11000</cbc:PostalZone>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000001</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>PRIMALAC D.O.O.</cbc:RegistrationName>
+            <cbc:CompanyID>20000001</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+          <cac:Contact>
+            <cbc:Name>Jovana</cbc:Name>
+            <cbc:Telephone> 063/322-779</cbc:Telephone>
+          </cac:Contact>
+        </cac:Party>
+      </cac:AccountingCustomerParty>
+      <cac:Delivery>
+        <cbc:ActualDeliveryDate>2026-09-08</cbc:ActualDeliveryDate>
+        <cac:DeliveryLocation>
+          <cac:Address>
+            <cbc:StreetName>RESAVSKA 23 I PA1</cbc:StreetName>
+            <cbc:CityName>Beograd</cbc:CityName>
+            <cbc:PostalZone>11000</cbc:PostalZone>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+            </cac:Country>
+          </cac:Address>
+        </cac:DeliveryLocation>
+        <cac:DeliveryParty>
+          <cac:PartyName />
+        </cac:DeliveryParty>
+      </cac:Delivery>
+      <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cbc:PaymentID>26215/26-VP</cbc:PaymentID>
+        <cac:PayeeFinancialAccount>
+          <cbc:ID>220-000003-64;  170-30000000003-11; 160-000003-49</cbc:ID>
+        </cac:PayeeFinancialAccount>
+      </cac:PaymentMeans>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="RSD">2239.4</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+          <cbc:TaxableAmount currencyID="RSD">11197.02</cbc:TaxableAmount>
+          <cbc:TaxAmount currencyID="RSD">2239.4</cbc:TaxAmount>
+          <cac:TaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="RSD">11197.02</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="RSD">11197.02</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="RSD">13436.42</cbc:TaxInclusiveAmount>
+        <cbc:AllowanceTotalAmount currencyID="RSD">0</cbc:AllowanceTotalAmount>
+        <cbc:ChargeTotalAmount currencyID="RSD">0</cbc:ChargeTotalAmount>
+        <cbc:PrepaidAmount currencyID="RSD">0</cbc:PrepaidAmount>
+        <cbc:PayableRoundingAmount currencyID="RSD">0</cbc:PayableRoundingAmount>
+        <cbc:PayableAmount currencyID="RSD">13436.42</cbc:PayableAmount>
+      </cac:LegalMonetaryTotal>
+      <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">4900</cbc:LineExtensionAmount>
+        <cac:Item>
+          <cbc:Name>Sef KSF mini - 2818 EL</cbc:Name>
+          <cac:BuyersItemIdentification>
+            <cbc:ID>F563</cbc:ID>
+          </cac:BuyersItemIdentification>
+          <cac:SellersItemIdentification>
+            <cbc:ID>F563</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:StandardItemIdentification>
+            <cbc:ID schemeID="0160">4333465127569</cbc:ID>
+          </cac:StandardItemIdentification>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">4900</cbc:PriceAmount>
+        </cac:Price>
+      </cac:InvoiceLine>
+      <cac:InvoiceLine>
+        <cbc:ID>2</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">5</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">1625.01</cbc:LineExtensionAmount>
+        <cac:AllowanceCharge>
+          <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+          <cbc:AllowanceChargeReason>Rabat</cbc:AllowanceChargeReason>
+          <cbc:MultiplierFactorNumeric>7.67</cbc:MultiplierFactorNumeric>
+          <cbc:Amount currencyID="RSD">134.99</cbc:Amount>
+        </cac:AllowanceCharge>
+        <cac:Item>
+          <cbc:Name>Fotokopir papir  A4/80gr Nexo Everyday</cbc:Name>
+          <cac:BuyersItemIdentification>
+            <cbc:ID>1036</cbc:ID>
+          </cac:BuyersItemIdentification>
+          <cac:SellersItemIdentification>
+            <cbc:ID>1036</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:StandardItemIdentification>
+            <cbc:ID schemeID="0160">5901657018910</cbc:ID>
+          </cac:StandardItemIdentification>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">352</cbc:PriceAmount>
+        </cac:Price>
+      </cac:InvoiceLine>
+      <cac:InvoiceLine>
+        <cbc:ID>3</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">6</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">1860.01</cbc:LineExtensionAmount>
+        <cac:AllowanceCharge>
+          <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+          <cbc:AllowanceChargeReason>Rabat</cbc:AllowanceChargeReason>
+          <cbc:MultiplierFactorNumeric>24.39</cbc:MultiplierFactorNumeric>
+          <cbc:Amount currencyID="RSD">599.99</cbc:Amount>
+        </cac:AllowanceCharge>
+        <cac:Item>
+          <cbc:Name>Registrator A4 Fornax Prestige plavi 80mm 12541</cbc:Name>
+          <cac:BuyersItemIdentification>
+            <cbc:ID>7671</cbc:ID>
+          </cac:BuyersItemIdentification>
+          <cac:SellersItemIdentification>
+            <cbc:ID>7671</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:StandardItemIdentification>
+            <cbc:ID schemeID="0160">3856000410236</cbc:ID>
+          </cac:StandardItemIdentification>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">410</cbc:PriceAmount>
+        </cac:Price>
+      </cac:InvoiceLine>
+      <cac:InvoiceLine>
+        <cbc:ID>4</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">4</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">1240</cbc:LineExtensionAmount>
+        <cac:AllowanceCharge>
+          <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+          <cbc:AllowanceChargeReason>Rabat</cbc:AllowanceChargeReason>
+          <cbc:MultiplierFactorNumeric>24.39</cbc:MultiplierFactorNumeric>
+          <cbc:Amount currencyID="RSD">400</cbc:Amount>
+        </cac:AllowanceCharge>
+        <cac:Item>
+          <cbc:Name>Registrator A4 Fornax Prestige plavi 60mm 14600</cbc:Name>
+          <cac:BuyersItemIdentification>
+            <cbc:ID>7672</cbc:ID>
+          </cac:BuyersItemIdentification>
+          <cac:SellersItemIdentification>
+            <cbc:ID>7672</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:StandardItemIdentification>
+            <cbc:ID schemeID="0160">3856000410311</cbc:ID>
+          </cac:StandardItemIdentification>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">410</cbc:PriceAmount>
+        </cac:Price>
+      </cac:InvoiceLine>
+      <cac:InvoiceLine>
+        <cbc:ID>5</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">2</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">510</cbc:LineExtensionAmount>
+        <cac:Item>
+          <cbc:Name>Pregradni karton skr 240x105mm 170g 1/100 žuti intezivni</cbc:Name>
+          <cac:BuyersItemIdentification>
+            <cbc:ID>8772</cbc:ID>
+          </cac:BuyersItemIdentification>
+          <cac:SellersItemIdentification>
+            <cbc:ID>8772</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:StandardItemIdentification />
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">255</cbc:PriceAmount>
+        </cac:Price>
+      </cac:InvoiceLine>
+      <cac:InvoiceLine>
+        <cbc:ID>6</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">490</cbc:LineExtensionAmount>
+        <cac:Item>
+          <cbc:Name>L folija 80 mic 1/100 FOLIAEXPERT A4+ Orange Peel</cbc:Name>
+          <cac:BuyersItemIdentification>
+            <cbc:ID>J428</cbc:ID>
+          </cac:BuyersItemIdentification>
+          <cac:SellersItemIdentification>
+            <cbc:ID>J428</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:StandardItemIdentification>
+            <cbc:ID schemeID="0160">8606019060879</cbc:ID>
+          </cac:StandardItemIdentification>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">490</cbc:PriceAmount>
+        </cac:Price>
+      </cac:InvoiceLine>
+      <cac:InvoiceLine>
+        <cbc:ID>7</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">572</cbc:LineExtensionAmount>
+        <cac:Item>
+          <cbc:Name>Bušač Maped Essential Metal 20/25</cbc:Name>
+          <cac:BuyersItemIdentification>
+            <cbc:ID>C238</cbc:ID>
+          </cac:BuyersItemIdentification>
+          <cac:SellersItemIdentification>
+            <cbc:ID>C238</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:StandardItemIdentification>
+            <cbc:ID schemeID="0160">3154144024112</cbc:ID>
+          </cac:StandardItemIdentification>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">572</cbc:PriceAmount>
+        </cac:Price>
+      </cac:InvoiceLine>
+    </Invoice>
+  </env:DocumentBody>
+</env:DocumentEnvelope>

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<env:DocumentEnvelope xmlns:env="urn:eFaktura:MinFinrs:envelop:schema">
+  <env:DocumentHeader>
+    <env:SalesInvoiceId>486753073</env:SalesInvoiceId>
+    <env:PurchaseInvoiceId>482178106</env:PurchaseInvoiceId>
+    <env:DocumentId>a09560e1-c14e-4ebe-ab2f-2cc8fb7419f8</env:DocumentId>
+    <env:CreationDate>2026-10-07</env:CreationDate>
+    <env:SendingDate>2026-10-07</env:SendingDate>
+    <env:DocumentPdf mimeCode="application/pdf">REMOVED_FROM_FIXTURE</env:DocumentPdf>
+  </env:DocumentHeader>
+  <env:DocumentBody>
+    <CreditNote xmlns:cec="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:sbt="http://mfin.gov.rs/srbdt/srbdtext" xmlns="urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2">
+      <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:mfin.gov.rs:srbdt:2022</cbc:CustomizationID>
+      <cbc:ID>26-07-558396</cbc:ID>
+      <cbc:IssueDate>2026-10-07</cbc:IssueDate>
+      <cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>
+      <cbc:Note>Preostalo za uplatu: 0.00 RSD</cbc:Note>
+      <cbc:DocumentCurrencyCode>RSD</cbc:DocumentCurrencyCode>
+      <cac:InvoicePeriod>
+        <cbc:DescriptionCode>0</cbc:DescriptionCode>
+      </cac:InvoicePeriod>
+      <cac:OrderReference>
+        <cbc:ID>26-07-558396</cbc:ID>
+      </cac:OrderReference>
+      <cac:BillingReference>
+        <cac:InvoiceDocumentReference>
+          <cbc:ID>26-03-892094</cbc:ID>
+        </cac:InvoiceDocumentReference>
+      </cac:BillingReference>
+      <cac:AdditionalDocumentReference>
+        <cbc:ID>26-07-558396</cbc:ID>
+        <cac:Attachment>
+          <cbc:EmbeddedDocumentBinaryObject mimeCode="application/pdf" filename="26-07-558396">REMOVED_FROM_FIXTURE</cbc:EmbeddedDocumentBinaryObject>
+        </cac:Attachment>
+      </cac:AdditionalDocumentReference>
+      <cac:AccountingSupplierParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000002</cbc:EndpointID>
+          <cac:PartyIdentification>
+            <cbc:ID>JBKJS:81970</cbc:ID>
+          </cac:PartyIdentification>
+          <cac:PartyName>
+            <cbc:Name>JKP KOMUNALNO BEOGRAD</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>Prekonoška ulica br.  28v</cbc:StreetName>
+            <cbc:CityName>Beograd</cbc:CityName>
+            <cbc:PostalZone>11077</cbc:PostalZone>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+              <cbc:Name>Srbija</cbc:Name>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000002</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>JKP KOMUNALNO BEOGRAD</cbc:RegistrationName>
+            <cbc:CompanyID>07000002</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+        </cac:Party>
+      </cac:AccountingSupplierParty>
+      <cac:AccountingCustomerParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000001</cbc:EndpointID>
+          <cac:PartyIdentification>
+            <cbc:ID>20000001</cbc:ID>
+          </cac:PartyIdentification>
+          <cac:PartyName>
+            <cbc:Name>PRIMALAC DOO BEOGRAD</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>PRIMER 1/</cbc:StreetName>
+            <cbc:CityName>BEOGRAD-VRAČAR</cbc:CityName>
+            <cbc:PostalZone>11118</cbc:PostalZone>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+              <cbc:Name>Srbija</cbc:Name>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000001</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>PRIMALAC DOO BEOGRAD</cbc:RegistrationName>
+            <cbc:CompanyID>20000001</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+        </cac:Party>
+      </cac:AccountingCustomerParty>
+      <cac:Delivery>
+        <cbc:ActualDeliveryDate>2026-10-06</cbc:ActualDeliveryDate>
+      </cac:Delivery>
+      <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cbc:PaymentID>(mod97) 108113652782</cbc:PaymentID>
+        <cac:PayeeFinancialAccount>
+          <cbc:ID>205000000000000002</cbc:ID>
+        </cac:PayeeFinancialAccount>
+      </cac:PaymentMeans>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="RSD">250.0</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+          <cbc:TaxableAmount currencyID="RSD">1250.0</cbc:TaxableAmount>
+          <cbc:TaxAmount currencyID="RSD">250.0</cbc:TaxAmount>
+          <cac:TaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="RSD">1250.0</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="RSD">1250.0</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="RSD">1500.0</cbc:TaxInclusiveAmount>
+        <cbc:AllowanceTotalAmount currencyID="RSD">0</cbc:AllowanceTotalAmount>
+        <cbc:PrepaidAmount currencyID="RSD">0</cbc:PrepaidAmount>
+        <cbc:PayableAmount currencyID="RSD">1500.0</cbc:PayableAmount>
+      </cac:LegalMonetaryTotal>
+      <cac:CreditNoteLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:CreditedQuantity unitCode="H87" unitCodeListID="H87">1</cbc:CreditedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">1250.0</cbc:LineExtensionAmount>
+        <cac:Item>
+          <cbc:Name>Ljubičasta podzona A.1 13652782, BG2068AB,13652782,2026-09-26 19:12:20,MARŠALA BIRJUZOVA (37-53A 36-58) 39,Ljubičasta podzona A.1</cbc:Name>
+          <cac:SellersItemIdentification>
+            <cbc:ID>190</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">1250</cbc:PriceAmount>
+        </cac:Price>
+      </cac:CreditNoteLine>
+    </CreditNote>
+  </env:DocumentBody>
+</env:DocumentEnvelope>

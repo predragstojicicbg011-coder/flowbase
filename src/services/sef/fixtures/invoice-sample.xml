@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<env:DocumentEnvelope xmlns:env="urn:eFaktura:MinFinrs:envelop:schema">
+  <env:DocumentHeader>
+    <env:SalesInvoiceId>477975068</env:SalesInvoiceId>
+    <env:PurchaseInvoiceId>473450675</env:PurchaseInvoiceId>
+    <env:DocumentId>7717e756-218f-4e43-827d-746d420a8b09</env:DocumentId>
+    <env:CreationDate>2026-09-15</env:CreationDate>
+    <env:SendingDate>2026-09-15</env:SendingDate>
+    <env:DocumentPdf mimeCode="application/pdf">REMOVED_FROM_FIXTURE</env:DocumentPdf>
+  </env:DocumentHeader>
+  <env:DocumentBody>
+    <Invoice xmlns:cec="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:sbt="http://mfin.gov.rs/srbdt/srbdtext" xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+      <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:mfin.gov.rs:srbdt:2021</cbc:CustomizationID>
+      <cbc:ID>KR1370630/26</cbc:ID>
+      <cbc:IssueDate>2026-09-15</cbc:IssueDate>
+      <cbc:DueDate>2026-09-15</cbc:DueDate>
+      <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+      <cbc:Note>Ukoliko do prijema ovog obračuna obaveza nije izmirena, molimo Vas da sredstva obezbedite na svom tekućem računu, za koji ste dali saglasnost za naplatu obaveza po ovom kreditu. Navedeni iznos u valuti kredita EUR naplaćuje se u RSD primenom srednjeg kursa Narodne Banke Srbije, na dan uplate/naplate sa tekućeg računa.</cbc:Note>
+      <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+      <cbc:TaxCurrencyCode>RSD</cbc:TaxCurrencyCode>
+      <cac:ContractDocumentReference>
+        <cbc:ID>17000004</cbc:ID>
+      </cac:ContractDocumentReference>
+      <cac:AccountingSupplierParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000004</cbc:EndpointID>
+          <cac:PartyName>
+            <cbc:Name>PRVA BANKA AD BEOGRAD</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>Milentija Popovica 7B</cbc:StreetName>
+            <cbc:CityName>Novi Beograd</cbc:CityName>
+            <cbc:PostalZone>11070</cbc:PostalZone>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+              <cbc:Name>Srbija</cbc:Name>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000004</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>PRVA BANKA AD BEOGRAD</cbc:RegistrationName>
+            <cbc:CompanyID>07000004</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+        </cac:Party>
+      </cac:AccountingSupplierParty>
+      <cac:AccountingCustomerParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000001</cbc:EndpointID>
+          <cac:PartyName>
+            <cbc:Name>Primalac d.o.o. Beograd</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>RESAVSKA 23</cbc:StreetName>
+            <cbc:CityName>Beograd-Vračar</cbc:CityName>
+            <cbc:PostalZone>11000</cbc:PostalZone>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+              <cbc:Name>Srbija</cbc:Name>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000001</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>Primalac d.o.o. Beograd</cbc:RegistrationName>
+            <cbc:CompanyID>20000001</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+        </cac:Party>
+      </cac:AccountingCustomerParty>
+      <cac:Delivery>
+        <cbc:ActualDeliveryDate>2026-09-15</cbc:ActualDeliveryDate>
+      </cac:Delivery>
+      <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cac:PayeeFinancialAccount>
+          <cbc:ID>908000000000000004</cbc:ID>
+        </cac:PayeeFinancialAccount>
+      </cac:PaymentMeans>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="RSD">0</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+          <cbc:TaxableAmount currencyID="RSD">35045.51</cbc:TaxableAmount>
+          <cbc:TaxAmount currencyID="RSD">0</cbc:TaxAmount>
+          <cac:TaxCategory>
+            <cbc:ID>E</cbc:ID>
+            <cbc:Percent>0</cbc:Percent>
+            <cbc:TaxExemptionReasonCode>PDV-RS-25-1-3</cbc:TaxExemptionReasonCode>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">0</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+          <cbc:TaxableAmount currencyID="EUR">298.59</cbc:TaxableAmount>
+          <cbc:TaxAmount currencyID="EUR">0</cbc:TaxAmount>
+          <cac:TaxCategory>
+            <cbc:ID>E</cbc:ID>
+            <cbc:Percent>0</cbc:Percent>
+            <cbc:TaxExemptionReasonCode>PDV-RS-25-1-3</cbc:TaxExemptionReasonCode>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">298.59</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">298.59</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">298.59</cbc:TaxInclusiveAmount>
+        <cbc:AllowanceTotalAmount currencyID="EUR">0</cbc:AllowanceTotalAmount>
+        <cbc:PrepaidAmount currencyID="EUR">0</cbc:PrepaidAmount>
+        <cbc:PayableAmount currencyID="EUR">298.59</cbc:PayableAmount>
+      </cac:LegalMonetaryTotal>
+      <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">298.59</cbc:LineExtensionAmount>
+        <cac:Item>
+          <cbc:Name>KREDITI - redovna kamata</cbc:Name>
+          <cac:BuyersItemIdentification>
+            <cbc:ID>BNKTR:</cbc:ID>
+          </cac:BuyersItemIdentification>
+          <cac:SellersItemIdentification>
+            <cbc:ID>KR</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>E</cbc:ID>
+            <cbc:Percent>0</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="EUR">298.59</cbc:PriceAmount>
+        </cac:Price>
+      </cac:InvoiceLine>
+    </Invoice>
+  </env:DocumentBody>
+</env:DocumentEnvelope>
