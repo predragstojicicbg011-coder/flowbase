@@ -29,7 +29,7 @@ describe('what to propose for an incoming bill', () => {
     ], [])
     expect(p?.expense_description).toBe('Telephone')
     expect(p?.basis).toBe('mixed')
-    expect(p?.reason).toMatch(/mixed|differ/i)
+    expect(p?.reason).toMatch(/različito/i)
   })
 
   it('falls back to a quick-fill template matching the supplier', () => {

@@ -11,6 +11,7 @@ import TransactionDialog from '../components/TransactionDialog'
 import PassthroughDialog from '../components/PassthroughDialog'
 import ReconcilePanel from '../components/ReconcilePanel'
 import BulkImport from '../components/BulkImport'
+import SefInboxDialog from '../components/SefInboxDialog'
 import BankStatementDialog from '../components/BankStatementDialog'
 import AutoMatchPanel from '../components/AutoMatchPanel'
 import PayrollDialog from '../components/PayrollDialog'
@@ -89,6 +90,7 @@ export default function Transactions() {
   const [showTransactionDialog, setShowTransactionDialog] = useState(false)
   const [showPassthroughDialog, setShowPassthroughDialog] = useState(false)
   const [showBulkImport, setShowBulkImport] = useState(false)
+  const [showSefInbox, setShowSefInbox] = useState(false)
   const [showBankStatement, setShowBankStatement] = useState(false)
   const [showPayrollDialog, setShowPayrollDialog] = useState(false)
   const [showPayrollImport, setShowPayrollImport] = useState(false)
@@ -568,6 +570,7 @@ export default function Transactions() {
             <button style={s.btnTransaction} onClick={() => { setEditTransaction(null); setShowTransactionDialog(true) }}>💳 Nova transakcija</button>
             <button style={s.btnStatement} onClick={() => setShowBankStatement(true)}>🏦 Izvod</button>
             <button style={s.btnBulk} onClick={() => setShowBulkImport(true)}>📥 Grupni uvoz</button>
+            <button style={s.btnBulk} onClick={() => setShowSefInbox(true)}>📨 SEF sanduče</button>
             <button style={s.btnPayroll} onClick={() => setShowPayrollDialog(true)}>💼 Zarade</button>
             <button style={s.btnPayrollImport} onClick={() => setShowPayrollImport(true)}>📊 Uvoz zarada</button>
           </div>
@@ -964,6 +967,14 @@ export default function Transactions() {
       )}
       {showBulkImport && (
         <BulkImport onClose={() => setShowBulkImport(false)} onImported={() => fetchAll()} />
+      )}
+      {showSefInbox && (
+        <SefInboxDialog
+          onClose={() => setShowSefInbox(false)}
+          // Not closed on a booking: the owner works through a queue, and
+          // closing here would cut the invoice dialog's confirmation short
+          // and send him back to reopen the inbox after every one.
+          onImported={() => fetchAll()} />
       )}
       {showAutoMatch && (
         <AutoMatchPanel

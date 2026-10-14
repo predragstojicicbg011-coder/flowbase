@@ -71,6 +71,10 @@ export function draftFromUbl(
   /** The rate the bill converts at, read on its date of supply. Null where it
    *  could not be fetched, which leaves the dialog's Fetch button to it. */
   exchangeRate: number | null = null,
+  /** The EUR rate of the same day. Every record here carries one beside the
+   *  booking rate, so filling one and not the other leaves half a conversion
+   *  behind. */
+  eurRate: number | null = null,
 ): Record<string, unknown> {
   const { account, offered } = billAccount(ubl.bankAccounts, savedAccounts)
   return {
@@ -96,6 +100,7 @@ export function draftFromUbl(
     // document, so there is nothing here for the owner to decide and no
     // reason to make him press Fetch for an answer already determined.
     exchange_rate: exchangeRate,
+    eur_rate: eurRate,
     // Carried so `carriedAccountOf` keeps the account the bill names rather
     // than reaching for the partner's primary one.
     account_number: account,
@@ -115,7 +120,7 @@ export function draftFromUbl(
     dept_subcategory: proposal?.dept_subcategory ?? null,
     expense_description: proposal?.expense_description ?? null,
     cf_type: proposal?.cf_type ?? null,
-    note: ubl.isCreditNote ? 'Credit note from SEF' : null,
+    note: ubl.isCreditNote ? 'Knjižno odobrenje sa SEF-a' : null,
   }
 }
 
@@ -151,9 +156,9 @@ export function reviewNotesFor(
   const notes: string[] = []
 
   if (ctx.proposal) {
-    notes.push(`Proposed classification: ${classificationOf(ctx.proposal)}. ${ctx.proposal.reason}`)
+    notes.push(`Predložena klasifikacija: ${classificationOf(ctx.proposal)}. ${ctx.proposal.reason}`)
   } else {
-    notes.push('No classification was proposed: this supplier has no classified history here and no template matches. Classify it yourself.')
+    notes.push('Klasifikacija nije predložena: ovaj dobavljač nema ranije klasifikovanih faktura, a nijedan šablon se ne poklapa. Klasifikujte je sami.')
   }
 
   // Which of the owner's books the cost lands in. Said out loud even when it
@@ -161,21 +166,21 @@ export function reviewNotesFor(
   // behind the dialog may be showing a different company entirely.
   if (ctx.company) {
     notes.push(ctx.company.by
-      ? `Addressed to ${ctx.company.name}, taken from the ${ctx.company.by === 'pib' ? 'PIB' : 'registration number'} on the bill.`
-      : 'The bill is addressed to a company with no PIB or registration number on file here, so none was filled in. Pick the company before posting.')
+      ? `Glasi na ${ctx.company.name}, prema ${ctx.company.by === 'pib' ? 'PIB-u' : 'matičnom broju'} sa fakture.`
+      : 'Faktura glasi na firmu čiji PIB i matični broj ovde nisu upisani, pa firma nije popunjena. Izaberite je pre knjiženja.')
   }
 
   if (ctx.matchedBy === null) {
-    notes.push('No partner matches this supplier. Pick or create one before posting.')
+    notes.push('Nijedan partner ne odgovara ovom dobavljaču. Izaberite ga ili napravite pre knjiženja.')
   } else if (ctx.matchedBy === 'name') {
-    notes.push('The supplier was matched by name only, which is the weakest match. Check the partner is the right company.')
+    notes.push('Dobavljač je prepoznat samo po imenu, što je najslabije poklapanje. Proverite da li je partner prava firma.')
   }
 
   const { account, offered } = billAccount(ubl.bankAccounts, ctx.saved)
   if (offered.length > 0) {
     notes.push(account
-      ? `The bill offers several bank accounts (${offered.join('; ')}). ${account} is the one already saved for this supplier.`
-      : `The bill offers several bank accounts: ${offered.join('; ')}. None was chosen for you. Pick the one to pay in the account field.`)
+      ? `Faktura nudi više računa (${offered.join('; ')}). ${account} je onaj koji je već sačuvan za ovog dobavljača.`
+      : `Faktura nudi više računa: ${offered.join('; ')}. Nijedan nije izabran umesto vas. Izaberite na koji se plaća, u polju za račun.`)
   }
 
   // The owner chose to open this invoice on the header's supplier, number and
@@ -189,30 +194,30 @@ export function reviewNotesFor(
     const money = (n: number, c: string | null) => `${n.toFixed(2)}${c ? ` ${c}` : ''}`
     if (header.amount !== null && ubl.total !== null
         && Math.abs(Math.abs(Number(header.amount)) - Math.abs(ubl.total)) > 0.005) {
-      notes.push(`The queue listed this invoice at ${money(Number(header.amount), header.currency)}, but the document says ${money(ubl.total, ubl.currency)}. The document's figure is the one being booked.`)
+      notes.push(`U sandučetu je ova faktura stajala na ${money(Number(header.amount), header.currency)}, a dokument kaže ${money(ubl.total, ubl.currency)}. Knjiži se iznos iz dokumenta.`)
     }
     if (header.currency && ubl.currency && header.currency !== ubl.currency) {
-      notes.push(`The queue listed this invoice in ${header.currency}, but the document is in ${ubl.currency}. The document's currency is the one being booked.`)
+      notes.push(`U sandučetu je ova faktura stajala u ${header.currency}, a dokument je u ${ubl.currency}. Knjiži se valuta iz dokumenta.`)
     }
   }
 
   if (ubl.isCreditNote) {
-    notes.push('This is a credit note, so the amount is entered as a negative figure.')
+    notes.push('Ovo je knjižno odobrenje, pa je iznos unet kao negativan.')
   }
 
   // WHICH DATE IT IS BOOKED ON. Said whenever it is not the one the bill is
   // headed with, because that is the date on the screen the owner will check
   // against the paper in front of him, and because the rate follows it.
   if (ubl.deliveryDate && ubl.issueDate && ubl.deliveryDate !== ubl.issueDate) {
-    notes.push(`Booked on the date of supply (${ubl.deliveryDate}), which is also the date the exchange rate is taken on. The supplier issued the bill on ${ubl.issueDate}.`)
+    notes.push(`Knjiži se na datum prometa (${ubl.deliveryDate}), po kom se uzima i kurs. Dobavljač je fakturu izdao ${ubl.issueDate}.`)
   } else if (!ubl.deliveryDate && ubl.issueDate) {
-    notes.push(`The bill names no date of supply, so it is booked on its issue date (${ubl.issueDate}). Check that against the paper if the two differ.`)
+    notes.push(`Faktura ne navodi datum prometa, pa se knjiži na datum izdavanja (${ubl.issueDate}). Uporedite sa papirom ako se razlikuju.`)
   }
 
   // Carried as the supplier sent it. Pointed out, not corrected: it may be a
   // mistake on their side or it may be what they meant.
   if (ubl.issueDate && ubl.dueDate && ubl.dueDate < ubl.issueDate) {
-    notes.push(`The supplier's due date (${ubl.dueDate}) is before its issue date (${ubl.issueDate}). It is entered as sent.`)
+    notes.push(`Datum dospeća (${ubl.dueDate}) je pre datuma izdavanja (${ubl.issueDate}). Unet je onako kako ga je dobavljač poslao.`)
   }
 
   return notes

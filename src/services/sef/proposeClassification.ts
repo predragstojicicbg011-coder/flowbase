@@ -1,5 +1,6 @@
 import { classificationKey } from '../budgetForecast'
 import { foldName } from '../lookupNames'
+import { plural } from '../../utils/plural'
 import type { ScriptLike } from '../expenseSplit'
 
 // A proposal is a proposal. It arrives with its reason attached and the owner
@@ -103,8 +104,8 @@ export function proposeClassification(
       cf_type: cfToCarry(newest.cf_type),
       basis: agreed ? 'history' : 'mixed',
       reason: agreed
-        ? `${supplierName}'s last ${recent.length} classified bill${recent.length === 1 ? '' : 's'} ${recent.length === 1 ? 'was' : 'were'} filed here.`
-        : `${supplierName}'s bills are filed differently from one another — this is the most recent, from ${newest.invoice_date || 'an unknown date'}. Check it.`,
+        ? `Poslednj${recent.length === 1 ? 'a' : 'e'} ${recent.length} klasifikovan${recent.length === 1 ? 'a' : 'e'} ${plural(recent.length, 'faktura', 'fakture', 'faktura')} dobavljača ${supplierName} knjižena ${recent.length === 1 ? 'je' : 'su'} ovde.`
+        : `Fakture dobavljača ${supplierName} knjižene su različito — ovo je najskorija, od ${newest.invoice_date || 'nepoznatog datuma'}. Proverite.`,
     }
   }
 
@@ -131,7 +132,7 @@ export function proposeClassification(
       expense_description: hit.expense_description ?? null,
       cf_type: cfToCarry(hit.cf_type),
       basis: 'script',
-      reason: `From the template "${hit.name}", matched on the supplier's name.`,
+      reason: `Iz šablona „${hit.name}“, prepoznatog po imenu dobavljača.`,
     }
   }
 

@@ -7,6 +7,11 @@ interface Props {
   partner?: any
   initialName?: string
   initialAccountNumber?: string
+  /** From a bill that named the supplier by its PIB and registration number,
+   *  so a supplier created from the SEF inbox arrives identified rather than
+   *  as a name somebody has to look up. */
+  initialTaxId?: string
+  initialRegistrationNumber?: string
   onClose: () => void
   onSaved: (partner: any) => void
   onDelete?: (id: string, name: string) => void
@@ -146,7 +151,7 @@ function NbsMergeDialog({ existingPartner, existingAccounts, nbsResult, onConfir
   )
 }
 
-export default function PartnerDialog({ partner, initialName = '', initialAccountNumber = '', onClose, onSaved, onDelete }: Props) {
+export default function PartnerDialog({ partner, initialName = '', initialAccountNumber = '', initialTaxId = '', initialRegistrationNumber = '', onClose, onSaved, onDelete }: Props) {
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
   const [activeTab, setActiveTab] = useState<'info' | 'accounts'>('info')
@@ -154,8 +159,8 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
 
   const [name, setName] = useState(partner?.name || initialName)
   const [type, setType] = useState(partner?.type || 'vendor')
-  const [taxId, setTaxId] = useState(partner?.tax_id || '')
-  const [registrationNumber, setRegistrationNumber] = useState(partner?.registration_number || '')
+  const [taxId, setTaxId] = useState(partner?.tax_id || initialTaxId)
+  const [registrationNumber, setRegistrationNumber] = useState(partner?.registration_number || initialRegistrationNumber)
   const [address, setAddress] = useState(partner?.address || '')
   const [city, setCity] = useState(partner?.city || '')
   const [country, setCountry] = useState(partner?.country || '')

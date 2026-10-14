@@ -228,7 +228,7 @@ describe('the draft, against the real documents', () => {
   it('carries a credit note’s negative amount, marked as a credit note', () => {
     const d = draftFromUbl(credit(), row, 'p1', null)
     expect(d.amount).toBe(-1500)
-    expect(d.note).toMatch(/credit note/i)
+    expect(d.note).toMatch(/knjižno odobrenje/i)
   })
 
   it('has no due date where the credit note has none', () => {
@@ -236,7 +236,7 @@ describe('the draft, against the real documents', () => {
   })
 
   it('does not mark an ordinary invoice as a credit note', () => {
-    expect(String(draftFromUbl(inv2(), row, 'p1', null).note ?? '')).not.toMatch(/credit/i)
+    expect(String(draftFromUbl(inv2(), row, 'p1', null).note ?? '')).not.toMatch(/odobrenje/i)
   })
 })
 
@@ -259,7 +259,7 @@ describe('what the owner is told before confirming', () => {
       const text = reviewNotesFor(plain, {
         ...base, company: { by: 'registration' as const, name: 'Primalac d.o.o.' },
       }).join(' ')
-      expect(text).toMatch(/registration number/i)
+      expect(text).toMatch(/matičnom broju/i)
       expect(text).not.toMatch(/PIB/)
     })
 
@@ -267,27 +267,27 @@ describe('what the owner is told before confirming', () => {
       const text = reviewNotesFor(plain, {
         ...base, company: { by: null, name: null },
       }).join(' ')
-      expect(text).toMatch(/no PIB or registration number on file/i)
-      expect(text).toMatch(/Pick the company/i)
+      expect(text).toMatch(/PIB i matični broj ovde nisu upisani/i)
+      expect(text).toMatch(/Izaberite je pre knjiženja/i)
     })
 
     it('says nothing about a company where the caller matched none at all', () => {
-      expect(reviewNotesFor(plain, base).join(' ')).not.toMatch(/addressed to|Pick the company/i)
+      expect(reviewNotesFor(plain, base).join(' ')).not.toMatch(/Glasi na|Izaberite je pre/i)
     })
   })
 
   /** A proposal without its reason is a filled field nobody checked. */
   it('gives the proposal with its reason', () => {
-    const notes = reviewNotesFor(plain, { ...base, proposal: { ...proposal, reason: 'Its last 3 bills were filed here.' } })
-    const line = notes.find(n => /Proposed/.test(n)) as string
+    const notes = reviewNotesFor(plain, { ...base, proposal: { ...proposal, reason: 'Poslednje 3 fakture knjižene su ovde.' } })
+    const line = notes.find(n => /Predložena/.test(n)) as string
     expect(line).toContain('Operating expenses')
-    expect(line).toContain('Its last 3 bills were filed here.')
+    expect(line).toContain('Poslednje 3 fakture')
   })
 
   /** An empty classification must not look like an oversight. */
   it('says so when nothing could be proposed', () => {
     const notes = reviewNotesFor(plain, { ...base, proposal: null })
-    expect(notes.join(' ')).toMatch(/no classification was proposed/i)
+    expect(notes.join(' ')).toMatch(/Klasifikacija nije predložena/i)
   })
 
   it('lists every account a bill offers, and says none was chosen', () => {
@@ -295,21 +295,21 @@ describe('what the owner is told before confirming', () => {
     expect(notes).toContain('220-000003-64')
     expect(notes).toContain('170-30000000003-11')
     expect(notes).toContain('160-000003-49')
-    expect(notes).toMatch(/none was chosen/i)
+    expect(notes).toMatch(/Nijedan nije izabran/i)
   })
 
   it('says which account was used where one of several is already saved', () => {
     const notes = reviewNotesFor(inv2(), { ...base, saved: ['170-30000000003-11'] }).join(' ')
-    expect(notes).toMatch(/already saved/i)
-    expect(notes).not.toMatch(/none was chosen/i)
+    expect(notes).toMatch(/već sačuvan/i)
+    expect(notes).not.toMatch(/Nijedan nije izabran/i)
   })
 
   it('says nothing about accounts where the bill names one', () => {
-    expect(reviewNotesFor(plain, base).join(' ')).not.toMatch(/account/i)
+    expect(reviewNotesFor(plain, base).join(' ')).not.toMatch(/račun/i)
   })
 
   it('says it is a credit note, entered negative', () => {
-    expect(reviewNotesFor(credit(), base).join(' ')).toMatch(/credit note.*negative/i)
+    expect(reviewNotesFor(credit(), base).join(' ')).toMatch(/knjižno odobrenje.*negativan/i)
   })
 
   /** What the supplier sent, carried as sent and pointed out. */
@@ -317,11 +317,11 @@ describe('what the owner is told before confirming', () => {
     const notes = reviewNotesFor(inv2(), base).join(' ')
     expect(notes).toContain('2026-09-08')
     expect(notes).toContain('2026-09-14')
-    expect(notes).toMatch(/before/i)
+    expect(notes).toMatch(/je pre datuma izdavanja/i)
   })
 
   it('does not mention dates that are in order', () => {
-    expect(reviewNotesFor(plain, base).join(' ')).not.toMatch(/due date/i)
+    expect(reviewNotesFor(plain, base).join(' ')).not.toMatch(/dospeća/i)
   })
 
   /** The owner decides from the header and books from the document. When the
@@ -333,25 +333,25 @@ describe('what the owner is told before confirming', () => {
       }).join(' ')
       expect(text).toContain('12000.00 RSD')
       expect(text).toContain('12500.00 RSD')
-      expect(text).toMatch(/document's figure is the one being booked/)
+      expect(text).toMatch(/Knjiži se iznos iz dokumenta/)
     })
 
     it('names both currencies', () => {
       const text = reviewNotesFor(ubl({ currency: 'EUR' }), {
         ...base, header: { amount: 12000, currency: 'RSD' },
       }).join(' ')
-      expect(text).toMatch(/listed this invoice in RSD, but the document is in EUR/)
+      expect(text).toMatch(/stajala u RSD, a dokument je u EUR/)
     })
 
     it('says nothing where they agree', () => {
       const text = reviewNotesFor(ubl(), { ...base, header: { amount: 12000, currency: 'RSD' } }).join(' ')
-      expect(text).not.toMatch(/queue listed/)
+      expect(text).not.toMatch(/U sandučetu je ova faktura stajala/)
     })
 
     /** Sub-cent noise is not a disagreement; a note that cried wolf is skimmed. */
     it('ignores a difference below a cent', () => {
       const text = reviewNotesFor(ubl({ total: 12000.004 }), { ...base, header: { amount: 12000, currency: 'RSD' } }).join(' ')
-      expect(text).not.toMatch(/queue listed/)
+      expect(text).not.toMatch(/U sandučetu je ova faktura stajala/)
     })
 
     /** The parser signs a credit note's total; whether the queue holds it signed
@@ -359,33 +359,33 @@ describe('what the owner is told before confirming', () => {
     it('does not mistake a credit note’s sign for a different amount', () => {
       const note = ubl({ total: -1500, isCreditNote: true })
       expect(reviewNotesFor(note, { ...base, header: { amount: 1500, currency: 'RSD' } }).join(' '))
-        .not.toMatch(/queue listed/)
+        .not.toMatch(/U sandučetu je ova faktura stajala/)
       expect(reviewNotesFor(note, { ...base, header: { amount: -1500, currency: 'RSD' } }).join(' '))
-        .not.toMatch(/queue listed/)
+        .not.toMatch(/U sandučetu je ova faktura stajala/)
     })
 
     it('says nothing where either side has no figure to compare', () => {
       expect(reviewNotesFor(ubl(), { ...base, header: { amount: null, currency: null } }).join(' '))
-        .not.toMatch(/queue listed/)
-      expect(reviewNotesFor(ubl(), base).join(' ')).not.toMatch(/queue listed/)
+        .not.toMatch(/U sandučetu je ova faktura stajala/)
+      expect(reviewNotesFor(ubl(), base).join(' ')).not.toMatch(/U sandučetu je ova faktura stajala/)
     })
   })
 
   it('warns when the supplier was matched by name only', () => {
-    expect(reviewNotesFor(plain, { ...base, matchedBy: 'name' }).join(' ')).toMatch(/by name only/i)
+    expect(reviewNotesFor(plain, { ...base, matchedBy: 'name' }).join(' ')).toMatch(/samo po imenu/i)
   })
 
   /** A strong match needs no comment; one that cried wolf would be skimmed. */
   it('does not warn about a match on the PIB or the registration number', () => {
     for (const matchedBy of ['pib', 'registration'] as const) {
       const text = reviewNotesFor(plain, { ...base, matchedBy }).join(' ')
-      expect(text).not.toMatch(/by name only/i)
-      expect(text).not.toMatch(/no partner/i)
+      expect(text).not.toMatch(/samo po imenu/i)
+      expect(text).not.toMatch(/Nijedan partner/i)
     }
   })
 
   it('says when no partner matched', () => {
-    expect(reviewNotesFor(plain, { ...base, matchedBy: null }).join(' ')).toMatch(/no partner/i)
+    expect(reviewNotesFor(plain, { ...base, matchedBy: null }).join(' ')).toMatch(/Nijedan partner/i)
   })
 })
 

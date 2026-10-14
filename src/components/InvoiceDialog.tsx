@@ -40,11 +40,28 @@ const TAG_LABEL: Record<string, string> = {
 interface Props {
   onClose: () => void
   invoice?: any
+  /**
+   * The id of the invoice this dialog just created.
+   *
+   * Handed over rather than found again: a caller that looks up "the invoice
+   * just written" by number links the wrong one as soon as two bills share a
+   * number. It is awaited, so whatever the caller does finishes before the
+   * dialog reports success -- but a failure in it is the caller's to show.
+   * The invoice exists by then, and reading it as "not posted" would invite a
+   * second click and a second invoice.
+   */
+  onSaved?: (invoiceId: string) => void | Promise<void>
+  /** Lines shown above every step: what the person confirming should have
+   *  read first, such as a proposed classification and the reason for it. */
+  reviewNotes?: string[]
+  /** The invoice is a credit note, so its amount must be NEGATIVE where every
+   *  other invoice's must be greater than zero. */
+  creditNote?: boolean
 }
 
 interface ValidationErrors { [key: string]: string }
 
-export default function InvoiceDialog({ onClose, invoice }: Props) {
+export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, creditNote }: Props) {
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -317,7 +334,12 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
     if (!currency) e.currency = 'Valuta je obavezna'
     if (!invoiceDate) e.invoiceDate = 'Datum fakture je obavezan'
     if (!partnerId && !(showNewPartner && newPartnerName.trim())) e.partnerId = 'Partner je obavezan'
-    if (!amount || parseFloat(amount) <= 0) e.amount = 'Iznos mora biti veći od 0'
+    // A credit note is a negative figure by design; reading it as "not
+    // greater than zero" would refuse every one. The same rule turned over
+    // refuses one booked positive -- the fault the sign exists to prevent.
+    if (creditNote) {
+      if (!amount || !(parseFloat(amount) < 0)) e.amount = 'Knjižno odobrenje mora imati negativan iznos'
+    } else if (!amount || parseFloat(amount) <= 0) e.amount = 'Iznos mora biti veći od 0'
     if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Kurs je obavezan'
     if (invType === 'expense' && plImpact && !linkedTxId) {
       // A split bill is classified by its lines, and the fields below are
@@ -683,6 +705,11 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
         // reporting success.
         if (!newInv?.id) throw new Error('Faktura nije sačuvana — baza nije vratila red.')
         invoiceId = newInv.id
+        // From here the invoice EXISTS, whatever the steps below do. Handed
+        // over now so a later failure cannot leave it unlinked.
+        if (onSaved) {
+          try { await onSaved(newInv.id) } catch { /* the caller shows its own failure; see `onSaved` above */ }
+        }
         if (linkedTxId && plCatName) {
           const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, project_id: ownProjectId }).eq('id', linkedTxId).select('id')
           if (txErr) throw txErr
@@ -929,6 +956,14 @@ export default function InvoiceDialog({ onClose, invoice }: Props) {
               <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.9 }}>{saveError}</div>
             </div>
             <button style={s.bannerClose} onClick={() => setSaveError('')}>×</button>
+          </div>
+        )}
+
+        {reviewNotes && reviewNotes.length > 0 && (
+          <div data-testid="review-notes" style={{ ...s.validationBanner, background: DIALOG.raised, borderColor: DIALOG.border, color: DIALOG.text }}>
+            <div style={{ flex: 1, fontSize: '12px', lineHeight: 1.5 }}>
+              {reviewNotes.map((n, i) => <div key={i} style={{ marginTop: i ? '4px' : 0 }}>{n}</div>)}
+            </div>
           </div>
         )}
 
