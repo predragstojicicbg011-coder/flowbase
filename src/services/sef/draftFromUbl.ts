@@ -53,6 +53,17 @@ export function billAccount(billAccounts: string[], savedNumbers: string[]): Bil
  * booking with no date at all is worse than one dated a few days late — and
  * the notes say when that happened.
  */
+/**
+ * The bill states its figures in a currency it is only INDEXED in, and states
+ * them again in the one it is owed in.
+ *
+ * True of a loan statement written in euros with a dinar tax currency: the
+ * euro is the index, the dinar is what is paid and declared.
+ */
+export function isIndexed(ubl: Pick<UblInvoice, 'currency' | 'documentCurrency'>): boolean {
+  return !!ubl.documentCurrency && !!ubl.currency && ubl.documentCurrency !== ubl.currency
+}
+
 export function bookedDateOf(ubl: Pick<UblInvoice, 'deliveryDate' | 'issueDate'>): string | null {
   return ubl.deliveryDate || ubl.issueDate || null
 }
@@ -94,8 +105,14 @@ export function draftFromUbl(
     due_date: ubl.dueDate,
     type: 'expense',
     currency: ubl.currency || row.currency,
-    // Already negative for a credit note: the parser signs it.
+    // Already negative for a credit note: the parser signs it. In the
+    // currency the invoice is BOOKED in, which on an indexed bill is not the
+    // one it is written in.
     amount: ubl.total,
+    // The figures came from a bill written in another currency. The field
+    // exists for exactly this, and an indexed bill left unmarked looks like
+    // an ordinary one at a strange rate.
+    is_indexed: isIndexed(ubl),
     // Both the currency and the date the rate is read on come off the
     // document, so there is nothing here for the owner to decide and no
     // reason to make him press Fetch for an answer already determined.
@@ -192,13 +209,29 @@ export function reviewNotesFor(
   const header = ctx.header
   if (header) {
     const money = (n: number, c: string | null) => `${n.toFixed(2)}${c ? ` ${c}` : ''}`
-    if (header.amount !== null && ubl.total !== null
-        && Math.abs(Math.abs(Number(header.amount)) - Math.abs(ubl.total)) > 0.005) {
-      notes.push(`U sandučetu je ova faktura stajala na ${money(Number(header.amount), header.currency)}, a dokument kaže ${money(ubl.total, ubl.currency)}. Knjiži se iznos iz dokumenta.`)
+    // The queue reports a bill in the currency it was WRITTEN in, so on an
+    // indexed one it is compared against the document's own figure. Compared
+    // against the booked figure it would disagree on every such bill, by the
+    // exchange rate, and a warning that is always wrong is one nobody reads.
+    const shown = isIndexed(ubl) ? ubl.documentTotal : ubl.total
+    const shownCurrency = isIndexed(ubl) ? ubl.documentCurrency : ubl.currency
+    if (header.amount !== null && shown !== null
+        && Math.abs(Math.abs(Number(header.amount)) - Math.abs(shown)) > 0.005) {
+      notes.push(`U sandučetu je ova faktura stajala na ${money(Number(header.amount), header.currency)}, a dokument kaže ${money(shown, shownCurrency)}. Knjiži se iznos iz dokumenta.`)
     }
-    if (header.currency && ubl.currency && header.currency !== ubl.currency) {
-      notes.push(`U sandučetu je ova faktura stajala u ${header.currency}, a dokument je u ${ubl.currency}. Knjiži se valuta iz dokumenta.`)
+    if (header.currency && shownCurrency && header.currency !== shownCurrency) {
+      notes.push(`U sandučetu je ova faktura stajala u ${header.currency}, a dokument je u ${shownCurrency}. Knjiži se valuta iz dokumenta.`)
     }
+  }
+
+  // Popunjeno bez pitanja, a broj na papiru nije broj na ekranu. Oba se
+  // imenuju.
+  if (isIndexed(ubl)) {
+    notes.push(`Dobavljač je fakturu izdao u ${ubl.documentCurrency}`
+      + (ubl.documentTotal !== null ? ` (${ubl.documentTotal.toFixed(2)})` : '')
+      + `, što je valuta indeksacije. Knjiži se u ${ubl.currency}`
+      + (ubl.total !== null ? ` (${ubl.total.toFixed(2)})` : '')
+      + ', jer se to duguje i prijavljuje.')
   }
 
   if (ubl.isCreditNote) {

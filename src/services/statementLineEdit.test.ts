@@ -1,4 +1,4 @@
-import { editedAmounts, amountText, correctLine } from './statementLineEdit'
+import { editedAmounts, amountText, correctLine, isoDate } from './statementLineEdit'
 
 const none = { debit: null, credit: null }
 
@@ -92,5 +92,39 @@ describe('correcting one line of an import', () => {
     const before = rows()
     correctLine(before, 'a', { description: 'Bank charge' })
     expect(before[0].parsed.description).toBe('FEE')
+  })
+})
+
+describe('the date a date input will actually show', () => {
+  /** The parsers keep a line's date as the FILE wrote it. A `date` input
+   *  handed `14.10.2026` shows nothing at all -- no date and no complaint --
+   *  so the line read as undated while the row above it showed 14.10.2026. */
+  it('turns a Serbian date into the shape the input understands', () => {
+    expect(isoDate('14.10.2026')).toBe('2026-10-14')
+    expect(isoDate('1.9.2026')).toBe('2026-09-01')
+    expect(isoDate('01.09.2026')).toBe('2026-09-01')
+  })
+
+  it('reads the other separators a statement uses', () => {
+    expect(isoDate('14/10/2026')).toBe('2026-10-14')
+    expect(isoDate('14-10-2026')).toBe('2026-10-14')
+    expect(isoDate('14.10.2026.')).toBe('2026-10-14')
+  })
+
+  it('leaves a date that is already ISO alone', () => {
+    expect(isoDate('2026-10-14')).toBe('2026-10-14')
+  })
+
+  it('hands back anything it does not recognise, rather than inventing one', () => {
+    expect(isoDate('')).toBe('')
+    expect(isoDate(null)).toBe('')
+    expect(isoDate(undefined)).toBe('')
+    expect(isoDate('not a date')).toBe('not a date')
+    expect(isoDate('10.2026')).toBe('10.2026')
+  })
+
+  it('pads, so a single-digit day and month still parse as a date', () => {
+    // '2026-9-1' is not a date to an input; '2026-09-01' is.
+    expect(isoDate('1.9.2026')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })

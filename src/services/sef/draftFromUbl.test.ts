@@ -19,7 +19,15 @@ const ubl = (over: Partial<UblInvoice> = {}): UblInvoice => ({
   customerRegistrationNumber: '20000001',
   bankAccount: '160-0000000000000-11', bankAccounts: ['160-0000000000000-11'],
   paymentReference: '12-345', paymentModel: '97',
-  net: 10000, vat: 2000, total: 12000, sefPurchaseInvoiceId: null, lines: [], ...over,
+  net: 10000, vat: 2000, total: 12000, sefPurchaseInvoiceId: null, lines: [],
+  // These FOLLOW `currency` and `total` where a test does not set them
+  // itself. A bill whose two currencies differ is an INDEXED one, and a test
+  // that only meant to change the currency would otherwise get indexation it
+  // never asked for -- which is how a test about one thing starts failing
+  // over another.
+  documentCurrency: over.currency ?? 'RSD',
+  documentTotal: over.total ?? 12000,
+  ...over,
 })
 
 const proposal: Proposal = {
@@ -50,6 +58,24 @@ describe('the draft handed to the invoice dialog', () => {
   /** The currency and the date the rate is read on both come off the
    *  document, so pressing Fetch asks the owner for an answer already
    *  determined — and leaving it blank converts the bill at 1. */
+  /** invoice-sample.xml is a loan statement written in euros with a dinar
+   *  tax currency. The euro is the index; the dinar is what is owed, paid and
+   *  declared, and 298.59 booked where 35,045.51 is owed is out by a factor
+   *  of a hundred with nothing about it looking wrong. */
+  it('books an indexed bill in dinars, and marks it indexed', () => {
+    const indexed = parseUbl(fixture('invoice-sample.xml'))
+    const d = draftFromUbl(indexed, row, 'p1', null)
+    expect(d.amount).toBe(35045.51)
+    expect(d.currency).toBe('RSD')
+    expect(d.is_indexed).toBe(true)
+  })
+
+  it('does not mark an ordinary bill as indexed', () => {
+    const plainBill = parseUbl(fixture('invoice-sample-2.xml'))
+    expect(draftFromUbl(plainBill, row, 'p1', null).is_indexed).toBe(false)
+    expect(draftFromUbl(ubl(), row, 'p1', null).is_indexed).toBe(false)
+  })
+
   it('carries the exchange rate it was given', () => {
     expect(draftFromUbl(ubl(), row, 'p1', null, [], 'c1', 0.0095).exchange_rate).toBe(0.0095)
   })
@@ -306,6 +332,43 @@ describe('what the owner is told before confirming', () => {
 
   it('says nothing about accounts where the bill names one', () => {
     expect(reviewNotesFor(plain, base).join(' ')).not.toMatch(/račun/i)
+  })
+
+  describe('a bill indexed in another currency', () => {
+    const indexed = () => parseUbl(fixture('invoice-sample.xml'))
+
+    it('names both currencies and both figures', () => {
+      const text = reviewNotesFor(indexed(), base).join(' ')
+      expect(text).toMatch(/EUR/)
+      expect(text).toContain('298.59')
+      expect(text).toMatch(/RSD/)
+      expect(text).toContain('35045.51')
+      expect(text).toMatch(/valuta indeksacije/i)
+    })
+
+    it('says nothing of the sort about an ordinary bill', () => {
+      const plainBill = parseUbl(fixture('invoice-sample-2.xml'))
+      expect(reviewNotesFor(plainBill, base).join(' ')).not.toMatch(/indeksacije/i)
+    })
+
+    /** The queue reports a bill in the currency it was WRITTEN in. Compared
+     *  against the booked figure it would disagree on every indexed bill, by
+     *  the exchange rate, and a warning that is always wrong is one nobody
+     *  reads. */
+    it('does not call the queue wrong for listing the written figure', () => {
+      const text = reviewNotesFor(indexed(), {
+        ...base, header: { amount: 298.59, currency: 'EUR' },
+      }).join(' ')
+      expect(text).not.toMatch(/stajala na|stajala u/i)
+    })
+
+    it('still reports a queue figure that disagrees with the document', () => {
+      const text = reviewNotesFor(indexed(), {
+        ...base, header: { amount: 300.00, currency: 'EUR' },
+      }).join(' ')
+      expect(text).toMatch(/stajala na 300.00 EUR/)
+      expect(text).toMatch(/dokument kaže 298.59 EUR/)
+    })
   })
 
   it('says it is a credit note, entered negative', () => {

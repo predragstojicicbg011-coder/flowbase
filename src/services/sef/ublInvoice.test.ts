@@ -43,10 +43,20 @@ describe('reading a Serbian e-invoice, against real documents', () => {
       expect(credit().dueDate).toBeNull()
     })
 
-    it('reads the document currency', () => {
-      expect(inv().currency).toBe('EUR')
+    /** `currency` is the one the invoice is BOOKED in, which on a bill
+     *  indexed in euros is the dinar. What the supplier wrote it in is kept
+     *  separately. */
+    it('reads the currency the invoice is booked in', () => {
+      expect(inv().currency).toBe('RSD')
       expect(inv2().currency).toBe('RSD')
       expect(credit().currency).toBe('RSD')
+    })
+
+    it('keeps the currency the supplier wrote it in, beside it', () => {
+      expect(inv().documentCurrency).toBe('EUR')
+      expect(inv().documentTotal).toBe(298.59)
+      expect(inv2().documentCurrency).toBe('RSD')
+      expect(inv2().documentTotal).toBe(13436.42)
     })
   })
 
@@ -185,39 +195,52 @@ describe('reading a Serbian e-invoice, against real documents', () => {
   describe('the money', () => {
     /**
      * THIS IS THE TEST THAT MATTERS. invoice-sample.xml is a loan interest
-     * statement in EUR with TaxCurrencyCode RSD, and it carries a TaxTotal in
-     * each currency. Taking the first gives the tax in dinars against a total
-     * in euros, and nothing about the number looks wrong — it is just in the
-     * wrong unit.
+     * statement written in EUR with TaxCurrencyCode RSD, and it carries a
+     * TaxTotal in each. The euro is only the index: the bill is for 35,045.51
+     * dinars and that is what is owed, paid and declared. Booked at 298.59 it
+     * is out by a factor of a hundred, and nothing about the number looks
+     * wrong.
      *
-     * In THIS document both happen to be 0, so the real figure cannot tell
-     * the two apart. The next two tests are the same document with one tax
-     * figure changed, which is what proves the parser chose by currency and
-     * not by position.
+     * `LegalMonetaryTotal` exists only in euros, so the dinar figures come
+     * from the dinar TaxTotal and the total is their sum.
      */
-    it('reads the VAT in the document currency (both are 0 in the real document)', () => {
+    it('books an indexed bill in dinars, not in the currency it is written in', () => {
+      expect(inv().net).toBe(35045.51)
       expect(inv().vat).toBe(0)
-      expect(inv().net).toBe(298.59)
-      expect(inv().total).toBe(298.59)
+      expect(inv().total).toBe(35045.51)
     })
 
-    it('takes the EUR TaxTotal even when the RSD one comes first and differs', () => {
+    /** Both VAT figures are 0 in the real document, so the figure alone
+     *  cannot say which block was read. Changed here, it can. */
+    it('takes the VAT from the tax currency, not from the one written first', () => {
       const xml = fixture('invoice-sample.xml')
         .replace('<cbc:TaxAmount currencyID="RSD">0</cbc:TaxAmount>',
                  '<cbc:TaxAmount currencyID="RSD">4200.55</cbc:TaxAmount>')
         .replace('<cbc:TaxAmount currencyID="EUR">0</cbc:TaxAmount>',
                  '<cbc:TaxAmount currencyID="EUR">17.25</cbc:TaxAmount>')
-      expect(xml).toContain('4200.55')
-      expect(parseUbl(xml).vat).toBe(17.25)
+      const i = parseUbl(xml)
+      expect(i.vat).toBe(4200.55)
+      expect(i.total).toBe(39246.06)   // 35,045.51 + 4,200.55
     })
 
-    it('falls back to the first TaxTotal only when none is in the document currency', () => {
+    /** A document that names a tax currency but states no figures in it has
+     *  nothing to book from there, and its own currency is all there is. */
+    it('stays in the written currency where the tax currency has no figures', () => {
       const xml = fixture('invoice-sample.xml')
-        .replace('<cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>',
-                 '<cbc:DocumentCurrencyCode>USD</cbc:DocumentCurrencyCode>')
         .replace('<cbc:TaxAmount currencyID="RSD">0</cbc:TaxAmount>',
-                 '<cbc:TaxAmount currencyID="RSD">4200.55</cbc:TaxAmount>')
-      expect(parseUbl(xml).vat).toBe(4200.55)
+                 '<cbc:TaxAmount currencyID="XXX">0</cbc:TaxAmount>')
+      const i = parseUbl(xml)
+      expect(i.currency).toBe('EUR')
+      expect(i.total).toBe(298.59)
+    })
+
+    it('leaves a bill with no tax currency exactly as it was', () => {
+      const xml = fixture('invoice-sample.xml')
+        .replace('<cbc:TaxCurrencyCode>RSD</cbc:TaxCurrencyCode>', '')
+      const i = parseUbl(xml)
+      expect(i.currency).toBe('EUR')
+      expect(i.net).toBe(298.59)
+      expect(i.total).toBe(298.59)
     })
 
     it('reads net, VAT and total on a single-currency invoice', () => {

@@ -42,7 +42,21 @@ export interface UblInvoice {
    */
   deliveryDate: string | null
   dueDate: string | null
+  /**
+   * The currency the invoice is BOOKED in.
+   *
+   * Not always the one the supplier wrote it in. A bill indexed in euros
+   * states its figures in EUR and states them AGAIN in dinars, because the
+   * tax base and the VAT have to be in the tax currency. The books, the VAT
+   * return and the payment are all in dinars, so that is what this carries.
+   */
   currency: string | null
+  /** `DocumentCurrencyCode` -- how the supplier wrote it. Equal to `currency`
+   *  on an ordinary bill, and EUR on one indexed in euros. */
+  documentCurrency: string | null
+  /** `PayableAmount`, in `documentCurrency`. Shown to the owner where the two
+   *  currencies differ, so the figure on the paper is accounted for. */
+  documentTotal: number | null
   typeCode: string | null       // '380' invoice, '381' credit note
   isCreditNote: boolean
   supplierName: string | null
@@ -128,6 +142,34 @@ const findBodyRoot = (doc: Document): Element | null => {
 // which would sit next to a total in euros — a figure that looks fine and is
 // in the wrong unit. The right TaxTotal is the one in the document currency;
 // the first is only a fallback for a document that has none in it.
+/**
+ * The net and the VAT in ONE currency, from the TaxTotal that states them.
+ *
+ * A bill indexed in a foreign currency carries two of these: one in the
+ * currency it is written in, one in the tax currency. `LegalMonetaryTotal`
+ * exists only in the written one, so the dinar figures of an indexed bill are
+ * here or nowhere.
+ *
+ * Null where that currency has no TaxTotal, or none with a taxable amount in
+ * it -- a block with no subtotal would otherwise read as a net of zero, which
+ * is a figure, and wrong.
+ */
+const totalsIn = (root: Element, currency: string | null): { net: number; vat: number } | null => {
+  if (!currency) return null
+  const block = kids(root, 'TaxTotal').find(
+    t => child(t, 'TaxAmount')?.getAttribute('currencyID') === currency)
+  if (!block) return null
+  const vat = num(child(block, 'TaxAmount'))
+  if (vat === null) return null
+  const taxable = kids(block, 'TaxSubtotal')
+    .map(sub => num(child(sub, 'TaxableAmount')))
+    .filter((n): n is number => n !== null)
+  if (taxable.length === 0) return null
+  const net = taxable.reduce((a, b) => a + b, 0)
+  // Added, so the sum of two exact figures does not arrive as 35045.509999.
+  return { net: Math.round(net * 100) / 100, vat }
+}
+
 const pickTaxAmount = (root: Element, currency: string | null): number | null => {
   const totals = kids(root, 'TaxTotal')
   const inDocumentCurrency = currency
@@ -139,6 +181,7 @@ const pickTaxAmount = (root: Element, currency: string | null): number | null =>
 const empty = (): UblInvoice => ({
   invoiceNumber: null, issueDate: null, dueDate: null, currency: null,
   typeCode: null, isCreditNote: false,
+  documentCurrency: null, documentTotal: null,
   supplierName: null, supplierVatNumber: null, supplierRegistrationNumber: null,
   customerName: null, customerVatNumber: null, customerRegistrationNumber: null,
   deliveryDate: null,
@@ -169,7 +212,23 @@ export function parseUbl(xml: string): UblInvoice {
   const typeCode = text(child(root, 'InvoiceTypeCode')) || text(child(root, 'CreditNoteTypeCode'))
   const isCreditNote = typeCode === '381' || root.localName === 'CreditNote'
 
-  const currency = text(child(root, 'DocumentCurrencyCode'))
+  // WHICH CURRENCY THIS IS BOOKED IN.
+  //
+  // `TaxCurrencyCode` is the currency the tax authority is owed in, and on a
+  // bill indexed in euros it is the dinar. Every figure the books need is
+  // then in the dinar TaxTotal, while `LegalMonetaryTotal` stays in euros.
+  // Reading the document's own currency gave 298.59 EUR where the bill was
+  // for 35,045.51 RSD -- a figure that looks perfectly ordinary and is in the
+  // wrong unit by a factor of a hundred.
+  //
+  // Falls back to the document's currency when there is no tax currency, or
+  // when it names one but states no figures in it.
+  const documentCurrency = text(child(root, 'DocumentCurrencyCode'))
+  const taxCurrency = text(child(root, 'TaxCurrencyCode'))
+  const indexed = taxCurrency && taxCurrency !== documentCurrency
+    ? totalsIn(root, taxCurrency)
+    : null
+  const currency = indexed ? taxCurrency : documentCurrency
 
   // A credit note states every amount positive. Negating only the total would
   // leave net and VAT to be negated by whoever reads them, and a rule that
@@ -218,9 +277,13 @@ export function parseUbl(xml: string): UblInvoice {
     paymentModel: payId.model,
     // A credit note reduces what is owed. Booked positive it is wrong in the
     // P&L and in the payables at once, and it reads as an ordinary bill.
-    net: sign(num(child(root, 'LegalMonetaryTotal', 'TaxExclusiveAmount'))),
-    vat: sign(pickTaxAmount(root, currency)),
-    total: sign(num(child(root, 'LegalMonetaryTotal', 'PayableAmount'))),
+    net: sign(indexed ? indexed.net : num(child(root, 'LegalMonetaryTotal', 'TaxExclusiveAmount'))),
+    vat: sign(indexed ? indexed.vat : pickTaxAmount(root, documentCurrency)),
+    total: sign(indexed
+      ? Math.round((indexed.net + indexed.vat) * 100) / 100
+      : num(child(root, 'LegalMonetaryTotal', 'PayableAmount'))),
+    documentCurrency,
+    documentTotal: sign(num(child(root, 'LegalMonetaryTotal', 'PayableAmount'))),
     sefPurchaseInvoiceId: text(child(envelope, 'DocumentHeader', 'PurchaseInvoiceId')),
     lines,
   }

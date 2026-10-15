@@ -64,3 +64,23 @@ export function correctLine<R extends { parsed: { id: string } }>(
 ): R[] {
   return rows.map(r => r.parsed.id === id ? { ...r, parsed: { ...r.parsed, ...patch } } : r)
 }
+
+/**
+ * A date in the one shape a `<input type="date">` will show: YYYY-MM-DD.
+ *
+ * The parsers keep a line's date as the FILE wrote it, which for a Serbian
+ * statement is `14.10.2026`. A date input given that shows nothing at all --
+ * no date, no complaint -- so the line looked undated while the row above it
+ * read 14.10.2026. Anything already in ISO, and anything this does not
+ * recognise, is handed back untouched for the caller to judge.
+ */
+export function isoDate(value: string | null | undefined): string {
+  const v = (value || '').trim()
+  if (!v) return ''
+  const dmy = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})\.?$/.exec(v)
+  if (dmy) {
+    const [, d, m, y] = dmy
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+  }
+  return v
+}
