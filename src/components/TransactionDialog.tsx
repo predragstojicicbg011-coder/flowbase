@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { supabase } from '../supabase'
+import { matchesAmount } from '../services/amountSearch'
 import { brand } from '../config/brand'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { fetchScripts, saveScript, whyNotSavable } from '../services/quickFillStore'
@@ -609,7 +610,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const filteredOpenInvoices = openInvoices.filter(inv => {
     if (!invoiceSearch) return true
     return (inv.partner_name || '').toLowerCase().includes(invoiceSearch.toLowerCase()) ||
-      (inv.invoice_number || '').toLowerCase().includes(invoiceSearch.toLowerCase())
+      (inv.invoice_number || '').toLowerCase().includes(invoiceSearch.toLowerCase()) ||
+      matchesAmount(invoiceSearch, inv.amount, inv.amount_rsd, inv.remaining_rsd)
   })
 
   const touch = (field: string) => setTouched(prev => ({ ...prev, [field]: true }))
@@ -1886,7 +1888,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   )}
                   <input style={{ ...s.input, marginBottom: '10px', width: '100%', boxSizing: 'border-box' as const }}
                     value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)}
-                    placeholder="Pretraga po partneru ili broju fakture…" />
+                    placeholder="Pretraga po partneru, broju fakture ili iznosu…" />
                   {filteredOpenInvoices.length === 0 ? (
                     <div style={{ padding: '20px', textAlign: 'center' as const, color: DIALOG.faint, fontSize: '13px', background: DIALOG.raised, borderRadius: '8px' }}>
                       Ova firma nema otvorenih faktura.

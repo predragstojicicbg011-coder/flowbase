@@ -196,6 +196,31 @@ export function statementLabel(statementNumber: string): string {
 }
 
 /**
+ * What an edited statement's log entry should be called, and how its default
+ * note should read.
+ *
+ * The editor was built for statements typed in by hand, so on save it renamed
+ * the log `Izvod #<broj>` and noted it as entered manually. A statement that
+ * came out of a bank file has a name already -- the file's -- and calling it
+ * manual would lose the only record of where those rows came from, on the one
+ * screen anybody goes looking.
+ */
+export function editedStatementName(
+  origin: { fromFile?: boolean; fileName?: string | null },
+  statementNumber: string,
+): string {
+  if (origin.fromFile && origin.fileName) return origin.fileName
+  return statementLabel(statementNumber)
+}
+
+export function editedStatementNote(
+  origin: { fromFile?: boolean },
+  rowCount: number,
+): string {
+  return origin.fromFile ? `Stavki: ${rowCount}` : `Ručno uneto stavki: ${rowCount}`
+}
+
+/**
  * An invoice's status from what has been allocated against it.
  *
  * The tenth of a percent that used to be written here was a fudge for

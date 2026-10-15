@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
+import { matchesAmount } from '../services/amountSearch'
 import { brand } from '../config/brand'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { fetchScripts, saveScript, whyNotSavable } from '../services/quickFillStore'
@@ -569,7 +570,11 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     if (!reconcileSearch) return true
     return (tx.partners?.name || '').toLowerCase().includes(reconcileSearch.toLowerCase()) ||
       (tx.pl_category || '').toLowerCase().includes(reconcileSearch.toLowerCase()) ||
-      (tx.transaction_date || '').includes(reconcileSearch)
+      (tx.transaction_date || '').includes(reconcileSearch) ||
+      // A transaction with no partner on it cannot be found by name, and that
+      // is the one that has to be linked by hand. Both figures on the row are
+      // offered, because he types whichever he is reading.
+      matchesAmount(reconcileSearch, tx.amount, tx.amount_rsd)
   })
   const linkedTx = directTransactions.find(t => t.id === linkedTxId)
 
@@ -1008,7 +1013,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                   ) : (
                     <>
                       <input style={{ ...s.input, marginBottom: '8px', width: '100%', boxSizing: 'border-box' as const }}
-                        value={reconcileSearch} onChange={e => setReconcileSearch(e.target.value)} placeholder="Pretraga po partneru, kategoriji ili datumu…" />
+                        value={reconcileSearch} onChange={e => setReconcileSearch(e.target.value)} placeholder="Pretraga po partneru, kategoriji, datumu ili iznosu…" />
                       {directTransactions.length === 0 ? (
                         <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>Ova firma još nema direktnih transakcija.</div>
                       ) : (

@@ -1,6 +1,7 @@
 import {
   txToSeed, passthroughToSeed, allowedTypes, isRowEditable,
   statementSpan, statementLabel, invoiceStatus, rowAmount,
+  editedStatementName, editedStatementNote,
 } from './statementEdit'
 
 const expenseTx = {
@@ -285,5 +286,34 @@ describe('an advance, reopened', () => {
     expect(txToSeed(tx).is_advance).toBe(true)
     expect(txToSeed({ ...tx, is_advance: undefined }).is_advance).toBe(false)
     expect(passthroughToSeed({ id: 'x', direction: 'in', amount: 1 }).is_advance).toBe(false)
+  })
+})
+
+describe('what an edited statement’s log is called', () => {
+  /** The editor was written for statements typed in by hand. Saving one that
+   *  came out of a bank file used to rename it `Izvod #...` and note it as
+   *  entered manually, losing the only record of which file those rows came
+   *  from on the one screen anybody goes looking. */
+  it('keeps the file name for a statement that came from a file', () => {
+    expect(editedStatementName(
+      { fromFile: true, fileName: '150-000000004457094_140_22.txt' }, '2026-44',
+    )).toBe('150-000000004457094_140_22.txt')
+  })
+
+  it('does not call a file import a manual entry', () => {
+    expect(editedStatementNote({ fromFile: true }, 12)).toBe('Stavki: 12')
+    expect(editedStatementNote({ fromFile: true }, 12)).not.toMatch(/Ručno/i)
+  })
+
+  it('still names a hand-typed statement by its number', () => {
+    expect(editedStatementName({ fromFile: false, fileName: null }, '2026-44'))
+      .toBe('Izvod #2026-44')
+    expect(editedStatementNote({ fromFile: false }, 2)).toBe('Ručno uneto stavki: 2')
+  })
+
+  it('falls back to the number when a file import has lost its name', () => {
+    expect(editedStatementName({ fromFile: true, fileName: null }, '2026-44'))
+      .toBe('Izvod #2026-44')
+    expect(editedStatementName({ fromFile: true, fileName: '' }, '')).toBe('Ručni unos')
   })
 })

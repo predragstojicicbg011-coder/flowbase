@@ -235,3 +235,54 @@ input[type="date"]:focus {
 .mf-trash { transition: color 120ms ease, background 120ms ease; }
 .mf-trash:hover { color: #FF5B5A; background: rgba(255, 91, 90, 0.12); }
 .mf-trash:focus-visible { outline: 2px solid #FF5B5A; outline-offset: 1px; }
+
+/* ── The General Ledger header ───────────────────────────────────────────
+   Two things are CREATED on this page and four are BROUGHT IN from
+   somewhere else. All six used to sit in one flat row as equals, each in
+   its own colour, and the row read as seven unrelated buttons rather than
+   two actions and a set of doors.
+
+   The four are one control now: a single border around them, one quiet
+   colour, hairline dividers between. Their emoji still tell them apart, so
+   nothing is lost by dropping four competing accent colours. */
+.mf-intake {
+  display: flex;
+  align-items: stretch;
+  background: rgba(255, 255, 255, 0.03);
+  border: 0.5px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mf-intake-divider {
+  width: 0.5px;
+  background: rgba(255, 255, 255, 0.10);
+  flex: 0 0 auto;
+}
+.mf-intake-btn {
+  background: transparent;
+  color: #9FB6CC;
+  border: none;
+  padding: 9px 14px;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+.mf-intake-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #DCE9F6;
+}
+/* Inset, because the buttons sit flush inside the group's own border and an
+   outline on the edge ones would be clipped by `overflow: hidden`. */
+.mf-intake-btn:focus-visible {
+  outline: 2px solid #4EA8FF;
+  outline-offset: -2px;
+}
+
+/* The two that create something keep their filled treatment — they are what
+   this page is for — and now answer the cursor like everything else. */
+.mf-primary-action { transition: filter 120ms ease; }
+.mf-primary-action:hover { filter: brightness(1.08); }
+.mf-primary-action:focus-visible { outline: 2px solid #DCE9F6; outline-offset: 2px; }

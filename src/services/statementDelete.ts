@@ -26,35 +26,35 @@ export interface DeletionCounts {
  */
 export function deletionWarning(fileName: string | null | undefined, c: DeletionCounts): string {
   const lines = [
-    `Delete "${fileName || 'this statement'}" and everything it posted?`,
+    `Obrisati „${fileName || 'ovaj izvod'}“ i sve što je proknjižio?`,
     '',
-    `· ${c.transactions} transaction${c.transactions === 1 ? '' : 's'}`,
+    `· transakcija: ${c.transactions}`,
   ]
   if (c.passthroughs > 0) {
-    lines.push(`· ${c.passthroughs} pass-through row${c.passthroughs === 1 ? '' : 's'}`)
+    lines.push(`· prolaznih stavki: ${c.passthroughs}`)
   }
   if (c.invoiceIds.length > 0) {
-    lines.push(`· ${c.invoiceIds.length} invoice allocation${c.invoiceIds.length === 1 ? '' : 's'}`)
+    lines.push(`· raspodela na fakture: ${c.invoiceIds.length}`)
     if (c.closing.length > 0) {
       lines.push('')
-      lines.push(`${c.closing.length} invoice${c.closing.length === 1 ? '' : 's'} currently read as paid and will owe money again:`)
+      lines.push(`Fakture koje se sada vode kao plaćene i ponovo će imati dug (${c.closing.length}):`)
       lines.push(c.closing.slice(0, 8).join(', ')
-        + (c.closing.length > 8 ? `, and ${c.closing.length - 8} more` : ''))
+        + (c.closing.length > 8 ? ` i još ${c.closing.length - 8}` : ''))
     }
   }
   lines.push('')
-  lines.push('This cannot be undone from here.')
+  lines.push('Ovo se ne može poništiti odavde.')
   return lines.join('\n')
 }
 
 /** What was actually done, in the same terms the warning used. */
 export function deletionSummary(r: any): string {
   const d = (r || {}) as any
-  return `Deleted ${d.transactions_deleted ?? 0} transaction(s)`
-    + ((d.passthroughs_deleted ?? 0) > 0 ? `, ${d.passthroughs_deleted} pass-through(s)` : '')
-    + `, removed ${d.allocations_removed ?? 0} allocation(s)`
-    + ((d.installments_reopened ?? 0) > 0 ? `, reopened ${d.installments_reopened} credit instalment(s)` : '')
-    + ((d.invoices_restated ?? 0) > 0 ? `, and ${d.invoices_restated} invoice(s) no longer read as they did` : '')
+  return `Obrisano transakcija: ${d.transactions_deleted ?? 0}`
+    + ((d.passthroughs_deleted ?? 0) > 0 ? `, prolaznih stavki: ${d.passthroughs_deleted}` : '')
+    + `, uklonjeno raspodela: ${d.allocations_removed ?? 0}`
+    + ((d.installments_reopened ?? 0) > 0 ? `, ponovo otvoreno rata kredita: ${d.installments_reopened}` : '')
+    + ((d.invoices_restated ?? 0) > 0 ? `, faktura kojima se promenio status: ${d.invoices_restated}` : '')
     + '.'
 }
 
@@ -82,7 +82,7 @@ export async function gatherDeletion(supabase: any, batchId: string): Promise<De
     invoiceIds,
     closing: (affected || [])
       .filter((i: any) => i.calculated_status === 'paid')
-      .map((i: any) => i.invoice_number || '(no number)'),
+      .map((i: any) => i.invoice_number || '(bez broja)'),
   }
 }
 

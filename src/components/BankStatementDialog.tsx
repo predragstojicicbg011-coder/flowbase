@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabase'
+import { matchesAmount } from '../services/amountSearch'
 import { brand } from '../config/brand'
 import { useCompanies } from '../contexts/CompaniesContext'
 import InlineCategoryAdd from './InlineCategoryAdd'
 
 import { importRowHash } from '../utils/importHash'
 import { fetchAllPages } from '../utils/fetchAllPages'
+import {
+  gatherDeletion, deletionWarning, deletionSummary, deleteStatementBatch,
+} from '../services/statementDelete'
 import { softDeleteRow } from '../services/writeOrder'
 import CreditInstallmentSelector from './CreditInstallmentSelector'
 import { DIALOG, chrome } from './dialogTheme'
@@ -34,6 +38,7 @@ import SystemCategoryNotice from './SystemCategoryNotice'
 import { creditLegBooker, checkCreditCurrency } from '../services/creditPayment'
 import {
   txToSeed, passthroughToSeed, allowedTypes, statementSpan, statementLabel,
+  editedStatementName, editedStatementNote,
   invoiceStatus, rowAmount, type RowSeed, type RowSource,
 } from '../services/statementEdit'
 import { fetchAllPartners } from '../services/allPartners'
@@ -58,6 +63,16 @@ const HISTORY_PAGE = 8
 interface Props {
   onClose: () => void
   onImported: () => void
+  /**
+   * An `import_logs` row to open straight onto, instead of a blank entry.
+   *
+   * This dialog is the one place a posted statement is reopened and edited,
+   * and it already does it properly: rows are UPDATED in place, so an
+   * imported row keeps the `import_hash` that stops its file being imported
+   * twice. The bulk import hands statements here rather than growing a
+   * second editor that would have to be taught the same things.
+   */
+  editLog?: any
 }
 
 interface StatementRow {
@@ -158,7 +173,7 @@ function makeRow(defaultCurrency = 'RSD', date = ''): StatementRow {
   }
 }
 
-export default function BankStatementDialog({ onClose, onImported }: Props) {
+export default function BankStatementDialog({ onClose, onImported, editLog }: Props) {
   const { companies, defaultCompany, showPicker } = useCompanies()
   /** Where a credit instalment's two legs post — see services/systemCategories. */
   const systemCategories = useSystemCategories()
@@ -184,6 +199,9 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
   const [allBanks, setAllBanks] = useState<any[]>([])
   const [openInvoices, setOpenInvoices] = useState<any[]>([])
   const [partners, setPartners] = useState<any[]>([])
+  /** The one-off loads are in; `startEdit` reads partners to name rows. */
+  const [refsLoaded, setRefsLoaded] = useState(false)
+  const [pendingEdit, setPendingEdit] = useState<any>(editLog ?? null)
   const [allPartnerAccounts, setAllPartnerAccounts] = useState<any[]>([])
   const [partnerSearch, setPartnerSearch] = useState<Record<string, string>>({})
   const [plCategories, setPlCategories] = useState<any[]>([])
@@ -259,6 +277,10 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
     logId: string
     batchId: string
     label: string
+    /** The rows came out of a bank file, not somebody typing. The log keeps
+     *  the file's name on save, and is not relabelled as a manual entry. */
+    fromFile: boolean
+    fileName: string | null
     lockedCount: number
     /**
      * The months the editable rows sat in when the statement was opened.
@@ -349,6 +371,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       // A credit's figures are in its own currency; a missing one reads as
       // RSD, as in useCreditPayment.
       if (creds) setCredits(creds.map((c: any) => ({ ...c, currency: c.currency || 'RSD' })))
+      setRefsLoaded(true)
     }
     load()
   }, [])
@@ -510,57 +533,9 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
     setError(''); setNotice('')
     setDeleting(batchId)
     try {
-      const [{ count: txCount }, { count: ptCount }, { data: links }] = await Promise.all([
-        supabase.from('transactions').select('id', { count: 'exact', head: true })
-          .eq('import_batch_id', batchId).is('deleted_at', null),
-        supabase.from('passthrough').select('id', { count: 'exact', head: true })
-          .eq('import_batch_id', batchId).is('deleted_at', null),
-        supabase.from('invoice_transaction_links')
-          .select('invoice_id, transactions!inner(import_batch_id)')
-          .eq('transactions.import_batch_id', batchId),
-      ])
-
-      const invoiceIds = Array.from(new Set((links || []).map((l: any) => l.invoice_id)))
-      const { data: affected } = invoiceIds.length > 0
-        ? await supabase.from('v_invoice_status')
-            .select('invoice_number, calculated_status').in('id', invoiceIds)
-        : { data: [] as any[] }
-      const closing = (affected || []).filter((i: any) => i.calculated_status === 'paid')
-
-      const lines = [
-        `Obrisati „${log.file_name || 'ovaj izvod'}“ i sve što je proknjižio?`,
-        '',
-        `· transakcija: ${txCount ?? 0}`,
-      ]
-      if ((ptCount ?? 0) > 0) lines.push(`· prolaznih stavki: ${ptCount}`)
-      if (invoiceIds.length > 0) {
-        lines.push(`· raspodela na fakture: ${invoiceIds.length}`)
-        if (closing.length > 0) {
-          lines.push('')
-          lines.push(`Fakture koje se sada vode kao plaćene i ponovo će imati dug (${closing.length}):`)
-          lines.push(closing.slice(0, 8).map((i: any) => i.invoice_number || '(bez broja)').join(', ')
-            + (closing.length > 8 ? ` i još ${closing.length - 8}` : ''))
-        }
-      }
-      lines.push('')
-      lines.push('Ovo se ne može poništiti odavde.')
-
-      if (!window.confirm(lines.join('\n'))) { setDeleting(null); return }
-
-      const { data, error: rpcErr } = await supabase.rpc('delete_statement_cascade', {
-        p_batch_id: batchId,
-        p_deleted_by: null,
-      })
-      if (rpcErr) throw rpcErr
-
-      const r = (data || {}) as any
-      setNotice(
-        `Obrisano transakcija: ${r.transactions_deleted ?? 0}`
-        + ((r.passthroughs_deleted ?? 0) > 0 ? `, prolaznih stavki: ${r.passthroughs_deleted}` : '')
-        + `, uklonjeno raspodela: ${r.allocations_removed ?? 0}`
-        + ((r.installments_reopened ?? 0) > 0 ? `, ponovo otvoreno rata kredita: ${r.installments_reopened}` : '')
-        + ((r.invoices_restated ?? 0) > 0 ? `, faktura kojima se promenio status: ${r.invoices_restated}` : '')
-        + '.')
+      const counts = await gatherDeletion(supabase, batchId)
+      if (!window.confirm(deletionWarning(log.file_name, counts))) { setDeleting(null); return }
+      setNotice(deletionSummary(await deleteStatementBatch(supabase, batchId)))
       setHistoryRefresh(n => n + 1)
       onImported()
     } catch (err: any) {
@@ -695,12 +670,21 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       setRows(loaded)
       setRemovedRows([])
       setExpandedRow(null)
-      setStatementNumber(String(log.file_name || '').replace(/^Statement #/, '').replace(/^Izvod #/, '').trim())
+      // A file's name is not a statement number, so it is left out of that
+      // box rather than shown there as one.
+      setStatementNumber(log.import_type === 'bank_statement'
+        ? ''
+        : String(log.file_name || '').replace(/^Statement #/, '').replace(/^Izvod #/, '').trim())
       setEditDescription(log.note || '')
       if (log.default_currency) setDefaultCurrency(log.default_currency)
       setEditing({
         logId: log.id,
         batchId,
+        // Where these rows came from. A statement out of a bank file keeps
+        // the file's name when it is saved again, and is not relabelled as
+        // something typed in by hand.
+        fromFile: log.import_type === 'bank_statement',
+        fileName: log.file_name || null,
         label: log.file_name || 'Ručni unos',
         lockedCount: loaded.filter(r => r.locked).length,
         originalMonths: Array.from(new Set(
@@ -713,6 +697,23 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
     }
     setLoadingStatement(false)
   }
+
+  // Opened on a statement chosen somewhere else -- today, the bulk import's
+  // list of previous imports. The account and the company have to be the
+  // log's own before the rows can be loaded, because the editor locks both
+  // while a statement is open, and the partners have to be in before the rows
+  // can be named. Each pass sets one of those and comes back.
+  useEffect(() => {
+    if (!pendingEdit) return
+    if (company !== pendingEdit.company_id) { setCompany(pendingEdit.company_id); return }
+    if (bank !== pendingEdit.bank_id) { setBank(pendingEdit.bank_id); return }
+    if (!refsLoaded) return
+    const log = pendingEdit
+    setPendingEdit(null)
+    startEdit(log)
+    // `startEdit` is recreated every render and would re-run this on each one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingEdit, company, bank, refsLoaded])
 
   const validRows = rows.filter(r => r.date && (parseFloat(r.debit) > 0 || parseFloat(r.credit) > 0))
   const editableRows = rows.filter(r => !r.locked)
@@ -1517,12 +1518,12 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
       // ── The log entry, rewritten to match what the statement now holds ────
       const span = statementSpan(rows)
       const { error: logErr } = await supabase.from('import_logs').update({
-        file_name: statementLabel(statementNumber),
+        file_name: editedStatementName(editing, statementNumber),
         date_from: span.date_from,
         date_to: span.date_to,
         row_count: span.row_count,
         default_currency: defaultCurrency,
-        note: editDescription.trim() || `Ručno uneto stavki: ${span.row_count}`,
+        note: editDescription.trim() || editedStatementNote(editing, span.row_count),
       }).eq('id', editing.logId)
       if (logErr) throw logErr
 
@@ -1975,7 +1976,7 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                     value={invoiceSearch[row.id] || ''}
                                     onChange={e => { e.stopPropagation(); setInvoiceSearch(prev => ({ ...prev, [row.id]: e.target.value })) }}
                                     onClick={e => e.stopPropagation()}
-                                    placeholder="Pretraga po partneru ili broju fakture…"
+                                    placeholder="Pretraga po partneru, broju fakture ili iznosu…"
                                   />
                                   {(() => {
                                     // Counted over the same list the picker draws
@@ -2009,7 +2010,9 @@ export default function BankStatementDialog({ onClose, onImported }: Props) {
                                       .filter(inv => {
                                         const q = (invoiceSearch[row.id] || '').toLowerCase()
                                         if (!q) return true
-                                        return (inv.partner_name || '').toLowerCase().includes(q) || (inv.invoice_number || '').toLowerCase().includes(q)
+                                        return (inv.partner_name || '').toLowerCase().includes(q)
+                                          || (inv.invoice_number || '').toLowerCase().includes(q)
+                                          || matchesAmount(q, inv.amount, inv.amount_rsd, inv.remaining_rsd)
                                       })
                                       .filter(inv => !isHiddenForRow(
                                         invoiceClaim(inv, row.id).free,

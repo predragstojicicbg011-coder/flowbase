@@ -14,7 +14,6 @@ import BulkImport from '../components/BulkImport'
 import SefInboxDialog from '../components/SefInboxDialog'
 import BankStatementDialog from '../components/BankStatementDialog'
 import AutoMatchPanel from '../components/AutoMatchPanel'
-import PayrollDialog from '../components/PayrollDialog'
 import PayrollImportDialog from '../components/PayrollImportDialog'
 import SearchableSelect, { type SelectOption } from '../components/SearchableSelect'
 import { fmtMoney } from '../utils/formatters'
@@ -92,7 +91,8 @@ export default function Transactions() {
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [showSefInbox, setShowSefInbox] = useState(false)
   const [showBankStatement, setShowBankStatement] = useState(false)
-  const [showPayrollDialog, setShowPayrollDialog] = useState(false)
+  /** An `import_logs` row the statement editor should open straight onto. */
+  const [editStatementLog, setEditStatementLog] = useState<any>(null)
   const [showPayrollImport, setShowPayrollImport] = useState(false)
   const [showAutoMatch, setShowAutoMatch] = useState(false)
   const [editInvoice, setEditInvoice] = useState<any>(null)
@@ -566,13 +566,22 @@ export default function Transactions() {
             <div style={s.pageSub}>Fakture, transakcije i prolazne stavke svih firmi</div>
           </div>
           <div style={s.btnGroup}>
-            <button style={s.btnInvoice} onClick={() => { setEditInvoice(null); setShowInvoiceDialog(true) }}>📄 Nova faktura</button>
-            <button style={s.btnTransaction} onClick={() => { setEditTransaction(null); setShowTransactionDialog(true) }}>💳 Nova transakcija</button>
-            <button style={s.btnStatement} onClick={() => setShowBankStatement(true)}>🏦 Izvod</button>
-            <button style={s.btnBulk} onClick={() => setShowBulkImport(true)}>📥 Grupni uvoz</button>
-            <button style={s.btnBulk} onClick={() => setShowSefInbox(true)}>📨 SEF sanduče</button>
-            <button style={s.btnPayroll} onClick={() => setShowPayrollDialog(true)}>💼 Zarade</button>
-            <button style={s.btnPayrollImport} onClick={() => setShowPayrollImport(true)}>📊 Uvoz zarada</button>
+            <button style={s.btnInvoice} className="mf-primary-action"
+              onClick={() => { setEditInvoice(null); setShowInvoiceDialog(true) }}>📄 Nova faktura</button>
+            <button style={s.btnTransaction} className="mf-primary-action"
+              onClick={() => { setEditTransaction(null); setShowTransactionDialog(true) }}>💳 Nova transakcija</button>
+            {/* The four ways entries arrive. One control, because they are one
+                kind of thing -- not four more actions competing with the two
+                above them. */}
+            <div className="mf-intake">
+              <button className="mf-intake-btn" onClick={() => setShowBankStatement(true)}>🏦 Izvod</button>
+              <span className="mf-intake-divider" />
+              <button className="mf-intake-btn" onClick={() => setShowBulkImport(true)}>📥 Grupni uvoz</button>
+              <span className="mf-intake-divider" />
+              <button className="mf-intake-btn" onClick={() => setShowSefInbox(true)}>📨 SEF sanduče</button>
+              <span className="mf-intake-divider" />
+              <button className="mf-intake-btn" onClick={() => setShowPayrollImport(true)}>📊 Uvoz zarada</button>
+            </div>
           </div>
         </div>
 
@@ -830,12 +839,16 @@ export default function Transactions() {
                 <div style={{ fontSize: '32px', marginBottom: '12px' }}>💳</div>
                 <div style={{ fontSize: '15px', fontWeight: '500', color: '#DCE9F6', marginBottom: '6px' }}>Još nema transakcija</div>
                 <div style={{ fontSize: '13px', color: '#7A9BB8', marginBottom: '20px' }}>Kliknite „Nova transakcija“ ili koristite grupni uvoz.</div>
-                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-                  <button style={s.btnTransaction} onClick={() => setShowTransactionDialog(true)}>💳 Nova transakcija</button>
-                  <button style={s.btnStatement} onClick={() => setShowBankStatement(true)}>🏦 Izvod</button>
-                  <button style={s.btnBulk} onClick={() => setShowBulkImport(true)}>📥 Grupni uvoz</button>
-            <button style={s.btnPayroll} onClick={() => setShowPayrollDialog(true)}>💼 Zarade</button>
-            <button style={s.btnPayrollImport} onClick={() => setShowPayrollImport(true)}>📊 Uvoz zarada</button>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' as const }}>
+                  <button style={s.btnTransaction} className="mf-primary-action"
+                    onClick={() => setShowTransactionDialog(true)}>💳 Nova transakcija</button>
+                  <div className="mf-intake">
+                    <button className="mf-intake-btn" onClick={() => setShowBankStatement(true)}>🏦 Izvod</button>
+                    <span className="mf-intake-divider" />
+                    <button className="mf-intake-btn" onClick={() => setShowBulkImport(true)}>📥 Grupni uvoz</button>
+                    <span className="mf-intake-divider" />
+                    <button className="mf-intake-btn" onClick={() => setShowPayrollImport(true)}>📊 Uvoz zarada</button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -966,7 +979,13 @@ export default function Transactions() {
         <ReconcilePanel sourceType={reconcileSource.type} sourceId={reconcileSource.id} onClose={() => setReconcileSource(null)} onReconciled={() => fetchAll()} />
       )}
       {showBulkImport && (
-        <BulkImport onClose={() => setShowBulkImport(false)} onImported={() => fetchAll()} />
+        <BulkImport
+          onClose={() => setShowBulkImport(false)}
+          onImported={() => fetchAll()}
+          // Changing what an import posted is the statement editor's job, and
+          // it already reopens a batch properly. The import closes and hands
+          // the statement over rather than opening a dialog inside a dialog.
+          onEditStatement={log => { setShowBulkImport(false); setEditStatementLog(log); setShowBankStatement(true) }} />
       )}
       {showSefInbox && (
         <SefInboxDialog
@@ -983,10 +1002,10 @@ export default function Transactions() {
         />
       )}
       {showBankStatement && (
-        <BankStatementDialog onClose={() => setShowBankStatement(false)} onImported={() => fetchAll()} />
-      )}
-      {showPayrollDialog && (
-        <PayrollDialog onClose={() => setShowPayrollDialog(false)} onPosted={() => { setShowPayrollDialog(false); fetchAll() }} />
+        <BankStatementDialog
+          onClose={() => { setShowBankStatement(false); setEditStatementLog(null) }}
+          onImported={() => fetchAll()}
+          editLog={editStatementLog} />
       )}
       {showPayrollImport && (
         <PayrollImportDialog onClose={() => setShowPayrollImport(false)} onPosted={() => { setShowPayrollImport(false); fetchAll() }} />
@@ -1003,13 +1022,9 @@ const s: Record<string, React.CSSProperties> = {
   pageHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.5rem' },
   pageTitle: { fontFamily: "'DM Serif Display', Georgia, serif", fontSize: '24px', fontWeight: '400', color: '#DCE9F6', marginBottom: '4px' },
   pageSub: { fontSize: '13px', color: '#7A9BB8' },
-  btnGroup: { display: 'flex', gap: '8px' },
+  btnGroup: { display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' as const },
   btnInvoice: { background: '#00D47E', color: '#060E1A', border: 'none', borderRadius: '8px', padding: '9px 16px', fontFamily: 'system-ui,sans-serif', fontSize: '13px', fontWeight: '500', cursor: 'pointer' },
   btnTransaction: { background: '#185FA5', color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 16px', fontFamily: 'system-ui,sans-serif', fontSize: '13px', fontWeight: '500', cursor: 'pointer' },
-  btnStatement: { background: 'transparent', color: '#9D97FF', border: '0.5px solid rgba(157,151,255,0.4)', borderRadius: '8px', padding: '9px 16px', fontFamily: 'system-ui,sans-serif', fontSize: '13px', fontWeight: '500', cursor: 'pointer' },
-  btnBulk: { background: 'transparent', color: '#4EA8FF', border: '0.5px solid rgba(78,168,255,0.4)', borderRadius: '8px', padding: '9px 16px', fontFamily: 'system-ui,sans-serif', fontSize: '13px', fontWeight: '500', cursor: 'pointer' },
-  btnPayroll: { background: 'rgba(0,212,126,0.10)', color: '#00D47E', border: '0.5px solid rgba(0,212,126,0.4)', borderRadius: '8px', padding: '9px 16px', fontFamily: 'system-ui,sans-serif', fontSize: '13px', fontWeight: '500', cursor: 'pointer' },
-  btnPayrollImport: { background: 'rgba(245,166,35,0.10)', color: '#F5A623', border: '0.5px solid rgba(245,166,35,0.4)', borderRadius: '8px', padding: '9px 16px', fontFamily: 'system-ui,sans-serif', fontSize: '13px', fontWeight: '500', cursor: 'pointer' },
   summaryRow: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '1.5rem' },
   summaryCard: { background: '#0D1B2C', border: '1px solid rgba(255,255,255,0.075)', borderRadius: '10px', padding: '14px 16px' },
   summaryCardAlert: { border: '1px solid rgba(255,91,90,0.3)', background: 'rgba(255,91,90,0.07)' },

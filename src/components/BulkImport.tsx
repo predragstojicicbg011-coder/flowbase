@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '../supabase'
+import {
+  editedAmounts, amountText, correctLine, isoDate,
+} from '../services/statementLineEdit'
+import {
+  gatherDeletion, deletionWarning, deletionSummary, deleteStatementBatch,
+} from '../services/statementDelete'
+import { matchesAmount } from '../services/amountSearch'
 import { useCompanies } from '../contexts/CompaniesContext'
 import InlineCategoryAdd from './InlineCategoryAdd'
 import * as XLSX from 'xlsx'
@@ -52,6 +59,12 @@ import { countOf } from '../utils/plural'
 interface Props {
   onClose: () => void
   onImported: () => void
+  /**
+   * Hand a past import to the statement editor, which is where a posted
+   * statement is changed. Absent, the Edit buttons are not offered at all
+   * rather than offered and dead.
+   */
+  onEditStatement?: (log: any) => void
 }
 
 interface ParsedRow {
@@ -395,12 +408,9 @@ function parseWio(content: string): ParsedRow[] {
   return rows
 }
 
-function formatDate(d: string): string {
-  if (!d) return ''
-  const parts = d.split('.')
-  if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`
-  return d
-}
+// One rule for both the booking and the box the owner types in, so a date
+// cannot be shown one way and stored another.
+const formatDate = (d: string): string => isoDate(d)
 
 /**
  * A row's four stored columns, as the analysis step attached them, or null.
@@ -472,7 +482,7 @@ const FORMAT_LABELS: Record<string, string> = {
   amex: '💳 American Express', wio: '🇦🇪 Wio Bank', paypal: '🅿️ PayPal',
 }
 
-export default function BulkImport({ onClose, onImported }: Props) {
+export default function BulkImport({ onClose, onImported, onEditStatement }: Props) {
   const [step, setStep] = useState<'upload' | 'review' | 'posting' | 'done'>('upload')
   const [rows, setRows] = useState<ImportRow[]>([])
   const [detectedFormat, setDetectedFormat] = useState<string>('')
@@ -517,6 +527,11 @@ export default function BulkImport({ onClose, onImported }: Props) {
   const [settlementWarning, setSettlementWarning] = useState('')
   const [importHistory, setImportHistory] = useState<any[]>([])
   const [historyExpanded, setHistoryExpanded] = useState(false)
+  /** The batch currently being deleted, so its button alone shows it. */
+  const [deletingBatch, setDeletingBatch] = useState<string | null>(null)
+  const [historyNotice, setHistoryNotice] = useState('')
+  const [historyError, setHistoryError] = useState('')
+  const [historyRefresh, setHistoryRefresh] = useState(0)
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [reviewPartnerSearch, setReviewPartnerSearch] = useState<Record<string, string>>({})
   const [savingAccount, setSavingAccount] = useState<Record<string, boolean>>({})
@@ -630,7 +645,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
       if (data && data.length > 0) setHistoryExpanded(true)
     }
     fetchHistory()
-  }, [company, bank])
+  }, [company, bank, historyRefresh])
 
   useEffect(() => {
     if (!company) return
@@ -970,6 +985,48 @@ export default function BulkImport({ onClose, onImported }: Props) {
     setAnalyzing(false)
     setStep('review')
   }
+
+  /**
+   * Correct what the file said about a line.
+   *
+   * Everything downstream -- the posting, the totals, the date range, the AI
+   * proposal -- already reads `parsed`, so a correction needs no plumbing of
+   * its own and cannot be read by one place and missed by another.
+   *
+   * `import_hash` lives on the row, NOT here, and is taken once from the file
+   * before any of this. A correction therefore leaves it alone, which is the
+   * point: it answers "has this line of this file been imported already?",
+   * and recomputing it would make a corrected row look new and quietly undo
+   * the protection against importing the same statement twice.
+   */
+  /**
+   * Undo an import: delete everything it posted.
+   *
+   * The same counting, the same warning and the same single-transaction
+   * delete the statement dialog does, from the shared module -- because the
+   * dangerous part is not the delete, it is the SENTENCE, and two copies of
+   * it would drift apart.
+   */
+  const deleteImport = async (log: any) => {
+    const batchId: string = log.filing_ref
+    if (!batchId || deletingBatch) return
+    setHistoryError(''); setHistoryNotice('')
+    setDeletingBatch(batchId)
+    try {
+      const counts = await gatherDeletion(supabase, batchId)
+      if (!window.confirm(deletionWarning(log.file_name, counts))) { setDeletingBatch(null); return }
+      setHistoryNotice(deletionSummary(await deleteStatementBatch(supabase, batchId)))
+      setHistoryRefresh(n => n + 1)
+      onImported()
+    } catch (err: any) {
+      setHistoryError(`Uvoz nije obrisan: ${err.message}`)
+    }
+    setDeletingBatch(null)
+  }
+
+  const updateParsed = useCallback((id: string, patch: Partial<ParsedRow>) => {
+    setRows(prev => correctLine(prev, id, patch))
+  }, [])
 
   const updateRow = useCallback((id: string, updates: Partial<ImportRow>) => {
     setRows(prev => prev.map(r => r.parsed.id === id ? { ...r, ...updates } : r))
@@ -1712,6 +1769,12 @@ export default function BulkImport({ onClose, onImported }: Props) {
                     </div>
                     <span style={{ fontSize: '10px', color: '#7A9BB8' }}>{historyExpanded ? '▲ Sakrij' : '▼ Prikaži'}</span>
                   </div>
+                  {historyNotice && (
+                    <div style={{ ...s.infoBox, background: 'rgba(0,212,126,0.08)', borderColor: 'rgba(0,212,126,0.25)', color: '#00D47E', marginBottom: '10px' }}>{historyNotice}</div>
+                  )}
+                  {historyError && (
+                    <div style={{ ...s.infoBox, background: DIALOG.redFill, borderColor: DIALOG.redSoft, color: DIALOG.red, marginBottom: '10px' }}>⚠️ {historyError}</div>
+                  )}
                   {historyExpanded && (
                     importHistory.length === 0 ? (
                       <div style={{ fontSize: '12px', color: '#7A9BB8', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -1731,7 +1794,33 @@ export default function BulkImport({ onClose, onImported }: Props) {
                             <div style={{ fontSize: '11px', color: '#7A9BB8', whiteSpace: 'nowrap' as const }}>
                               {new Date(log.created_at).toLocaleDateString('sr-Latn-RS')}
                             </div>
-                            <div style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: 'rgba(0,212,126,0.10)', color: '#00D47E' }}>✓ Uvezeno</div>
+                            <div style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: 'rgba(0,212,126,0.10)', color: '#00D47E', whiteSpace: 'nowrap' as const }}>✓ Uvezeno</div>
+                            {/* Without a batch id nothing ties this import's
+                                rows together, so there is no statement to
+                                reopen. Say so rather than offer a button that
+                                cannot work. */}
+                            {log.filing_ref ? (
+                              <>
+                                {onEditStatement && (
+                                  <button
+                                    style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '4px 11px', border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', background: 'transparent', color: DIALOG.dim, cursor: 'pointer', whiteSpace: 'nowrap' as const }}
+                                    title="Otvori ovaj uvoz u uređivaču izvoda i izmeni šta je proknjižio"
+                                    onClick={() => onEditStatement(log)}>✎ Izmeni</button>
+                                )}
+                                <button
+                                  style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '4px 11px', border: '0.5px solid ' + DIALOG.red, borderRadius: '6px', background: 'transparent', color: DIALOG.red, cursor: deletingBatch ? 'wait' : 'pointer', whiteSpace: 'nowrap' as const, opacity: deletingBatch === log.filing_ref ? 0.6 : 1 }}
+                                  disabled={!!deletingBatch}
+                                  title="Obriši ovaj uvoz i svaku transakciju, raspodelu i ratu koju je napravio"
+                                  onClick={() => deleteImport(log)}>
+                                  {deletingBatch === log.filing_ref ? '…' : '🗑 Obriši'}
+                                </button>
+                              </>
+                            ) : (
+                              <span style={{ fontSize: '10px', color: DIALOG.faint, padding: '4px 6px', whiteSpace: 'nowrap' as const }}
+                                title="Ovaj uvoz je prošao pre nego što su se redovi pratili kao grupa, pa se ne mogu vezati za njega. Te transakcije se menjaju pojedinačno.">
+                                nije povezan
+                              </span>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1837,6 +1926,68 @@ export default function BulkImport({ onClose, onImported }: Props) {
                       {isExpanded && (
                         <div style={s.editPanel} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
                           {row.proposal && <div style={s.aiNotes}>🤖 AI: {row.proposal.notes}</div>}
+
+                          {/* The line as the file read it, and correctable --
+                              a statement is not always right, and until now
+                              only the bank statement dialog let it be fixed. */}
+                          <div style={{ marginBottom: '12px' }}>
+                            <div style={{ ...s.editLbl, marginBottom: '6px' }}>Sama stavka</div>
+                            <div style={s.editGrid2}>
+                              <div style={s.editField}>
+                                <label style={s.editLbl}>Datum</label>
+                                {/* A date input shows nothing at all when it
+                                    is handed `14.10.2026`, which is how a
+                                    statement writes it and how the file is
+                                    kept. */}
+                                <input type="date" style={s.editInput} value={isoDate(p.date)}
+                                  onChange={e => updateParsed(p.id, { date: e.target.value })} />
+                              </div>
+                              <div style={s.editField}>
+                                <label style={s.editLbl}>Valuta</label>
+                                <input style={s.editInput} value={p.currency || ''}
+                                  onChange={e => updateParsed(p.id, { currency: e.target.value })} />
+                              </div>
+                              <div style={s.editField}>
+                                <label style={s.editLbl}>Isplata</label>
+                                <input type="number" style={{ ...s.editInput, color: (p.debit || 0) > 0 ? DIALOG.red : undefined }}
+                                  value={amountText(p.debit)} placeholder="—"
+                                  onChange={e => updateParsed(p.id, editedAmounts('debit', e.target.value, { debit: p.debit, credit: p.credit }))} />
+                              </div>
+                              <div style={s.editField}>
+                                <label style={s.editLbl}>Uplata</label>
+                                <input type="number" style={{ ...s.editInput, color: (p.credit || 0) > 0 ? DIALOG.accent : undefined }}
+                                  value={amountText(p.credit)} placeholder="—"
+                                  onChange={e => updateParsed(p.id, editedAmounts('credit', e.target.value, { debit: p.debit, credit: p.credit }))} />
+                              </div>
+                            </div>
+                            <div style={{ ...s.editField, marginTop: '10px' }}>
+                              <label style={s.editLbl}>Opis</label>
+                              <input style={s.editInput} value={p.description || ''}
+                                onChange={e => updateParsed(p.id, { description: e.target.value })} />
+                            </div>
+                            <div style={{ ...s.editGrid2, marginTop: '10px' }}>
+                              <div style={s.editField}>
+                                <label style={s.editLbl}>Broj računa</label>
+                                <input style={s.editInput} value={p.account_number || ''} placeholder="265-…"
+                                  onChange={e => updateParsed(p.id, { account_number: e.target.value })} />
+                              </div>
+                              <div style={s.editField}>
+                                <label style={s.editLbl}>Model</label>
+                                <input style={s.editInput} value={p.model || ''} placeholder="97"
+                                  onChange={e => updateParsed(p.id, { model: e.target.value })} />
+                              </div>
+                              <div style={s.editField}>
+                                <label style={s.editLbl}>Poziv na broj</label>
+                                <input style={s.editInput} value={p.reference_number || ''}
+                                  onChange={e => updateParsed(p.id, { reference_number: e.target.value })} />
+                              </div>
+                              <div style={s.editField}>
+                                <label style={s.editLbl}>Partner na stavci</label>
+                                <input style={s.editInput} value={p.partner_name || ''}
+                                  onChange={e => updateParsed(p.id, { partner_name: e.target.value })} />
+                              </div>
+                            </div>
+                          </div>
 
                           <div style={s.editGrid2}>
                             {/* Partner field with dropdown search */}
@@ -2051,7 +2202,7 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                     value={invoiceSearch[p.id] || ''}
                                     onChange={e => { e.stopPropagation(); setInvoiceSearch(prev => ({ ...prev, [p.id]: e.target.value })) }}
                                     onClick={e => e.stopPropagation()}
-                                    placeholder="Pretraga po partneru ili broju fakture…"
+                                    placeholder="Pretraga po partneru, broju fakture ili iznosu…"
                                     autoFocus={invoicePickerOpen[p.id]}
                                   />
                                   {(() => {
@@ -2088,7 +2239,9 @@ export default function BulkImport({ onClose, onImported }: Props) {
                                       .filter(inv => {
                                         const q = (invoiceSearch[p.id] || '').toLowerCase()
                                         if (!q) return true
-                                        return (inv.partner_name || '').toLowerCase().includes(q) || (inv.invoice_number || '').toLowerCase().includes(q)
+                                        return (inv.partner_name || '').toLowerCase().includes(q)
+                                          || (inv.invoice_number || '').toLowerCase().includes(q)
+                                          || matchesAmount(q, inv.amount, inv.amount_rsd, inv.remaining_rsd)
                                       })
                                       .filter(inv => !isHiddenForRow(
                                         freeForRow(
