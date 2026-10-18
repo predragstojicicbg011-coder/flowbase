@@ -17,6 +17,7 @@ import { sefPdfUrl } from '../services/sef/sefPdf'
 import {
   decideOnSef, readSefDecisionsEnabled, decisionActions, SWITCH_OFF_MESSAGE, type SefDecision,
 } from '../services/sef/sefDecide'
+import { sefDecisionGuard, sefOutsideBadge, sefStatusRank } from '../services/sef/sefDecisionGuard'
 import { useAuth } from '../contexts/AuthContext'
 import { fetchScripts } from '../services/quickFillStore'
 import { getBookRates, rateFor } from '../services/bookAmounts'
@@ -335,8 +336,11 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     return c
   }, [rows])
 
+  // New invoices (still New on SEF) first, the rest in the order they came
+  // (newest sent first). The sort is stable, so within each group it holds.
   const visible = useMemo(
-    () => (filter === 'all' ? rows : rows.filter(r => r.state === filter)),
+    () => (filter === 'all' ? rows : rows.filter(r => r.state === filter))
+      .slice().sort((a, b) => sefStatusRank(a.sef_status) - sefStatusRank(b.sef_status)),
     [rows, filter])
 
   const ledgerByPartner = useMemo(() => {
@@ -393,7 +397,8 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     if (!r.ok) {
       if (r.code === 'switch_off') setDecisionsEnabled(false)
       // Reloaded when SEF may have the decision even though we do not.
-      if (r.code === 'saved_on_sef_only' || r.code === 'already_accepted' || r.code === 'already_rejected') await load()
+      if (r.code === 'saved_on_sef_only' || r.code === 'already_accepted' || r.code === 'already_rejected'
+        || r.code === 'accepted_outside' || r.code === 'rejected_outside' || r.code === 'withdrawn') await load()
       setRowError({ id: row.id, text: r.message })
       return
     }
@@ -635,7 +640,16 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
       ledger)
     const proposal = proposalFor(row, match)
     const opened = !!row.ubl_fetched_at
-    const sefActions = decisionActions(row)
+    // What the row allows, narrowed by what SEF's own status already settles
+    // (decided in the SEF portal, or withdrawn by the supplier).
+    const allowed = decisionActions(row)
+    const acceptRefusal = sefDecisionGuard(row, true)
+    const rejectRefusal = sefDecisionGuard(row, false)
+    const sefActions = { accept: allowed.accept && !acceptRefusal, reject: allowed.reject && !rejectRefusal }
+    const guardNote = allowed.accept && acceptRefusal ? acceptRefusal.message
+      : allowed.reject && rejectRefusal ? 'Faktura je već odbijena na SEF-u van aplikacije — može se još samo prihvatiti.'
+      : null
+    const outsideBadge = sefOutsideBadge(row)
 
     return (
       <div key={row.id} data-row={row.id} style={s.row}>
@@ -644,6 +658,13 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
             <div style={s.supplierLine}>
               <span style={s.supplier}>{row.supplier_name || 'Nepoznat dobavljač'}</span>
               {isCreditNote(row) && <span style={{ ...s.badge, background: DIALOG.blueFill, color: DIALOG.blue }}>Knjižno odobrenje</span>}
+              {outsideBadge && (
+                <span style={{
+                  ...s.badge,
+                  background: outsideBadge.tone === 'red' ? DIALOG.redFill : DIALOG.raised,
+                  color: outsideBadge.tone === 'red' ? DIALOG.red : DIALOG.dim,
+                }}>{outsideBadge.label}</span>
+              )}
               {!match && (
                 <button style={s.linkBtn} disabled={busy} onClick={() => setNewSupplier(row)}>Nov dobavljač — napravi</button>
               )}
@@ -768,6 +789,9 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
 
         {declining?.id !== row.id && deciding?.row.id !== row.id && (
           <div style={s.actions}>
+            {keepsBooks && guardNote && (
+              <span style={{ ...s.hint, marginTop: 0, alignSelf: 'center', marginRight: 'auto' }}>{guardNote}</span>
+            )}
             {keepsBooks && (sefActions.accept || sefActions.reject) && (
               <>
                 {!decisionsEnabled && (

@@ -153,3 +153,61 @@ describe('deciding on SEF from the inbox', () => {
     expect(screen.getByText('Potvrdi prihvatanje na SEF-u')).toBeInTheDocument()
   })
 })
+
+describe('decisions made on SEF outside the app', () => {
+  it('marks an invoice accepted in the SEF portal and offers no decision', async () => {
+    mockState.rows = [row({ sef_status: 'Approved' })]
+    await show()
+    expect(screen.getByText('Odlučeno van aplikacije')).toBeInTheDocument()
+    expect(screen.getByText(/već prihvaćena na SEF-u van aplikacije/)).toBeInTheDocument()
+    expect(screen.queryByText('Prihvati na SEF-u')).not.toBeInTheDocument()
+    expect(screen.queryByText('Odbij na SEF-u')).not.toBeInTheDocument()
+  })
+
+  it('lets an invoice rejected in the SEF portal still be accepted, but not rejected again', async () => {
+    mockState.rows = [row({ sef_status: 'Rejected' })]
+    await show()
+    expect(screen.getByText('Odlučeno van aplikacije')).toBeInTheDocument()
+    expect(screen.getByText('Prihvati na SEF-u')).toBeEnabled()
+    expect(screen.queryByText('Odbij na SEF-u')).not.toBeInTheDocument()
+    expect(screen.getByText(/može se još samo prihvatiti/)).toBeInTheDocument()
+  })
+
+  it.each([['Storno', 'Storno'], ['Cancelled', 'Otkazana']])('offers nothing on a %s invoice', async (status, label) => {
+    mockState.rows = [row({ sef_status: status })]
+    await show()
+    expect(screen.getByText(label)).toBeInTheDocument()
+    expect(screen.getByText('Dobavljač je otkazao ili stornirao fakturu — odluka nije moguća.')).toBeInTheDocument()
+    expect(screen.queryByText('Prihvati na SEF-u')).not.toBeInTheDocument()
+    expect(screen.queryByText('Odbij na SEF-u')).not.toBeInTheDocument()
+  })
+
+  it('does not mark the app own decision as made outside', async () => {
+    mockState.rows = [row({ sef_status: 'Approved', sef_decision: 'accepted' })]
+    await show()
+    expect(screen.queryByText('Odlučeno van aplikacije')).not.toBeInTheDocument()
+  })
+
+  it('shows the server refusal of an already decided invoice in the same words', async () => {
+    const msg = 'Faktura je već prihvaćena na SEF-u van aplikacije (status: Prihvaćena). Nova odluka nije poslata.'
+    mockState.invoke.mockResolvedValue({
+      data: null,
+      error: { message: 'x', context: { status: 409, json: async () => ({ code: 'accepted_outside', error: msg }) } },
+    })
+    await show()
+    fireEvent.click(screen.getByText('Prihvati na SEF-u'))
+    fireEvent.click(screen.getByText('Potvrdi prihvatanje na SEF-u'))
+    expect(await screen.findByRole('alert')).toHaveTextContent(msg)
+    expect(mockState.invoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('lists invoices still New on SEF first', async () => {
+    mockState.rows = [
+      row({ id: 'a', supplier_name: 'Prvi doo', sef_status: 'Seen' }),
+      row({ id: 'b', sef_status: 'New', ubl_fetched_at: null }),
+    ]
+    await show()
+    const order = Array.from(document.querySelectorAll('[data-row]')).map(e => e.getAttribute('data-row'))
+    expect(order).toEqual(['b', 'a'])
+  })
+})

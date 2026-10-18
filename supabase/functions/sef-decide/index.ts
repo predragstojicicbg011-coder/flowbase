@@ -14,14 +14,18 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 //   * a rejection carries a comment;
 //   * the invoice has been opened (its document fetched) — nobody accepts a
 //     bill nobody has read;
-//   * an accepted invoice is final; a rejected one may still be accepted.
+//   * an accepted invoice is final; a rejected one may still be accepted;
+//   * SEF's own status, as the last pull saw it, has not settled it already:
+//     the accounting firm may have accepted or rejected it in the SEF portal,
+//     or the supplier cancelled or stornoed it (`decisionGuard` below).
 //
 // Then SEF is called EXACTLY ONCE. The call is not safe to repeat — a timeout
 // does not mean SEF did nothing — so nothing here retries, and the person is
 // told to try again only after checking.
 //
 // Every attempt that reaches the call is recorded in `sef_decisions`, whatever
-// came back. Only a success updates the inbox row.
+// came back; a refusal before the call is not an attempt on SEF and is not
+// recorded. Only a success updates the inbox row.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -67,6 +71,41 @@ function readSefDecisionResponse(body: unknown) {
     invoiceNumber: typeof number === 'string' && number.trim() ? number.trim() : null,
     message: typeof message === 'string' && message.trim() ? message.trim() : null,
   }
+}
+
+// ─── What SEF's status already settles ──────────────────────────────────────
+//
+// A copy of `src/services/sef/sefDecisionGuard.ts`, where it is tested.
+// Change both together.
+
+const ACCEPTED_OUTSIDE_MESSAGE =
+  'Faktura je već prihvaćena na SEF-u van aplikacije (status: Prihvaćena). Nova odluka nije poslata.'
+const REJECTED_OUTSIDE_MESSAGE =
+  'Faktura je već odbijena na SEF-u van aplikacije (status: Odbijena). Nova odluka nije poslata.'
+const WITHDRAWN_MESSAGE =
+  'Dobavljač je otkazao ili stornirao fakturu — odluka nije moguća.'
+
+type GuardRefusal = { code: 'accepted_outside' | 'rejected_outside' | 'withdrawn'; message: string }
+const norm = (s: string | null | undefined) => (s || '').trim().toLowerCase()
+
+function decisionGuard(row: { sef_status: string | null; sef_decision: string | null }, accepted: boolean): GuardRefusal | null {
+  const status = norm(row.sef_status)
+  if (status === 'cancelled' || status === 'storno') return { code: 'withdrawn', message: WITHDRAWN_MESSAGE }
+  if (status === 'approved' && row.sef_decision !== 'accepted') return { code: 'accepted_outside', message: ACCEPTED_OUTSIDE_MESSAGE }
+  if (status === 'rejected' && !accepted && row.sef_decision !== 'rejected') return { code: 'rejected_outside', message: REJECTED_OUTSIDE_MESSAGE }
+  return null
+}
+
+function alreadyDecidedRefusal(status: string | null, message: string | null, accepted: boolean): GuardRefusal | null {
+  const st = norm(status)
+  const text = norm(message)
+  if (st === 'cancelled' || st === 'storno' || /storn|cancel|otkazan/.test(text)) return { code: 'withdrawn', message: WITHDRAWN_MESSAGE }
+  if (st === 'approved') return { code: 'accepted_outside', message: ACCEPTED_OUTSIDE_MESSAGE }
+  if (st === 'rejected' && !accepted) return { code: 'rejected_outside', message: REJECTED_OUTSIDE_MESSAGE }
+  if (!/already|već|vec /.test(text)) return null
+  if (/approv|accept|prihva/.test(text)) return { code: 'accepted_outside', message: ACCEPTED_OUTSIDE_MESSAGE }
+  if (/reject|odbij/.test(text)) return accepted ? null : { code: 'rejected_outside', message: REJECTED_OUTSIDE_MESSAGE }
+  return null
 }
 
 Deno.serve(async (req) => {
@@ -132,7 +171,7 @@ Deno.serve(async (req) => {
   // ── THE ROW ─────────────────────────────────────────────────────────────
   const { data: row, error: rowErr } = await supabase
     .from('sef_inbox')
-    .select('id, company_id, sef_invoice_id, ubl_fetched_at, sef_decision')
+    .select('id, company_id, sef_invoice_id, ubl_fetched_at, sef_decision, sef_status')
     .eq('id', inboxId).maybeSingle()
   if (rowErr) return fail(500, 'failed', `Faktura nije mogla da se pročita: ${rowErr.message}`)
   if (!row) return fail(404, 'not_found', 'Te fakture nema u SEF sandučetu.')
@@ -146,6 +185,10 @@ Deno.serve(async (req) => {
   if (row.sef_decision === 'rejected' && !accepted) {
     return fail(409, 'already_rejected', 'Faktura je već odbijena na SEF-u. Može se još samo prihvatiti.')
   }
+  // Decided in the SEF portal, or withdrawn by the supplier. Not sent, and not
+  // recorded: nothing reached SEF.
+  const settled = decisionGuard(row, accepted)
+  if (settled) return fail(409, settled.code, settled.message, { sef_status: row.sef_status })
 
   // ── THE KEY ─────────────────────────────────────────────────────────────
   // Read exactly as `sef-fetch-invoice` reads it, including `extra.base_url`,
@@ -203,6 +246,7 @@ Deno.serve(async (req) => {
   if (!res.ok || answer.success !== true) {
     const detail = answer.message || (parsed ? '' : text.slice(0, 300))
     let status: number, code: string, msg: string
+    let settledOnSef: GuardRefusal | null = null
     if (res.status === 401) {
       status = 401; code = 'key_rejected'
       msg = 'SEF je odbio API ključ. Proverite ga na SEF-u (Podešavanja → API) i u integration_credentials.'
@@ -212,6 +256,9 @@ Deno.serve(async (req) => {
     } else if (res.status >= 500) {
       status = 502; code = 'sef_unavailable'
       msg = 'SEF nije dostupan, pokušajte ponovo.'
+    } else if ((settledOnSef = alreadyDecidedRefusal(answer.status, detail, accepted))) {
+      // The status had not reached us yet: SEF says it is already decided.
+      status = 409; code = settledOnSef.code; msg = settledOnSef.message
     } else if (!res.ok) {
       status = 422; code = 'sef_refused'
       msg = `SEF je odbio odluku (${res.status})${detail ? `: ${detail}` : '.'}`

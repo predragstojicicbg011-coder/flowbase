@@ -22,6 +22,8 @@ export type SefDecideErrorCode =
   | 'not_opened' | 'already_accepted' | 'already_rejected' | 'not_found'
   | 'key_rejected' | 'key_forbidden' | 'sef_refused' | 'sef_unavailable'
   | 'saved_on_sef_only' | 'no_credentials' | 'bad_request' | 'failed'
+  // Decided or withdrawn on SEF outside the app (`sefDecisionGuard.ts`).
+  | 'accepted_outside' | 'rejected_outside' | 'withdrawn'
 
 export type SefDecideResult =
   | {
@@ -95,6 +97,7 @@ const CODES: readonly SefDecideErrorCode[] = [
   'not_opened', 'already_accepted', 'already_rejected', 'not_found',
   'key_rejected', 'key_forbidden', 'sef_refused', 'sef_unavailable',
   'saved_on_sef_only', 'no_credentials', 'bad_request', 'failed',
+  'accepted_outside', 'rejected_outside', 'withdrawn',
 ]
 
 /** What the function's status means when its body names no code. */
