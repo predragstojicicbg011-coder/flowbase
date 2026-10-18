@@ -14,6 +14,10 @@ import { proposeClassification, type PastInvoice, type Proposal } from '../servi
 import { parseUbl } from '../services/sef/ublInvoice'
 import { draftFromUbl, reviewNotesFor, bookedDateOf } from '../services/sef/draftFromUbl'
 import { sefPdfUrl } from '../services/sef/sefPdf'
+import {
+  decideOnSef, readSefDecisionsEnabled, decisionActions, SWITCH_OFF_MESSAGE, type SefDecision,
+} from '../services/sef/sefDecide'
+import { useAuth } from '../contexts/AuthContext'
 import { fetchScripts } from '../services/quickFillStore'
 import { getBookRates, rateFor } from '../services/bookAmounts'
 import type { ScriptLike } from '../services/expenseSplit'
@@ -57,6 +61,17 @@ interface SefRow {
   ubl_fetched_at: string | null
   /** Set once the invoice's PDF is kept in the private `sef-pdf` bucket. */
   pdf_path: string | null
+  /** The decision SEF has recorded, made from here through `sef-decide`. */
+  sef_decision: SefDecision | null
+  sef_decision_comment: string | null
+  sef_decided_at: string | null
+  sef_decided_by_name: string | null
+}
+
+/** A decision on SEF waiting for its confirmation. */
+interface Deciding {
+  row: SefRow
+  accepted: boolean
 }
 
 interface SyncRun {
@@ -83,6 +98,7 @@ const INBOX_COLUMNS = [
   'supplier_vat_number', 'supplier_registration_number', 'amount', 'currency',
   'delivery_date', 'due_date', 'sent_date', 'sef_status', 'state',
   'dismiss_reason', 'dismissed_at', 'imported_at', 'ubl_fetched_at', 'pdf_path',
+  'sef_decision', 'sef_decision_comment', 'sef_decided_at', 'sef_decided_by_name',
 ].join(', ')
 
 const LEDGER_COLUMNS = [
@@ -183,6 +199,13 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
   // The refusal belongs to the row it is about: a banner at the top of a long
   // scroll is off-screen from the button that was pressed.
   const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null)
+  const [rowNotice, setRowNotice] = useState<{ id: string; text: string } | null>(null)
+  // Accepting or rejecting ON SEF. Off until an administrator turns it on, and
+  // only for the people who keep the books.
+  const { canEdit: keepsBooks } = useAuth()
+  const [decisionsEnabled, setDecisionsEnabled] = useState(false)
+  const [deciding, setDeciding] = useState<Deciding | null>(null)
+  const [decisionComment, setDecisionComment] = useState('')
 
   // State is asynchronous and a double click arrives faster than a render, so
   // the guard is a ref. What a second click would cost is a SEF call and a
@@ -202,7 +225,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     const problems: string[] = []
     const today = new Date().toLocaleDateString('en-CA')
 
-    const [inbox, ledgerRows, partnerRows, companyRows, scriptRows, complete, failed, floor] = await Promise.all([
+    const [inbox, ledgerRows, partnerRows, companyRows, scriptRows, complete, failed, floor, decisionsOn] = await Promise.all([
       // Paged, because PostgREST caps a response at 1000 rows and says nothing.
       // `nullsFirst: false` because a descending sort otherwise puts undated
       // rows above everything that has a date.
@@ -271,6 +294,8 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
       // start instead.
       Promise.resolve(supabase.rpc('sef_pull_window', { p_from: '1900-01-01', p_to: today }))
         .then((r: any) => r.data?.[0]?.date_from ?? '', () => ''),
+      // Anything but a readable `true` is off.
+      readSefDecisionsEnabled(supabase),
     ])
 
     if (!mounted.current) return
@@ -286,6 +311,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     setLastFailure(failed)
     // 1900 is the stand-in for "no floor configured".
     setPullFrom(floor && floor > '2000' ? floor : '')
+    setDecisionsEnabled(decisionsOn)
     setError(problems.join(' '))
     setLoading(false)
   }, [])
@@ -349,6 +375,36 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     if (!data || data.length === 0) { setRowError({ id: declining.id, text: 'Ništa nije promenjeno. Faktura je možda uklonjena ili nije vaša da je odbijete.' }); return }
     setDeclining(null); setReason('')
     await load()
+  })
+
+  /**
+   * Accepts or rejects the invoice ON SEF, after the confirmation panel.
+   *
+   * Through `exclusive`, like the fetch: a double click would be a second
+   * decision sent to a register, and the call is not safe to repeat. A
+   * failure is shown on the row and never retried from here.
+   */
+  const decideOnSefNow = () => exclusive(async () => {
+    if (!deciding) return
+    const { row, accepted } = deciding
+    setError(''); setNotice(''); setRowError(null); setRowNotice(null)
+    const r = await decideOnSef(supabase, { inboxId: row.id, accepted, comment: decisionComment })
+    if (!mounted.current) return
+    if (!r.ok) {
+      if (r.code === 'switch_off') setDecisionsEnabled(false)
+      // Reloaded when SEF may have the decision even though we do not.
+      if (r.code === 'saved_on_sef_only' || r.code === 'already_accepted' || r.code === 'already_rejected') await load()
+      setRowError({ id: row.id, text: r.message })
+      return
+    }
+    setDeciding(null); setDecisionComment('')
+    await load()
+    const who = [r.decidedByName, r.decidedAt ? fmtMoment(r.decidedAt) : null].filter(Boolean).join(', ')
+    setRowNotice({
+      id: row.id,
+      text: `${r.decision === 'accepted' ? 'Prihvaćeno' : 'Odbijeno'} na SEF-u. SEF status: ${r.sefStatus}${who ? ` (${who})` : ''}.`
+        + (r.warning ? ` ${r.warning}` : ''),
+    })
   })
 
   /**
@@ -561,6 +617,17 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     return proposeClassification(row.supplier_name || '', history, scripts)
   }
 
+  const startDeciding = (row: SefRow, accepted: boolean) => {
+    setDeciding({ row, accepted }); setDecisionComment('')
+    setDeclining(null); setError(''); setNotice(''); setRowError(null); setRowNotice(null)
+  }
+
+  /** " 18.10.2026. 10:00 · Ana" — when and who, as far as it is known. */
+  const decidedBy = (row: SefRow) => {
+    const parts = [row.sef_decided_at ? fmtMoment(row.sef_decided_at) : null, row.sef_decided_by_name].filter(Boolean)
+    return parts.length ? ` ${parts.join(' · ')}` : ''
+  }
+
   const renderRow = (row: SefRow) => {
     const match = matches.get(row.id) ?? null
     const dup = findLikelyDuplicate(
@@ -568,6 +635,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
       ledger)
     const proposal = proposalFor(row, match)
     const opened = !!row.ubl_fetched_at
+    const sefActions = decisionActions(row)
 
     return (
       <div key={row.id} data-row={row.id} style={s.row}>
@@ -617,8 +685,62 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
           </div>
         )}
 
+        {row.sef_decision === 'accepted' && (
+          <div style={{ ...s.flag, color: DIALOG.accent, background: DIALOG.accentFill }}>
+            Prihvaćeno na SEF-u{decidedBy(row)} · SEF status {row.sef_status || '—'}
+            {row.sef_decision_comment ? ` · ${row.sef_decision_comment}` : ''}
+          </div>
+        )}
+        {row.sef_decision === 'rejected' && (
+          <div style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>
+            Odbijeno na SEF-u — može se naknadno prihvatiti{decidedBy(row)} · SEF status {row.sef_status || '—'}
+            {row.sef_decision_comment ? ` · Razlog: ${row.sef_decision_comment}` : ''}
+          </div>
+        )}
+
         {rowError?.id === row.id && (
           <div role="alert" style={{ ...s.flag, color: DIALOG.red, background: DIALOG.redFill }}>{rowError.text}</div>
+        )}
+        {rowNotice?.id === row.id && (
+          <div role="status" style={{ ...s.flag, color: DIALOG.accent, background: DIALOG.accentFill }}>{rowNotice.text}</div>
+        )}
+
+        {deciding?.row.id === row.id && (
+          <div style={s.declinePanel}>
+            <div style={{ fontSize: '13px', color: DIALOG.text, fontWeight: 500 }}>
+              {deciding.accepted ? 'Prihvatiti ovu fakturu na SEF-u?' : 'Odbiti ovu fakturu na SEF-u?'}
+            </div>
+            <div style={{ ...s.hint, fontSize: '12px', color: DIALOG.dim }}>
+              {deciding.accepted
+                ? 'Odluka se upisuje na SEF-u i vide je dobavljač i računovođa. Prihvatanje je konačno: posle njega faktura ne može da se odbije.'
+                : 'Odluka se upisuje na SEF-u i vide je dobavljač i računovođa. Odbijena faktura može kasnije da se prihvati.'}
+            </div>
+            <label style={{ ...s.lbl, marginTop: '8px' }}>
+              {deciding.accepted ? 'Komentar (nije obavezan)' : 'Razlog odbijanja (obavezan)'}
+              <textarea
+                aria-label={deciding.accepted ? 'Komentar za SEF' : 'Razlog odbijanja na SEF-u'}
+                style={s.textarea}
+                rows={2}
+                maxLength={1000}
+                value={decisionComment}
+                autoFocus
+                onChange={e => setDecisionComment(e.target.value)} />
+            </label>
+            <div style={s.actions}>
+              <button style={s.btnGhost} disabled={busy}
+                onClick={() => { setDeciding(null); setDecisionComment(''); setRowError(null) }}>Otkaži</button>
+              {(() => {
+                const blocked = busy || (!deciding.accepted && !decisionComment.trim())
+                return (
+                  <button
+                    style={{ ...(deciding.accepted ? s.btnPrimary : s.btnDanger), opacity: blocked ? 0.5 : 1 }}
+                    disabled={blocked} onClick={decideOnSefNow}>
+                    {busy ? 'Šalje se SEF-u…' : deciding.accepted ? 'Potvrdi prihvatanje na SEF-u' : 'Potvrdi odbijanje na SEF-u'}
+                  </button>
+                )
+              })()}
+            </div>
+          </div>
         )}
 
         {declining?.id === row.id && (
@@ -644,8 +766,29 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
           </div>
         )}
 
-        {declining?.id !== row.id && (
+        {declining?.id !== row.id && deciding?.row.id !== row.id && (
           <div style={s.actions}>
+            {keepsBooks && (sefActions.accept || sefActions.reject) && (
+              <>
+                {!decisionsEnabled && (
+                  <span style={{ ...s.hint, marginTop: 0, alignSelf: 'center', marginRight: 'auto' }}>
+                    {SWITCH_OFF_MESSAGE}
+                  </span>
+                )}
+                {sefActions.accept && (
+                  <button style={{ ...s.btnGhost, opacity: busy || !decisionsEnabled ? 0.5 : 1 }}
+                    disabled={busy || !decisionsEnabled}
+                    title={decisionsEnabled ? 'Upisuje prihvatanje na SEF-u; prihvatanje je konačno' : SWITCH_OFF_MESSAGE}
+                    onClick={() => startDeciding(row, true)}>Prihvati na SEF-u</button>
+                )}
+                {sefActions.reject && (
+                  <button style={{ ...s.btnGhost, opacity: busy || !decisionsEnabled ? 0.5 : 1 }}
+                    disabled={busy || !decisionsEnabled}
+                    title={decisionsEnabled ? 'Upisuje odbijanje na SEF-u, uz razlog' : SWITCH_OFF_MESSAGE}
+                    onClick={() => startDeciding(row, false)}>Odbij na SEF-u</button>
+                )}
+              </>
+            )}
             {row.state === 'pending' && (
               <>
                 <button
@@ -656,7 +799,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
                     : 'Otvaranje preuzima dokument, čime faktura na SEF-u postaje pregledana'}
                   onClick={() => openAndBook(row)}>Otvori i proknjiži</button>
                 <button style={s.btnGhost} disabled={busy}
-                  onClick={() => { setDeclining(row); setReason(''); setError(''); setNotice(''); setRowError(null) }}>Odbij</button>
+                  onClick={() => { setDeclining(row); setDeciding(null); setReason(''); setError(''); setNotice(''); setRowError(null) }}>Odbij</button>
               </>
             )}
             {row.state !== 'pending' && (

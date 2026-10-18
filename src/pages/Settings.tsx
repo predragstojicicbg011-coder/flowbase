@@ -11,6 +11,7 @@ import UserManagement from '../components/UserManagement'
 import ClosedPeriodsTab from '../components/ClosedPeriodsTab'
 import BanksTab from '../components/BanksTab'
 import SystemCategoriesTab from '../components/SystemCategoriesTab'
+import SefSettingsTab from '../components/SefSettingsTab'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 import { countOf } from '../utils/plural'
 
@@ -18,9 +19,9 @@ import { countOf } from '../utils/plural'
 const inUse = (name: string, n: number, one: string, few: string, many: string) =>
   `„${name}“ ne može da se obriše — koristi se u ${countOf(n, one, few, many)}.`
 
-type SettingsTab = 'companies' | 'banks' | 'pl' | 'departments' | 'descriptions' | 'system' | 'users' | 'periods' | 'templates' | 'payroll'
+type SettingsTab = 'companies' | 'banks' | 'pl' | 'departments' | 'descriptions' | 'system' | 'users' | 'periods' | 'templates' | 'payroll' | 'sef'
 
-const TAB_IDS: readonly SettingsTab[] = ['companies', 'banks', 'pl', 'departments', 'descriptions', 'system', 'users', 'periods', 'templates', 'payroll']
+const TAB_IDS: readonly SettingsTab[] = ['companies', 'banks', 'pl', 'departments', 'descriptions', 'system', 'users', 'periods', 'templates', 'payroll', 'sef']
 
 /** `#/settings?tab=system` opens that tab — the notices on Zarade and Krediti link there. */
 function tabFromSearch(search: string): SettingsTab | null {
@@ -73,6 +74,7 @@ export default function Settings() {
             { id: 'templates',    label: '⚡ Šabloni brze popune',  show: true },
             { id: 'payroll',      label: '💼 Podešavanja zarada',   show: true },
             { id: 'periods',      label: '🔒 Zaključani periodi',   show: true },
+            { id: 'sef',          label: '📨 SEF',                  show: canManageSettings },
             { id: 'users',        label: '👥 Korisnici',            show: canManageUsers },
           ] as { id: SettingsTab; label: string; show: boolean }[]).filter(t => t.show).map(tab => (
             <button key={tab.id}
@@ -92,6 +94,7 @@ export default function Settings() {
         {activeTab === 'templates'    && <QuickFillTab canEdit={canManageSettings} />}
         {activeTab === 'payroll'      && <PayrollSettingsTab canEdit={canManageSettings} />}
         {activeTab === 'periods'      && <ClosedPeriodsTab canEdit={canManageSettings} />}
+        {activeTab === 'sef'          && canManageSettings && <SefSettingsTab canEdit={canManageSettings} />}
         {activeTab === 'users'        && <UserManagement />}
       </div>
     </div>
