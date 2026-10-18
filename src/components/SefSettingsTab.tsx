@@ -2,15 +2,18 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../supabase'
 import { settingsStyles as s } from '../pages/Settings'
 import { readSefDecisionsEnabled, SEF_DECISIONS_FLAG } from '../services/sef/sefDecide'
+import SefKeyCard from './SefKeyCard'
 
 // ── SEF ────────────────────────────────────────────────────────────────────
+// The API key card (SefKeyCard: every member sees the status, the
+// administrator or owner sets and checks the key), then
 // The switch for accepting and rejecting invoices ON SEF from the inbox
 // (`feature_flags.sef_decisions_enabled`, migration 20261018140000). Off by
 // default: it writes to a register the supplier and the accounting firm read,
 // so a client turns it on deliberately. The database lets only the
 // administrator change it.
 
-export default function SefSettingsTab({ canEdit }: { canEdit: boolean }) {
+export default function SefSettingsTab({ canEdit, canSetKey = false }: { canEdit: boolean; canSetKey?: boolean }) {
   const [enabled, setEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -47,6 +50,8 @@ export default function SefSettingsTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <>
+      <SefKeyCard canSetKey={canSetKey} />
+
       {!canEdit && <div style={s.readOnlyBanner}>👁 Samo pregled — ovaj prekidač menja samo administrator.</div>}
 
       <div style={{

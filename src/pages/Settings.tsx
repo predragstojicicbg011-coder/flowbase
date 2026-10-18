@@ -45,7 +45,7 @@ async function reportWrite(label: string, q: any): Promise<boolean> {
 }
 
 export default function Settings() {
-  const { canManageSettings, canManageUsers } = useAuth()
+  const { canManageSettings, canManageUsers, role } = useAuth()
   const location = useLocation()
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => tabFromSearch(location.search) ?? 'companies')
   useEffect(() => {
@@ -74,7 +74,7 @@ export default function Settings() {
             { id: 'templates',    label: '⚡ Šabloni brze popune',  show: true },
             { id: 'payroll',      label: '💼 Podešavanja zarada',   show: true },
             { id: 'periods',      label: '🔒 Zaključani periodi',   show: true },
-            { id: 'sef',          label: '📨 SEF',                  show: canManageSettings },
+            { id: 'sef',          label: '📨 SEF',                  show: true },
             { id: 'users',        label: '👥 Korisnici',            show: canManageUsers },
           ] as { id: SettingsTab; label: string; show: boolean }[]).filter(t => t.show).map(tab => (
             <button key={tab.id}
@@ -94,7 +94,10 @@ export default function Settings() {
         {activeTab === 'templates'    && <QuickFillTab canEdit={canManageSettings} />}
         {activeTab === 'payroll'      && <PayrollSettingsTab canEdit={canManageSettings} />}
         {activeTab === 'periods'      && <ClosedPeriodsTab canEdit={canManageSettings} />}
-        {activeTab === 'sef'          && canManageSettings && <SefSettingsTab canEdit={canManageSettings} />}
+        {activeTab === 'sef'          && (
+          // The key is is_admin()'s on the server: administrator or owner.
+          <SefSettingsTab canEdit={canManageSettings} canSetKey={role === 'administrator' || role === 'owner'} />
+        )}
         {activeTab === 'users'        && <UserManagement />}
       </div>
     </div>
