@@ -13,7 +13,10 @@ import { matchCompany, type CompanyLite } from '../services/sef/matchCompany'
 import { proposeClassification, type PastInvoice, type Proposal } from '../services/sef/proposeClassification'
 import { parseUbl } from '../services/sef/ublInvoice'
 import { draftFromUbl, reviewNotesFor, bookedDateOf } from '../services/sef/draftFromUbl'
-import { sefPdfUrl } from '../services/sef/sefPdf'
+import {
+  sefPdfUrl, sefObjectUrl, attachmentsByInbox, attachmentLabel, offersRefetchPdf, refetchSefPdf,
+  ATTACHMENT_COLUMNS, type SefAttachmentRow,
+} from '../services/sef/sefPdf'
 import {
   decideOnSef, readSefDecisionsEnabled, decisionActions, SWITCH_OFF_MESSAGE, type SefDecision,
 } from '../services/sef/sefDecide'
@@ -62,6 +65,10 @@ interface SefRow {
   ubl_fetched_at: string | null
   /** Set once the invoice's PDF is kept in the private `sef-pdf` bucket. */
   pdf_path: string | null
+  /** Which PDF that is: SEF's rendering of the invoice, or (older rows, or no
+   *  rendering) a supplier attachment. */
+  pdf_kind?: string | null
+  pdf_note?: string | null
   /** The decision SEF has recorded, made from here through `sef-decide`. */
   sef_decision: SefDecision | null
   sef_decision_comment: string | null
@@ -98,7 +105,7 @@ const INBOX_COLUMNS = [
   'id', 'sef_invoice_id', 'document_number', 'document_type', 'supplier_name',
   'supplier_vat_number', 'supplier_registration_number', 'amount', 'currency',
   'delivery_date', 'due_date', 'sent_date', 'sef_status', 'state',
-  'dismiss_reason', 'dismissed_at', 'imported_at', 'ubl_fetched_at', 'pdf_path',
+  'dismiss_reason', 'dismissed_at', 'imported_at', 'ubl_fetched_at', 'pdf_path', 'pdf_kind', 'pdf_note',
   'sef_decision', 'sef_decision_comment', 'sef_decided_at', 'sef_decided_by_name',
 ].join(', ')
 
@@ -201,6 +208,9 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
   // scroll is off-screen from the button that was pressed.
   const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null)
   const [rowNotice, setRowNotice] = useState<{ id: string; text: string } | null>(null)
+  // The supplier's PDF attachments, by inbox row, and the row whose list is open.
+  const [attachments, setAttachments] = useState<Map<string, SefAttachmentRow[]>>(new Map())
+  const [attachmentsOpen, setAttachmentsOpen] = useState<string | null>(null)
   // Accepting or rejecting ON SEF. Off until an administrator turns it on, and
   // only for the people who keep the books.
   const { canEdit: keepsBooks } = useAuth()
@@ -226,7 +236,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     const problems: string[] = []
     const today = new Date().toLocaleDateString('en-CA')
 
-    const [inbox, ledgerRows, partnerRows, companyRows, scriptRows, complete, failed, floor, decisionsOn] = await Promise.all([
+    const [inbox, ledgerRows, partnerRows, companyRows, scriptRows, complete, failed, floor, decisionsOn, attachmentRows] = await Promise.all([
       // Paged, because PostgREST caps a response at 1000 rows and says nothing.
       // `nullsFirst: false` because a descending sort otherwise puts undated
       // rows above everything that has a date.
@@ -297,6 +307,10 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
         .then((r: any) => r.data?.[0]?.date_from ?? '', () => ''),
       // Anything but a readable `true` is off.
       readSefDecisionsEnabled(supabase),
+      fetchAllPages<SefAttachmentRow>((from, to) =>
+        supabase.from('sef_inbox_attachments').select(ATTACHMENT_COLUMNS)
+          .order('id').range(from, to))
+        .catch((e: any) => { problems.push(`Could not read the invoices' attachments: ${e?.message || e}`); return [] as SefAttachmentRow[] }),
     ])
 
     if (!mounted.current) return
@@ -313,6 +327,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     // 1900 is the stand-in for "no floor configured".
     setPullFrom(floor && floor > '2000' ? floor : '')
     setDecisionsEnabled(decisionsOn)
+    setAttachments(attachmentsByInbox(attachmentRows))
     setError(problems.join(' '))
     setLoading(false)
   }, [])
@@ -413,22 +428,47 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
   })
 
   /**
-   * Opens the kept PDF in a new tab. Reads our own storage, never SEF, so it
+   * Opens a kept PDF in a new tab. Reads our own storage, never SEF, so it
    * changes nothing there. The tab is opened before the link is signed, inside
    * the click, so a popup blocker does not eat it.
    */
-  const showPdf = async (row: SefRow) => {
+  const openSigned = async (rowId: string, sign: () => Promise<string | null>) => {
     setRowError(null)
     const tab = window.open('', '_blank')
     try {
-      const url = await sefPdfUrl(supabase, row)
+      const url = await sign()
       if (!url) throw new Error('PDF nije dostupan.')
       if (tab) { tab.opener = null; tab.location.href = url } else window.open(url, '_blank', 'noopener')
     } catch (e) {
       tab?.close()
-      setRowError({ id: row.id, text: `PDF ne može da se otvori: ${e instanceof Error ? e.message : String(e)}` })
+      setRowError({ id: rowId, text: `PDF ne može da se otvori: ${e instanceof Error ? e.message : String(e)}` })
     }
   }
+  const showPdf = (row: SefRow) => openSigned(row.id, () => sefPdfUrl(supabase, row))
+  const showAttachment = (row: SefRow, a: SefAttachmentRow) => openSigned(row.id, () => sefObjectUrl(supabase, a.path))
+
+  /**
+   * For a row opened before the invoice came first: fetches the document
+   * again, for its PDFs only. Offered only when SEF no longer shows it New, so
+   * nothing changes there; the function refuses New as well.
+   */
+  const refetchInvoicePdf = (row: SefRow) => exclusive(async () => {
+    setError(''); setNotice(''); setRowError(null); setRowNotice(null)
+    try {
+      const r = await refetchSefPdf(supabase, row, reasonFrom)
+      await load()
+      setRowNotice({
+        id: row.id,
+        text: (r.pdfKind === 'sef_rendering'
+          ? 'Račun je preuzet sa SEF-a i sada se prikazuje kao faktura.'
+          : 'Dokument je preuzet, ali SEF u njemu nema prikaz računa; ostaje PDF dobavljača.')
+          + (r.attachments ? ` Prilozi: ${r.attachments}.` : '')
+          + ' Status na SEF-u se nije promenio.',
+      })
+    } catch (e) {
+      setRowError({ id: row.id, text: e instanceof Error ? e.message : String(e) })
+    }
+  })
 
   const restore = (row: SefRow) => exclusive(async () => {
     setError(''); setNotice(''); setRowError(null)
@@ -640,6 +680,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
       ledger)
     const proposal = proposalFor(row, match)
     const opened = !!row.ubl_fetched_at
+    const rowAttachments = attachments.get(row.id) || []
     // What the row allows, narrowed by what SEF's own status already settles
     // (decided in the SEF portal, or withdrawn by the supplier).
     const allowed = decisionActions(row)
@@ -831,9 +872,39 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
             )}
             {/* Only an opened row can have a PDF: it is kept at that one fetch. */}
             {opened && (row.pdf_path
-              ? <button style={s.btnGhost} onClick={() => showPdf(row)}>Prikaži PDF</button>
+              ? <button style={s.btnGhost}
+                  title={row.pdf_kind === 'supplier_attachment'
+                    ? 'Za ovu fakturu je sačuvan PDF koji je dobavljač priložio, ne SEF-ov prikaz računa'
+                    : 'SEF-ov prikaz računa'}
+                  onClick={() => showPdf(row)}>Prikaži fakturu</button>
               : <span style={{ ...s.hint, marginTop: 0, alignSelf: 'center' }}>PDF nije dostupan</span>)}
+            {rowAttachments.length > 0 && (
+              <button style={s.btnGhost} aria-expanded={attachmentsOpen === row.id}
+                onClick={() => setAttachmentsOpen(attachmentsOpen === row.id ? null : row.id)}>
+                Prilozi ({rowAttachments.length})
+              </button>
+            )}
+            {keepsBooks && offersRefetchPdf(row) && (
+              <button style={{ ...s.btnGhost, opacity: busy ? 0.5 : 1 }} disabled={busy}
+                title='Ponovo preuzima dokument sa SEF-a samo radi PDF-a računa. Faktura je na SEF-u već pregledana, pa se njen status ne menja.'
+                onClick={() => refetchInvoicePdf(row)}>Preuzmi račun sa SEF-a</button>
+            )}
           </div>
+        )}
+        {keepsBooks && offersRefetchPdf(row) && declining?.id !== row.id && deciding?.row.id !== row.id && (
+          <div style={s.hint}>
+            Sačuvan je PDF koji je dobavljač priložio (npr. otpremnica), ne račun. „Preuzmi račun sa SEF-a“ ga zamenjuje SEF-ovim prikazom računa; status na SEF-u se ne menja.
+          </div>
+        )}
+        {row.pdf_note && <div style={s.hint}>{row.pdf_note}</div>}
+        {attachmentsOpen === row.id && rowAttachments.length > 0 && (
+          <ul aria-label='Prilozi dobavljača' style={{ margin: '6px 0 0', paddingLeft: '18px', fontSize: '12px' }}>
+            {rowAttachments.map(a => (
+              <li key={a.id}>
+                <button style={s.linkBtn} onClick={() => showAttachment(row, a)}>{attachmentLabel(a)}</button>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     )

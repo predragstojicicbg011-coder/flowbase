@@ -11,6 +11,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 //
 // SEF is asked for a document EXACTLY ONCE. The second open reads what is
 // stored, so changing one's mind twice costs nothing and marks nothing.
+//
+// The one exception is asked for by name: `{ inbox_id, refetch_pdf: true }`
+// fetches the document again for its PDFs only, and only for an invoice that
+// is no longer New on SEF (an already-seen document stays as it is there).
+// It never touches the stored XML or the row's state. Never more than one
+// SEF call per request, either way.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -79,22 +85,81 @@ Deno.serve(async (req) => {
 
   if (!allowed) return json({ error: 'Sign in first.' }, 401)
 
-  const { id } = await req.json().catch(() => ({ id: null }))
+  const body = await req.json().catch(() => ({})) as { id?: string; inbox_id?: string; refetch_pdf?: boolean }
+  const id = body.inbox_id || body.id
   if (!id) return json({ error: 'No row id.' }, 400)
+  const refetch = body.refetch_pdf === true
 
   const { data: row, error: rowErr } = await supabase
-    .from('sef_inbox').select('id, company_id, sef_invoice_id, state, ubl_xml, pdf_path')
+    .from('sef_inbox')
+    .select('id, company_id, sef_invoice_id, state, sef_status, ubl_xml, pdf_path, pdf_kind, pdf_note')
     .eq('id', id).single()
   if (rowErr || !row) return json({ error: 'No such row in the inbox.' }, 404)
 
-  // Already fetched: served from what is stored, and SEF is not asked again —
-  // not even for a PDF. A row opened before PDFs were kept had them stripped,
-  // and they are gone; a second fetch would be a second thing SEF records.
+  // ── The repair: the PDFs again, for a row that has already been opened ──
+  //
+  // Rows opened before 20261019100000 kept the supplier's attachment (often a
+  // delivery note) as their PDF, and the stored XML had every PDF stripped.
+  // The invoice can only come from the document again. That is a second fetch
+  // of something SEF has already marked Seen — it changes nothing there — so
+  // it is allowed ONLY when SEF's status is known and is not New. A New
+  // invoice would be marked Seen by it, behind the accounting firm's back.
+  //
+  // It touches the PDFs and nothing else: not `ubl_xml`, not `state`, not
+  // `ubl_fetched_at`. SEF is still asked at most once per request.
+  if (refetch) {
+    if (!row.ubl_xml) {
+      return json({ error: 'Faktura još nije otvorena. Otvorite je — PDF računa se čuva pri otvaranju.' }, 409)
+    }
+    const status = String(row.sef_status ?? '').trim()
+    if (!status) {
+      return json({ error: 'SEF status fakture nije poznat, pa se dokument ne preuzima ponovo. Povucite sanduče pa pokušajte opet.' }, 409)
+    }
+    if (status.toLowerCase() === 'new') {
+      return json({ error: 'Faktura je na SEF-u još nova; ponovno preuzimanje bi je označilo kao pregledanu, pa se ne radi.' }, 409)
+    }
+
+    const doc = await fetchDocument(supabase, row.sef_invoice_id)
+    if (doc instanceof Response) return doc
+    const xml = doc.xml
+
+    // The document must be the one this row is. The envelope names it.
+    const named = /<env:PurchaseInvoiceId>\s*([^<\s]+)\s*<\/env:PurchaseInvoiceId>/.exec(xml)?.[1]
+    if (named && named !== String(row.sef_invoice_id)) {
+      return json({ error: `SEF returned the document of invoice ${named}, not ${row.sef_invoice_id}. Nothing was changed.` }, 502)
+    }
+
+    const kept = await keepPdfs(supabase, row.id, row.company_id, row.sef_invoice_id, xml)
+    if (!kept.saved) {
+      return json({ error: kept.error || 'SEF document carries no PDF. Nothing was changed.' }, 502)
+    }
+    const note = kept.saved.pdf_kind === 'sef_rendering'
+      ? 'Ponovo preuzeto sa SEF-a radi računa (umesto priloga)'
+      : 'Ponovo preuzeto sa SEF-a; dokument nema SEF-ov prikaz računa, pa je glavni PDF i dalje prilog'
+    const { error: saveErr } = await supabase.from('sef_inbox')
+      .update({ ...kept.saved, pdf_note: note })
+      .eq('id', id)
+    if (saveErr) return json({ error: `Fetched, but could not record it: ${saveErr.message}` }, 500)
+
+    return json({
+      refetched: true,
+      pdf_path: kept.saved.pdf_path,
+      pdf_kind: kept.saved.pdf_kind,
+      attachments: kept.attachments,
+      pdf_note: note,
+      ...(kept.error ? { pdf_error: kept.error } : {}),
+    })
+  }
+
+  // Already fetched: served from what is stored, and SEF is not asked again.
+  // A row whose PDF is missing or is only an attachment is mended by the
+  // repair above, which the person asks for knowingly.
   if (row.ubl_xml) {
     return json({
       ubl_xml: row.ubl_xml,
       already_had_it: true,
       pdf_path: row.pdf_path ?? null,
+      pdf_kind: row.pdf_kind ?? null,
       ...(row.pdf_path ? {} : { pdf_note: 'PDF nije sačuvan (faktura otvorena pre ove izmene)' }),
     })
   }
@@ -107,6 +172,58 @@ Deno.serve(async (req) => {
     return json({ error: 'That invoice was declined. Put it back in the queue first if you mean to book it.' }, 409)
   }
 
+  const doc = await fetchDocument(supabase, row.sef_invoice_id)
+  if (doc instanceof Response) return doc
+  const xml = doc.xml
+
+  // Base64 PDFs ride along in a document — the envelope's rendering of the
+  // invoice (`env:DocumentPdf`, always) and whatever the supplier attached
+  // (`cbc:EmbeddedDocumentBinaryObject`, zero or more). They are kept, in the
+  // private `sef-pdf` bucket, BEFORE they are stripped: this is the only
+  // moment their bytes exist here. See `keepPdfs` below.
+  const pdf = await keepPdfs(supabase, row.id, row.company_id, row.sef_invoice_id, xml)
+
+  // Together the PDFs are most of the document, so they are not stored in the
+  // XML column. The elements stay, so what is stored is still a whole
+  // document.
+  const slim = xml
+    .replace(/(<env:DocumentPdf[^>]*>)[^<]*(<\/env:DocumentPdf>)/g, '$1$2')
+    .replace(/(<cbc:EmbeddedDocumentBinaryObject[^>]*>)[^<]*(<\/cbc:EmbeddedDocumentBinaryObject>)/g, '$1$2')
+
+  // Stored before it is returned. If this write fails the caller is told,
+  // rather than being handed a document the next open would fetch again —
+  // and a second fetch is a second thing SEF records.
+  // The PDF columns go in the SAME update as the XML, and only when the upload
+  // succeeded. A failed upload leaves them null and is reported; it never
+  // costs the XML, which is what the books are made from.
+  const { error: saveErr } = await supabase.from('sef_inbox')
+    .update({
+      ubl_xml: slim,
+      ubl_fetched_at: new Date().toISOString(),
+      ...(pdf.saved ?? {}),
+    })
+    .eq('id', id)
+  if (saveErr) return json({ error: `Fetched, but could not store it: ${saveErr.message}` }, 500)
+
+  return json({
+    ubl_xml: slim,
+    already_had_it: false,
+    pdf_path: pdf.saved?.pdf_path ?? null,
+    pdf_kind: pdf.saved?.pdf_kind ?? null,
+    attachments: pdf.attachments,
+    ...(pdf.error ? { pdf_error: pdf.error } : {}),
+  })
+})
+
+// ─── The one SEF call ───────────────────────────────────────────────────────
+//
+// Both the first open and the repair go through here, to the same endpoint,
+// once per request. Returns the document, or the Response to send instead.
+
+async function fetchDocument(
+  supabase: ReturnType<typeof createClient>,
+  sefInvoiceId: number | string,
+): Promise<{ xml: string } | Response> {
   const { data: creds, error: credErr } = await supabase
     .from('integration_credentials').select('*')
     .eq('provider', 'sef').eq('is_active', true).limit(1)
@@ -125,7 +242,7 @@ Deno.serve(async (req) => {
   try {
     // A hung connection would otherwise leave the owner waiting on the button
     // with no answer. Same bound as `sef-pull`.
-    res = await fetch(`${base}/purchase-invoice/xml?invoiceId=${row.sef_invoice_id}`,
+    res = await fetch(`${base}/purchase-invoice/xml?invoiceId=${sefInvoiceId}`,
       { headers: { ApiKey: cred.api_key }, signal: AbortSignal.timeout(60_000) })
   } catch (e) {
     return json({ error: `SEF could not be reached: ${e instanceof Error ? e.message : String(e)}` }, 502)
@@ -165,102 +282,136 @@ Deno.serve(async (req) => {
     return json({ error: 'SEF returned something that is not an invoice document. Nothing was stored; try again.' }, 502)
   }
 
-  // Two base64 PDFs ride along in a document — the envelope's rendered copy
-  // (`env:DocumentPdf`, always) and the supplier's own attachment
-  // (`cbc:EmbeddedDocumentBinaryObject`, when he sent one). One is kept, in
-  // the private `sef-pdf` bucket, BEFORE they are stripped: this is the only
-  // moment its bytes exist here. See `keepPdf` below.
-  const pdf = await keepPdf(supabase, row.company_id, row.sef_invoice_id, xml)
+  return { xml }
+}
 
-  // Together the two PDFs are most of the 150 KB, so they are not stored in
-  // the XML column. The elements stay, so what is stored is still a whole
-  // document.
-  const slim = xml
-    .replace(/(<env:DocumentPdf[^>]*>)[^<]*(<\/env:DocumentPdf>)/g, '$1$2')
-    .replace(/(<cbc:EmbeddedDocumentBinaryObject[^>]*>)[^<]*(<\/cbc:EmbeddedDocumentBinaryObject>)/g, '$1$2')
-
-  // Stored before it is returned. If this write fails the caller is told,
-  // rather than being handed a document the next open would fetch again —
-  // and a second fetch is a second thing SEF records.
-  // The PDF columns go in the SAME update as the XML, and only when the upload
-  // succeeded. A failed upload leaves them null and is reported; it never
-  // costs the XML, which is what the books are made from.
-  const { error: saveErr } = await supabase.from('sef_inbox')
-    .update({
-      ubl_xml: slim,
-      ubl_fetched_at: new Date().toISOString(),
-      ...(pdf.saved ?? {}),
-    })
-    .eq('id', id)
-  if (saveErr) return json({ error: `Fetched, but could not store it: ${saveErr.message}` }, 500)
-
-  return json({
-    ubl_xml: slim,
-    already_had_it: false,
-    pdf_path: pdf.saved?.pdf_path ?? null,
-    ...(pdf.error ? { pdf_error: pdf.error } : {}),
-  })
-})
-
-// ─── The PDF ────────────────────────────────────────────────────────────────
+// ─── The PDFs ───────────────────────────────────────────────────────────────
 //
 // A minimal copy of `src/services/sef/sefPdf.ts`, which is where the choice is
 // tested: the edge functions share no code with the app. Change both together.
 //
-// The supplier's own attachment is preferred — it is the document he issued —
-// and SEF's rendering is the fallback. A candidate that does not decode to
+// THE RULE: the main PDF is SEF's rendering of the invoice whenever there is
+// one; a supplier attachment stands in only when it is missing. Every supplier
+// PDF attachment is kept too, as `<company_id>/<sef_invoice_id>/prilog-<n>.pdf`
+// with a row in `sef_inbox_attachments`. A candidate that does not decode to
 // `%PDF-` (base64 `JVBERi0`) is skipped.
 
 type PdfKind = 'supplier_attachment' | 'sef_rendering'
 
-function pickEnvelopePdf(xml: string): { kind: PdfKind; base64: string } | null {
-  const attachment = /<cbc:EmbeddedDocumentBinaryObject([^>]*)>([^<]*)<\/cbc:EmbeddedDocumentBinaryObject>/g
-  for (const m of xml.matchAll(attachment)) {
-    const b64 = m[2].replace(/\s+/g, '')
-    if (/mimeCode\s*=\s*["']application\/pdf["']/i.test(m[1]) && b64.startsWith('JVBERi0')) {
-      return { kind: 'supplier_attachment', base64: b64 }
-    }
-  }
-  const r = /<env:DocumentPdf[^>]*>([^<]*)<\/env:DocumentPdf>/.exec(xml)
-  const b64 = r ? r[1].replace(/\s+/g, '') : ''
-  return b64.startsWith('JVBERi0') ? { kind: 'sef_rendering', base64: b64 } : null
+interface EnvelopeAttachment { n: number; filename: string | null; description: string | null; base64: string }
+
+const unescapeXml = (s: string) => s
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+  .replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+
+function textOf(fragment: string, tag: string): string | null {
+  const m = new RegExp(`<cbc:${tag}\\b[^>]*>([^<]*)</cbc:${tag}>`).exec(fragment)
+  const t = m ? unescapeXml(m[1]).trim() : ''
+  return t || null
 }
 
-interface KeptPdf {
+function attrOf(attrs: string, name: string): string | null {
+  const m = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`).exec(attrs)
+  const v = m ? unescapeXml(m[1] ?? m[2] ?? '').trim() : ''
+  return v || null
+}
+
+function envelopeAttachments(xml: string): EnvelopeAttachment[] {
+  const out: EnvelopeAttachment[] = []
+  const reference = /<cac:AdditionalDocumentReference\b[^>]*>([\s\S]*?)<\/cac:AdditionalDocumentReference>/g
+  for (const ref of xml.matchAll(reference)) {
+    const body = ref[1]
+    const bin = /<cbc:EmbeddedDocumentBinaryObject([^>]*)>([^<]*)<\/cbc:EmbeddedDocumentBinaryObject>/.exec(body)
+    if (!bin) continue
+    const b64 = bin[2].replace(/\s+/g, '')
+    if (!/mimeCode\s*=\s*["']application\/pdf["']/i.test(bin[1]) || !b64.startsWith('JVBERi0')) continue
+    const at = body.search(/<cac:Attachment\b/)
+    const head = at < 0 ? body : body.slice(0, at)
+    out.push({
+      n: out.length + 1,
+      filename: attrOf(bin[1], 'filename') ?? textOf(head, 'ID'),
+      description: textOf(body, 'DocumentDescription') ?? textOf(body, 'DocumentType'),
+      base64: b64,
+    })
+  }
+  return out
+}
+
+function extractEnvelopePdfs(xml: string): { main: { kind: PdfKind; base64: string } | null; attachments: EnvelopeAttachment[] } {
+  const attachments = envelopeAttachments(xml)
+  const r = /<env:DocumentPdf[^>]*>([^<]*)<\/env:DocumentPdf>/.exec(xml)
+  const rendering = r ? r[1].replace(/\s+/g, '') : ''
+  const main = rendering.startsWith('JVBERi0')
+    ? { kind: 'sef_rendering' as const, base64: rendering }
+    : attachments[0] ? { kind: 'supplier_attachment' as const, base64: attachments[0].base64 } : null
+  return { main, attachments }
+}
+
+function toBytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return Array.from(digest).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+interface KeptPdfs {
   saved?: { pdf_path: string; pdf_sha256: string; pdf_bytes: number; pdf_kind: PdfKind; pdf_saved_at: string }
+  /** How many attachments are now kept for the row. */
+  attachments: number
   error?: string
 }
 
 // Never throws: whatever goes wrong here is reported beside the XML, and the
-// XML is stored regardless.
-async function keepPdf(
+// XML is stored regardless. The main PDF and the attachments fail separately:
+// a lost attachment never costs the invoice.
+async function keepPdfs(
   supabase: ReturnType<typeof createClient>,
-  companyId: string, sefInvoiceId: number | string, xml: string,
-): Promise<KeptPdf> {
+  inboxId: string, companyId: string, sefInvoiceId: number | string, xml: string,
+): Promise<KeptPdfs> {
+  const problems: string[] = []
+  let saved: KeptPdfs['saved']
+  let kept = 0
   try {
-    const pick = pickEnvelopePdf(xml)
-    if (!pick) return {}
+    const { main, attachments } = extractEnvelopePdfs(xml)
 
-    const bin = atob(pick.base64)
-    const bytes = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    if (main) {
+      const bytes = toBytes(main.base64)
+      // `<company_id>/<sef_invoice_id>.pdf` — the convention 20261018120000 names.
+      const path = `${companyId}/${sefInvoiceId}.pdf`
+      const { error } = await supabase.storage.from('sef-pdf')
+        .upload(path, bytes, { contentType: 'application/pdf', upsert: true })
+      if (error) problems.push(`PDF računa nije sačuvan: ${error.message}`)
+      else saved = {
+        pdf_path: path, pdf_sha256: await sha256Hex(bytes), pdf_bytes: bytes.length,
+        pdf_kind: main.kind, pdf_saved_at: new Date().toISOString(),
+      }
+    }
 
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
-    const sha256 = Array.from(digest).map(b => b.toString(16).padStart(2, '0')).join('')
-
-    // `<company_id>/<sef_invoice_id>.pdf` — the convention the migration names.
-    const path = `${companyId}/${sefInvoiceId}.pdf`
-    const { error } = await supabase.storage.from('sef-pdf')
-      .upload(path, bytes, { contentType: 'application/pdf', upsert: true })
-    if (error) return { error: `PDF nije sačuvan: ${error.message}` }
-
-    return {
-      saved: {
-        pdf_path: path, pdf_sha256: sha256, pdf_bytes: bytes.length,
-        pdf_kind: pick.kind, pdf_saved_at: new Date().toISOString(),
-      },
+    const rows = []
+    for (const a of attachments) {
+      const bytes = toBytes(a.base64)
+      const path = `${companyId}/${sefInvoiceId}/prilog-${a.n}.pdf`
+      const { error } = await supabase.storage.from('sef-pdf')
+        .upload(path, bytes, { contentType: 'application/pdf', upsert: true })
+      if (error) { problems.push(`Prilog ${a.n} nije sačuvan: ${error.message}`); continue }
+      rows.push({
+        inbox_id: inboxId, company_id: companyId, n: a.n, path,
+        filename: a.filename, description: a.description,
+        sha256: await sha256Hex(bytes), bytes: bytes.length, saved_at: new Date().toISOString(),
+      })
+    }
+    if (rows.length) {
+      const { error } = await supabase.from('sef_inbox_attachments').upsert(rows, { onConflict: 'path' })
+      if (error) problems.push(`Prilozi nisu zabeleženi: ${error.message}`)
+      else kept = rows.length
     }
   } catch (e) {
-    return { error: `PDF nije sačuvan: ${e instanceof Error ? e.message : String(e)}` }
+    problems.push(`PDF nije sačuvan: ${e instanceof Error ? e.message : String(e)}`)
   }
+  return { saved, attachments: kept, ...(problems.length ? { error: problems.join(' ') } : {}) }
 }
