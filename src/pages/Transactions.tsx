@@ -12,6 +12,8 @@ import PassthroughDialog from '../components/PassthroughDialog'
 import ReconcilePanel from '../components/ReconcilePanel'
 import BulkImport from '../components/BulkImport'
 import SefInboxDialog from '../components/SefInboxDialog'
+import InvoiceDocumentsDialog from '../components/InvoiceDocumentsDialog'
+import { invoicesWithSef } from '../services/sef/invoiceDocuments'
 import BankStatementDialog from '../components/BankStatementDialog'
 import AutoMatchPanel from '../components/AutoMatchPanel'
 import PayrollImportDialog from '../components/PayrollImportDialog'
@@ -96,6 +98,9 @@ export default function Transactions() {
   const [showPayrollImport, setShowPayrollImport] = useState(false)
   const [showAutoMatch, setShowAutoMatch] = useState(false)
   const [editInvoice, setEditInvoice] = useState<any>(null)
+  // The invoice whose SEF documents are open, and which shown invoices have them.
+  const [docsInvoiceId, setDocsInvoiceId] = useState<string | null>(null)
+  const [withSef, setWithSef] = useState<Set<string>>(new Set())
   const [editTransaction, setEditTransaction] = useState<any>(null)
   const [editPassthrough, setEditPassthrough] = useState<any>(null)
   const [reconcileSource, setReconcileSource] = useState<{ type: 'transaction' | 'invoice'; id: string } | null>(null)
@@ -382,6 +387,16 @@ export default function Transactions() {
 
   // Server-side filtriranje — data je već filtrirana; ovo su samo imena.
   const filteredInvoices = rows.invoices
+
+  // Which invoices on this page came from SEF, so their row shows 📎. A
+  // failure only hides the clip; the menu's „Dokumenti“ still works.
+  const invoiceIdsKey = filteredInvoices.map((i: any) => i.id).join(',')
+  useEffect(() => {
+    let live = true
+    const ids = invoiceIdsKey ? invoiceIdsKey.split(',') : []
+    invoicesWithSef(supabase, ids).then(set => { if (live) setWithSef(set) }).catch(() => {})
+    return () => { live = false }
+  }, [invoiceIdsKey])
   const filteredTransactions = rows.transactions
   const filteredPassthroughs = rows.passthrough
 
@@ -805,7 +820,13 @@ export default function Transactions() {
                         <td style={s.td}><span style={s.dateCell}>{inv.invoice_date}</span></td>
                         <td style={s.td}><span style={{ ...s.dateCell, color: isOverdue ? '#FF5B5A' : '#7A9BB8', fontWeight: isOverdue ? '600' : '400' }}>{inv.due_date || '—'}{isOverdue && ' ⚠️'}</span></td>
                         <td style={s.td}><span style={s.partnerCell}>{inv.partner_name || '—'}</span></td>
-                        <td style={s.td}><span style={s.invNumCell}>{inv.invoice_number || '—'}</span></td>
+                        <td style={s.td}>
+                          <span style={s.invNumCell}>{inv.invoice_number || '—'}</span>
+                          {withSef.has(inv.id) && (
+                            <button style={s.docsBtn} title="Račun i prilozi sa SEF-a" aria-label="Dokumenti fakture"
+                              onClick={e => { e.stopPropagation(); setDocsInvoiceId(inv.id) }}>📎</button>
+                          )}
+                        </td>
                         <td style={s.td}><span style={{ ...s.badge, background: inv.type === 'expense' ? '#FCEBEB' : '#E1F5EE', color: inv.type === 'expense' ? '#A32D2D' : '#085041' }}>{valueLabel(inv.type)}</span></td>
                         <td style={s.td}><span style={s.catCell}>{inv.pl_category || inv.revenue_stream || '—'}</span></td>
                         <td style={s.td}><span style={s.compCell}>{projectLabelById(projects, inv.project_id, inv.project_name)}</span></td>
@@ -819,6 +840,7 @@ export default function Transactions() {
                             {showMenu === inv.id && (
                               <div style={s.contextMenu}>
                                 <div style={s.contextItem} onClick={() => handleEditInvoice(inv)}>✏️ Izmeni</div>
+                                <div style={s.contextItem} onClick={() => { setDocsInvoiceId(inv.id); setShowMenu(null) }}>📎 Dokumenti</div>
                                 <div style={s.contextItem} onClick={() => { setReconcileSource({ type: 'invoice', id: inv.id }); setShowMenu(null) }}>🔗 Upari</div>
                                 <div style={{ ...s.contextItem, color: '#FF5B5A' }} onClick={() => deleteInvoice(inv.id)}>🗑 Obriši</div>
                               </div>
@@ -966,6 +988,10 @@ export default function Transactions() {
         </div>
       </div>
 
+      {docsInvoiceId && (
+        <InvoiceDocumentsDialog invoiceId={docsInvoiceId} onClose={() => setDocsInvoiceId(null)}
+          onLinked={() => setWithSef(prev => new Set(prev).add(docsInvoiceId))} />
+      )}
       {(showInvoiceDialog || editInvoice) && (
         <InvoiceDialog onClose={() => { setShowInvoiceDialog(false); setEditInvoice(null); refresh() }} invoice={editInvoice} />
       )}
@@ -1067,6 +1093,7 @@ const s: Record<string, React.CSSProperties> = {
   emptyState: { padding: '3rem', textAlign: 'center' as const },
   dateCell: { fontSize: '12px', color: '#7A9BB8', whiteSpace: 'nowrap' as const },
   partnerCell: { fontSize: '13px', fontWeight: '500', color: '#DCE9F6' },
+  docsBtn: { marginLeft: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', padding: 0 },
   invNumCell: { fontSize: '11px', color: '#7A9BB8', fontFamily: 'monospace', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px' },
   catCell: { fontSize: '11px', color: '#7A9BB8' },
   descCell: { fontSize: '11px', color: '#7A9BB8', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, display: 'block' },
