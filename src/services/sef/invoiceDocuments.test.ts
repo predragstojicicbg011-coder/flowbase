@@ -1,4 +1,4 @@
-import { rankLinkCandidates, pdfStateOf, type BookedInvoice, type SefDocRow } from './invoiceDocuments'
+import { rankLinkCandidates, pdfStateOf, uploadRefusal, uploadPath, newUuid, type BookedInvoice, type SefDocRow } from './invoiceDocuments'
 
 const inv = (over: Partial<BookedInvoice> = {}): BookedInvoice => ({
   id: 'inv', company_id: 'c', type: 'expense', invoice_number: '2026/0412', invoice_date: '2026-10-14',
@@ -71,4 +71,32 @@ describe('what a linked row can show', () => {
   it('knows a row opened before PDFs were kept', () => {
     expect(pdfStateOf({ ...base, ubl_fetched_at: '2026-10-10T00:00:00Z' }).kind).toBe('opened_without_pdf')
   })
+})
+
+describe('which files may be uploaded', () => {
+  const bytes = (s: string) => Uint8Array.from(s, c => c.charCodeAt(0))
+  const pdf = bytes('%PDF-1.7')
+  const f = (over: Partial<{ name: string; size: number; type: string }> = {}) =>
+    ({ name: 'racun.pdf', size: 2048, type: 'application/pdf', ...over })
+
+  it('takes a PDF', () => {
+    expect(uploadRefusal(f(), pdf)).toBeNull()
+  })
+
+  it('reads the first bytes, not the name: a renamed image is refused', () => {
+    expect(uploadRefusal(f({ name: 'slika.pdf' }), bytes('\x89PNG\r'))).toMatch(/nije PDF/)
+  })
+
+  it('refuses an empty file and one over 15 MB', () => {
+    expect(uploadRefusal(f({ size: 0 }), pdf)).toMatch(/prazan/)
+    expect(uploadRefusal(f({ size: 15 * 1024 * 1024 + 1 }), pdf)).toMatch(/15 MB/)
+  })
+
+  it('puts the file at the address the database checks', () => {
+    expect(uploadPath('c', 'i', 'd')).toBe('c/i/d.pdf')
+  })
+})
+
+it('makes ids the database path check accepts', () => {
+  expect(newUuid()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
 })

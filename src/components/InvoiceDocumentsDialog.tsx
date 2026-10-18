@@ -5,9 +5,10 @@ import { DIALOG, chrome } from './dialogTheme'
 import { fmtMoney } from '../utils/formatters'
 import {
   loadInvoiceDocuments, loadLinkCandidates, linkInvoiceToSef, pdfStateOf,
-  type InvoiceDocuments, type LinkCandidate,
+  uploadInvoicePdf, removeUpload, UPLOAD_BUCKET,
+  type InvoiceDocuments, type LinkCandidate, type UploadedDocument,
 } from '../services/sef/invoiceDocuments'
-import { sefObjectUrl, attachmentLabel, refetchSefPdf } from '../services/sef/sefPdf'
+import { sefObjectUrl, attachmentLabel, refetchSefPdf, SEF_PDF_URL_SECONDS } from '../services/sef/sefPdf'
 
 // ─── A booked invoice's documents ───────────────────────────────────────────
 //
@@ -16,10 +17,15 @@ import { sefObjectUrl, attachmentLabel, refetchSefPdf } from '../services/sef/se
 // already. One typed in by hand can be paired here with the SEF row that is
 // still waiting for it — which also takes that row out of the queue.
 //
-// Everyone in the company may look. Pairing and fetching are for those who
-// keep the books, and the database checks that again.
+// Any other PDF — a foreign supplier, a bill that never went through SEF, a
+// signed progress billing — is uploaded here by hand, onto any invoice.
+//
+// Everyone in the company may look. Pairing, fetching, uploading and removing
+// are for those who keep the books, and the database checks that again.
 
 interface Props { invoiceId: string; onClose: () => void; onLinked?: () => void }
+
+const fmtBytes = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
 /** A failed call's real reason is in the response body, not in `message`. */
 async function reasonFrom(err: any): Promise<string> {
@@ -45,6 +51,8 @@ export default function InvoiceDocumentsDialog({ invoiceId, onClose, onLinked }:
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const inFlight = useRef(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [description, setDescription] = useState('')
 
   const load = useCallback(async () => {
     setError('')
@@ -68,10 +76,12 @@ export default function InvoiceDocumentsDialog({ invoiceId, onClose, onLinked }:
   }
 
   /** The tab is opened before the await, or the browser treats it as a pop-up. */
-  const openSigned = async (path: string) => {
+  const openSigned = async (path: string, bucket?: string) => {
     const tab = window.open('', '_blank')
     try {
-      const url = await sefObjectUrl(supabase, path)
+      const url = bucket
+        ? (await supabase.storage.from(bucket).createSignedUrl(path, SEF_PDF_URL_SECONDS)).data?.signedUrl ?? null
+        : await sefObjectUrl(supabase, path)
       if (!url) throw new Error('PDF nije dostupan.')
       if (tab) { tab.opener = null; tab.location.href = url } else window.open(url, '_blank', 'noopener')
     } catch (e) {
@@ -111,6 +121,29 @@ export default function InvoiceDocumentsDialog({ invoiceId, onClose, onLinked }:
     setNotice(r.note || 'Račun je ponovo preuzet sa SEF-a.')
   })
 
+  /** Every chosen file in turn; one refused file does not stop the others. */
+  const upload = (files: FileList | null) => exclusive(async () => {
+    if (!docs || !files || files.length === 0) return
+    const failed: string[] = []
+    let done = 0
+    for (const f of Array.from(files)) {
+      try { await uploadInvoicePdf(supabase, docs.invoice, f, description); done++ }
+      catch (e) { failed.push(e instanceof Error ? e.message : String(e)) }
+    }
+    if (fileInput.current) fileInput.current.value = ''
+    await load()
+    if (done > 0) { setDescription(''); onLinked?.() }
+    if (failed.length) throw new Error(failed.join(' '))
+    setNotice(done === 1 ? 'Dokument je otpremljen.' : `Otpremljeno dokumenata: ${done}.`)
+  })
+
+  const remove = (d: UploadedDocument) => exclusive(async () => {
+    if (!window.confirm(`Ukloniti „${d.filename}“ sa fakture?\n\nDokument se skriva; zapis o tome ko ga je otpremio i ko uklonio ostaje.`)) return
+    await removeUpload(supabase, d.id)
+    await load()
+    setNotice('Dokument je uklonjen.')
+  })
+
   const inv = docs?.invoice
   const row = docs?.linked || null
   const state = row ? pdfStateOf(row) : null
@@ -121,7 +154,7 @@ export default function InvoiceDocumentsDialog({ invoiceId, onClose, onLinked }:
         <div style={chrome.header}>
           <div>
             <div style={chrome.headerTitle}>Dokumenti fakture{inv?.invoice_number ? ` ${inv.invoice_number}` : ''}</div>
-            <div style={chrome.headerSub}>Račun i prilozi dobavljača sa SEF-a</div>
+            <div style={chrome.headerSub}>Račun, prilozi dobavljača i otpremljeni PDF-ovi</div>
           </div>
           <button style={chrome.closeBtn} onClick={onClose} aria-label="Zatvori">×</button>
         </div>
@@ -172,7 +205,7 @@ export default function InvoiceDocumentsDialog({ invoiceId, onClose, onLinked }:
 
           {docs && !row && (
             inv?.type !== 'expense'
-              ? <div style={s.dim}>Dokumenti sa SEF-a postoje samo za ulazne fakture.</div>
+              ? <div style={s.dim}>SEF dokumenti postoje samo za ulazne fakture; PDF se može otpremiti ispod.</div>
               : (
                 <>
                   <div style={s.dim}>Ova faktura nije povezana sa SEF-om — verovatno je uneta ručno.</div>
@@ -198,6 +231,34 @@ export default function InvoiceDocumentsDialog({ invoiceId, onClose, onLinked }:
                   ))}
                 </>
               )
+          )}
+
+          {docs && (
+            <>
+              <div style={s.section}>Dokumenti otpremljeni ručno ({docs.uploads.length})</div>
+              {docs.uploads.length === 0 && <div style={s.dim}>Nema otpremljenih dokumenata.</div>}
+              {docs.uploads.map(d => (
+                <div key={d.id} style={s.candidate}>
+                  <button style={{ ...s.docBtn, flex: 1 }} onClick={() => openSigned(d.path, UPLOAD_BUCKET)}>
+                    📄 {d.filename}{d.description ? ` — ${d.description}` : ''}
+                    <span style={{ color: DIALOG.dim }}> · {fmtBytes(d.bytes)} · {d.uploaded_at.slice(0, 10)}</span>
+                  </button>
+                  {keepsBooks && <button style={s.removeBtn} disabled={busy} onClick={() => remove(d)}>Ukloni</button>}
+                </div>
+              ))}
+              {keepsBooks && (
+                <div style={s.uploadRow}>
+                  <input style={s.input} placeholder="Opis (nije obavezno), npr. otpremnica, ugovor" value={description}
+                    aria-label="Opis dokumenta" onChange={e => setDescription(e.target.value)} />
+                  <input ref={fileInput} type="file" accept="application/pdf,.pdf" multiple hidden
+                    aria-label="PDF za otpremanje" onChange={e => upload(e.target.files)} />
+                  <button style={s.actionBtn} disabled={busy} onClick={() => fileInput.current?.click()}>
+                    {busy ? 'Otpremanje…' : '⬆ Otpremi PDF'}
+                  </button>
+                </div>
+              )}
+              {keepsBooks && <div style={s.dim}>Samo PDF, najviše 15 MB po fajlu.</div>}
+            </>
           )}
         </div>
       </div>
@@ -227,6 +288,15 @@ const s: Record<string, React.CSSProperties> = {
   candidate: {
     display: 'flex', gap: '12px', alignItems: 'center', background: DIALOG.raised,
     border: `0.5px solid ${DIALOG.borderSoft}`, borderRadius: '10px', padding: '10px 12px',
+  },
+  removeBtn: {
+    background: 'transparent', border: `0.5px solid ${DIALOG.redSoft}`, color: DIALOG.red,
+    borderRadius: '8px', padding: '7px 10px', fontSize: '12px', cursor: 'pointer',
+  },
+  uploadRow: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' },
+  input: {
+    flex: 1, background: DIALOG.raised, border: `0.5px solid ${DIALOG.border}`, color: DIALOG.text,
+    borderRadius: '8px', padding: '7px 10px', fontSize: '12px',
   },
   error: { background: DIALOG.redFill, border: `0.5px solid ${DIALOG.redSoft}`, color: DIALOG.red, borderRadius: '8px', padding: '8px 12px', fontSize: '12px' },
   notice: { background: DIALOG.accentFill, border: `0.5px solid ${DIALOG.accentSoft}`, color: DIALOG.accent, borderRadius: '8px', padding: '8px 12px', fontSize: '12px' },

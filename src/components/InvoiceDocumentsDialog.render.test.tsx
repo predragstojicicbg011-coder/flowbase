@@ -10,6 +10,7 @@ import InvoiceDocumentsDialog from './InvoiceDocumentsDialog'
 
 const mockTables: Record<string, any[]> = {}
 const mockRpc: { fn: string; args: any }[] = []
+const mockUploads: { bucket: string; path: string }[] = []
 let mockRole = 'accountant'
 
 jest.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ canEdit: mockRole !== 'manager' }) }))
@@ -25,6 +26,7 @@ jest.mock('../supabase', () => {
       is: (c: string, v: any) => { filters.push(r => (r[c] ?? null) === v); return b },
       in: (c: string, v: any[]) => { filters.push(r => v.includes(r[c])); return b },
       single: () => { single = true; return b },
+      insert: (row: any) => { (mockTables[table] ||= []).push({ uploaded_at: '2026-10-19T10:00:00Z', removed_at: null, ...row }); return Promise.resolve({ error: null }) },
       then: (res: any, rej: any) => Promise.resolve(
         single ? { data: rows()[0] ?? null, error: rows()[0] ? null : { message: 'none' } } : { data: rows(), error: null },
       ).then(res, rej),
@@ -36,12 +38,21 @@ jest.mock('../supabase', () => {
       from: (t: string) => builder(t),
       rpc: (fn: string, args: any) => {
         mockRpc.push({ fn, args })
+        if (fn === 'invoice_document_remove') {
+          Object.assign(mockTables.invoice_documents.find(d => d.id === args.p_id), { removed_at: 'now' })
+          return Promise.resolve({ error: null })
+        }
         const row = mockTables.sef_inbox.find(r => r.id === args.p_id)
         Object.assign(row, { state: 'imported', imported_invoice_id: args.p_invoice_id })
         return Promise.resolve({ error: null })
       },
       functions: { invoke: jest.fn() },
-      storage: { from: () => ({ createSignedUrl: () => Promise.resolve({ data: { signedUrl: 'https://signed' }, error: null }) }) },
+      storage: {
+        from: (bucket: string) => ({
+          createSignedUrl: () => Promise.resolve({ data: { signedUrl: 'https://signed' }, error: null }),
+          upload: (path: string) => { mockUploads.push({ bucket, path }); return Promise.resolve({ error: null }) },
+        }),
+      },
     },
   }
 })
@@ -55,6 +66,7 @@ const sefRow = (over: any) => ({
 
 beforeEach(() => {
   mockRpc.length = 0
+  mockUploads.length = 0
   mockRole = 'accountant'
   for (const k of Object.keys(mockTables)) delete mockTables[k]
   Object.assign(mockTables, {
@@ -64,6 +76,7 @@ beforeEach(() => {
     }],
     sef_inbox: [],
     sef_inbox_attachments: [],
+    invoice_documents: [],
   })
   jest.spyOn(window, 'confirm').mockReturnValue(true)
 })
@@ -100,5 +113,46 @@ describe('the documents of a booked invoice', () => {
     mockTables.sef_inbox.push(sefRow({ supplier_vat_number: '999', document_number: '1' }))
     render(<InvoiceDocumentsDialog invoiceId="inv" onClose={() => {}} />)
     expect(await screen.findByText(/nema SEF fakture na čekanju/)).toBeInTheDocument()
+  })
+})
+
+describe('PDFs uploaded by hand', () => {
+  const pdfFile = (name: string, head = '%PDF-1.7 ...') => new File([head], name, { type: 'application/pdf' })
+
+  it('uploads the file to the invoice’s folder and records it', async () => {
+    render(<InvoiceDocumentsDialog invoiceId="inv" onClose={() => {}} />)
+    await screen.findByText('⬆ Otpremi PDF')
+    fireEvent.change(screen.getByLabelText('Opis dokumenta'), { target: { value: 'otpremnica' } })
+    fireEvent.change(screen.getByLabelText('PDF za otpremanje'), { target: { files: [pdfFile('otpremnica.pdf')] } })
+    expect(await screen.findByText(/📄 otpremnica\.pdf — otpremnica/)).toBeInTheDocument()
+    expect(mockUploads).toHaveLength(1)
+    expect(mockUploads[0].bucket).toBe('invoice-docs')
+    expect(mockUploads[0].path).toBe(`co/inv/${mockTables.invoice_documents[0].id}.pdf`)
+    expect(mockTables.invoice_documents[0].path).toBe(mockUploads[0].path)
+  })
+
+  it('refuses a file that is not a PDF, and uploads nothing', async () => {
+    render(<InvoiceDocumentsDialog invoiceId="inv" onClose={() => {}} />)
+    await screen.findByText('⬆ Otpremi PDF')
+    fireEvent.change(screen.getByLabelText('PDF za otpremanje'), { target: { files: [pdfFile('slika.pdf', 'GIF89a')] } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('nije PDF')
+    expect(mockUploads).toHaveLength(0)
+  })
+
+  it('removes through the database function, which keeps the record', async () => {
+    mockTables.invoice_documents.push({ id: 'd1', invoice_id: 'inv', path: 'co/inv/d1.pdf', filename: 'ugovor.pdf', description: null, bytes: 2048, uploaded_at: '2026-10-19T10:00:00Z', removed_at: null })
+    render(<InvoiceDocumentsDialog invoiceId="inv" onClose={() => {}} />)
+    fireEvent.click(await screen.findByText('Ukloni'))
+    await waitFor(() => expect(mockRpc).toEqual([{ fn: 'invoice_document_remove', args: { p_id: 'd1' } }]))
+    expect(await screen.findByText('Nema otpremljenih dokumenata.')).toBeInTheDocument()
+  })
+
+  it('lets a manager open uploads but not add or remove them', async () => {
+    mockRole = 'manager'
+    mockTables.invoice_documents.push({ id: 'd1', invoice_id: 'inv', path: 'co/inv/d1.pdf', filename: 'ugovor.pdf', description: null, bytes: 2048, uploaded_at: '2026-10-19T10:00:00Z', removed_at: null })
+    render(<InvoiceDocumentsDialog invoiceId="inv" onClose={() => {}} />)
+    expect(await screen.findByText(/📄 ugovor\.pdf/)).toBeInTheDocument()
+    expect(screen.queryByText('Ukloni')).not.toBeInTheDocument()
+    expect(screen.queryByText('⬆ Otpremi PDF')).not.toBeInTheDocument()
   })
 })

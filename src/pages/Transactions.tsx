@@ -13,7 +13,7 @@ import ReconcilePanel from '../components/ReconcilePanel'
 import BulkImport from '../components/BulkImport'
 import SefInboxDialog from '../components/SefInboxDialog'
 import InvoiceDocumentsDialog from '../components/InvoiceDocumentsDialog'
-import { invoicesWithSef } from '../services/sef/invoiceDocuments'
+import { invoicesWithDocuments } from '../services/sef/invoiceDocuments'
 import BankStatementDialog from '../components/BankStatementDialog'
 import AutoMatchPanel from '../components/AutoMatchPanel'
 import PayrollImportDialog from '../components/PayrollImportDialog'
@@ -388,13 +388,13 @@ export default function Transactions() {
   // Server-side filtriranje — data je već filtrirana; ovo su samo imena.
   const filteredInvoices = rows.invoices
 
-  // Which invoices on this page came from SEF, so their row shows 📎. A
+  // Which invoices on this page have documents (SEF or uploaded), so their row shows 📎. A
   // failure only hides the clip; the menu's „Dokumenti“ still works.
   const invoiceIdsKey = filteredInvoices.map((i: any) => i.id).join(',')
   useEffect(() => {
     let live = true
     const ids = invoiceIdsKey ? invoiceIdsKey.split(',') : []
-    invoicesWithSef(supabase, ids).then(set => { if (live) setWithSef(set) }).catch(() => {})
+    invoicesWithDocuments(supabase, ids).then(set => { if (live) setWithSef(set) }).catch(() => {})
     return () => { live = false }
   }, [invoiceIdsKey])
   const filteredTransactions = rows.transactions
@@ -823,7 +823,7 @@ export default function Transactions() {
                         <td style={s.td}>
                           <span style={s.invNumCell}>{inv.invoice_number || '—'}</span>
                           {withSef.has(inv.id) && (
-                            <button style={s.docsBtn} title="Račun i prilozi sa SEF-a" aria-label="Dokumenti fakture"
+                            <button style={s.docsBtn} title="Račun i prilozi" aria-label="Dokumenti fakture"
                               onClick={e => { e.stopPropagation(); setDocsInvoiceId(inv.id) }}>📎</button>
                           )}
                         </td>

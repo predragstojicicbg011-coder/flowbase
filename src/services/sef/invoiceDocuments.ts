@@ -7,9 +7,10 @@
 // it with a SEF row still waiting in the inbox, through the same function, so
 // the row also leaves the queue it would otherwise sit in for ever.
 //
-// Nothing here writes a PDF. The PDFs are kept by `sef-fetch-invoice` when a
-// row is opened; a linked row that was never opened is opened from here, with
-// the same warning the inbox gives about SEF's New status.
+// SEF's PDFs are kept by `sef-fetch-invoice` when a row is opened; a linked
+// row that was never opened is opened from here, with the same warning the
+// inbox gives about SEF's New status. PDFs from anywhere else are uploaded by
+// hand into `invoice-docs` (see the end of this file).
 
 import { ATTACHMENT_COLUMNS, type SefAttachmentRow } from './sefPdf'
 
@@ -125,6 +126,7 @@ export interface InvoiceDocuments {
   invoice: BookedInvoice
   linked: SefDocRow | null
   attachments: SefAttachmentRow[]
+  uploads: UploadedDocument[]
 }
 
 export async function loadInvoiceDocuments(client: DocsClient, invoiceId: string): Promise<InvoiceDocuments> {
@@ -151,7 +153,8 @@ export async function loadInvoiceDocuments(client: DocsClient, invoiceId: string
     if (attErr) throw new Error(attErr.message)
     attachments = att || []
   }
-  return { invoice, linked, attachments }
+  const uploads = await loadUploads(client, invoiceId)
+  return { invoice, linked, attachments, uploads }
 }
 
 /** Waiting SEF rows of the invoice's company, ranked for pairing. */
@@ -170,11 +173,117 @@ export async function linkInvoiceToSef(client: DocsClient, rowId: string, invoic
   if (error) throw new Error(error.message)
 }
 
-/** The invoice ids, of those given, that have a SEF row behind them. */
-export async function invoicesWithSef(client: DocsClient, invoiceIds: string[]): Promise<Set<string>> {
+/** The invoice ids, of those given, that have any document: a SEF row or an upload. */
+export async function invoicesWithDocuments(client: DocsClient, invoiceIds: string[]): Promise<Set<string>> {
   if (invoiceIds.length === 0) return new Set()
-  const { data, error } = await client.from('sef_inbox')
-    .select('imported_invoice_id').in('imported_invoice_id', invoiceIds)
+  const [sef, up] = await Promise.all([
+    client.from('sef_inbox').select('imported_invoice_id').in('imported_invoice_id', invoiceIds),
+    client.from('invoice_documents').select('invoice_id').in('invoice_id', invoiceIds).is('removed_at', null),
+  ])
+  if (sef.error) throw new Error(sef.error.message)
+  const ids = new Set<string>((sef.data || []).map((r: any) => r.imported_invoice_id).filter(Boolean))
+  // A database without the uploads table yet still shows the SEF clip.
+  if (!up.error) (up.data || []).forEach((r: any) => ids.add(r.invoice_id))
+  return ids
+}
+
+// ─── PDFs uploaded by hand (20261019120000) ─────────────────────────────────
+//
+// Bucket `invoice-docs`, path <company_id>/<invoice_id>/<document_id>.pdf. The
+// file goes up first and the row after it: storage takes a file only under a
+// live invoice's folder, and nobody can read it until a row names it.
+
+export const UPLOAD_BUCKET = 'invoice-docs'
+export const UPLOAD_MAX_BYTES = 15 * 1024 * 1024
+
+export interface UploadedDocument {
+  id: string
+  invoice_id: string
+  path: string
+  filename: string
+  description: string | null
+  bytes: number
+  uploaded_at: string
+}
+
+export const UPLOAD_COLUMNS = 'id, invoice_id, path, filename, description, bytes, uploaded_at'
+
+export const uploadPath = (companyId: string, invoiceId: string, documentId: string): string =>
+  `${companyId}/${invoiceId}/${documentId}.pdf`
+
+/** Why this file may not be uploaded, or null. `head` is the file's first bytes. */
+export function uploadRefusal(file: { name: string; size: number; type: string }, head: Uint8Array): string | null {
+  if (file.size === 0) return `„${file.name}“ je prazan fajl.`
+  if (file.size > UPLOAD_MAX_BYTES) return `„${file.name}“ je veći od 15 MB.`
+  // The name and the browser's type can both be wrong; the first bytes cannot.
+  const magic = String.fromCharCode(...Array.from(head.slice(0, 5)))
+  if (magic !== '%PDF-') return `„${file.name}“ nije PDF.`
+  return null
+}
+
+export async function loadUploads(client: DocsClient, invoiceId: string): Promise<UploadedDocument[]> {
+  const { data, error } = await client.from('invoice_documents').select(UPLOAD_COLUMNS)
+    .eq('invoice_id', invoiceId).is('removed_at', null).order('uploaded_at')
   if (error) throw new Error(error.message)
-  return new Set((data || []).map((r: any) => r.imported_invoice_id).filter(Boolean))
+  return data || []
+}
+
+/** A v4 UUID; `randomUUID` is missing on older phones and outside https. */
+export function newUuid(): string {
+  const c: Crypto | undefined = (globalThis as any).crypto
+  if (c?.randomUUID) return c.randomUUID()
+  const b = new Uint8Array(16)
+  if (c?.getRandomValues) c.getRandomValues(b)
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256)
+  b[6] = (b[6] & 0x0f) | 0x40
+  b[8] = (b[8] & 0x3f) | 0x80
+  const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('')
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
+
+/** A blob's bytes; FileReader where `Blob.arrayBuffer` is missing (older browsers, jsdom). */
+function readHead(blob: Blob): Promise<Uint8Array> {
+  if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer().then(b => new Uint8Array(b))
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(new Uint8Array(r.result as ArrayBuffer))
+    r.onerror = () => reject(r.error)
+    r.readAsArrayBuffer(blob)
+  })
+}
+
+export interface UploadClient extends DocsClient {
+  storage: { from(bucket: string): any }
+}
+
+/** Uploads one checked PDF and records it. Throws with the reason on failure. */
+export async function uploadInvoicePdf(
+  client: UploadClient,
+  invoice: Pick<BookedInvoice, 'id' | 'company_id'>,
+  file: File,
+  description: string,
+  newId: () => string = newUuid,
+): Promise<void> {
+  if (!invoice.company_id) throw new Error('Faktura nema firmu, pa dokument nema gde da se sačuva.')
+  const head = await readHead(file.slice(0, 5))
+  const refusal = uploadRefusal(file, head)
+  if (refusal) throw new Error(refusal)
+
+  const id = newId()
+  const path = uploadPath(invoice.company_id, invoice.id, id)
+  const { error: upErr } = await client.storage.from(UPLOAD_BUCKET)
+    .upload(path, file, { contentType: 'application/pdf', upsert: false })
+  if (upErr) throw new Error(`Fajl „${file.name}“ nije otpremljen: ${upErr.message}`)
+
+  const { error } = await client.from('invoice_documents').insert({
+    id, invoice_id: invoice.id, company_id: invoice.company_id, path,
+    filename: file.name, description: description.trim() || null, bytes: file.size,
+  })
+  if (error) throw new Error(`Fajl „${file.name}“ je otpremljen, ali nije upisan: ${error.message}`)
+}
+
+/** Hides an uploaded document; the file and the record stay. */
+export async function removeUpload(client: DocsClient, documentId: string): Promise<void> {
+  const { error } = await client.rpc('invoice_document_remove', { p_id: documentId })
+  if (error) throw new Error(error.message)
 }
