@@ -77,10 +77,23 @@ Deno.serve(async (req) => {
     allowed = !probeErr
   }
 
-  // The owner's browser.
+  // A person's browser. Signed in is not enough: since the approval app,
+  // some signed-in accounts are not company members at all. The database
+  // decides the role, with the caller's own token, as sef-decide does.
   if (!allowed && bearer !== '') {
     const { data: who, error: whoErr } = await supabase.auth.getUser(bearer)
-    allowed = !whoErr && !!who?.user
+    if (!whoErr && who?.user) {
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
+      if (!anonKey) return json({ error: 'Funkciji nedostaje SUPABASE_ANON_KEY.' }, 500)
+      const asCaller = createClient(Deno.env.get('SUPABASE_URL')!, anonKey, {
+        global: { headers: { Authorization: `Bearer ${bearer}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+      const [member, books] = await Promise.all([asCaller.rpc('is_member'), asCaller.rpc('can_write_books')])
+      if (member.error || books.error) return json({ error: 'Uloga nije mogla da se proveri.' }, 500)
+      if (!(member.data === true && books.data === true)) return json({ error: 'SEF fakturu otvara samo neko ko vodi knjige (administrator, vlasnik ili administrativni asistent).' }, 403)
+      allowed = true
+    }
   }
 
   if (!allowed) return json({ error: 'Sign in first.' }, 401)
