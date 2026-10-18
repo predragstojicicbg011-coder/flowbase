@@ -13,6 +13,7 @@ import { matchCompany, type CompanyLite } from '../services/sef/matchCompany'
 import { proposeClassification, type PastInvoice, type Proposal } from '../services/sef/proposeClassification'
 import { parseUbl } from '../services/sef/ublInvoice'
 import { draftFromUbl, reviewNotesFor, bookedDateOf } from '../services/sef/draftFromUbl'
+import { sefPdfUrl } from '../services/sef/sefPdf'
 import { fetchScripts } from '../services/quickFillStore'
 import { getBookRates, rateFor } from '../services/bookAmounts'
 import type { ScriptLike } from '../services/expenseSplit'
@@ -54,6 +55,8 @@ interface SefRow {
   dismissed_at: string | null
   imported_at: string | null
   ubl_fetched_at: string | null
+  /** Set once the invoice's PDF is kept in the private `sef-pdf` bucket. */
+  pdf_path: string | null
 }
 
 interface SyncRun {
@@ -79,7 +82,7 @@ const INBOX_COLUMNS = [
   'id', 'sef_invoice_id', 'document_number', 'document_type', 'supplier_name',
   'supplier_vat_number', 'supplier_registration_number', 'amount', 'currency',
   'delivery_date', 'due_date', 'sent_date', 'sef_status', 'state',
-  'dismiss_reason', 'dismissed_at', 'imported_at', 'ubl_fetched_at',
+  'dismiss_reason', 'dismissed_at', 'imported_at', 'ubl_fetched_at', 'pdf_path',
 ].join(', ')
 
 const LEDGER_COLUMNS = [
@@ -347,6 +350,24 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     setDeclining(null); setReason('')
     await load()
   })
+
+  /**
+   * Opens the kept PDF in a new tab. Reads our own storage, never SEF, so it
+   * changes nothing there. The tab is opened before the link is signed, inside
+   * the click, so a popup blocker does not eat it.
+   */
+  const showPdf = async (row: SefRow) => {
+    setRowError(null)
+    const tab = window.open('', '_blank')
+    try {
+      const url = await sefPdfUrl(supabase, row)
+      if (!url) throw new Error('PDF nije dostupan.')
+      if (tab) { tab.opener = null; tab.location.href = url } else window.open(url, '_blank', 'noopener')
+    } catch (e) {
+      tab?.close()
+      setRowError({ id: row.id, text: `PDF ne može da se otvori: ${e instanceof Error ? e.message : String(e)}` })
+    }
+  }
 
   const restore = (row: SefRow) => exclusive(async () => {
     setError(''); setNotice(''); setRowError(null)
@@ -641,6 +662,10 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
             {row.state !== 'pending' && (
               <button style={s.btnGhost} disabled={busy} onClick={() => restore(row)}>Vrati u red</button>
             )}
+            {/* Only an opened row can have a PDF: it is kept at that one fetch. */}
+            {opened && (row.pdf_path
+              ? <button style={s.btnGhost} onClick={() => showPdf(row)}>Prikaži PDF</button>
+              : <span style={{ ...s.hint, marginTop: 0, alignSelf: 'center' }}>PDF nije dostupan</span>)}
           </div>
         )}
       </div>
