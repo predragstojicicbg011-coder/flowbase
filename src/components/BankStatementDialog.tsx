@@ -27,7 +27,7 @@ import {
 } from '../services/settlementCheck'
 import { formatMoney, toOwn, toRsd } from '../services/allocationDisplay'
 import { invoiceRates, linkAmountsFromOwn } from '../services/invoiceLinks'
-import { outstandingOwn, settlementFor } from '../services/settleInvoice'
+import { outstandingOwn, settlementFor, owedAmount } from '../services/settleInvoice'
 import {
   fetchScripts, saveScript, removeScript, orderedForDifference, findCurrencyDifference,
 } from '../services/quickFillStore'
@@ -871,7 +871,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       .select('allocated_amount').eq('invoice_id', invoiceId)
     const total = (allocations || []).reduce((s: number, r: any) => s + (r.allocated_amount || 0), 0)
     await supabase.from('invoices').update({
-      status: invoiceStatus(total, inv.amount || 0, inv.amount_rsd, inv.advance_deducted),
+      status: invoiceStatus(total, owedAmount(inv), inv.amount_rsd, inv.advance_deducted),
     }).eq('id', invoiceId)
   }
 
@@ -1267,7 +1267,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
             settlementExpectations.push({
               invoiceId: inv.id,
               invoiceNumber: inv.invoice_number || null,
-              amount: inv.amount || 0,
+              amount: owedAmount(inv),
               allocated: willHold,
               amountRsd: inv.amount_rsd ?? null,
               advanceDeducted: Number(inv.advance_deducted) || 0,

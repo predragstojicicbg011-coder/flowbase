@@ -64,7 +64,7 @@ create index if not exists invoices_adjusts_invoice_idx
 -- Backfill before the new rules exist: they would re-check every row.
 update public.invoices
    set document_type = 'credit_note'
- where amount < 0 and document_type = 'invoice' and parent_invoice_id is null;
+ where amount < 0 and document_type = 'invoice' and parent_invoice_id is null and deleted_at is null;
 
 -- Duplicate control per document type.
 drop index if exists public.invoices_supplier_number_idx;

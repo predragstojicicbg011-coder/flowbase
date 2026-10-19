@@ -142,6 +142,7 @@ describe('credit and debit notes in the unpaid list', () => {
   it('offers what is left after the credit note and says why', async () => {
     await open()
     expect(screen.getByText('knjižno odobrenje −20.000,00 RSD')).toBeInTheDocument()
+    expect(screen.getByText('UMANJENO ODOBRENJEM')).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText('Plati F-1'))
     expect((screen.getByLabelText('Iznos za plaćanje F-1') as HTMLInputElement).value).toBe('100000,00')
   })

@@ -173,6 +173,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
             // Its credit and debit notes count: a bill of 120.000 with a
             // credit note of −20.000 is owed 100.000.
             adjustments: Number(open?.adjustments) || 0,
+            paid_own: partial ? (Number(open?.paid_amount) || 0) : 0,
             outstanding_own: outstandingOwn({
               ...i,
               amount: (Number(i.amount) || 0) + (Number(open?.adjustments) || 0),
@@ -609,7 +610,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                           </span>
                           {inv.calculated_status === 'partial' && (
                             <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '20px', background: 'rgba(245,166,35,0.15)', color: '#F5A623', border: '0.5px solid rgba(245,166,35,0.3)', whiteSpace: 'nowrap' as const }}>
-                              DELIMIČNO
+                              {inv.adjustments < 0 && !(inv.paid_own > 0) ? 'UMANJENO ODOBRENJEM' : 'DELIMIČNO'}
                             </span>
                           )}
                           {badge && (

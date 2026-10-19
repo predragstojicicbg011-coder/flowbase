@@ -42,7 +42,7 @@ import {
 } from '../services/expenseSplit'
 import { saveSplits } from '../services/saveSplits'
 import { linkAmountsFromOwn } from '../services/invoiceLinks'
-import { outstandingOwn, settledStatus, settlementFor } from '../services/settleInvoice'
+import { outstandingOwn, settledStatus, settlementFor, owedAmount } from '../services/settleInvoice'
 import {
   claimNotice, freeForRow, isHiddenForRow, type ClaimRow, type OpenInvoice,
 } from '../services/invoiceClaims'
@@ -1374,7 +1374,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             settlementExpectations.push({
               invoiceId: invoiceId,
               invoiceNumber: inv.invoice_number || null,
-              amount: inv.amount || 0,
+              amount: owedAmount(inv),
               allocated: alreadyAllocOrig + allocOwn,
               amountRsd: inv.amount_rsd ?? null,
               advanceDeducted: advanceOwn,
@@ -1384,7 +1384,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             const { data: allAlloc } = await supabase.from('invoice_transaction_links')
               .select('allocated_amount').eq('invoice_id', invoiceId)
             const totalAllocatedOrig = (allAlloc || []).reduce((s: number, r: any) => s + (r.allocated_amount || 0), 0)
-            const invStatus = settledStatus(inv.amount || 0, totalAllocatedOrig, inv.amount_rsd, advanceOwn)
+            const invStatus = settledStatus(owedAmount(inv), totalAllocatedOrig, inv.amount_rsd, advanceOwn)
             await supabase.from('invoices')
               .update({ status: invStatus, updated_at: new Date().toISOString() })
               .eq('id', invoiceId)

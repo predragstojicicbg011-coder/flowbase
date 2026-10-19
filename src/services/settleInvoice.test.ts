@@ -1,5 +1,5 @@
 import {
-  CLOSED_WITHIN, outstandingOwn, paysInInvoiceCurrency, settledStatus, settlementFor,
+  CLOSED_WITHIN, outstandingOwn, owedAmount, paysInInvoiceCurrency, settledStatus, settlementFor,
   toleranceFor,
 } from './settleInvoice'
 import { RateUnavailableError } from './bookAmounts'
@@ -330,5 +330,30 @@ describe('a billing that deducts the advance', () => {
     // Without a deduction, the rule is what it was.
     expect(settledStatus(1000, 0, 117200)).toBe('unpaid')
     expect(settledStatus(1000, 999.99, 117200)).toBe('paid')
+  })
+})
+
+describe('a bill with credit and debit notes', () => {
+  // The view's `adjustments`: the live notes on the bill, credits negative.
+  const credited = { currency: 'RSD', amount: 120000, adjustments: -20000, exchange_rate: 1, eur_rate: 117.2, amount_rsd: 120000, amount_eur: 1023.89 }
+
+  it('is owed the bill with its notes', () => {
+    expect(owedAmount(credited)).toBe(100000)
+    expect(owedAmount({ ...credited, adjustments: 5000 })).toBe(125000)
+    expect(owedAmount({ amount: 120000 })).toBe(120000)
+    expect(outstandingOwn(credited)).toBe(100000)
+    expect(outstandingOwn({ ...credited, paid_amount: 30000 })).toBe(70000)
+  })
+
+  it('takes from a payment only what is owed after the credit note', () => {
+    const s = settlementFor({ invoice: credited, paymentCurrency: 'RSD', paymentOwn: 120000, paymentRsd: 120000 })
+    expect(s.own).toBe(100000)
+    expect(s.leftOnPayment).toBe(20000)
+    expect(s.leftOnInvoice).toBe(0)
+  })
+
+  it('is paid when the payment covers what the notes left', () => {
+    expect(settledStatus(owedAmount(credited), 100000, 120000)).toBe('paid')
+    expect(settledStatus(owedAmount(credited), 50000, 120000)).toBe('partial')
   })
 })

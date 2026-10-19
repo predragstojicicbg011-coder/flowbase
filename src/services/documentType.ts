@@ -88,3 +88,35 @@ export function adjustmentSummary(_amount: number, adjustments: number, currency
   const figure = `${fmtNum(Math.abs(adjustments))} ${currency}`
   return adjustments < 0 ? `knjižno odobrenje −${figure}` : `knjižno zaduženje +${figure}`
 }
+
+/** A row of v_invoice_status, as much of it as `closureNote` reads. */
+export interface ClosureRow {
+  document_type?: string | null
+  type?: string | null
+  calculated_status?: string | null
+  currency?: string | null
+  adjustments?: number | null
+  paid_amount?: number | null
+  amount_due?: number | null
+}
+
+/**
+ * Why a bill is closed or smaller, when it is a credit note and not a
+ * payment (spec, decisions 1 and 2): '' where money did it, or on a note.
+ * A credit note after payment leaves the other side owing a refund.
+ */
+export function closureNote(r: ClosureRow): string {
+  if ((r.document_type ?? 'invoice') !== 'invoice') return ''
+  const adj = Number(r.adjustments) || 0
+  const paid = Number(r.paid_amount) || 0
+  const due = Number(r.amount_due) || 0
+  if (adj < 0 && paid > due + 0.005) {
+    const who = r.type === 'revenue' ? 'kupcu dugujemo povraćaj' : 'dobavljač duguje povraćaj'
+    return `${who} ${fmtNum(paid - due)} ${r.currency || 'RSD'}`
+  }
+  if (adj < 0 && paid <= 0) {
+    if (r.calculated_status === 'paid') return 'zatvoreno knjižnim odobrenjem'
+    if (r.calculated_status === 'partial') return 'umanjeno knjižnim odobrenjem'
+  }
+  return ''
+}

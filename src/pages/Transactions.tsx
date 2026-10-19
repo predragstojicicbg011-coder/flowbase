@@ -14,6 +14,7 @@ import BulkImport from '../components/BulkImport'
 import SefInboxDialog from '../components/SefInboxDialog'
 import InvoiceDocumentsDialog from '../components/InvoiceDocumentsDialog'
 import DocumentTypeTag from '../components/DocumentTypeTag'
+import { closureNote } from '../services/documentType'
 import { invoicesWithDocuments } from '../services/sef/invoiceDocuments'
 import BankStatementDialog from '../components/BankStatementDialog'
 import AutoMatchPanel from '../components/AutoMatchPanel'
@@ -835,7 +836,7 @@ export default function Transactions() {
                         <td style={s.td}><span style={s.compCell}>{inv.company_name || '—'}</span></td>
                         <td style={{ ...s.td, textAlign: 'right' as const }}><span style={s.amtCell}>{fmtMoney(inv.amount || 0, inv.currency)}</span></td>
                         <td style={{ ...s.td, textAlign: 'right' as const }}><span style={{ ...s.amtCell, color: (pick(inv, 'remaining') ?? 0) > 0.01 ? '#FF5B5A' : '#00D47E' }}>{format(pick(inv, 'remaining'))}</span></td>
-                        <td style={s.td}><span style={{ ...s.badge, background: invoiceStatusColors[inv.calculated_status]?.bg, color: invoiceStatusColors[inv.calculated_status]?.color }}>{valueLabel(inv.calculated_status)}</span></td>
+                        <td style={s.td}><span style={{ ...s.badge, background: invoiceStatusColors[inv.calculated_status]?.bg, color: invoiceStatusColors[inv.calculated_status]?.color }}>{valueLabel(inv.calculated_status)}</span>{closureNote(inv) && <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px', whiteSpace: 'nowrap' as const }}>{closureNote(inv)}</div>}</td>
                         <td style={s.td} onClick={e => e.stopPropagation()}>
                           <div style={{ position: 'relative' }}>
                             <button style={s.editBtn} onClick={() => setShowMenu(showMenu === inv.id ? null : inv.id)}>···</button>

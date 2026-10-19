@@ -2,6 +2,7 @@ import {
   DOCUMENT_TYPE_LABEL,
   adjustmentSummary,
   billTotal,
+  closureNote,
   creditProblem,
   defaultDocumentType,
   invoiceNumberKey,
@@ -67,5 +68,33 @@ describe('documentType', () => {
     expect(adjustmentSummary(120000, -20000, 'RSD')).toBe('knjižno odobrenje −20.000,00 RSD')
     expect(adjustmentSummary(120000, 5000, 'RSD')).toBe('knjižno zaduženje +5.000,00 RSD')
     expect(adjustmentSummary(120000, 0, 'RSD')).toBe('')
+  })
+})
+
+describe('what closed a bill', () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    document_type: 'invoice', type: 'expense', calculated_status: 'paid', currency: 'RSD',
+    amount: 120000, adjustments: 0, paid_amount: 120000, amount_due: 120000, ...over,
+  })
+
+  it('says nothing on a bill paid with money', () => {
+    expect(closureNote(row())).toBe('')
+  })
+
+  it('names a bill a credit note closed', () => {
+    expect(closureNote(row({ adjustments: -120000, paid_amount: 0, amount_due: 0 }))).toBe('zatvoreno knjižnim odobrenjem')
+  })
+
+  it('names a bill a credit note reduced', () => {
+    expect(closureNote(row({ calculated_status: 'partial', adjustments: -20000, paid_amount: 0, amount_due: 100000 }))).toBe('umanjeno knjižnim odobrenjem')
+  })
+
+  it('names the refund a supplier owes after a credit note on a paid bill', () => {
+    expect(closureNote(row({ adjustments: -20000, amount_due: 100000 }))).toBe('dobavljač duguje povraćaj 20.000,00 RSD')
+    expect(closureNote(row({ type: 'revenue', adjustments: -20000, amount_due: 100000 }))).toBe('kupcu dugujemo povraćaj 20.000,00 RSD')
+  })
+
+  it('says nothing on a note itself', () => {
+    expect(closureNote(row({ document_type: 'credit_note', amount: -5 }))).toBe('')
   })
 })

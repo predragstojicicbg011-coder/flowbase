@@ -487,7 +487,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         .from('v_invoice_status').select('*').eq('company_id', companyId)
         .in('calculated_status', ['unpaid', 'partial', 'overpaid'])
         .order('due_date', { ascending: true })
-      if (data) setOpenInvoices(data)
+      // A credit or debit note is settled through its bill, never by a payment.
+      if (data) setOpenInvoices(data.filter((i: any) => (i.document_type ?? 'invoice') === 'invoice'))
     }
     fetchOpenInvoices()
   }, [companyId])

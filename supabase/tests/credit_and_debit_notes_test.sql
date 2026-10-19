@@ -146,5 +146,33 @@ begin
   end;
   raise notice '10 ok';
 
+  -- 11. A debit note that a credit note leans on cannot go away or shrink.
+  declare v_b2 uuid; v_d2 uuid;
+  begin
+    insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate)
+    values (v_co, v_p1, 'R-3/26', current_date, 'expense', 'RSD', 100, 100, 1) returning id into v_b2;
+    insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, document_type, adjusts_invoice_id)
+    values (v_co, v_p1, 'KZ-3/26', current_date, 'expense', 'RSD', 50, 'debit_note', v_b2) returning id into v_d2;
+    insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, document_type, adjusts_invoice_id)
+    values (v_co, v_p1, 'KO-13/26', current_date, 'expense', 'RSD', -140, 'credit_note', v_b2);
+    begin
+      update public.invoices set deleted_at = now() where id = v_d2;
+      raise exception 'FAIL: deleted a debit note a credit note leans on';
+    exception when check_violation then null;
+    end;
+    begin
+      update public.invoices set amount = 10 where id = v_d2;
+      raise exception 'FAIL: shrank a debit note a credit note leans on';
+    exception when check_violation then null;
+    end;
+    begin
+      update public.invoices set adjusts_invoice_id = null where id = v_d2;
+      raise exception 'FAIL: unlinked a debit note a credit note leans on';
+    exception when check_violation then null;
+    end;
+    update public.invoices set amount = 40 where id = v_d2;  -- 100 + 40 - 140 = 0: still allowed
+  end;
+  raise notice '11 ok';
+
   raise notice 'ALL TESTS PASSED';
 end $$;
