@@ -13,6 +13,7 @@ import ReconcilePanel from '../components/ReconcilePanel'
 import BulkImport from '../components/BulkImport'
 import SefInboxDialog from '../components/SefInboxDialog'
 import InvoiceDocumentsDialog from '../components/InvoiceDocumentsDialog'
+import DocumentTypeTag from '../components/DocumentTypeTag'
 import { invoicesWithDocuments } from '../services/sef/invoiceDocuments'
 import BankStatementDialog from '../components/BankStatementDialog'
 import AutoMatchPanel from '../components/AutoMatchPanel'
@@ -822,6 +823,7 @@ export default function Transactions() {
                         <td style={s.td}><span style={s.partnerCell}>{inv.partner_name || '—'}</span></td>
                         <td style={s.td}>
                           <span style={s.invNumCell}>{inv.invoice_number || '—'}</span>
+                          <DocumentTypeTag documentType={inv.document_type} unlinked={inv.unlinked} />
                           {withSef.has(inv.id) && (
                             <button style={s.docsBtn} title="Račun i prilozi" aria-label="Dokumenti fakture"
                               onClick={e => { e.stopPropagation(); setDocsInvoiceId(inv.id) }}>📎</button>

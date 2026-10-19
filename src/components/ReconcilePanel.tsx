@@ -112,7 +112,8 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
           .eq('company_id', tx.company_id)
           .in('calculated_status', ['unpaid', 'partial', 'reconciled'])
           .order('invoice_date', { ascending: false })
-        setCandidates(invs || [])
+        // A credit or debit note is settled through its bill, never by a payment.
+        setCandidates((invs || []).filter((i: any) => (i.document_type ?? 'invoice') === 'invoice'))
       }
 
       // Existing links

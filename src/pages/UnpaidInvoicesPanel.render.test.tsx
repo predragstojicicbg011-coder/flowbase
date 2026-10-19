@@ -128,3 +128,28 @@ describe('paying unpaid bills', () => {
     expect(downloads).toHaveLength(0)
   })
 })
+
+describe('credit and debit notes in the unpaid list', () => {
+  beforeEach(() => {
+    mockTables.v_invoice_status = [
+      { id: 'i1', calculated_status: 'partial', amount: 120000, paid_amount: 0, document_type: 'invoice', adjustments: -20000, unlinked: false },
+      { id: 'i2', calculated_status: 'unpaid', amount: 50000, paid_amount: 0, document_type: 'invoice', adjustments: 0, unlinked: false },
+      { id: 'n1', calculated_status: 'unpaid', amount: -3000, paid_amount: 0, document_type: 'credit_note', adjustments: 0, unlinked: true, invoice_number: 'KO-1/25', partner_name: 'Armatura' },
+    ]
+    mockTables.invoices = [inv('i1', 'F-1', 120000, 'Beton Plus'), inv('i2', 'F-2', 50000, 'Armatura')]
+  })
+
+  it('offers what is left after the credit note and says why', async () => {
+    await open()
+    expect(screen.getByText('knjižno odobrenje −20.000,00 RSD')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Plati F-1'))
+    expect((screen.getByLabelText('Iznos za plaćanje F-1') as HTMLInputElement).value).toBe('100000,00')
+  })
+
+  it('never lists a note as a bill to pay, and warns about one not linked', async () => {
+    await open()
+    expect(screen.queryByText('KO-1/25')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Plati KO-1/25')).not.toBeInTheDocument()
+    expect(screen.getByText('1 knjižno odobrenje nije vezano za račun')).toBeInTheDocument()
+  })
+})

@@ -6,6 +6,7 @@ import { useCompanies } from '../contexts/CompaniesContext'
 import { SkeletonRows } from '../components/motion'
 import { fetchAllPages, fetchByIds, countRows } from '../utils/fetchAllPages'
 import { outstandingOwn } from '../services/settleInvoice'
+import { adjustmentSummary } from '../services/documentType'
 import { toRsd, toEur } from '../services/allocationDisplay'
 import { fmtMoney, fmtNum } from '../utils/formatters'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
@@ -48,11 +49,29 @@ function downloadTkdis(batch: BankBatch, bills: Map<string, PayableBill>, compan
 const sifraLabel = (code: string) => HALCOM_SIFRE.find(s => s.value === code)?.label.split(' – ')[1] || code
 
 // ── Unpaid Invoices Panel ────────────────────────────────
+/** „1 knjižno odobrenje nije vezano za račun“, „2 knjižna zaduženja nisu vezana za račun“, or both. */
+export function unlinkedNotesLabel(notes: { document_type: string }[]): string {
+  const credits = notes.filter(n => n.document_type === 'credit_note').length
+  const debits = notes.length - credits
+  const one = (n: number, a: string, few: string, many: string) => {
+    const m10 = n % 10, m100 = n % 100
+    return `${n} ${m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many}`
+  }
+  const parts = [
+    credits > 0 ? one(credits, 'knjižno odobrenje', 'knjižna odobrenja', 'knjižnih odobrenja') : '',
+    debits > 0 ? one(debits, 'knjižno zaduženje', 'knjižna zaduženja', 'knjižnih zaduženja') : '',
+  ].filter(Boolean)
+  const singular = notes.length === 1 || (credits % 10 === 1 && credits % 100 !== 11 && debits === 0) || (debits % 10 === 1 && debits % 100 !== 11 && credits === 0)
+  return `${parts.join(' i ')} ${singular ? 'nije vezano' : 'nisu vezana'} za račun`
+}
+
 export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
   // What is owed prints in the viewer's display currency, beside the bill's own.
   const { currency, pick, format } = useDisplayCurrency()
   const fmt = (n: number | null) => format(n, 0)
   const [invoices, setInvoices] = useState<any[]>([])
+  /** Credit and debit notes not linked to a bill yet: never paid, only named. */
+  const [unlinkedNotes, setUnlinkedNotes] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [sortBy, setSortBy] = useState<'due_date' | 'amount' | 'partner' | 'bank'>('due_date')
   const [filterStatus, setFilterStatus] = useState<'all' | 'overdue' | 'upcoming'>('all')
@@ -102,11 +121,21 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
       // view — it decides which invoices, not what is printed on them.
       const openRows = await fetchAllPages<any>((from, to) =>
         supabase.from('v_invoice_status')
-          .select('id, calculated_status, amount, paid_amount, remaining_rsd, remaining_eur')
+          .select('id, calculated_status, amount, paid_amount, remaining_rsd, remaining_eur, document_type, adjustments, unlinked')
           .eq('company_id', compData.id)
+          .eq('document_type', 'invoice')
           .in('calculated_status', ['unpaid', 'partial'])
           .order('due_date', { ascending: true }).order('id')
           .range(from, to))
+        // A credit or debit note is never paid on its own: the bill it
+        // adjusts is (its notes counted), and one not linked yet waits.
+        .then(rows => rows.filter((r: any) => (r.document_type ?? 'invoice') === 'invoice'))
+
+      const { data: loose } = await supabase.from('v_invoice_status')
+        .select('id, invoice_number, partner_name, document_type, amount, currency, unlinked')
+        .eq('company_id', compData.id)
+        .eq('unlinked', true)
+      setUnlinkedNotes((loose || []).filter((r: any) => r.unlinked))
 
       const openById = new Map<string, any>(openRows.map(r => [r.id, r]))
       const invData = await fetchByIds<any>(
@@ -140,7 +169,15 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
             // billing that deducts an advance is owed `amount −
             // advance_deducted` before anything is paid (`invoices.*` carries
             // advance_deducted).
-            outstanding_own: outstandingOwn({ ...i, paid_amount: partial ? (open?.paid_amount ?? 0) : 0 }),
+            //
+            // Its credit and debit notes count: a bill of 120.000 with a
+            // credit note of −20.000 is owed 100.000.
+            adjustments: Number(open?.adjustments) || 0,
+            outstanding_own: outstandingOwn({
+              ...i,
+              amount: (Number(i.amount) || 0) + (Number(open?.adjustments) || 0),
+              paid_amount: partial ? (open?.paid_amount ?? 0) : 0,
+            }),
           }
         })
         // `fetchByIds` returns chunk by chunk, so the ordering within a chunk
@@ -488,6 +525,20 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        {unlinkedNotes.length > 0 && (
+          <details style={{ margin: '0 0 10px', padding: '8px 12px', borderRadius: '8px', background: 'rgba(245,166,35,0.10)', border: '0.5px solid rgba(245,166,35,0.35)', color: '#F5A623', fontSize: '12px' }}>
+            <summary style={{ cursor: 'pointer' }}>{unlinkedNotesLabel(unlinkedNotes)}</summary>
+            <div style={{ marginTop: '6px', color: '#DCE9F6' }}>
+              Ne nude se za plaćanje dok se ne vežu. Otvorite ih u Glavnoj knjizi i izaberite račun na koji se odnose.
+              {unlinkedNotes.map(n => (
+                <div key={n.id} style={{ marginTop: '3px', fontFamily: "'DM Mono', monospace", fontSize: '11px' }}>
+                  {n.partner_name || '—'} · {n.invoice_number || 'bez broja'} · {fmtMoney(n.amount || 0, n.currency || 'RSD')}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
         {/* ── Table ── */}
         <div style={ps.tableWrap}>
           {loading ? (
@@ -578,6 +629,11 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                           <span style={{ fontSize: '13px', fontWeight: '500', fontFamily: "'DM Mono', monospace", color: '#E8F1FB', whiteSpace: 'nowrap' as const }}>
                             {fmtMoney(inv.amount || 0, inv.currency)}
                           </span>
+                          {inv.adjustments !== 0 && inv.adjustments != null && (
+                            <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px', whiteSpace: 'nowrap' as const }}>
+                              {adjustmentSummary(inv.amount || 0, inv.adjustments, inv.currency || 'RSD')}
+                            </div>
+                          )}
                           {inv.calculated_status === 'partial' && (
                             <div style={{ fontSize: '10px', color: '#F5A623', marginTop: '2px', whiteSpace: 'nowrap' as const }}>
                               Preostalo: {fmtMoney(inv.outstanding_own || 0, inv.currency)}

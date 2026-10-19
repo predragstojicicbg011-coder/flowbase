@@ -459,6 +459,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   useEffect(() => {
     if (!company) return
     supabase.from('v_invoice_status').select('*').eq('company_id', company)
+      .eq('document_type', 'invoice')
       .in('calculated_status', ['unpaid', 'partial']).order('due_date', { ascending: true })
       .then(({ data }) => { if (data) setOpenInvoices(data) })
   }, [company])
