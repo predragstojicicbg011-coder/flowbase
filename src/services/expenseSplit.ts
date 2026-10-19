@@ -129,7 +129,9 @@ export function whySplitNotSavable(
       + 'izveštaju, a stavka bez kategorije završava u „Nedodeljeno“.'
   }
 
-  const noAmount = lines.findIndex(l => !(l.amount && l.amount > 0))
+  // A line carries the parent's sign: a credit note's lines are negative.
+  const sign = (parent.amount || 0) < 0 ? -1 : 1
+  const noAmount = lines.findIndex(l => !(l.amount && l.amount * sign > 0))
   if (noAmount >= 0) {
     return `Stavka ${noAmount + 1} nema iznos. Stavka bez vrednosti nije podela, `
       + 'već stavka koju treba ukloniti.'

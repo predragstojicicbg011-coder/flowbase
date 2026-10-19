@@ -31,6 +31,10 @@ import {
 } from '../services/revenue'
 import { round2 } from '../services/bookAmounts'
 import { countOf } from '../utils/plural'
+import {
+  DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL, billTotal, creditProblem, defaultDocumentType, scaleSplits, signProblem,
+  type AdjustableBill, type DocumentType,
+} from '../services/documentType'
 
 /** Display labels for the stored tag keys; the keys stay as they are in the data. */
 const TAG_LABEL: Record<string, string> = {
@@ -55,8 +59,9 @@ interface Props {
   /** Lines shown above every step: what the person confirming should have
    *  read first, such as a proposed classification and the reason for it. */
   reviewNotes?: string[]
-  /** The invoice is a credit note, so its amount must be NEGATIVE where every
-   *  other invoice's must be greater than zero. */
+  /** Open as a credit note (knjižno odobrenje): its amount is NEGATIVE where
+   *  a bill's must be greater than zero. The type can still be changed in the
+   *  header. */
   creditNote?: boolean
 }
 
@@ -136,6 +141,19 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [refNum, setRefNum] = useState('')
   const [currency, setCurrency] = useState('')
   const [amount, setAmount] = useState('')
+  /**
+   * Bill, credit note or debit note. Until the person picks one it follows
+   * the amount's sign (a minus is a credit note); once picked it stays.
+   */
+  const [docType, setDocType] = useState<DocumentType>(invoice?.document_type || (creditNote ? 'credit_note' : 'invoice'))
+  const [docTypeChosen, setDocTypeChosen] = useState<boolean>(!!invoice?.document_type || !!creditNote)
+  /** The bill a note adjusts; '' is a note not linked yet. */
+  const [adjustsId, setAdjustsId] = useState<string>(invoice?.adjusts_invoice_id || '')
+  /** The partner's bills a note can point to, from v_invoice_status. */
+  const [baseBills, setBaseBills] = useState<any[]>([])
+  /** The picked bill's split, to scale to this note's amount. */
+  const [baseSplit, setBaseSplit] = useState<{ amount: number; lines: SplitLine[] } | null>(null)
+  const isNote = docType !== 'invoice'
   // RSD per 1 unit of `currency`, and RSD per 1 EUR — fetched from NBS or
   // typed by hand. On a EUR invoice the two are the same number.
   const [exRate, setExRate] = useState('')
@@ -241,8 +259,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   // hand-typed rate is booked exactly like a fetched one). A missing rate is
   // an error to show, never a figure to guess.
   const book: { amounts: BookAmounts | null; error: string } = (() => {
+    // A credit note is negative and is booked like any other figure.
     const a = parseFloat(amount)
-    if (!currency || !(a > 0)) return { amounts: null, error: '' }
+    if (!currency || !Number.isFinite(a) || a === 0) return { amounts: null, error: '' }
     const own = currency === 'RSD' ? 1 : parseFloat(exRate)
     const eur = currency === 'EUR' ? parseFloat(exRate) : parseFloat(eurRate)
     try {
@@ -329,19 +348,96 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     } catch { return null }
   })()
 
+  /** The bill this note adjusts, its notes counted without this one. */
+  const baseBill: AdjustableBill | null = (() => {
+    const b = isNote && adjustsId ? baseBills.find(x => x.id === adjustsId) : null
+    if (!b) return null
+    const own = invoice?.id && invoice?.adjusts_invoice_id === b.id ? Number(invoice.amount) || 0 : 0
+    return {
+      id: b.id, invoice_number: b.invoice_number, invoice_date: b.invoice_date,
+      amount: Number(b.amount) || 0, adjustments: (Number(b.adjustments) || 0) - own,
+      paid_amount: Number(b.paid_amount) || 0, currency: b.currency,
+    }
+  })()
+
+  // The type follows the sign until the person picks one.
+  useEffect(() => {
+    if (!docTypeChosen) setDocType(defaultDocumentType(parseFloat(amount)))
+  }, [amount, docTypeChosen])
+
+  // The partner's bills a note can point to: same company, partner and
+  // direction, bills only (not other notes). Deleted ones are hidden by RLS.
+  useEffect(() => {
+    if (!isNote || !companyId || !partnerId) { setBaseBills([]); return }
+    let cancelled = false
+    supabase.from('v_invoice_status')
+      .select('id, invoice_number, invoice_date, type, currency, amount, adjustments, paid_amount, amount_due, exchange_rate, eur_rate, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, project_id, pl_impact, cf_type')
+      .eq('company_id', companyId).eq('partner_id', partnerId).eq('type', invType).eq('document_type', 'invoice')
+      .order('invoice_date', { ascending: false }).limit(300)
+      .then(({ data, error }: any) => {
+        if (cancelled) return
+        if (error) console.warn('base bills load error:', error.message)
+        setBaseBills((data || []).filter((b: any) => b.id !== invoice?.id))
+      })
+    return () => { cancelled = true }
+  }, [isNote, companyId, partnerId, invType]) // eslint-disable-line
+
+  // A picked bill's split, scaled to this note's amount whenever it changes.
+  useEffect(() => {
+    if (!baseSplit) return
+    const a = parseFloat(amount)
+    if (!Number.isFinite(a) || a === 0) return
+    setSplitLines(scaleSplits(baseSplit.lines.map(l => ({ ...l, amount: l.amount || 0 })), baseSplit.amount, a))
+  }, [baseSplit, amount])
+
+  /**
+   * Link the note to a bill, and book it like the bill: classification,
+   * project, P&L impact, cash-flow type, currency and rates, and the split
+   * scaled to the note. Everything stays editable.
+   */
+  const pickBase = async (id: string) => {
+    setAdjustsId(id)
+    setBaseSplit(null)
+    const b = baseBills.find(x => x.id === id)
+    if (!b) return
+    setPlCatName(b.pl_category || ''); setPlCatId(plCategories.find(c => c.name === b.pl_category)?.id || '')
+    setPlSubName(b.pl_subcategory || ''); setPlSubId(plSubcategories.find(c => c.name === b.pl_subcategory)?.id || '')
+    setDeptName(b.department || ''); setDeptId(departments.find(c => c.name === b.department)?.id || '')
+    setDeptSubName(b.dept_subcategory || ''); setDeptSubId(deptSubcategories.find(c => c.name === b.dept_subcategory)?.id || '')
+    setExpDesc(b.expense_description || '')
+    if (b.revenue_stream) { setRevStream(b.revenue_stream); setRevStreamChosen(true) }
+    setProjectId(b.project_id ?? null)
+    setPlImpact(b.pl_impact !== false)
+    setCfType(b.cf_type || '')
+    if (b.currency) setCurrency(b.currency)
+    if (b.exchange_rate != null) setExRate(String(b.exchange_rate))
+    if (b.eur_rate != null) setEurRate(String(b.eur_rate))
+    setRateSource('kurs osnovnog računa'); setRateMissing(false)
+    const rows = await loadSplits(supabase, 'invoice', id)
+    if (rows.length > 0) setBaseSplit({ amount: Number(b.amount) || 0, lines: linesFrom(rows as any, n => `line-${n}`) })
+    else setSplitLines([])
+  }
+
   const runValidation = () => {
     const e: ValidationErrors = {}
     if (!companyId) e.companyId = 'Firma je obavezna'
     if (!currency) e.currency = 'Valuta je obavezna'
     if (!invoiceDate) e.invoiceDate = 'Datum fakture je obavezan'
     if (!partnerId && !(showNewPartner && newPartnerName.trim())) e.partnerId = 'Partner je obavezan'
-    // A credit note is a negative figure by design; reading it as "not
-    // greater than zero" would refuse every one. The same rule turned over
-    // refuses one booked positive -- the fault the sign exists to prevent.
-    if (creditNote) {
-      if (!amount || !(parseFloat(amount) < 0)) e.amount = 'Knjižno odobrenje mora imati negativan iznos'
+    // The sign follows the document type: a credit note is negative by
+    // design, a bill and a debit note are positive. The database holds the
+    // same rule (invoices_adjustment_rules).
+    if (isNote) {
+      const why = signProblem(docType, parseFloat(amount) || 0)
+      if (why) e.amount = why
+      else if (baseBill) {
+        const over = creditProblem(parseFloat(amount), baseBill)
+        if (over) e.amount = over
+        if (currency && baseBill.currency && currency !== baseBill.currency)
+          e.currency = `Valuta mora biti ista kao na računu ${baseBill.invoice_number || ''} (${baseBill.currency})`
+      }
     } else if (!amount || parseFloat(amount) <= 0) e.amount = 'Iznos mora biti veći od 0'
-    if (currency && parseFloat(amount) > 0 && !book.amounts) e.exRate = book.error || 'Kurs je obavezan'
+    if (currency && parseFloat(amount) && !book.amounts) e.exRate = book.error || 'Kurs je obavezan'
     if (invType === 'expense' && plImpact && !linkedTxId) {
       // A split bill is classified by its lines, and the fields below are
       // filled from them. Demanding them again would refuse a bill that is
@@ -368,7 +464,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions]) // eslint-disable-line
+  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions, docType, adjustsId, baseBills]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -548,6 +644,8 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setTags(invoice.tags || []); setAccNum(invoice.account_number || '')
     setModel(invoice.model || ''); setRefNum(invoice.reference_number || '')
     setCurrency(invoice.currency || ''); setAmount(invoice.amount?.toString() || '')
+    if (invoice.document_type) { setDocType(invoice.document_type); setDocTypeChosen(true) }
+    setAdjustsId(invoice.adjusts_invoice_id || '')
     setExRate(invoice.exchange_rate?.toString() || ''); setIsIndexed(invoice.is_indexed || false)
     setEurRate(invoice.eur_rate?.toString() || '')
     setPlImpact(invoice.pl_impact !== false)
@@ -670,6 +768,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         cf_capex_months: cfType === 'capex' ? (cfCapexMonths ? parseInt(cfCapexMonths) : null) : null,
         cf_reimbursable_date: cfType === 'reimbursable' ? (cfReimbursableDate || null) : null,
         currency, amount: parseFloat(amount),
+        document_type: docType, adjusts_invoice_id: isNote ? (adjustsId || null) : null,
         exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
         amount_rsd: booked.amount_rsd, amount_eur: booked.amount_eur,
         is_indexed: isIndexed, account_number: accNum || null,
@@ -928,6 +1027,11 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
             <div style={s.headerSub}>Korak {step} od 4 — {stepTitles[step - 1]}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <select aria-label="Vrsta dokumenta" style={{ ...s.select, width: 'auto', padding: '6px 10px', fontSize: '12px' }}
+              value={docType}
+              onChange={e => { setDocType(e.target.value as DocumentType); setDocTypeChosen(true); touch('amount') }}>
+              {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{DOCUMENT_TYPE_LABEL[t]}</option>)}
+            </select>
             <div style={{ ...s.invBadge, ...(linkedTxId ? { background: 'rgba(12,68,124,0.2)', color: DIALOG.blue, borderColor: 'rgba(12,68,124,0.3)' } : {}) }}>
               {linkedTxId ? '🔗 Uparena' : 'Utiče na P&L'}
             </div>
@@ -1120,6 +1224,31 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                     </div>
                   </div>
                 </div>
+                {isNote && (
+                  <div style={{ ...s.field, marginBottom: '14px' }}>
+                    <label style={s.lbl}>Odnosi se na račun</label>
+                    <select aria-label="Odnosi se na račun" style={s.select} value={adjustsId}
+                      onChange={e => { pickBase(e.target.value); touch('amount') }}
+                      disabled={!partnerId}>
+                      <option value="">— nije vezano za račun —</option>
+                      {baseBills.filter(b => !currency || !b.currency || b.currency === currency || b.id === adjustsId).map(b => {
+                        const total = billTotal({ ...b, amount: Number(b.amount) || 0, adjustments: Number(b.adjustments) || 0 })
+                        const left = round2((Number(b.amount_due) || 0) - (Number(b.paid_amount) || 0))
+                        return (
+                          <option key={b.id} value={b.id}>
+                            {b.invoice_number || 'bez broja'} · {b.invoice_date ? b.invoice_date.split('-').reverse().join('.') : '—'} · {fmtMoney(total, b.currency || '')} · ostalo {fmtMoney(left, b.currency || '')}
+                          </option>
+                        )
+                      })}
+                    </select>
+                    {!partnerId && <div style={{ fontSize: '11px', color: DIALOG.dim, marginTop: '4px' }}>Prvo izaberite partnera.</div>}
+                    {partnerId && !adjustsId && (
+                      <div style={{ ...s.infoBox, marginTop: '6px', background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber, fontSize: '12px' }}>
+                        Nije vezano za račun — veže se kasnije
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div style={s.sectionTitle}>Podaci za plaćanje</div>
                 <div style={s.row3}>
                   <div style={s.field}>
