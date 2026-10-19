@@ -59,6 +59,7 @@ beforeEach(() => {
   })
   ;(global as any).URL.createObjectURL = jest.fn(() => 'blob:x')
   ;(global as any).URL.revokeObjectURL = jest.fn()
+  jest.spyOn(window, 'confirm').mockReturnValue(true)
   jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { downloads.push(this.download) })
 })
 
@@ -116,5 +117,14 @@ describe('paying unpaid bills', () => {
     expect((screen.getByLabelText('Banka F-2') as HTMLSelectElement).value).toBe('b2')
     expect(screen.getAllByText('↓ Izvezi')).toHaveLength(1)
     expect(within(screen.getByText(/OTP banka/, { selector: 'b' }).parentElement!).getByText(/2 naloga/)).toBeInTheDocument()
+  })
+
+  it('asks to confirm the account the file is for, and downloads nothing without it', async () => {
+    ;(window.confirm as jest.Mock).mockReturnValue(false)
+    await open()
+    fireEvent.click(screen.getByLabelText('Plati F-1'))
+    fireEvent.click(screen.getByText('↓ Izvezi'))
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringMatching(/SAMO.*Banca Intesa.*160-0000000111111-11/s))
+    expect(downloads).toHaveLength(0)
   })
 })

@@ -61,6 +61,7 @@ beforeEach(() => {
   })
   ;(global as any).URL.createObjectURL = jest.fn(() => 'blob:x')
   ;(global as any).URL.revokeObjectURL = jest.fn()
+  jest.spyOn(window, 'confirm').mockReturnValue(true)
   jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { downloads.push(this.download) })
 })
 

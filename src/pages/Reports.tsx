@@ -313,6 +313,18 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
   // file whose record is refused never reaches the bank.
   const handleExport = async (batch: BankBatch) => {
     if (exporting) return
+    // Hal E-Bank books an imported file to whatever account is selected at
+    // the import — tried, it does not check the file's own (TKDIS carries the
+    // payer only in its header). So the person exporting is told which.
+    if (!window.confirm(
+      `Ovaj fajl uvezite u Halcom SAMO dok je izabran račun:
+
+`
+      + `${batch.bank.bank_name || ''}  ${batch.bank.account_number}
+
+`
+      + `Halcom ne proverava račun iz fajla: ako je izabran drugi račun, nalozi će biti plaćeni sa njega.`,
+    )) return
     setExportError('')
     setExporting(true)
     const date = new Date()
