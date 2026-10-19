@@ -29,6 +29,12 @@ export interface UnpaidPanelExtension {
   onLineChange(line: PaymentLine): void
   /** Extra controls in the selection bar, given the current lines. */
   selectionActions(lines: PaymentLine[], clear: () => void): React.ReactNode
+  /**
+   * Called BEFORE a file is downloaded, with the name it will have. If it
+   * throws, nothing is downloaded and its message is shown: a file that
+   * could not be recorded must never reach the bank.
+   */
+  beforeExport(batch: BankBatch, fileName: string): Promise<void>
   /** Called after a file is downloaded; awaited, and its error is shown. */
   onExported(batch: BankBatch, fileName: string): Promise<void>
 }

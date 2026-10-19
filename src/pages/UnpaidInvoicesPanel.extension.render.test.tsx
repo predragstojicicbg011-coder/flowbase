@@ -75,7 +75,7 @@ const open = async (ext: Partial<UnpaidPanelExtension>) => {
   // The bills arrive outside React's act; the presets follow them in an
   // effect, so wait until every preset line is ticked.
   const n = ext.presetLines?.length ?? 0
-  if (n > 0) await waitFor(() => expect(document.querySelectorAll('input[type=checkbox]:checked')).toHaveLength(n))
+  if (n > 0) await waitFor(() => expect(document.querySelectorAll('input[type=checkbox][aria-label^="Plati"]:checked')).toHaveLength(n))
 }
 const preset = { invoiceId: 'i1', amountText: '30000,00', bankAccountId: 'b2', paymentCode: '254' }
 
@@ -128,8 +128,39 @@ describe('the unpaid-bills panel, extended', () => {
     const onExported = jest.fn().mockRejectedValue(new Error('Nije zabeleženo'))
     await open({ presetLines: [preset], onExported })
     fireEvent.click(screen.getByText('↓ Izvezi'))
+    await waitFor(() => expect(onExported).toHaveBeenCalled())
     expect(onExported).toHaveBeenCalledWith(expect.objectContaining({ total: 30000 }), expect.stringMatching(/^nalozi_OTP_BANKA_222222_\d{6}\.txt$/))
     expect(await screen.findByText(/Nije zabeleženo/)).toBeInTheDocument()
     expect(downloads).toHaveLength(1)
+  })
+
+  it('records the file before it downloads, and downloads nothing when that is refused', async () => {
+    const beforeExport = jest.fn().mockRejectedValue(new Error('Stavka nije spremna za izvoz'))
+    const onExported = jest.fn()
+    await open({ presetLines: [preset], beforeExport, onExported })
+    fireEvent.click(screen.getByText('↓ Izvezi'))
+    expect(await screen.findByText(/Stavka nije spremna za izvoz/)).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Fajl nije preuzet')
+    expect(beforeExport).toHaveBeenCalledWith(expect.objectContaining({ total: 30000 }), expect.stringMatching(/^nalozi_OTP_BANKA_222222_\d{6}\.txt$/))
+    expect(downloads).toHaveLength(0)
+    expect(onExported).not.toHaveBeenCalled()
+  })
+
+  it('downloads once the file is recorded, under the name it was recorded with', async () => {
+    let recorded = ''
+    const beforeExport = jest.fn(async (_b: any, name: string) => { recorded = name })
+    await open({ presetLines: [preset], beforeExport })
+    fireEvent.click(screen.getByText('↓ Izvezi'))
+    await waitFor(() => expect(downloads).toHaveLength(1))
+    expect(downloads[0]).toBe(recorded)
+  })
+
+  it('reports a bank set for all ticked lines, line by line', async () => {
+    const onLineChange = jest.fn()
+    await open({ presetLines: [preset, { invoiceId: 'i2', amountText: '10000,00', bankAccountId: 'b2', paymentCode: '221' }], onLineChange })
+    fireEvent.change(screen.getByLabelText('Banka za sve izabrane'), { target: { value: 'b1' } })
+    expect(onLineChange).toHaveBeenCalledTimes(2)
+    expect(onLineChange).toHaveBeenCalledWith(expect.objectContaining({ invoiceId: 'i1', bankAccountId: 'b1' }))
+    expect(onLineChange).toHaveBeenCalledWith(expect.objectContaining({ invoiceId: 'i2', bankAccountId: 'b1' }))
   })
 })

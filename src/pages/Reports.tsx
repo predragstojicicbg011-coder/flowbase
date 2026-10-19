@@ -25,9 +25,8 @@ import { UnpaidPanelExtensionContext } from '../services/payments/unpaidPanelExt
 // batched by bank, and each bank gets its own TKDIS file whose header names
 // that bank's account. See halcomTkdis.ts for why it cannot be one file.
 
-/** Downloads the bank's file and returns its name. */
-function downloadTkdis(batch: BankBatch, bills: Map<string, PayableBill>, companyProfile: any, companyName: string): string {
-  const date = new Date()
+/** Downloads the bank's file under the given name. */
+function downloadTkdis(batch: BankBatch, bills: Map<string, PayableBill>, companyProfile: any, companyName: string, date: Date, fileName: string) {
   const text = buildTkdis(
     {
       account_number: batch.bank.account_number,
@@ -41,10 +40,9 @@ function downloadTkdis(batch: BankBatch, bills: Map<string, PayableBill>, compan
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = tkdisFileName(batch.bank.bank_name, batch.bank.account_number, date)
+  a.download = fileName
   a.click()
   URL.revokeObjectURL(url)
-  return a.download
 }
 
 const sifraLabel = (code: string) => HALCOM_SIFRE.find(s => s.value === code)?.label.split(' – ')[1] || code
@@ -64,6 +62,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
   // A client app's part in paying (unpaidPanelExtension.ts); null in FlowBase.
   const ext = useContext(UnpaidPanelExtensionContext)
   const [exportError, setExportError] = useState('')
+  const [exporting, setExporting] = useState(false)
   const selected = new Set(Object.keys(lines))
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
   // The account a newly ticked bill is paid from: the primary one.
@@ -289,8 +288,10 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
       return n
     })
   }, [ext?.presetLines, invoices])
-  const patchAll = (patch: Partial<PaymentLine>) =>
+  const patchAll = (patch: Partial<PaymentLine>) => {
     setLines(prev => Object.fromEntries(Object.entries(prev).map(([k, l]) => [k, { ...l, ...patch }])))
+    Object.values(lines).forEach(l => ext?.onLineChange?.({ ...l, ...patch }))
+  }
 
   // ── The files: one per bank ─────────────────────────────────────────────
   // A line the client app holds back (with its reason) is no file's.
@@ -308,13 +309,29 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
     if (acc) setInvoiceAccountMap(prev => ({ ...prev, [invId]: { account_number: acc.account_number, model: acc.model || '97', bank_name: acc.bank_name || '' } }))
   }
 
+  // Recorded first (when a client app records files), downloaded second: a
+  // file whose record is refused never reaches the bank.
   const handleExport = async (batch: BankBatch) => {
+    if (exporting) return
     setExportError('')
-    const fileName = downloadTkdis(batch, bills, companyProfile, defaultCompany?.name || '')
+    setExporting(true)
+    const date = new Date()
+    const fileName = tkdisFileName(batch.bank.bank_name, batch.bank.account_number, date)
     try {
-      await ext?.onExported?.(batch, fileName)
-    } catch (e) {
-      setExportError(`Fajl ${fileName} je preuzet, ali izvoz nije zabeležen: ${e instanceof Error ? e.message : String(e)}`)
+      try {
+        await ext?.beforeExport?.(batch, fileName)
+      } catch (e) {
+        setExportError(`Fajl nije preuzet: ${e instanceof Error ? e.message : String(e)}`)
+        return
+      }
+      downloadTkdis(batch, bills, companyProfile, defaultCompany?.name || '', date, fileName)
+      try {
+        await ext?.onExported?.(batch, fileName)
+      } catch (e) {
+        setExportError(`Fajl ${fileName} je preuzet, ali izvoz nije zabeležen: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -453,7 +470,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   {' · '}{b.byCode.map(c => `${c.code} (${c.count})`).join(', ')}
                 </span>
                 <span style={{ fontFamily: "'DM Mono',monospace", fontSize: '12px', fontWeight: '600', color: '#E8F1FB' }}>{fmtNum(b.total)} RSD</span>
-                <button style={ps.exportBtn} onClick={() => handleExport(b)}>↓ Izvezi</button>
+                <button style={{ ...ps.exportBtn, opacity: exporting ? 0.5 : 1 }} disabled={exporting} onClick={() => handleExport(b)}>↓ Izvezi</button>
               </div>
             ))}
           </div>

@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { UnpaidInvoicesPanel } from './Reports'
 
 // Paying unpaid bills: part of a bill, from two banks, one Halcom file each.
@@ -97,8 +97,12 @@ describe('paying unpaid bills', () => {
     expect(buttons).toHaveLength(2)
     expect(screen.getByText(/Banca Intesa/, { selector: 'b' }).parentElement).toHaveTextContent('221 (1)')
     expect(screen.getByText(/OTP banka/, { selector: 'b' }).parentElement).toHaveTextContent('254 (1)')
-    buttons.forEach(b => fireEvent.click(b))
-    expect(downloads).toHaveLength(2)
+    // One file at a time: the second button waits until the first is done.
+    fireEvent.click(buttons[0])
+    await waitFor(() => expect(downloads).toHaveLength(1))
+    await waitFor(() => expect(screen.getAllByText('↓ Izvezi')[1]).toBeEnabled())
+    fireEvent.click(screen.getAllByText('↓ Izvezi')[1])
+    await waitFor(() => expect(downloads).toHaveLength(2))
     expect(downloads[0]).toMatch(/^nalozi_BANCA_INTESA_111111_\d{6}\.txt$/)
     expect(downloads[1]).toMatch(/^nalozi_OTP_BANKA_222222_\d{6}\.txt$/)
   })
