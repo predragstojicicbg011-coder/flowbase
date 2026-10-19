@@ -11,126 +11,57 @@ import { fmtMoney, fmtNum } from '../utils/formatters'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { findAccountByNumber, defaultAccount } from '../services/partnerAccountChoice'
 import { countOf } from '../utils/plural'
+import { HALCOM_SIFRE, buildTkdis, tkdisBytes, tkdisFileName } from '../services/payments/halcomTkdis'
+import {
+  newLine, lineAmount, lineProblem, remainingAfter, batchesByBank, orderFor, round2,
+  type PaymentLine, type PayableBill, type BankBatch,
+} from '../services/payments/paymentLines'
 
-// ── Halcom TKDIS format generator ────────────────────────
-const HALCOM_SIFRE = [
-  { value: '221', label: '221 – Bezgotovinsko (robe i usluge)' },
-  { value: '240', label: '240 – Zarade' },
-  { value: '253', label: '253 – Javni prihodi' },
-  { value: '254', label: '254 – Porezi i doprinosi (objedinjena naplata)' },
-  { value: '260', label: '260 – Premije osiguranja' },
-  { value: '263', label: '263 – Ostali transferi' },
-  { value: '270', label: '270 – Short-term loans' },
-  { value: '271', label: '271 – Long-term loans' },
-]
+// ── Payment orders: one Halcom file per bank (services/payments) ──────────
+//
+// A ticked bill is a payment line — an amount (all of what is owed, or part),
+// the company account it is paid from, and a payment code. The lines are
+// batched by bank, and each bank gets its own TKDIS file whose header names
+// that bank's account. See halcomTkdis.ts for why it cannot be one file.
 
-function padR(s: string, n: number): string {
-  return (s || '').substring(0, n).padEnd(n, ' ')
-}
-function cleanAccount(acc: string): string {
-  // Halcom TKDIS format: tačno 18 cifara bez crtica
-  // NBS format sa crticama: BBB-CCCCCCCCCCCCCCC (3+15) ILI BBB-CCCCCCCCCC-KK (stari)
-  // Uvijek normalizujemo na 18 cifara: 3 (banka) + 13 (core) + 2 (ctrl) = 18
-  const raw = (acc || '').replace(/\s/g, '')
-  const digits = raw.replace(/[^0-9]/g, '')
-  const parts = raw.split('-').filter(p => p.length > 0)
-
-  if (parts.length === 3) {
-    // Stari format sa crticama: BBB-CORE-KK
-    const bank = parts[0].padStart(3, '0').slice(-3)
-    const ctrl = parts[2].padStart(2, '0').slice(-2)
-    const core = parts[1].padStart(13, '0').slice(-13)  // 13 cifara = 18 ukupno
-    return bank + core + ctrl
-  }
-  if (parts.length === 2) {
-    // Format BBB-CCCCCCCCCCCCCCC (novi NBS, 3+15)
-    const bank = parts[0].padStart(3, '0').slice(-3)
-    const rest = parts[1].padStart(15, '0').slice(-15)
-    return bank + rest
-  }
-  // Već bez crtica — pad do 18 cifara
-  if (digits.length >= 18) return digits.slice(-18)
-  if (digits.length > 5) {
-    const bank = digits.slice(0, 3)
-    const ctrl = digits.slice(-2)
-    const core = digits.slice(3, -2).padStart(13, '0').slice(-13)
-    return bank + core + ctrl
-  }
-  return digits
-}
-function fmtDatumDDMMYY(date: Date): string {
-  const d = String(date.getDate()).padStart(2, '0')
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const y = String(date.getFullYear()).slice(-2)
-  return `${d}${m}${y}`
-}
-
-/**
- * What a payment order should be written for.
- *
- * The outstanding figure where the panel has one — an invoice part paid is
- * owed the rest of itself, not the whole of itself again.
- */
-const payable = (inv: any): number =>
-  typeof inv.outstanding_own === 'number' ? inv.outstanding_own : (inv.amount || 0)
-
-function exportHalcom(invoices: any[], companyBankAccount: any, companyProfile: any, companyName: string, halcomSifra: string = '221') {
-  if (!companyBankAccount) {
-    alert('Firma nema tekući račun. Dodajte ga u Podešavanja → Profili firmi → Tekući računi.')
-    return
-  }
-  const missing = invoices.filter(i => !i.selected_account_number)
-  if (missing.length > 0) {
-    alert(`${countOf(missing.length, 'faktura nema', 'fakture nemaju', 'faktura nema')} račun primaoca. Izaberite račun za svaku.`)
-    return
-  }
-  const racunPlatilac = cleanAccount(companyBankAccount.account_number)
-  const imeFirma = (companyProfile?.full_legal_name || companyName).toUpperCase()
-  const gradFirma = (companyProfile?.city || 'BEOGRAD').toUpperCase()
-  const datum = fmtDatumDDMMYY(new Date())
-  const brNaloga = invoices.length
-  // WHAT IS STILL OWED, not what was billed. This paid `amount` even on an
-  // invoice already part paid, so the panel said one figure and the file it
-  // produced ordered another — and the one the bank would have acted on was
-  // the larger of the two.
-  const ukupanIznosPare = invoices.reduce((s, i) => s + Math.round(payable(i) * 100), 0)
-  const lines: string[] = []
-  lines.push(padR(racunPlatilac, 18) + padR(imeFirma, 35) + padR(gradFirma, 10) + datum + ' '.repeat(98) + 'MULTI E-BANK0')
-  lines.push(padR(racunPlatilac, 18) + padR(imeFirma, 35) + padR(gradFirma, 10) + String(ukupanIznosPare).padStart(15, '0') + '0000' + String(brNaloga) + ' '.repeat(96) + '9')
-  invoices.forEach(inv => {
-    const iznos = Math.round(payable(inv) * 100)
-    const svrhaText = `UPLATA PO FAKTURI ${inv.invoice_number || ''}`.toUpperCase().substring(0, 34)
-    const svrhaZona = (' '.repeat(25) + svrhaText).padEnd(61, ' ')
-    const racunPrimaoca = cleanAccount(inv.selected_account_number || '')
-    const poziv = padR(inv.reference_number || inv.invoice_number || '', 23)
-    lines.push(padR(racunPrimaoca, 18) + padR((inv.partner_name || '').toUpperCase(), 35) + padR((inv.partner_address || '').toUpperCase(), 35) + padR((inv.partner_city || '').toUpperCase(), 10) + '0' + svrhaZona + '00000 ' + padR(halcomSifra, 3) + '  ' + String(iznos).padStart(13, '0') + '  ' + poziv + datum + '01')
-  })
-  const content = lines.join('\r\n') + '\r\n\x1a'
-  const bytes = new Uint8Array(content.length)
-  for (let i = 0; i < content.length; i++) bytes[i] = content.charCodeAt(i) & 0xff
-  const blob = new Blob([bytes], { type: 'application/octet-stream' })
+function downloadTkdis(batch: BankBatch, bills: Map<string, PayableBill>, companyProfile: any, companyName: string) {
+  const date = new Date()
+  const text = buildTkdis(
+    {
+      account_number: batch.bank.account_number,
+      name: companyProfile?.full_legal_name || companyName,
+      city: companyProfile?.city || 'BEOGRAD',
+    },
+    batch.lines.map(l => orderFor(l, bills.get(l.invoiceId)!)),
+    date,
+  )
+  const blob = new Blob([tkdisBytes(text)], { type: 'application/octet-stream' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `nalozi_${datum}.txt`
+  a.download = tkdisFileName(batch.bank.bank_name, batch.bank.account_number, date)
   a.click()
   URL.revokeObjectURL(url)
 }
 
+const sifraLabel = (code: string) => HALCOM_SIFRE.find(s => s.value === code)?.label.split(' – ')[1] || code
+
 // ── Unpaid Invoices Panel ────────────────────────────────
-function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
+export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
   // What is owed prints in the viewer's display currency, beside the bill's own.
   const { currency, pick, format } = useDisplayCurrency()
   const fmt = (n: number | null) => format(n, 0)
   const [invoices, setInvoices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [sortBy, setSortBy] = useState<'due_date' | 'amount' | 'partner'>('due_date')
+  const [sortBy, setSortBy] = useState<'due_date' | 'amount' | 'partner' | 'bank'>('due_date')
   const [filterStatus, setFilterStatus] = useState<'all' | 'overdue' | 'upcoming'>('all')
   const [search, setSearch] = useState('')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  // What is to be paid: one line per ticked bill, keyed by invoice id.
+  const [lines, setLines] = useState<Record<string, PaymentLine>>({})
+  const selected = new Set(Object.keys(lines))
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
-  const [selectedBankId, setSelectedBankId] = useState('')
-  const [halcomSifra, setHalcomSifra] = useState('221')
+  // The account a newly ticked bill is paid from: the primary one.
+  const [defaultBankId, setDefaultBankId] = useState('')
   const [companyProfile, setCompanyProfile] = useState<any>(null)
   const { defaultCompany, loading: companiesLoading } = useCompanies()
   const [invoiceAccountMap, setInvoiceAccountMap] = useState<Record<string, { account_number: string; model: string; bank_name: string }>>({})
@@ -145,7 +76,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
       const compData = defaultCompany
       if (!compData) { setLoading(false); return }
       const { data: bankData } = await supabase.from('company_bank_accounts').select('*').eq('company_id', compData.id).eq('currency', 'RSD').order('is_primary', { ascending: false })
-      if (bankData && bankData.length > 0) { setBankAccounts(bankData); setSelectedBankId((bankData.find(b => b.is_primary) || bankData[0]).id) }
+      if (bankData && bankData.length > 0) { setBankAccounts(bankData); setDefaultBankId((bankData.find(b => b.is_primary) || bankData[0]).id) }
       const { data: profData } = await supabase.from('company_profiles').select('full_legal_name, city, address').eq('company_id', compData.id).single()
       if (profData) setCompanyProfile(profData)
       // ── Which invoices are open ────────────────────────────────────────
@@ -265,6 +196,19 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
     .sort((a, b) => {
       if (sortBy === 'amount') return (pick(b) ?? 0) - (pick(a) ?? 0)
       if (sortBy === 'partner') return (a.partners?.name || '').localeCompare(b.partners?.name || '')
+      if (sortBy === 'bank') {
+        // Ticked bills first, grouped by bank and then by payment code — the
+        // way the files will be cut. The rest after, by due date.
+        const la = lines[a.id], lb = lines[b.id]
+        if (la && !lb) return -1
+        if (lb && !la) return 1
+        if (la && lb) {
+          const ba = bankAccounts.findIndex(x => x.id === la.bankAccountId)
+          const bb = bankAccounts.findIndex(x => x.id === lb.bankAccountId)
+          if (ba !== bb) return ba - bb
+          if (la.paymentCode !== lb.paymentCode) return la.paymentCode.localeCompare(lb.paymentCode)
+        }
+      }
       return (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1
     })
 
@@ -277,15 +221,54 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
     : pick(i))
   const totalUnpaid = filtered.reduce((s, i) => s + (owed(i) ?? 0), 0)
   const overdueCount = filtered.filter(i => i.due_date && i.due_date < effectiveDate).length
-  const selectedInvoices = filtered.filter(i => selected.has(i.id))
-  const selectedBank = bankAccounts.find(b => b.id === selectedBankId)
+  // ── The bill as a payment line sees it ──────────────────────────────────
+  const billOf = (inv: any): PayableBill => ({
+    id: inv.id,
+    type: inv.type ?? null,
+    currency: inv.currency ?? null,
+    outstanding: round2(inv.outstanding_own || 0),
+    invoice_number: inv.invoice_number ?? null,
+    partner_name: inv.partners?.name ?? null,
+    partner_address: inv.partners?.address ?? null,
+    partner_city: inv.partners?.city ?? null,
+    beneficiary_account: invoiceAccountMap[inv.id]?.account_number || inv.account_number || null,
+    model: invoiceAccountMap[inv.id]?.model || inv.model || null,
+    reference_number: inv.reference_number ?? null,
+  })
+  const bills = new Map<string, PayableBill>(invoices.map(i => [i.id, billOf(i)]))
+  const selectedLines = Object.values(lines)
 
-  // Međuzbir selektovanih
-  const selectedTotalRsd = selectedInvoices.reduce((s, i) => s + (i.outstanding_own || 0), 0)
-  const selectedTotalBook = selectedInvoices.reduce((s, i) => s + (owed(i) ?? 0), 0)
+  // Međuzbir: only what is set aside for payment, not the whole of each bill.
+  const selectedTotalRsd = round2(selectedLines.reduce((s, l) => s + (lineAmount(l) ?? 0), 0))
+  // The same share of each bill, in the display currency.
+  const selectedTotalBook = selectedLines.reduce((s, l) => {
+    const inv = invoices.find(i => i.id === l.invoiceId)
+    const out = inv?.outstanding_own || 0
+    return s + (inv && out > 0 ? (owed(inv) ?? 0) * Math.min(1, (lineAmount(l) ?? 0) / out) : 0)
+  }, 0)
 
-  const toggleSelect = (id: string) => { setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n }) }
-  const toggleAll = () => { if (selected.size === filtered.length) setSelected(new Set()); else setSelected(new Set(filtered.map(i => i.id))) }
+  const toggleSelect = (inv: any) => setLines(prev => {
+    const n = { ...prev }
+    if (n[inv.id]) delete n[inv.id]
+    else n[inv.id] = newLine(billOf(inv), defaultBankId)
+    return n
+  })
+  const toggleAll = () => setLines(prev => {
+    if (Object.keys(prev).length === filtered.length) return {}
+    const n: Record<string, PaymentLine> = {}
+    filtered.forEach(i => { n[i.id] = prev[i.id] || newLine(billOf(i), defaultBankId) })
+    return n
+  })
+  const patchLine = (id: string, patch: Partial<PaymentLine>) =>
+    setLines(prev => (prev[id] ? { ...prev, [id]: { ...prev[id], ...patch } } : prev))
+  const patchAll = (patch: Partial<PaymentLine>) =>
+    setLines(prev => Object.fromEntries(Object.entries(prev).map(([k, l]) => [k, { ...l, ...patch }])))
+
+  // ── The files: one per bank ─────────────────────────────────────────────
+  const batches = batchesByBank(selectedLines, bills, bankAccounts)
+  const blocked = selectedLines
+    .map(l => ({ l, problem: bills.get(l.invoiceId) ? lineProblem(l, bills.get(l.invoiceId)!) : 'Faktura nije pronađena.' }))
+    .filter(x => x.problem !== null)
 
   const handleAccountSelect = (invId: string, accountId: string, partnerId: string) => {
     const accounts = partnerAccountsMap[partnerId] || []
@@ -293,14 +276,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
     if (acc) setInvoiceAccountMap(prev => ({ ...prev, [invId]: { account_number: acc.account_number, model: acc.model || '97', bank_name: acc.bank_name || '' } }))
   }
 
-  const handleExport = () => {
-    const toExport = (selectedInvoices.length > 0 ? selectedInvoices : filtered).map(i => ({
-      ...i, partner_name: i.partners?.name, partner_address: i.partners?.address || '', partner_city: i.partners?.city || '',
-      selected_account_number: invoiceAccountMap[i.id]?.account_number || i.account_number || '',
-      selected_model: invoiceAccountMap[i.id]?.model || i.model || '97',
-    }))
-    exportHalcom(toExport, selectedBank, companyProfile, defaultCompany?.name || '', halcomSifra)
-  }
+  const handleExport = (batch: BankBatch) => downloadTkdis(batch, bills, companyProfile, defaultCompany?.name || '')
 
   const daysUntilDue = (dueDate: string | null) => {
     if (!dueDate) return null
@@ -345,6 +321,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
             <option value="due_date">Sortiraj: datum dospeća</option>
             <option value="amount">Sortiraj: iznos</option>
             <option value="partner">Sortiraj: partner</option>
+            <option value="bank">Grupiši: banka i šifra plaćanja</option>
           </select>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: '10px' }}>
             <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.35)', whiteSpace: 'nowrap' as const }}>Stanje na dan:</span>
@@ -370,7 +347,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
             </div>
             <div style={{ display: 'flex', gap: '20px', flex: 1 }}>
               <div>
-                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginBottom: '2px' }}>Ukupno RSD</div>
+                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginBottom: '2px' }}>Za plaćanje RSD</div>
                 <div style={{ fontFamily: "'DM Mono',monospace", fontSize: '15px', fontWeight: '600', color: '#E8F1FB' }}>
                   {fmtNum(selectedTotalRsd)} RSD
                 </div>
@@ -384,42 +361,59 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                 </div>
               )}
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {bankAccounts.length > 1 && (
+                  <select aria-label="Banka za sve izabrane" style={{ ...ps.sel, fontSize: '11px' }} value=""
+                    onChange={e => { if (e.target.value) patchAll({ bankAccountId: e.target.value }) }}>
+                    <option value="">Banka za sve izabrane…</option>
+                    {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.bank_name}{b.is_primary ? ' ★' : ''}</option>)}
+                  </select>
+                )}
+                <select aria-label="Šifra za sve izabrane" style={{ ...ps.sel, fontSize: '11px' }} value=""
+                  onChange={e => { if (e.target.value) patchAll({ paymentCode: e.target.value }) }}>
+                  <option value="">Šifra za sve izabrane…</option>
+                  {HALCOM_SIFRE.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
                 <button
                   style={{ fontFamily: "'Inter',sans-serif", fontSize: '11px', padding: '5px 12px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', background: 'transparent', color: '#7A9BB8', cursor: 'pointer' }}
-                  onClick={() => setSelected(new Set())}>Poništi izbor</button>
+                  onClick={() => setLines({})}>Poništi izbor</button>
               </div>
             </div>
           </div>
         )}
 
-        {/* ── Export bar ── */}
+        {/* ── Export bar: one Halcom file per bank ── */}
         <div style={ps.exportBar}>
-          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '4px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '4px', minWidth: 0 }}>
             <div style={{ fontSize: '12px', color: '#854F0B', fontWeight: '600' }}>
-              Hal E-Bank — nalog za prenos (TKDIS format)
-              {selected.size > 0 && <span style={{ marginLeft: '8px', color: '#7A9BB8', fontWeight: '400' }}>({selected.size} selektovano)</span>}
+              Hal E-Bank — nalozi za prenos (TKDIS), jedan fajl po banci
             </div>
             {bankAccounts.length === 0 ? (
               <div style={{ fontSize: '11px', color: '#FF5B5A' }}>⚠ Firma nema tekući račun u RSD</div>
+            ) : selected.size === 0 ? (
+              <div style={{ fontSize: '11px', color: '#7A6030' }}>Čekirajte fakture koje se plaćaju; za svaku birate iznos, banku i šifru.</div>
             ) : (
               <div style={{ fontSize: '11px', color: '#7A6030' }}>
-                Platilac: {selectedBank?.bank_name} · {selectedBank?.account_number}
-                {missingAccountCount > 0 && <span style={{ marginLeft: '8px', color: '#FF5B5A', fontWeight: '600' }}>⚠ {missingAccountCount} bez računa</span>}
+                U Halcom-u pre uvoza izaberite račun naveden uz fajl. Naziv fajla nosi banku i kraj računa.
+                {blocked.length > 0 && (
+                  <span style={{ marginLeft: '8px', color: '#FF5B5A', fontWeight: '600' }}>
+                    ⚠ {countOf(blocked.length, 'stavka nije spremna', 'stavke nisu spremne', 'stavki nije spremno')} za izvoz
+                  </span>
+                )}
+                {missingAccountCount > 0 && <span style={{ marginLeft: '8px', color: '#FF5B5A', fontWeight: '600' }}>⚠ {missingAccountCount} bez računa primaoca</span>}
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {bankAccounts.length > 1 && (
-              <select style={{ ...ps.sel, fontSize: '11px' }} value={selectedBankId} onChange={e => setSelectedBankId(e.target.value)}>
-                {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.bank_name}{b.is_primary ? ' ★' : ''}</option>)}
-              </select>
-            )}
-            <select style={{ ...ps.sel, fontSize: '11px' }} value={halcomSifra} onChange={e => setHalcomSifra(e.target.value)}>
-              {HALCOM_SIFRE.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-            <button style={{ ...ps.exportBtn, opacity: bankAccounts.length === 0 ? 0.5 : 1 }} onClick={handleExport} disabled={bankAccounts.length === 0}>
-              ↓ Izvezi {selected.size > 0 ? `${selected.size}` : 'sve'} naloge
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '6px', alignItems: 'flex-end' }}>
+            {batches.map(b => (
+              <div key={b.bank.id} style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', color: '#DCE9F6' }}>
+                  <b>{b.bank.bank_name}</b> · {b.bank.account_number} · {countOf(b.lines.length, 'nalog', 'naloga', 'naloga')}
+                  {' · '}{b.byCode.map(c => `${c.code} (${c.count})`).join(', ')}
+                </span>
+                <span style={{ fontFamily: "'DM Mono',monospace", fontSize: '12px', fontWeight: '600', color: '#E8F1FB' }}>{fmtNum(b.total)} RSD</span>
+                <button style={ps.exportBtn} onClick={() => handleExport(b)}>↓ Izvezi</button>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -450,6 +444,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   <th style={{ ...ps.th, textAlign: 'right' as const }}>Iznos</th>
                   <th style={{ ...ps.th, textAlign: 'right' as const }}>{currency}</th>
                   <th style={ps.th}>Račun primaoca</th>
+                  <th style={ps.th}>Plaćanje</th>
                   <th style={ps.th}>Preostalo</th>
                 </tr>
               </thead>
@@ -462,6 +457,8 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   const partnerAccounts = partnerAccountsMap[partnerId] || []
                   const selectedAcc = invoiceAccountMap[inv.id]
                   const hasAccount = !!(selectedAcc?.account_number || inv.account_number)
+                  const line = lines[inv.id]
+                  const problem = line ? lineProblem(line, billOf(inv)) : null
                   return (
                     <tr key={inv.id} style={{
                       ...ps.tr,
@@ -472,7 +469,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                         : i % 2 === 0 ? '#0D1B2C' : '#0B1826',
                     }}>
                       <td style={ps.td}>
-                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.id)} style={{ cursor: 'pointer', accentColor: '#00D47E' }} />
+                        <input type="checkbox" aria-label={`Plati ${inv.invoice_number || ''}`} checked={isSelected} onChange={() => toggleSelect(inv)} style={{ cursor: 'pointer', accentColor: '#00D47E' }} />
                       </td>
                       <td style={ps.td}>
                         <span style={{ fontSize: '12px', fontWeight: isOverdue ? '600' : '400', color: isOverdue ? '#FF5B5A' : '#DCE9F6', whiteSpace: 'nowrap' as const }}>
@@ -549,6 +546,36 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                         )}
                       </td>
                       <td style={ps.td}>
+                        {line ? (
+                          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '4px', minWidth: '210px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', width: '52px' }}>Plaća se</span>
+                              <input aria-label={`Iznos za plaćanje ${inv.invoice_number || ''}`} inputMode="decimal"
+                                style={{ ...ps.sel, width: '110px', fontSize: '12px', padding: '4px 7px', fontFamily: "'DM Mono', monospace", textAlign: 'right' as const, borderColor: problem ? '#FF5B5A' : undefined }}
+                                value={line.amountText} onChange={e => patchLine(inv.id, { amountText: e.target.value })} />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', width: '52px' }}>Ostaje</span>
+                              <span style={{ fontSize: '11px', fontFamily: "'DM Mono', monospace", color: remainingAfter(line, billOf(inv)) > 0 ? '#F5A623' : 'rgba(255,255,255,0.35)' }}>
+                                {fmtMoney(Math.max(0, remainingAfter(line, billOf(inv))), inv.currency)}
+                              </span>
+                            </div>
+                            <select aria-label={`Banka ${inv.invoice_number || ''}`} style={{ ...ps.sel, fontSize: '11px', padding: '4px 7px' }}
+                              value={line.bankAccountId} onChange={e => patchLine(inv.id, { bankAccountId: e.target.value })}>
+                              {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.bank_name}{b.is_primary ? ' ★' : ''}</option>)}
+                            </select>
+                            <select aria-label={`Šifra plaćanja ${inv.invoice_number || ''}`} style={{ ...ps.sel, fontSize: '11px', padding: '4px 7px' }}
+                              title={sifraLabel(line.paymentCode)}
+                              value={line.paymentCode} onChange={e => patchLine(inv.id, { paymentCode: e.target.value })}>
+                              {HALCOM_SIFRE.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                            </select>
+                            {problem && <span role="alert" style={{ fontSize: '10px', color: '#FF5B5A' }}>{problem}</span>}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.2)' }}>—</span>
+                        )}
+                      </td>
+                      <td style={ps.td}>
                         {days === null ? (
                           <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)' }}>Bez datuma dospeća</span>
                         ) : days < 0 ? (
@@ -572,7 +599,7 @@ function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   <td style={{ padding: '12px 16px', textAlign: 'right' as const, fontFamily: "'DM Mono', monospace", fontSize: '15px', fontWeight: '700', color: '#00D47E' }}>
                     {fmt(totalUnpaid)}
                   </td>
-                  <td colSpan={2} style={{ padding: '12px 16px', fontSize: '11px', color: overdueCount > 0 ? '#FF5B5A' : 'rgba(255,255,255,0.25)', fontWeight: overdueCount > 0 ? '600' : '400' }}>
+                  <td colSpan={3} style={{ padding: '12px 16px', fontSize: '11px', color: overdueCount > 0 ? '#FF5B5A' : 'rgba(255,255,255,0.25)', fontWeight: overdueCount > 0 ? '600' : '400' }}>
                     {overdueCount > 0 ? `${countOf(overdueCount, 'faktura', 'fakture', 'faktura')} u kašnjenju` : 'Sve na vreme ✓'}
                   </td>
                 </tr>
