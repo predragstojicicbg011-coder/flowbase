@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { useNav } from '../navigation'
 import type { Page } from '../navigation'
 import { supabase } from '../supabase'
@@ -16,6 +16,7 @@ import {
   newLine, lineAmount, lineProblem, remainingAfter, batchesByBank, orderFor, round2,
   type PaymentLine, type PayableBill, type BankBatch,
 } from '../services/payments/paymentLines'
+import { UnpaidPanelExtensionContext } from '../services/payments/unpaidPanelExtension'
 
 // ── Payment orders: one Halcom file per bank (services/payments) ──────────
 //
@@ -24,7 +25,8 @@ import {
 // batched by bank, and each bank gets its own TKDIS file whose header names
 // that bank's account. See halcomTkdis.ts for why it cannot be one file.
 
-function downloadTkdis(batch: BankBatch, bills: Map<string, PayableBill>, companyProfile: any, companyName: string) {
+/** Downloads the bank's file and returns its name. */
+function downloadTkdis(batch: BankBatch, bills: Map<string, PayableBill>, companyProfile: any, companyName: string): string {
   const date = new Date()
   const text = buildTkdis(
     {
@@ -42,6 +44,7 @@ function downloadTkdis(batch: BankBatch, bills: Map<string, PayableBill>, compan
   a.download = tkdisFileName(batch.bank.bank_name, batch.bank.account_number, date)
   a.click()
   URL.revokeObjectURL(url)
+  return a.download
 }
 
 const sifraLabel = (code: string) => HALCOM_SIFRE.find(s => s.value === code)?.label.split(' – ')[1] || code
@@ -58,6 +61,9 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState('')
   // What is to be paid: one line per ticked bill, keyed by invoice id.
   const [lines, setLines] = useState<Record<string, PaymentLine>>({})
+  // A client app's part in paying (unpaidPanelExtension.ts); null in FlowBase.
+  const ext = useContext(UnpaidPanelExtensionContext)
+  const [exportError, setExportError] = useState('')
   const selected = new Set(Object.keys(lines))
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
   // The account a newly ticked bill is paid from: the primary one.
@@ -226,7 +232,9 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
     id: inv.id,
     type: inv.type ?? null,
     currency: inv.currency ?? null,
-    outstanding: round2(inv.outstanding_own || 0),
+    // Less what is already set aside for this bill elsewhere, so a line can
+    // never order more than is left once those are paid.
+    outstanding: round2(Math.max(0, (inv.outstanding_own || 0) - (ext?.reserved?.(inv.id) ?? 0))),
     invoice_number: inv.invoice_number ?? null,
     partner_name: inv.partners?.name ?? null,
     partner_address: inv.partners?.address ?? null,
@@ -259,15 +267,39 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
     filtered.forEach(i => { n[i.id] = prev[i.id] || newLine(billOf(i), defaultBankId) })
     return n
   })
-  const patchLine = (id: string, patch: Partial<PaymentLine>) =>
+  const patchLine = (id: string, patch: Partial<PaymentLine>) => {
+    const current = lines[id]
     setLines(prev => (prev[id] ? { ...prev, [id]: { ...prev[id], ...patch } } : prev))
+    if (current && ('bankAccountId' in patch || 'paymentCode' in patch)) ext?.onLineChange?.({ ...current, ...patch })
+  }
+
+  // Lines a client app presets (e.g. bills someone else decided to pay) are
+  // ticked once each, for bills this panel lists; unticking one is final
+  // until the preset itself changes.
+  const appliedPresets = useRef(new Set<string>())
+  const presetKey = (l: PaymentLine) => `${l.invoiceId}|${l.amountText}|${l.bankAccountId}|${l.paymentCode}`
+  useEffect(() => {
+    const fresh = (ext?.presetLines || [])
+      .filter(l => !appliedPresets.current.has(presetKey(l)) && invoices.some(i => i.id === l.invoiceId))
+    if (fresh.length === 0) return
+    fresh.forEach(l => appliedPresets.current.add(presetKey(l)))
+    setLines(prev => {
+      const n = { ...prev }
+      fresh.forEach(l => { n[l.invoiceId] = { ...l } })
+      return n
+    })
+  }, [ext?.presetLines, invoices])
   const patchAll = (patch: Partial<PaymentLine>) =>
     setLines(prev => Object.fromEntries(Object.entries(prev).map(([k, l]) => [k, { ...l, ...patch }])))
 
   // ── The files: one per bank ─────────────────────────────────────────────
-  const batches = batchesByBank(selectedLines, bills, bankAccounts)
+  // A line the client app holds back (with its reason) is no file's.
+  const problemOf = (l: PaymentLine): string | null =>
+    ext?.exportBlock?.(l.invoiceId)
+      ?? (bills.get(l.invoiceId) ? lineProblem(l, bills.get(l.invoiceId)!) : 'Faktura nije pronađena.')
+  const batches = batchesByBank(selectedLines.filter(l => !ext?.exportBlock?.(l.invoiceId)), bills, bankAccounts)
   const blocked = selectedLines
-    .map(l => ({ l, problem: bills.get(l.invoiceId) ? lineProblem(l, bills.get(l.invoiceId)!) : 'Faktura nije pronađena.' }))
+    .map(l => ({ l, problem: problemOf(l) }))
     .filter(x => x.problem !== null)
 
   const handleAccountSelect = (invId: string, accountId: string, partnerId: string) => {
@@ -276,7 +308,15 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
     if (acc) setInvoiceAccountMap(prev => ({ ...prev, [invId]: { account_number: acc.account_number, model: acc.model || '97', bank_name: acc.bank_name || '' } }))
   }
 
-  const handleExport = (batch: BankBatch) => downloadTkdis(batch, bills, companyProfile, defaultCompany?.name || '')
+  const handleExport = async (batch: BankBatch) => {
+    setExportError('')
+    const fileName = downloadTkdis(batch, bills, companyProfile, defaultCompany?.name || '')
+    try {
+      await ext?.onExported?.(batch, fileName)
+    } catch (e) {
+      setExportError(`Fajl ${fileName} je preuzet, ali izvoz nije zabeležen: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
 
   const daysUntilDue = (dueDate: string | null) => {
     if (!dueDate) return null
@@ -373,6 +413,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   <option value="">Šifra za sve izabrane…</option>
                   {HALCOM_SIFRE.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
+                {ext?.selectionActions?.(selectedLines, () => setLines({}))}
                 <button
                   style={{ fontFamily: "'Inter',sans-serif", fontSize: '11px', padding: '5px 12px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', background: 'transparent', color: '#7A9BB8', cursor: 'pointer' }}
                   onClick={() => setLines({})}>Poništi izbor</button>
@@ -402,6 +443,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                 {missingAccountCount > 0 && <span style={{ marginLeft: '8px', color: '#FF5B5A', fontWeight: '600' }}>⚠ {missingAccountCount} bez računa primaoca</span>}
               </div>
             )}
+            {exportError && <div role="alert" style={{ fontSize: '11px', color: '#FF5B5A', fontWeight: '600' }}>{exportError}</div>}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '6px', alignItems: 'flex-end' }}>
             {batches.map(b => (
@@ -458,7 +500,8 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   const selectedAcc = invoiceAccountMap[inv.id]
                   const hasAccount = !!(selectedAcc?.account_number || inv.account_number)
                   const line = lines[inv.id]
-                  const problem = line ? lineProblem(line, billOf(inv)) : null
+                  const problem = line ? problemOf(line) : null
+                  const badge = ext?.badge?.(inv.id)
                   return (
                     <tr key={inv.id} style={{
                       ...ps.tr,
@@ -487,6 +530,11 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                           {inv.calculated_status === 'partial' && (
                             <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '20px', background: 'rgba(245,166,35,0.15)', color: '#F5A623', border: '0.5px solid rgba(245,166,35,0.3)', whiteSpace: 'nowrap' as const }}>
                               DELIMIČNO
+                            </span>
+                          )}
+                          {badge && (
+                            <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '20px', background: 'rgba(78,168,255,0.15)', color: '#4EA8FF', border: '0.5px solid rgba(78,168,255,0.3)', whiteSpace: 'nowrap' as const }}>
+                              {badge}
                             </span>
                           )}
                         </div>
@@ -551,6 +599,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', width: '52px' }}>Plaća se</span>
                               <input aria-label={`Iznos za plaćanje ${inv.invoice_number || ''}`} inputMode="decimal"
+                                readOnly={!!ext?.amountLocked?.(inv.id)}
                                 style={{ ...ps.sel, width: '110px', fontSize: '12px', padding: '4px 7px', fontFamily: "'DM Mono', monospace", textAlign: 'right' as const, borderColor: problem ? '#FF5B5A' : undefined }}
                                 value={line.amountText} onChange={e => patchLine(inv.id, { amountText: e.target.value })} />
                             </div>
@@ -570,6 +619,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                               {HALCOM_SIFRE.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                             </select>
                             {problem && <span role="alert" style={{ fontSize: '10px', color: '#FF5B5A' }}>{problem}</span>}
+                            {ext?.lineActions?.(line)}
                           </div>
                         ) : (
                           <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.2)' }}>—</span>
