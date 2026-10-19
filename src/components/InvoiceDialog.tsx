@@ -32,7 +32,7 @@ import {
 import { round2 } from '../services/bookAmounts'
 import { countOf } from '../utils/plural'
 import {
-  DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL, billTotal, creditProblem, defaultDocumentType, scaleSplits, signProblem,
+  DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL, billTotal, creditProblem, defaultDocumentType, invoiceNumberKey, scaleSplits, signProblem,
   type AdjustableBill, type DocumentType,
 } from '../services/documentType'
 
@@ -417,6 +417,17 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     if (rows.length > 0) setBaseSplit({ amount: Number(b.amount) || 0, lines: linesFrom(rows as any, n => `line-${n}`) })
     else setSplitLines([])
   }
+
+  // A note from SEF names the bill it adjusts: that bill is proposed, once,
+  // when the partner's bills arrive. No match leaves it unlinked.
+  const [refProposed, setRefProposed] = useState(false)
+  useEffect(() => {
+    const ref = invoiceNumberKey(invoice?.billing_reference)
+    if (refProposed || !ref || adjustsId || baseBills.length === 0) return
+    setRefProposed(true)
+    const match = baseBills.find(b => invoiceNumberKey(b.invoice_number) === ref)
+    if (match) pickBase(match.id)
+  }, [baseBills]) // eslint-disable-line
 
   const runValidation = () => {
     const e: ValidationErrors = {}

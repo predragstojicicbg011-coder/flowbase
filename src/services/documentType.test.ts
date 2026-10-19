@@ -4,6 +4,7 @@ import {
   billTotal,
   creditProblem,
   defaultDocumentType,
+  invoiceNumberKey,
   scaleSplits,
   signProblem,
   type AdjustableBill,
@@ -54,6 +55,12 @@ describe('documentType', () => {
     expect(scaleSplits([{ amount: 80 }, { amount: 40 }], 120, 30).map(l => l.amount)).toEqual([20, 10])
     expect(scaleSplits([], 120, 30)).toEqual([])
     expect(scaleSplits([{ amount: 0 }, { amount: 0 }], 0, 30).map(l => l.amount)).toEqual([0, 30])
+  })
+
+  it('folds a bill number to its letters and digits', () => {
+    expect(invoiceNumberKey('R-1/26')).toBe(invoiceNumberKey('r 1 26'))
+    expect(invoiceNumberKey('Č-5/26')).toBe('č526')
+    expect(invoiceNumberKey(null)).toBe('')
   })
 
   it('sums up a bill\'s notes in one phrase', () => {

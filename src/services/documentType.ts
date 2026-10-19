@@ -76,6 +76,12 @@ export function scaleSplits<T extends { amount: number }>(lines: T[], baseAmount
   })
 }
 
+/** A bill number on its letters and digits, lower case: the database's
+ *  invoice_number_key, so "R-1/26" and "r 1 26" are one number. */
+export function invoiceNumberKey(n: string | null | undefined): string {
+  return (n || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+}
+
 /** „knjižno odobrenje −20.000,00 RSD“, „knjižno zaduženje +5.000,00 RSD“, or '' for a bill with no notes. */
 export function adjustmentSummary(_amount: number, adjustments: number, currency: string): string {
   if (Math.abs(adjustments) < 0.005) return ''

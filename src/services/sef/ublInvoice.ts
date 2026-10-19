@@ -57,8 +57,13 @@ export interface UblInvoice {
   /** `PayableAmount`, in `documentCurrency`. Shown to the owner where the two
    *  currencies differ, so the figure on the paper is accounted for. */
   documentTotal: number | null
-  typeCode: string | null       // '380' invoice, '381' credit note
+  typeCode: string | null       // '380' invoice, '381' credit note, '383' debit note
   isCreditNote: boolean
+  /** Type 383: adds to an earlier bill. Positive, like a bill. */
+  isDebitNote: boolean
+  /** The number of the bill a credit or debit note adjusts
+   *  (`BillingReference/InvoiceDocumentReference/ID`); null where none is named. */
+  billingReference: string | null
   supplierName: string | null
   supplierVatNumber: string | null       // PIB, digits only
   supplierRegistrationNumber: string | null
@@ -180,7 +185,7 @@ const pickTaxAmount = (root: Element, currency: string | null): number | null =>
 
 const empty = (): UblInvoice => ({
   invoiceNumber: null, issueDate: null, dueDate: null, currency: null,
-  typeCode: null, isCreditNote: false,
+  typeCode: null, isCreditNote: false, isDebitNote: false, billingReference: null,
   documentCurrency: null, documentTotal: null,
   supplierName: null, supplierVatNumber: null, supplierRegistrationNumber: null,
   customerName: null, customerVatNumber: null, customerRegistrationNumber: null,
@@ -262,6 +267,8 @@ export function parseUbl(xml: string): UblInvoice {
     currency,
     typeCode,
     isCreditNote,
+    isDebitNote: !isCreditNote && typeCode === '383',
+    billingReference: text(child(root, 'BillingReference', 'InvoiceDocumentReference', 'ID')),
     supplierName: text(child(supplier, 'PartyName', 'Name')),
     // `RS100000004` in the document; `partners.tax_id` holds the bare digits.
     supplierVatNumber: digits(text(child(supplier, 'PartyTaxScheme', 'CompanyID'))),

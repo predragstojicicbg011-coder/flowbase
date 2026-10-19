@@ -12,7 +12,7 @@ const row = { id: 'r1', currency: 'RSD' }
 const ubl = (over: Partial<UblInvoice> = {}): UblInvoice => ({
   invoiceNumber: '2026-0412', issueDate: '2026-09-30', dueDate: '2026-10-31',
   deliveryDate: null,
-  currency: 'RSD', typeCode: '380', isCreditNote: false,
+  currency: 'RSD', typeCode: '380', isCreditNote: false, isDebitNote: false, billingReference: null,
   supplierName: 'Telekom Srbija', supplierVatNumber: '100002887',
   supplierRegistrationNumber: '17162543',
   customerName: 'PRIMALAC DOO BEOGRAD', customerVatNumber: '100000001',
@@ -481,5 +481,24 @@ describe('a draft that declined to choose an account', () => {
     const d = draftFromUbl(ubl({ bankAccount: null, bankAccounts: [] }), row, 'p1', null)
     expect(d.account_number).toBeNull()
     expect('unresolved' in d).toBe(false)
+  })
+})
+
+describe('the document type of the draft', () => {
+  it('a bill is a bill', () => {
+    const d = draftFromUbl(ubl(), row, 'p1', null)
+    expect(d.document_type).toBe('invoice')
+    expect(d.billing_reference).toBeNull()
+  })
+
+  it('a credit note carries the bill it refers to', () => {
+    const d = draftFromUbl(ubl({ total: -1500, isCreditNote: true, typeCode: '381', billingReference: '26-03-892094' }), row, 'p1', null)
+    expect(d.document_type).toBe('credit_note')
+    expect(d.billing_reference).toBe('26-03-892094')
+  })
+
+  it('a debit note is a debit note', () => {
+    const d = draftFromUbl(ubl({ typeCode: '383', isDebitNote: true }), row, 'p1', null)
+    expect(d.document_type).toBe('debit_note')
   })
 })

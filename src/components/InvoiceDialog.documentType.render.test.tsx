@@ -157,3 +157,19 @@ describe('document type in the entry form', () => {
     expect(typeSelect().value).toBe('debit_note')
   })
 })
+
+describe('a note from SEF', () => {
+  it('proposes the bill its reference names', async () => {
+    mockState.bases = [base({ id: 'b0', invoice_number: 'R-0/26' }), base()]
+    render(<InvoiceDialog onClose={() => {}} invoice={draft({ document_type: 'credit_note', billing_reference: 'r 1/26' })} />)
+    const pick = await screen.findByLabelText('Odnosi se na račun') as HTMLSelectElement
+    await waitFor(() => expect(pick.value).toBe('b1'))
+  })
+
+  it('leaves it unlinked when no bill has that number', async () => {
+    render(<InvoiceDialog onClose={() => {}} invoice={draft({ document_type: 'credit_note', billing_reference: 'X-9' })} />)
+    const pick = await screen.findByLabelText('Odnosi se na račun') as HTMLSelectElement
+    await waitFor(() => expect(pick.querySelectorAll('option').length).toBe(2))
+    expect(pick.value).toBe('')
+  })
+})

@@ -137,7 +137,11 @@ export function draftFromUbl(
     dept_subcategory: proposal?.dept_subcategory ?? null,
     expense_description: proposal?.expense_description ?? null,
     cf_type: proposal?.cf_type ?? null,
-    note: ubl.isCreditNote ? 'Knjižno odobrenje sa SEF-a' : null,
+    note: ubl.isCreditNote ? 'Knjižno odobrenje sa SEF-a' : ubl.isDebitNote ? 'Knjižno zaduženje sa SEF-a' : null,
+    // The dialog opens with this type and proposes the partner's bill whose
+    // number is the reference (compared on letters and digits only).
+    document_type: ubl.isCreditNote ? 'credit_note' : ubl.isDebitNote ? 'debit_note' : 'invoice',
+    billing_reference: ubl.billingReference,
   }
 }
 

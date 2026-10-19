@@ -423,3 +423,24 @@ describe('reading a Serbian e-invoice, against real documents', () => {
     })
   })
 })
+
+describe('which bill a note adjusts, and a debit note', () => {
+  const fx = (name: string) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8')
+
+  it('reads the bill a credit note refers to', () => {
+    expect(parseUbl(fx('credit-note-sample.xml')).billingReference).toBe('26-03-892094')
+  })
+
+  it('a bill with no reference has none, and is not a debit note', () => {
+    const b = parseUbl(fx('invoice-sample.xml'))
+    expect(b.billingReference).toBeNull()
+    expect(b.isDebitNote).toBe(false)
+  })
+
+  it('type 383 is a debit note, positive', () => {
+    const d = parseUbl(fx('invoice-sample.xml').replace('<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>', '<cbc:InvoiceTypeCode>383</cbc:InvoiceTypeCode>'))
+    expect(d.isDebitNote).toBe(true)
+    expect(d.isCreditNote).toBe(false)
+    expect(d.total).toBeGreaterThan(0)
+  })
+})
