@@ -1,3 +1,4 @@
+import { isPayable } from '../services/documentType'
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { useNav } from '../navigation'
 import type { Page } from '../navigation'
@@ -121,21 +122,21 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
       // view — it decides which invoices, not what is printed on them.
       const openRows = await fetchAllPages<any>((from, to) =>
         supabase.from('v_invoice_status')
-          .select('id, calculated_status, amount, paid_amount, remaining_rsd, remaining_eur, document_type, adjustments, unlinked')
+          .select('id, calculated_status, amount, paid_amount, remaining_rsd, remaining_eur, document_type, adjustments, advance_used, unlinked')
           .eq('company_id', compData.id)
-          .eq('document_type', 'invoice')
+          .in('document_type', ['invoice', 'proforma'])
           .in('calculated_status', ['unpaid', 'partial'])
           .order('due_date', { ascending: true }).order('id')
           .range(from, to))
         // A credit or debit note is never paid on its own: the bill it
         // adjusts is (its notes counted), and one not linked yet waits.
-        .then(rows => rows.filter((r: any) => (r.document_type ?? 'invoice') === 'invoice'))
+        .then(rows => rows.filter((r: any) => isPayable(r.document_type ?? 'invoice')))
 
       const { data: loose } = await supabase.from('v_invoice_status')
         .select('id, invoice_number, partner_name, document_type, amount, currency, unlinked')
         .eq('company_id', compData.id)
         .eq('unlinked', true)
-      setUnlinkedNotes((loose || []).filter((r: any) => r.unlinked))
+      setUnlinkedNotes((loose || []).filter((r: any) => r.unlinked && (r.document_type === 'credit_note' || r.document_type === 'debit_note')))
 
       const openById = new Map<string, any>(openRows.map(r => [r.id, r]))
       const invData = await fetchByIds<any>(
@@ -173,10 +174,12 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
             // Its credit and debit notes count: a bill of 120.000 with a
             // credit note of −20.000 is owed 100.000.
             adjustments: Number(open?.adjustments) || 0,
+            // A final invoice: what supplier advances already paid of it.
+            advance_used: Number(open?.advance_used) || 0,
             paid_own: partial ? (Number(open?.paid_amount) || 0) : 0,
             outstanding_own: outstandingOwn({
               ...i,
-              amount: (Number(i.amount) || 0) + (Number(open?.adjustments) || 0),
+              amount: (Number(i.amount) || 0) + (Number(open?.adjustments) || 0) - (Number(open?.advance_used) || 0),
               paid_amount: partial ? (open?.paid_amount ?? 0) : 0,
             }),
           }
@@ -608,9 +611,14 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                           <span style={{ fontSize: '11px', fontFamily: "'DM Mono', monospace", background: 'rgba(255,255,255,0.05)', padding: '2px 7px', borderRadius: '5px', color: '#7A9BB8', border: '0.5px solid rgba(255,255,255,0.06)' }}>
                             {inv.invoice_number || '—'}
                           </span>
+                          {inv.document_type === 'proforma' && (
+                            <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '20px', background: 'rgba(78,168,255,0.15)', color: '#4EA8FF', border: '0.5px solid rgba(78,168,255,0.3)', whiteSpace: 'nowrap' as const }}>
+                              PREDRAČUN
+                            </span>
+                          )}
                           {inv.calculated_status === 'partial' && (
                             <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '20px', background: 'rgba(245,166,35,0.15)', color: '#F5A623', border: '0.5px solid rgba(245,166,35,0.3)', whiteSpace: 'nowrap' as const }}>
-                              {inv.adjustments < 0 && !(inv.paid_own > 0) ? 'UMANJENO ODOBRENJEM' : 'DELIMIČNO'}
+                              {inv.advance_used > 0 && !(inv.paid_own > 0) ? 'UMANJENO AVANSOM' : inv.adjustments < 0 && !(inv.paid_own > 0) ? 'UMANJENO ODOBRENJEM' : 'DELIMIČNO'}
                             </span>
                           )}
                           {badge && (
@@ -630,6 +638,11 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                           <span style={{ fontSize: '13px', fontWeight: '500', fontFamily: "'DM Mono', monospace", color: '#E8F1FB', whiteSpace: 'nowrap' as const }}>
                             {fmtMoney(inv.amount || 0, inv.currency)}
                           </span>
+                          {inv.advance_used > 0 && (
+                            <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px', whiteSpace: 'nowrap' as const }}>
+                              avans −{fmtMoney(inv.advance_used, inv.currency || 'RSD')}
+                            </div>
+                          )}
                           {inv.adjustments !== 0 && inv.adjustments != null && (
                             <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px', whiteSpace: 'nowrap' as const }}>
                               {adjustmentSummary(inv.amount || 0, inv.adjustments, inv.currency || 'RSD')}

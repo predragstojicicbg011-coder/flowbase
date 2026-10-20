@@ -1,3 +1,5 @@
+import { proformaFromPayment } from '../services/advances'
+import { isPayable } from '../services/documentType'
 import React, { useState, useMemo, useEffect } from 'react'
 import { supabase } from '../supabase'
 import { matchesAmount } from '../services/amountSearch'
@@ -488,7 +490,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         .in('calculated_status', ['unpaid', 'partial', 'overpaid'])
         .order('due_date', { ascending: true })
       // A credit or debit note is settled through its bill, never by a payment.
-      if (data) setOpenInvoices(data.filter((i: any) => (i.document_type ?? 'invoice') === 'invoice'))
+      if (data) setOpenInvoices(data.filter((i: any) => isPayable(i.document_type ?? 'invoice')))
     }
     fetchOpenInvoices()
   }, [companyId])
@@ -773,6 +775,24 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
    * remainder that then offered itself as a currency difference, though
    * dinars had settled a dinar bill in full.
    */
+  /** Why a proforma could not be made from this payment. */
+  const [proformaWhy, setProformaWhy] = useState('')
+
+  /** Money released to a supplier with no proforma: make one and pay it. */
+  const makeProformaFrom = async () => {
+    const made = proformaFromPayment({
+      companyId: companyId || null, partnerId: partnerId || null, date: txDate,
+      amount: Math.max(0, (parseFloat(amount) || 0) - totalAllocatedOwn), currency: currency || 'RSD',
+      accountNumber: accNum || null, description: note || null,
+    })
+    if (!made.ok) { setProformaWhy(made.why); return }
+    const { data: inserted, error } = await supabase.from('invoices').insert(made.row).select('id').single()
+    if (error || !inserted?.id) { setProformaWhy(`Predračun nije napravljen: ${error?.message || 'baza nije vratila red'}`); return }
+    const { data: open } = await supabase.from('v_invoice_status').select('*').eq('id', inserted.id).single()
+    setProformaWhy('')
+    if (open) { setOpenInvoices(prev => [...prev, open]); addInvoiceLink(open) }
+  }
+
   const addInvoiceLink = (inv: any) => {
     if (isInvoiceLinked(inv.id)) return
     const outstanding = outstandingOwn(inv)
@@ -1887,6 +1907,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                       ⚠️ {fieldErr('linkedInvoices')}
                     </div>
                   )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <button type="button" style={s.linkBtn} onClick={makeProformaFrom}>Nov predračun iz ove uplate</button>
+                    {proformaWhy && <span style={{ fontSize: '11px', color: DIALOG.red }}>{proformaWhy}</span>}
+                  </div>
                   <input style={{ ...s.input, marginBottom: '10px', width: '100%', boxSizing: 'border-box' as const }}
                     value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)}
                     placeholder="Pretraga po partneru, broju fakture ili iznosu…" />

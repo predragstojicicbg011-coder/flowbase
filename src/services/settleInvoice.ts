@@ -133,12 +133,15 @@ export interface InvoiceSettlement extends InvoiceMoney {
    * 120.000 with a credit note of −20.000 is owed 100.000 (20261020100000).
    */
   adjustments?: number | string | null
+  /** The view's `advance_used`: what of supplier advances this final invoice
+   *  uses (20261021090000). Settled like a payment. */
+  advance_used?: number | string | null
 }
 
-/** The bill with its credit and debit notes, in its own currency: what it comes to. */
-export function owedAmount(invoice: { amount?: number | string | null; adjustments?: number | string | null }): number {
+/** The bill with its credit and debit notes, less the advances it uses, in its own currency. */
+export function owedAmount(invoice: { amount?: number | string | null; adjustments?: number | string | null; advance_used?: number | string | null }): number {
   const n = (v: unknown) => { const x = typeof v === 'string' ? Number(v) : v; return typeof x === 'number' && Number.isFinite(x) ? x : 0 }
-  return round2(n(invoice.amount) + n(invoice.adjustments))
+  return round2(n(invoice.amount) + n(invoice.adjustments) - n(invoice.advance_used))
 }
 
 /** What the bill is still owed, in the currency it was written in. */

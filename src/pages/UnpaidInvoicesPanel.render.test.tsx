@@ -154,3 +154,22 @@ describe('credit and debit notes in the unpaid list', () => {
     expect(screen.getByText('1 knjižno odobrenje nije vezano za račun')).toBeInTheDocument()
   })
 })
+
+describe('proformas and final invoices in the unpaid list', () => {
+  beforeEach(() => {
+    mockTables.v_invoice_status = [
+      { id: 'i1', calculated_status: 'partial', amount: 17340, paid_amount: 0, document_type: 'invoice', adjustments: 0, advance_used: 13260, unlinked: false },
+      { id: 'i2', calculated_status: 'unpaid', amount: 200000, paid_amount: 0, document_type: 'proforma', adjustments: 0, advance_used: 0, unlinked: false },
+      { id: 'a1', calculated_status: 'paid', amount: 18144, paid_amount: 0, document_type: 'advance_invoice', adjustments: 0, advance_used: 0, unlinked: false },
+    ]
+    mockTables.invoices = [inv('i1', '427/26', 17340, 'Beton Plus'), { ...inv('i2', 'PR-1', 200000, 'Armatura'), document_type: 'proforma' }]
+  })
+
+  it('offers a proforma, marked, and what a final invoice owes after its advance', async () => {
+    await open()
+    expect(screen.getByText('PREDRAČUN')).toBeInTheDocument()
+    expect(screen.getByText('avans −13.260,00 RSD')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Plati 427/26'))
+    expect((screen.getByLabelText('Iznos za plaćanje 427/26') as HTMLInputElement).value).toBe('4080,00')
+  })
+})

@@ -1,3 +1,4 @@
+import { isPayable } from '../services/documentType'
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import { PostFailure, reportPostFailure, type CompletedWrite } from '../services/writeOrder'
@@ -112,8 +113,9 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
           .eq('company_id', tx.company_id)
           .in('calculated_status', ['unpaid', 'partial', 'reconciled'])
           .order('invoice_date', { ascending: false })
-        // A credit or debit note is settled through its bill, never by a payment.
-        setCandidates((invs || []).filter((i: any) => (i.document_type ?? 'invoice') === 'invoice'))
+        // A note is settled through its bill, an advance invoice never is;
+        // a bill and a proforma are paid.
+        setCandidates((invs || []).filter((i: any) => isPayable(i.document_type ?? 'invoice')))
       }
 
       // Existing links

@@ -114,3 +114,28 @@ export function openAdvancesNotice(advances: OpenAdvance[]): string {
   const total = cents(open.reduce((s, a) => s + a.open, 0))
   return `Dobavljač ima otvorene avanse: ${n} ${word}, ukupno ${fmtMoney(total, open[0].currency || 'RSD')}`
 }
+
+/**
+ * A proforma made from a payment that went out with none (spec: the money was
+ * released without a proforma). Dinars only: a foreign-currency proforma needs
+ * its own rate and is entered as a proforma. Everything is editable later.
+ */
+export function proformaFromPayment(p: {
+  companyId: string | null; partnerId: string | null; date: string; amount: number
+  currency: string | null; accountNumber: string | null; description: string | null
+}): { ok: true; row: Record<string, unknown> } | { ok: false; why: string } {
+  if (!p.partnerId) return { ok: false, why: 'Prvo izaberite dobavljača.' }
+  if (!(p.amount > 0)) return { ok: false, why: 'Predračun se pravi samo iz isplate.' }
+  if ((p.currency || 'RSD') !== 'RSD') return { ok: false, why: 'Iz uplate se pravi samo dinarski predračun; devizni unesite kao predračun.' }
+  const amount = cents(p.amount)
+  const when = p.date.split('-').reverse().join('.')
+  return {
+    ok: true,
+    row: {
+      company_id: p.companyId, partner_id: p.partnerId, invoice_number: null, invoice_date: p.date, due_date: p.date,
+      type: 'expense', currency: 'RSD', amount, amount_rsd: amount, exchange_rate: 1,
+      document_type: 'proforma', pl_impact: false, status: 'unpaid', account_number: p.accountNumber || null,
+      note: `Predračun napravljen iz uplate od ${when}` + (p.description ? `: ${p.description}` : ''),
+    },
+  }
+}

@@ -1,5 +1,5 @@
 import {
-  coverageProblem, openAdvancesNotice, proformaNumbersIn, proposeCoverage, proposeUsage, usageProblem,
+  coverageProblem, openAdvancesNotice, proformaFromPayment, proformaNumbersIn, proposeCoverage, proposeUsage, usageProblem,
   type OpenAdvance, type PaidProforma,
 } from './advances'
 
@@ -90,5 +90,27 @@ describe('telling the person a supplier has open advances', () => {
       .toBe('Dobavljač ima otvorene avanse: 2 avansna računa, ukupno 335.000,00 RSD')
     expect(openAdvancesNotice([adv({ open: 1 })])).toBe('Dobavljač ima otvorene avanse: 1 avansni račun, ukupno 1,00 RSD')
     expect(openAdvancesNotice([adv({ open: 0 })])).toBe('')
+  })
+})
+
+describe('a proforma made from a payment', () => {
+  const pay = { companyId: 'co1', partnerId: 'p1', date: '2026-10-12', amount: 190140, currency: 'RSD', accountNumber: '160-1-11', description: 'Uplata po predracunu 9917/017' }
+
+  it('carries the supplier, amount, date and account of the payment, with no P&L', () => {
+    expect(proformaFromPayment(pay)).toEqual({
+      ok: true,
+      row: {
+        company_id: 'co1', partner_id: 'p1', invoice_number: null, invoice_date: '2026-10-12', due_date: '2026-10-12',
+        type: 'expense', currency: 'RSD', amount: 190140, amount_rsd: 190140, exchange_rate: 1,
+        document_type: 'proforma', pl_impact: false, status: 'unpaid', account_number: '160-1-11',
+        note: 'Predračun napravljen iz uplate od 12.10.2026: Uplata po predracunu 9917/017',
+      },
+    })
+  })
+
+  it('needs a supplier, an amount paid out, and dinars', () => {
+    expect(proformaFromPayment({ ...pay, partnerId: null })).toEqual({ ok: false, why: 'Prvo izaberite dobavljača.' })
+    expect(proformaFromPayment({ ...pay, amount: 0 })).toEqual({ ok: false, why: 'Predračun se pravi samo iz isplate.' })
+    expect(proformaFromPayment({ ...pay, currency: 'EUR' })).toEqual({ ok: false, why: 'Iz uplate se pravi samo dinarski predračun; devizni unesite kao predračun.' })
   })
 })

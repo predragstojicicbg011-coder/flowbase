@@ -357,3 +357,11 @@ describe('a bill with credit and debit notes', () => {
     expect(settledStatus(owedAmount(credited), 50000, 120000)).toBe('partial')
   })
 })
+
+describe('a final invoice closed by an advance', () => {
+  it('owes the bill less the advance it uses', () => {
+    expect(owedAmount({ amount: 18144, adjustments: 0, advance_used: 18144 })).toBe(0)
+    expect(owedAmount({ amount: 17340, advance_used: 13260 })).toBe(4080)
+    expect(outstandingOwn({ currency: 'RSD', amount: 17340, advance_used: 13260, paid_amount: 1000 } as any)).toBe(3080)
+  })
+})

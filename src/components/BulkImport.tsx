@@ -651,7 +651,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
     if (!company) return
     const fetchInvoices = async () => {
       const { data, error } = await supabase.from('v_invoice_status').select('*').eq('company_id', company)
-        .eq('document_type', 'invoice')
+        .in('document_type', ['invoice', 'proforma'])
         .in('calculated_status', ['unpaid', 'partial']).order('due_date', { ascending: true })
       if (error) console.warn('v_invoice_status error (non-critical):', error.message)
       if (data) setOpenInvoices(data)

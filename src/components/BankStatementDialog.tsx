@@ -1,3 +1,4 @@
+import { proformaFromPayment } from '../services/advances'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabase'
 import { matchesAmount } from '../services/amountSearch'
@@ -198,6 +199,8 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   const [banks, setBanks] = useState<any[]>([])
   const [allBanks, setAllBanks] = useState<any[]>([])
   const [openInvoices, setOpenInvoices] = useState<any[]>([])
+  /** Why a proforma could not be made from a row's payment, by row. */
+  const [proformaWhy, setProformaWhy] = useState<Record<string, string>>({})
   const [partners, setPartners] = useState<any[]>([])
   /** The one-off loads are in; `startEdit` reads partners to name rows. */
   const [refsLoaded, setRefsLoaded] = useState(false)
@@ -459,7 +462,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   useEffect(() => {
     if (!company) return
     supabase.from('v_invoice_status').select('*').eq('company_id', company)
-      .eq('document_type', 'invoice')
+      .in('document_type', ['invoice', 'proforma'])
       .in('calculated_status', ['unpaid', 'partial']).order('due_date', { ascending: true })
       .then(({ data }) => { if (data) setOpenInvoices(data) })
   }, [company])
@@ -881,6 +884,25 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
    * side, so the cash line reads a receipt as an inflow. See
    * services/advanceReceipt.ts.
    */
+  /**
+   * Money released to a supplier with no proforma: make the proforma from the
+   * payment and pay it with this row (spec: "ili ga pravi i zatvara").
+   */
+  const makeProformaFrom = async (row: StatementRow) => {
+    const made = proformaFromPayment({
+      companyId: company || null, partnerId: row.partner_id, date: row.date,
+      amount: parseFloat(row.debit) || 0, currency: row.currency || defaultCurrency,
+      accountNumber: row.account_number || null, description: row.description || null,
+    })
+    if (!made.ok) { setProformaWhy(prev => ({ ...prev, [row.id]: made.why })); return }
+    const { data: inserted, error } = await supabase.from('invoices').insert(made.row).select('id').single()
+    if (error || !inserted?.id) { setProformaWhy(prev => ({ ...prev, [row.id]: `Predračun nije napravljen: ${error?.message || 'baza nije vratila red'}` })); return }
+    const { data: open } = await supabase.from('v_invoice_status').select('*').eq('id', inserted.id).single()
+    if (open) setOpenInvoices(prev => [...prev, open])
+    setProformaWhy(prev => ({ ...prev, [row.id]: '' }))
+    updateRow(row.id, { linked_invoice_id: inserted.id })
+  }
+
   const shapeOf = (row: StatementRow) => receiptShape({
     type: row.tx_type,
     subtype: row.tx_subtype,
@@ -1965,6 +1987,18 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                         {row.tx_type === 'invoice_payment' && (
                           <>
                             <div style={s.classTitle}>Poveži sa otvorenom fakturom</div>
+                            {parseFloat(row.debit) > 0 && !row.linked_invoice_id && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                <button type="button"
+                                  style={{ background: 'transparent', border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', color: DIALOG.accent, fontSize: '11.5px', padding: '4px 10px', cursor: 'pointer' }}
+                                  onClick={e => { e.stopPropagation(); makeProformaFrom(row) }}>
+                                  Nov predračun iz ove uplate
+                                </button>
+                                <span style={{ fontSize: '11px', color: proformaWhy[row.id] ? DIALOG.red : DIALOG.faint }}>
+                                  {proformaWhy[row.id] || 'Kad je novac pušten bez predračuna: pravi predračun i zatvara ga ovom uplatom, bez P&L.'}
+                                </span>
+                              </div>
+                            )}
                             <div style={{ marginBottom: '14px' }}>
                               {openInvoices.length === 0 ? (
                                 <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', background: DIALOG.raised, borderRadius: '8px' }}>
