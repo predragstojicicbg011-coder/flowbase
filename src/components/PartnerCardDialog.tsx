@@ -6,6 +6,7 @@ import { fmtMoney } from '../utils/formatters'
 import { buildPartnerCard } from '../services/partnerCard'
 import { loadPartnerCard, type PartnerCardData } from '../services/loadPartnerCard'
 import InvoiceDocumentsDialog from './InvoiceDocumentsDialog'
+import { partnerCardPrintHtml } from '../services/partnerCardPrint'
 
 // ─── Kartica partnera ───────────────────────────────────────────────────────
 //
@@ -37,6 +38,49 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
     return () => { cancelled = true }
   }, [partner.id, companyId])
 
+  const [exporting, setExporting] = useState(false)
+
+  /**
+   * The card as it is on screen (company, period) printed from a hidden frame:
+   * the print dialog's "Save as PDF" makes the file (the client's choice).
+   */
+  const exportPdf = async () => {
+    if (!card) return
+    setExporting(true)
+    try {
+      const [{ data: company }, { data: who }] = await Promise.all([
+        companyId
+          ? supabase.from('company_profiles').select('full_legal_name, address, city, pib').eq('company_id', companyId).maybeSingle()
+          : Promise.resolve({ data: null }),
+        supabase.from('partners').select('name, tax_id, address, city').eq('id', partner.id).maybeSingle(),
+      ])
+      const d = new Date()
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const html = partnerCardPrintHtml({
+        company: company || { full_legal_name: companies.find(c => c.id === companyId)?.name || '' },
+        partner: who || { name: partner.name },
+        period: { from: from || null, to: to || null },
+        card,
+        generatedOn: today,
+      })
+      document.querySelectorAll('iframe[title="Kartica za štampu"]').forEach(f => f.remove())
+      const frame = document.createElement('iframe')
+      frame.title = 'Kartica za štampu'
+      frame.style.position = 'fixed'
+      frame.style.width = '0'
+      frame.style.height = '0'
+      frame.style.border = '0'
+      frame.style.right = '0'
+      frame.style.bottom = '0'
+      frame.srcdoc = html
+      document.body.appendChild(frame)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const card = useMemo(() => data && buildPartnerCard(data, { from: from || null, to: to || null }), [data, from, to])
   const money = (n: number) => fmtMoney(n, 'RSD')
   const clip = (id: string | null) => id && data?.withDocs.has(id)
@@ -66,6 +110,10 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
             )}
             <label>Od <input aria-label="Od" type="date" style={input} value={from} onChange={e => setFrom(e.target.value)} /></label>
             <label>Do <input aria-label="Do" type="date" style={input} value={to} onChange={e => setTo(e.target.value)} /></label>
+            <button onClick={exportPdf} disabled={!card || exporting}
+              style={{ ...input, cursor: card ? 'pointer' : 'default', color: DIALOG.accent }}>
+              {exporting ? '…' : 'Izvezi PDF'}
+            </button>
             <button aria-label="Zatvori" onClick={onClose} style={{ background: 'none', border: 'none', color: DIALOG.dim, fontSize: '20px', cursor: 'pointer' }}>×</button>
           </div>
         </div>

@@ -11,7 +11,17 @@ jest.mock('../contexts/CompaniesContext', () => ({
   useCompanies: () => ({ companies: [{ id: 'co', name: 'Firma doo' }], defaultCompany: { id: 'co', name: 'Firma doo' }, showPicker: false }),
 }))
 jest.mock('./InvoiceDocumentsDialog', () => ({ invoiceId }: any) => <div>Dokumenti {invoiceId}</div>)
-jest.mock('../supabase', () => ({ supabase: {} }))
+jest.mock('../supabase', () => {
+  const rows: Record<string, any> = {
+    company_profiles: { full_legal_name: 'Firma doo', address: 'Ulica 1', city: 'Beograd', pib: '100000001' },
+    partners: { id: 'p1', name: 'Beton Plus doo', tax_id: '100000004', address: 'Put 2', city: 'Novi Sad' },
+  }
+  const q = (t: string): any => {
+    const b: any = { select: () => b, eq: () => b, maybeSingle: async () => ({ data: rows[t] ?? null, error: null }) }
+    return b
+  }
+  return { supabase: { from: (t: string) => q(t) } }
+})
 
 const doc = (over: any) => ({
   id: 'x', invoice_number: null, invoice_date: '2026-10-01', type: 'expense', document_type: 'invoice', currency: 'RSD',
@@ -66,5 +76,19 @@ describe('the partner card', () => {
     fireEvent.change(screen.getByLabelText('Od'), { target: { value: '2026-10-10' } })
     expect(screen.getByText('Početni saldo')).toBeInTheDocument()
     expect(screen.queryByText('Račun F-412/26')).not.toBeInTheDocument()
+  })
+})
+
+describe('exporting the card', () => {
+  it('prints the card with both parties into a frame', async () => {
+    await open()
+    fireEvent.click(screen.getByText('Izvezi PDF'))
+    await screen.findByText('Izvezi PDF')
+    await new Promise(r => setTimeout(r, 20))
+    const frame = document.querySelector('iframe[title="Kartica za štampu"]') as HTMLIFrameElement
+    expect(frame).not.toBeNull()
+    expect(frame.srcdoc).toContain('Beton Plus doo')
+    expect(frame.srcdoc).toContain('PIB 100000001')
+    expect(frame.srcdoc).toContain('Račun F-412/26')
   })
 })
