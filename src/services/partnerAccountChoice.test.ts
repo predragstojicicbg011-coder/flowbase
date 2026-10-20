@@ -169,3 +169,20 @@ describe('what a saved record is allowed to say', () => {
     expect(chooseAccount(accounts, carriedAccountOf(bill, 'eps'))?.accountId).toBe('p')
   })
 })
+
+describe('the same account written in another form', () => {
+  it('without the leading zeros of the middle part (as some SEF bills write it)', () => {
+    expect(sameAccountNumber('160-553857-18', '160-0000000553857-18')).toBe(true)
+    expect(sameAccountNumber('160-0000000553857-18', '160000000055385718')).toBe(true)
+  })
+
+  it('as an IBAN, and with spaces or a trailing blank', () => {
+    expect(sameAccountNumber('RS35 1600 0000 0055 3857 18', '160-0000000553857-18')).toBe(true)
+    expect(sameAccountNumber('105294145642 ', '105-0000002941456-42')).toBe(true)
+  })
+
+  it('still tells two different accounts apart', () => {
+    expect(sameAccountNumber('160-553857-18', '160-553857-19')).toBe(false)
+    expect(sameAccountNumber('160-553857-18', '265-553857-18')).toBe(false)
+  })
+})

@@ -84,8 +84,29 @@ export function accountDigits(n: string | null | undefined): string {
 export function sameAccountNumber(
   a: string | null | undefined, b: string | null | undefined,
 ): boolean {
-  const x = accountDigits(a)
-  return x !== '' && x === accountDigits(b)
+  const x = canonicalAccount(a)
+  return x !== '' && x === canonicalAccount(b)
+}
+
+/**
+ * An account number in its full form: 18 digits, bank (3) + account (13) +
+ * control (2) — the form Halcom takes (cleanAccount). Bills write the same
+ * account without the middle part's leading zeros („160-553857-18“), as an
+ * IBAN („RS35 1600 …“), with spaces or a trailing blank; compared on digits
+ * alone those read as different accounts and the partner's saved one was
+ * not recognised.
+ */
+export function canonicalAccount(n: string | null | undefined): string {
+  const raw = (n || '').trim().replace(/^RS\d{2}/i, '').replace(/\s/g, '')
+  const parts = raw.split('-').filter(Boolean)
+  // Written bank-account-control: the middle part padded to 13.
+  if (parts.length === 3 && parts.every(p => /^\d+$/.test(p))) {
+    return parts[0].padStart(3, '0').slice(-3) + parts[1].padStart(13, '0').slice(-13) + parts[2].padStart(2, '0').slice(-2)
+  }
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length >= 18) return digits.slice(-18)
+  if (digits.length > 5) return digits.slice(0, 3) + digits.slice(3, -2).padStart(13, '0') + digits.slice(-2)
+  return digits
 }
 
 /** The saved account a written number belongs to, or null. */
