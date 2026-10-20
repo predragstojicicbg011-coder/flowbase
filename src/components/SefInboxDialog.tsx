@@ -699,6 +699,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
             <div style={s.supplierLine}>
               <span style={s.supplier}>{row.supplier_name || 'Nepoznat dobavljač'}</span>
               {isCreditNote(row) && <span style={{ ...s.badge, background: DIALOG.blueFill, color: DIALOG.blue }}>Knjižno odobrenje</span>}
+              {/prepayment/i.test(row.document_type || '') && <span style={{ ...s.badge, background: DIALOG.amberFill, color: DIALOG.amber }}>Avansni račun</span>}
               {outsideBadge && (
                 <span style={{
                   ...s.badge,

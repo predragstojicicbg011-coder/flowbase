@@ -35,7 +35,10 @@ import {
   DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL, billTotal, creditProblem, defaultDocumentType, hasNoPl, invoiceNumberKey, scaleSplits, signProblem,
   type AdjustableBill, type DocumentType,
 } from '../services/documentType'
-import { coverageProblem, proposeCoverage, type PaidProforma } from '../services/advances'
+import {
+  coverageProblem, openAdvancesNotice, proposeCoverage, proposeUsage, usageProblem,
+  type AdvanceRef, type OpenAdvance, type PaidProforma,
+} from '../services/advances'
 
 /** Display labels for the stored tag keys; the keys stay as they are in the data. */
 const TAG_LABEL: Record<string, string> = {
@@ -164,6 +167,20 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   /** How much of each proforma this advance invoice covers, as typed. */
   const [coverage, setCoverage] = useState<Record<string, string>>({})
   const [coverageTouched, setCoverageTouched] = useState(false)
+  /** A supplier's bill: the advance invoices with something left to use. */
+  const [openAdvances, setOpenAdvances] = useState<OpenAdvance[]>([])
+  /** How much of each advance this final invoice uses, as typed. */
+  const [usage, setUsage] = useState<Record<string, string>>({})
+  const [usageTouched, setUsageTouched] = useState(false)
+  /** Advance invoices from an earlier period, added from this final invoice
+   *  (it names them; they are not in the books). Saved with it. */
+  const [priorAdvances, setPriorAdvances] = useState<{ number: string; date: string | null; amount: number }[]>([])
+  /** The advances a SEF final invoice names, and what they paid. */
+  const advanceRefs: AdvanceRef[] = Array.isArray(invoice?.advance_refs) ? invoice.advance_refs : []
+  const advanceUsedOnBill = Number(invoice?.advance_used) || 0
+  /** A final invoice from SEF: it may not be posted without its advances. */
+  const advancesRequired = docType === 'invoice' && advanceRefs.length > 0 && advanceUsedOnBill > 0
+  const isSupplierBill = docType === 'invoice' && invType === 'expense'
   // RSD per 1 unit of `currency`, and RSD per 1 EUR — fetched from NBS or
   // typed by hand. On a EUR invoice the two are the same number.
   const [exRate, setExRate] = useState('')
@@ -482,6 +499,64 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setCoverage(Object.fromEntries(proposal.map(p => [p.proformaId, String(p.amount)])))
   }, [docType, amount, paidProformas, coverageTouched, priorPeriod]) // eslint-disable-line
 
+  // A supplier's bill: the partner's advance invoices with something left
+  // (this bill's own usage counted back in when editing).
+  useEffect(() => {
+    if (!isSupplierBill || !companyId || !partnerId) { setOpenAdvances([]); return }
+    let cancelled = false
+    const load = async () => {
+      const [{ data, error }, own] = await Promise.all([
+        supabase.from('v_invoice_status')
+          .select('id, invoice_number, invoice_date, currency, amount, advance_open')
+          .eq('company_id', companyId).eq('partner_id', partnerId).eq('document_type', 'advance_invoice')
+          .order('invoice_date', { ascending: true }).limit(300),
+        invoice?.id
+          ? supabase.from('advance_usage').select('advance_invoice_id, amount').eq('final_invoice_id', invoice.id)
+          : Promise.resolve({ data: [] as any[] }),
+      ])
+      if (cancelled) return
+      if (error) console.warn('advances load error:', error.message)
+      const mine = new Map<string, number>(((own as any).data || []).map((u: any) => [u.advance_invoice_id, Number(u.amount) || 0]))
+      setOpenAdvances((data || []).map((r: any) => ({
+        id: r.id, invoice_number: r.invoice_number, invoice_date: r.invoice_date, currency: r.currency,
+        amount: Number(r.amount) || 0, open: (Number(r.advance_open) || 0) + (mine.get(r.id) || 0),
+      })).filter((a: OpenAdvance) => a.open > 0.005))
+      if (mine.size > 0) {
+        setUsage(Object.fromEntries(Array.from(mine.entries()).map(([k, v]) => [k, String(v)])))
+        setUsageTouched(true)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [isSupplierBill, companyId, partnerId]) // eslint-disable-line
+
+  /** What the bill's named advances come to against what is booked. */
+  const usageProposal = advancesRequired ? proposeUsage(advanceRefs, advanceUsedOnBill, openAdvances) : null
+  /** Named advances still missing: not booked and not added from an earlier period. */
+  const missingAdvances = (usageProposal?.missing || [])
+    .filter(m => !priorAdvances.some(pa => invoiceNumberKey(pa.number) === invoiceNumberKey(m.number)))
+
+  // Until the person types, a SEF final invoice's advances are filled in.
+  useEffect(() => {
+    if (!usageProposal || usageTouched) return
+    setUsage(Object.fromEntries(usageProposal.usage.map(u => [u.advanceId, String(u.amount)])))
+  }, [openAdvances, usageTouched]) // eslint-disable-line
+
+  /** Add a named advance from an earlier period, sized by what the bill says it paid. */
+  const addPriorAdvance = (ref: AdvanceRef) => {
+    const already = priorAdvances.reduce((sum, a) => sum + a.amount, 0)
+    const share = ref.amount ?? Math.max(0, Math.round(((usageProposal?.left || 0) - already) * 100) / 100)
+    setPriorAdvances(prev => [...prev, { number: ref.number, date: ref.date, amount: share }])
+    touch('advances')
+  }
+
+  /** The usage as it will be saved: booked advances with an amount. */
+  const usageRows = isSupplierBill
+    ? openAdvances
+        .map(a => ({ a, amount: parseFloat((usage[a.id] || '').replace(',', '.')) || 0 }))
+        .filter(r => r.amount > 0)
+    : []
+
   /** The coverage as it will be saved: proformas with an amount. */
   const coverageRows = docType === 'advance_invoice' && !priorPeriod
     ? paidProformas
@@ -517,6 +592,20 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       else if (Math.abs(total - a) > 0.005) e.coverage = coverageProblem(a, coverageRows.map(r => r.p))
         || `Zbir pokrića (${fmtNum(total)}) nije jednak avansnom računu (${fmtNum(a)}).`
     }
+    if (isSupplierBill && (usageRows.length > 0 || priorAdvances.length > 0 || advancesRequired)) {
+      const total = Math.round((usageRows.reduce((sum, r) => sum + r.amount, 0) + priorAdvances.reduce((sum, a) => sum + a.amount, 0)) * 100) / 100
+      const why = usageProblem(parseFloat(amount) || 0, [
+        ...usageRows.map(r => ({ amount: r.amount, open: r.a.open })),
+        ...priorAdvances.map(a => ({ amount: a.amount, open: a.amount })),
+      ])
+      if (missingAdvances.length > 0) {
+        e.advances = `Konačni račun navodi avansni račun ${missingAdvances.map(m => m.number).join(', ')} koji nije u knjigama.`
+      } else if (why) {
+        e.advances = why
+      } else if (advancesRequired && Math.abs(total - advanceUsedOnBill) > 0.005) {
+        e.advances = `Račun kaže da je avansom plaćeno ${fmtNum(advanceUsedOnBill)}, a vezano je ${fmtNum(total)}. Bez veze sa avansom konačni račun se ne knjiži.`
+      }
+    }
     if (invType === 'expense' && plImpact && !noPl && !linkedTxId) {
       // A split bill is classified by its lines, and the fields below are
       // filled from them. Demanding them again would refuse a bill that is
@@ -543,7 +632,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions, docType, adjustsId, baseBills, coverage, paidProformas, priorPeriod]) // eslint-disable-line
+  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions, docType, adjustsId, baseBills, coverage, paidProformas, priorPeriod, usage, openAdvances, priorAdvances]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -875,6 +964,11 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         const { error: delErr } = await supabase.from('advance_coverage').delete().eq('advance_invoice_id', invoice.id)
         if (delErr) throw delErr
       }
+      if (invoice?.id && isSupplierBill) {
+        // The advances it uses go first: an amount lowered under them is refused.
+        const { error: delErr } = await supabase.from('advance_usage').delete().eq('final_invoice_id', invoice.id)
+        if (delErr) throw delErr
+      }
       if (invoice?.id) {
         const { data: updated, error: updErr } = await supabase.from('invoices').update(payload).eq('id', invoice.id).select('id')
         if (updErr) throw updErr
@@ -924,6 +1018,32 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           setSaveError(outcome.message)
           return
         }
+      }
+
+      // ── The advances a final invoice uses, after it exists ───────────
+      //
+      // An advance from an earlier period is booked first (no proforma, no
+      // P&L, at this bill's rates), then every use in one insert.
+      if (usageRows.length > 0 || priorAdvances.length > 0) {
+        const ids: { id: string; amount: number }[] = usageRows.map(r => ({ id: r.a.id, amount: r.amount }))
+        for (const pa of priorAdvances) {
+          const rsd = Math.round(pa.amount * (booked.exchange_rate || 1) * 100) / 100
+          const { data: made, error: madeErr } = await supabase.from('invoices').insert({
+            company_id: companyId || null, partner_id: finalPartnerId || null,
+            invoice_number: pa.number, invoice_date: pa.date || invoiceDate, type: 'expense', currency,
+            amount: pa.amount, amount_rsd: rsd,
+            exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
+            amount_eur: booked.eur_rate ? Math.round((rsd / booked.eur_rate) * 100) / 100 : null,
+            document_type: 'advance_invoice', prior_period: true, pl_impact: false, status: 'unpaid',
+            note: `Avansni račun iz ranijeg perioda, dodat sa konačnog računa ${invoiceNumber || ''}.`,
+          }).select().single()
+          if (madeErr) throw new Error(`Račun je sačuvan, ali avansni račun ${pa.number} nije: ${madeErr.message}`)
+          if (!made?.id) throw new Error(`Račun je sačuvan, ali avansni račun ${pa.number} nije — baza nije vratila red.`)
+          ids.push({ id: made.id, amount: pa.amount })
+        }
+        const { error: useErr } = await supabase.from('advance_usage').insert(
+          ids.map(u => ({ final_invoice_id: invoiceId, advance_invoice_id: u.id, amount: Math.round(u.amount * 100) / 100 })))
+        if (useErr) throw new Error(`Račun je sačuvan, ali veza sa avansom nije: ${useErr.message}`)
       }
 
       // ── The proformas an advance invoice covers, after it exists ─────
@@ -1342,6 +1462,44 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                       </div>
                     )}
                   </div>
+                )}
+                {isSupplierBill && (openAdvances.length > 0 || advancesRequired) && (
+                  <fieldset aria-label="Avansi" style={{ border: 0, padding: 0, margin: '0 0 14px' }}>
+                    {openAdvancesNotice(openAdvances) && (
+                      <div style={{ ...s.infoBox, marginBottom: '6px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, fontSize: '12px' }}>
+                        {openAdvancesNotice(openAdvances)}
+                      </div>
+                    )}
+                    {advancesRequired && (
+                      <div style={{ fontSize: '12px', color: DIALOG.text, marginBottom: '6px' }}>
+                        Konačni račun: avansom je plaćeno {fmtNum(advanceUsedOnBill)}. Vežite avansne račune koje navodi.
+                      </div>
+                    )}
+                    {openAdvances.map(a => (
+                      <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                        <span style={{ flex: 1, fontSize: '12px', color: DIALOG.text }}>
+                          {a.invoice_number || 'bez broja'} · avans {fmtNum(a.amount)} · ostalo {fmtNum(a.open)}
+                        </span>
+                        <input aria-label={`Avans ${a.invoice_number || a.id}`} style={{ ...s.input, width: '140px' }}
+                          value={usage[a.id] || ''} placeholder="0,00"
+                          onChange={e => { setUsage(prev => ({ ...prev, [a.id]: e.target.value })); setUsageTouched(true); touch('advances') }} />
+                      </div>
+                    ))}
+                    {priorAdvances.map(pa => (
+                      <div key={pa.number} style={{ fontSize: '12px', color: DIALOG.text, marginTop: '4px' }}>
+                        {pa.number} · iz ranijeg perioda · {fmtNum(pa.amount)} (biće dodat pri knjiženju)
+                      </div>
+                    ))}
+                    {missingAdvances.map(m => (
+                      <div key={m.number} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                        <span style={{ flex: 1, fontSize: '12px', color: DIALOG.amber }}>
+                          Konačni račun navodi avansni račun {m.number} koji nije u knjigama.
+                        </span>
+                        <button type="button" style={s.linkBtn} onClick={() => addPriorAdvance(m)}>Dodaj avansni račun iz ranijeg perioda</button>
+                      </div>
+                    ))}
+                    {fieldErr('advances') && missingAdvances.length === 0 && <span style={s.errorMsg}>{fieldErr('advances')}</span>}
+                  </fieldset>
                 )}
                 {docType === 'advance_invoice' && (
                   <fieldset aria-label="Plaćeni predračuni" style={{ border: 0, padding: 0, margin: '0 0 14px' }}>

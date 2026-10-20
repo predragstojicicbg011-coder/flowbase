@@ -141,3 +141,61 @@ describe('an advance invoice', () => {
     expect(insertedInto('advance_coverage')).toHaveLength(0)
   })
 })
+
+describe('a final invoice', () => {
+  const advance = (over: Record<string, unknown> = {}) => ({
+    id: 'av1', invoice_number: 'RA2027179', invoice_date: '2026-10-08', document_type: 'advance_invoice',
+    currency: 'RSD', amount: 18144, advance_open: 18144, ...over,
+  })
+  const final = (over: Record<string, unknown> = {}) => draft({
+    invoice_number: '21404-01-26', amount: 18144, pl_category: 'Materijal', department: 'Gradilište',
+    advance_refs: [{ number: 'RA2027179', date: '2026-10-08', amount: 18144 }], advance_used: 18144, ...over,
+  })
+
+  it('B.B. Link: books the full amount and uses the advance it names', async () => {
+    mockState.status.advance_invoice = [advance()]
+    render(<InvoiceDialog onClose={() => {}} invoice={final()} />)
+    const use = await screen.findByLabelText('Avans RA2027179') as HTMLInputElement
+    await waitFor(() => expect(use.value).toBe('18144'))
+    next(); next(); next(); post()
+    await waitFor(() => expect(insertedInto('advance_usage')).toHaveLength(1))
+    expect(insertedInto('invoices')[0]).toMatchObject({ document_type: 'invoice', amount: 18144 })
+    expect(insertedInto('advance_usage')[0]).toEqual([{ final_invoice_id: 'new-1', advance_invoice_id: 'av1', amount: 18144 }])
+  })
+
+  it('DST: the advance closes part of it', async () => {
+    mockState.status.advance_invoice = [advance({ id: 'd1', invoice_number: '0033/26', amount: 13260, advance_open: 13260 })]
+    render(<InvoiceDialog onClose={() => {}} invoice={final({ invoice_number: '427/26', amount: 17340, advance_used: 13260,
+      advance_refs: [{ number: '0033/26', date: '2026-10-07', amount: 13260 }] })} />)
+    await waitFor(() => expect((screen.getByLabelText('Avans 0033/26') as HTMLInputElement).value).toBe('13260'))
+    next(); next(); next(); post()
+    await waitFor(() => expect(insertedInto('advance_usage')).toHaveLength(1))
+    expect(insertedInto('advance_usage')[0]).toEqual([{ final_invoice_id: 'new-1', advance_invoice_id: 'd1', amount: 13260 }])
+  })
+
+  it('names an advance not in the books: cannot be posted until it is added from an earlier period', async () => {
+    render(<InvoiceDialog onClose={() => {}} invoice={final({ advance_refs: [{ number: 'RA-9', date: '2025-01-15', amount: 18144 }] })} />)
+    expect(await screen.findByText('Konačni račun navodi avansni račun RA-9 koji nije u knjigama.')).toBeInTheDocument()
+    next(); next(); next(); post()
+    await new Promise(r => setTimeout(r, 50))
+    expect(insertedInto('invoices')).toHaveLength(0)
+    expect(screen.getAllByText(/Konačni račun navodi avansni račun RA-9 koji nije u knjigama/).length).toBeGreaterThan(0)
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByText('Nazad'))
+    fireEvent.click(screen.getByText('Dodaj avansni račun iz ranijeg perioda'))
+    next(); next(); next(); post()
+    await waitFor(() => expect(insertedInto('advance_usage')).toHaveLength(1))
+    expect(insertedInto('invoices')[1]).toMatchObject({
+      document_type: 'advance_invoice', prior_period: true, invoice_number: 'RA-9', invoice_date: '2025-01-15', amount: 18144, pl_impact: false,
+    })
+    expect(insertedInto('advance_usage')[0]).toEqual([{ final_invoice_id: 'new-1', advance_invoice_id: 'new-2', amount: 18144 }])
+  })
+
+  it('typed by hand: tells of open advances, and posts without them', async () => {
+    mockState.status.advance_invoice = [advance({ advance_open: 300000 }), advance({ id: 'av2', invoice_number: 'A-2', advance_open: 35000 })]
+    render(<InvoiceDialog onClose={() => {}} invoice={draft({ invoice_number: 'F-7', amount: 5000, pl_category: 'Materijal', department: 'Gradilište' })} />)
+    expect(await screen.findByText('Dobavljač ima otvorene avanse: 2 avansna računa, ukupno 335.000,00 RSD')).toBeInTheDocument()
+    next(); next(); next(); post()
+    await waitFor(() => expect(insertedInto('invoices')).toHaveLength(1))
+    expect(insertedInto('advance_usage')).toHaveLength(0)
+  })
+})
