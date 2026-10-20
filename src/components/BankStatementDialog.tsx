@@ -1193,10 +1193,12 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
         // A proforma proposed from this payment is written now, with the
         // payment it is paid by (see makeProformaFrom).
         if (row.tx_type === 'invoice_payment' && row.linked_invoice_id.startsWith('pending-') && newTx?.id) {
+          // Paying an advance invoice: the proforma is that supplier's, or
+          // the advance invoice could not be linked to it.
           const draft = pendingProformas[row.id]
           if (!draft) throw new Error(`Stavka ${row.date}: predloženi predračun nije pronađen.`)
           const { data: made, error: madeErr } = await supabase.from('invoices')
-            .insert({ ...draft, partner_id: partnerId || draft.partner_id }).select('id').single()
+            .insert({ ...draft, partner_id: pendingAdvance[row.id] ? draft.partner_id : (partnerId || draft.partner_id) }).select('id').single()
           if (madeErr || !made?.id) throw new Error(`Stavka ${row.date}: predračun nije napravljen: ${madeErr?.message || 'baza nije vratila red'}`)
           row = { ...row, linked_invoice_id: made.id }
           madeProformaId = made.id
