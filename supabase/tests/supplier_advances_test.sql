@@ -166,6 +166,66 @@ begin
   assert (select advance_open from public.v_invoice_status where id = v_bav) = 6599.88, 'Bepro advance left 6599.88';
   raise notice '10 ok';
 
+  -- 11. A linked document keeps its type and supplier.
+  begin
+    update public.invoices set document_type = 'invoice', pl_impact = true where id = v_av;
+    raise exception 'FAIL: retyped an advance invoice in use';
+  exception when check_violation then null;
+  end;
+  begin
+    update public.invoices set partner_id = v_p2 where id = v_pf;
+    raise exception 'FAIL: moved a covered proforma to another supplier';
+  exception when check_violation then null;
+  end;
+  begin
+    update public.invoices set currency = 'EUR' where id = v_fin;
+    raise exception 'FAIL: changed the currency of a final invoice using an advance';
+  exception when check_violation then null;
+  end;
+  raise notice '11 ok';
+
+  -- 12. A covered advance invoice's amount does not change under its coverage.
+  begin
+    update public.invoices set amount = 160000, amount_rsd = 160000 where id = v_av;
+    raise exception 'FAIL: changed the amount of a covered advance invoice';
+  exception when check_violation then null;
+  end;
+  raise notice '12 ok';
+
+  -- 13. A proforma's payment cannot be taken back from under its coverage.
+  begin
+    delete from public.invoice_transaction_links where invoice_id = v_pf;
+    raise exception 'FAIL: removed the payment of a covered proforma';
+  exception when check_violation then null;
+  end;
+  raise notice '13 ok';
+
+  -- 14. A credit note cannot take a final invoice below the advance it uses.
+  begin
+    insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, document_type, adjusts_invoice_id)
+    values (v_co, v_p1, 'KO-2', current_date, 'expense', 'RSD', -2000, 'credit_note', v_fin);
+    raise exception 'FAIL: a credit note under the advance used';
+  exception when check_violation then null;
+  end;
+  raise notice '14 ok';
+
+  -- 15. A negative bill with no advance can still be edited.
+  insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, parent_invoice_id)
+  values (v_co, v_p1, 'PAY-NEG', current_date, 'expense', 'RSD', -500, -500, 1, v_bill) returning id into v_loose;
+  update public.invoices set amount = -600, amount_rsd = -600 where id = v_loose;
+  raise notice '15 ok';
+
+  -- 16. Links are replaced in one go, or not at all.
+  begin
+    perform public.replace_advance_links(v_fin2, null, '[{"advance_invoice_id": "00000000-0000-0000-0000-000000000000", "amount": 999999}]'::jsonb);
+    raise exception 'FAIL: replaced links with a use beyond the advance';
+  exception when check_violation then null;
+  end;
+  assert (select amount from public.advance_usage where final_invoice_id = v_fin2) = 30000, 'old links stay when the new ones are refused';
+  perform public.replace_advance_links(v_fin2, null, jsonb_build_array(jsonb_build_object('advance_invoice_id', v_av, 'amount', 25000)));
+  assert (select amount from public.advance_usage where final_invoice_id = v_fin2) = 25000, 'links replaced';
+  raise notice '16 ok';
+
   set constraints all immediate;
   raise notice 'ALL TESTS PASSED';
 end $$;

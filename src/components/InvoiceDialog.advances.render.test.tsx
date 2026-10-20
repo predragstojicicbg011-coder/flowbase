@@ -11,6 +11,7 @@ const mockState = {
   /** v_invoice_status rows by document_type asked for. */
   status: {} as Record<string, any[]>,
   inserted: [] as { table: string; payload: any }[],
+  rpc: [] as { name: string; args: any }[],
 }
 
 function mockQuery(table: string) {
@@ -45,7 +46,7 @@ function mockQuery(table: string) {
 jest.mock('../supabase', () => ({
   supabase: {
     from: (t: string) => mockQuery(t),
-    rpc: () => Promise.resolve({ data: null, error: null }),
+    rpc: (name: string, args: any) => { mockState.rpc.push({ name, args }); return Promise.resolve({ data: null, error: null }) },
   },
 }))
 jest.mock('../contexts/CompaniesContext', () => ({
@@ -85,10 +86,13 @@ const proforma = (over: Record<string, unknown> = {}) => ({
 const next = () => fireEvent.click(screen.getByText('Dalje'))
 const post = () => fireEvent.click(screen.getByText(/Proknjiži fakturu|Sačuvaj izmene/))
 const insertedInto = (table: string) => mockState.inserted.filter(i => i.table === table).map(i => i.payload)
+/** The links a save replaced, in one transaction (replace_advance_links). */
+const links = () => mockState.rpc.filter(c => c.name === 'replace_advance_links').map(c => c.args)
 
 beforeEach(() => {
   mockState.status = {}
   mockState.inserted = []
+  mockState.rpc = []
 })
 
 describe('a proforma', () => {
@@ -111,9 +115,10 @@ describe('an advance invoice', () => {
     await waitFor(() => expect(cover.value).toBe('18144'))
     expect((screen.getByLabelText('Pokriće 1') as HTMLInputElement).value).toBe('')
     next(); next(); next(); post()
-    await waitFor(() => expect(insertedInto('advance_coverage')).toHaveLength(1))
+    await waitFor(() => expect(links()).toHaveLength(1))
     expect(insertedInto('invoices')[0]).toMatchObject({ document_type: 'advance_invoice', pl_impact: false, prior_period: false })
-    expect(insertedInto('advance_coverage')[0]).toEqual([{ advance_invoice_id: 'new-1', proforma_id: 'pf1', amount: 18144 }])
+    expect(links()[0]).toEqual({ p_invoice: 'new-1', p_coverage: [{ proforma_id: 'pf1', amount: 18144 }], p_usage: null })
+    expect(insertedInto('advance_coverage')).toHaveLength(0)
   })
 
   it('larger than what was paid cannot be covered', async () => {
@@ -138,7 +143,7 @@ describe('an advance invoice', () => {
     next(); next(); next(); post()
     await waitFor(() => expect(insertedInto('invoices')).toHaveLength(1))
     expect(insertedInto('invoices')[0]).toMatchObject({ document_type: 'advance_invoice', prior_period: true })
-    expect(insertedInto('advance_coverage')).toHaveLength(0)
+    expect(links()[0]).toEqual({ p_invoice: 'new-1', p_coverage: [], p_usage: null })
   })
 })
 
@@ -158,9 +163,9 @@ describe('a final invoice', () => {
     const use = await screen.findByLabelText('Avans RA2027179') as HTMLInputElement
     await waitFor(() => expect(use.value).toBe('18144'))
     next(); next(); next(); post()
-    await waitFor(() => expect(insertedInto('advance_usage')).toHaveLength(1))
+    await waitFor(() => expect(links()).toHaveLength(1))
     expect(insertedInto('invoices')[0]).toMatchObject({ document_type: 'invoice', amount: 18144 })
-    expect(insertedInto('advance_usage')[0]).toEqual([{ final_invoice_id: 'new-1', advance_invoice_id: 'av1', amount: 18144 }])
+    expect(links()[0]).toEqual({ p_invoice: 'new-1', p_coverage: null, p_usage: [{ advance_invoice_id: 'av1', amount: 18144 }] })
   })
 
   it('DST: the advance closes part of it', async () => {
@@ -169,8 +174,8 @@ describe('a final invoice', () => {
       advance_refs: [{ number: '0033/26', date: '2026-10-07', amount: 13260 }] })} />)
     await waitFor(() => expect((screen.getByLabelText('Avans 0033/26') as HTMLInputElement).value).toBe('13260'))
     next(); next(); next(); post()
-    await waitFor(() => expect(insertedInto('advance_usage')).toHaveLength(1))
-    expect(insertedInto('advance_usage')[0]).toEqual([{ final_invoice_id: 'new-1', advance_invoice_id: 'd1', amount: 13260 }])
+    await waitFor(() => expect(links()).toHaveLength(1))
+    expect(links()[0].p_usage).toEqual([{ advance_invoice_id: 'd1', amount: 13260 }])
   })
 
   it('names an advance not in the books: cannot be posted until it is added from an earlier period', async () => {
@@ -183,11 +188,11 @@ describe('a final invoice', () => {
     for (let i = 0; i < 3; i++) fireEvent.click(screen.getByText('Nazad'))
     fireEvent.click(screen.getByText('Dodaj avansni račun iz ranijeg perioda'))
     next(); next(); next(); post()
-    await waitFor(() => expect(insertedInto('advance_usage')).toHaveLength(1))
+    await waitFor(() => expect(links()).toHaveLength(1))
     expect(insertedInto('invoices')[1]).toMatchObject({
       document_type: 'advance_invoice', prior_period: true, invoice_number: 'RA-9', invoice_date: '2025-01-15', amount: 18144, pl_impact: false,
     })
-    expect(insertedInto('advance_usage')[0]).toEqual([{ final_invoice_id: 'new-1', advance_invoice_id: 'new-2', amount: 18144 }])
+    expect(links()[0].p_usage).toEqual([{ advance_invoice_id: 'new-2', amount: 18144 }])
   })
 
   it('typed by hand: tells of open advances, and posts without them', async () => {
@@ -196,6 +201,18 @@ describe('a final invoice', () => {
     expect(await screen.findByText('Dobavljač ima otvorene avanse: 2 avansna računa, ukupno 335.000,00 RSD')).toBeInTheDocument()
     next(); next(); next(); post()
     await waitFor(() => expect(insertedInto('invoices')).toHaveLength(1))
-    expect(insertedInto('advance_usage')).toHaveLength(0)
+    expect(links()[0]).toEqual({ p_invoice: 'new-1', p_coverage: null, p_usage: [] })
+  })
+})
+
+describe('leaving a document with no P&L', () => {
+  it('a proforma turned into a bill is in the P&L again', async () => {
+    render(<InvoiceDialog onClose={() => {}} invoice={{ ...draft({ document_type: 'proforma', pl_impact: false, invoice_number: 'PR-2', amount: 5000 }), pl_category: 'Materijal', department: 'Gradilište' }} />)
+    await new Promise(r => setTimeout(r, 100))
+    fireEvent.change(screen.getByLabelText('Vrsta dokumenta'), { target: { value: 'invoice' } })
+    expect(screen.getByText('Utiče na P&L')).toBeInTheDocument()
+    next(); next(); next(); post()
+    await waitFor(() => expect(insertedInto('invoices')).toHaveLength(1))
+    expect(insertedInto('invoices')[0]).toMatchObject({ document_type: 'invoice', pl_impact: true })
   })
 })

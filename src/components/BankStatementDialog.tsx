@@ -201,6 +201,8 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   const [openInvoices, setOpenInvoices] = useState<any[]>([])
   /** Why a proforma could not be made from a row's payment, by row. */
   const [proformaWhy, setProformaWhy] = useState<Record<string, string>>({})
+  /** Proformas proposed from a row's payment, written when the statement is posted. */
+  const [pendingProformas, setPendingProformas] = useState<Record<string, Record<string, unknown>>>({})
   const [partners, setPartners] = useState<any[]>([])
   /** The one-off loads are in; `startEdit` reads partners to name rows. */
   const [refsLoaded, setRefsLoaded] = useState(false)
@@ -885,22 +887,30 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
    * services/advanceReceipt.ts.
    */
   /**
-   * Money released to a supplier with no proforma: make the proforma from the
-   * payment and pay it with this row (spec: "ili ga pravi i zatvara").
+   * Money released to a supplier with no proforma: the proforma is PROPOSED
+   * here and written only when the payment is saved (a cancelled payment
+   * leaves nothing payable behind). Until then it stands in the list of open
+   * documents under a placeholder id.
    */
   const makeProformaFrom = async (row: StatementRow) => {
+    let eurRate: number | null = null
+    try { eurRate = (await getBookRates(row.date)).eurRate } catch { eurRate = null }
     const made = proformaFromPayment({
       companyId: company || null, partnerId: row.partner_id, date: row.date,
       amount: parseFloat(row.debit) || 0, currency: row.currency || defaultCurrency,
-      accountNumber: row.account_number || null, description: row.description || null,
+      accountNumber: row.account_number || null, description: row.description || null, eurRate,
     })
     if (!made.ok) { setProformaWhy(prev => ({ ...prev, [row.id]: made.why })); return }
-    const { data: inserted, error } = await supabase.from('invoices').insert(made.row).select('id').single()
-    if (error || !inserted?.id) { setProformaWhy(prev => ({ ...prev, [row.id]: `Predračun nije napravljen: ${error?.message || 'baza nije vratila red'}` })); return }
-    const { data: open } = await supabase.from('v_invoice_status').select('*').eq('id', inserted.id).single()
-    if (open) setOpenInvoices(prev => [...prev, open])
+    const id = `pending-${row.id}`
+    const r = made.row as any
+    setPendingProformas(prev => ({ ...prev, [row.id]: made.row }))
+    setOpenInvoices(prev => [...prev.filter(i => i.id !== id), {
+      ...r, id, invoice_number: 'Novi predračun', partner_name: row.partner_name,
+      paid_amount: 0, remaining_rsd: r.amount_rsd, remaining_eur: r.amount_eur, calculated_status: 'unpaid',
+      advance_deducted: 0, adjustments: 0, advance_used: 0,
+    }])
     setProformaWhy(prev => ({ ...prev, [row.id]: '' }))
-    updateRow(row.id, { linked_invoice_id: inserted.id })
+    updateRow(row.id, { linked_invoice_id: id })
   }
 
   const shapeOf = (row: StatementRow) => receiptShape({
@@ -977,7 +987,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
 
     try {
       for (let rowIndex = 0; rowIndex < validRows.length; rowIndex++) {
-        const row = validRows[rowIndex]
+        let row = validRows[rowIndex]
         const importHash = await importRowHash([
           company, bank, statementNumber, rowIndex,
           row.date, row.debit, row.credit, row.currency || defaultCurrency,
@@ -1148,6 +1158,17 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                 .eq('id', row.selected_credit_id)
           }
           continue
+        }
+
+        // A proforma proposed from this payment is written now, with the
+        // payment it is paid by (see makeProformaFrom).
+        if (row.tx_type === 'invoice_payment' && row.linked_invoice_id.startsWith('pending-') && newTx?.id) {
+          const draft = pendingProformas[row.id]
+          if (!draft) throw new Error(`Stavka ${row.date}: predloženi predračun nije pronađen.`)
+          const { data: made, error: madeErr } = await supabase.from('invoices')
+            .insert({ ...draft, partner_id: partnerId || draft.partner_id }).select('id').single()
+          if (madeErr || !made?.id) throw new Error(`Stavka ${row.date}: predračun nije napravljen: ${madeErr?.message || 'baza nije vratila red'}`)
+          row = { ...row, linked_invoice_id: made.id }
         }
 
         if (row.tx_type === 'invoice_payment' && row.linked_invoice_id && newTx?.id) {
@@ -1987,7 +2008,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                         {row.tx_type === 'invoice_payment' && (
                           <>
                             <div style={s.classTitle}>Poveži sa otvorenom fakturom</div>
-                            {parseFloat(row.debit) > 0 && !row.linked_invoice_id && (
+                            {parseFloat(row.debit) > 0 && !row.linked_invoice_id && !editing && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                                 <button type="button"
                                   style={{ background: 'transparent', border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', color: DIALOG.accent, fontSize: '11.5px', padding: '4px 10px', cursor: 'pointer' }}

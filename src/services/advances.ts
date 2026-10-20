@@ -123,10 +123,13 @@ export function openAdvancesNotice(advances: OpenAdvance[]): string {
 export function proformaFromPayment(p: {
   companyId: string | null; partnerId: string | null; date: string; amount: number
   currency: string | null; accountNumber: string | null; description: string | null
+  /** RSD per EUR on the payment's date: every record carries it beside the booking rate. */
+  eurRate: number | null
 }): { ok: true; row: Record<string, unknown> } | { ok: false; why: string } {
   if (!p.partnerId) return { ok: false, why: 'Prvo izaberite dobavljača.' }
   if (!(p.amount > 0)) return { ok: false, why: 'Predračun se pravi samo iz isplate.' }
   if ((p.currency || 'RSD') !== 'RSD') return { ok: false, why: 'Iz uplate se pravi samo dinarski predračun; devizni unesite kao predračun.' }
+  if (!(p.eurRate && p.eurRate > 0)) return { ok: false, why: 'Nema EUR kursa za dan uplate; unesite predračun ručno.' }
   const amount = cents(p.amount)
   const when = p.date.split('-').reverse().join('.')
   return {
@@ -134,6 +137,7 @@ export function proformaFromPayment(p: {
     row: {
       company_id: p.companyId, partner_id: p.partnerId, invoice_number: null, invoice_date: p.date, due_date: p.date,
       type: 'expense', currency: 'RSD', amount, amount_rsd: amount, exchange_rate: 1,
+      eur_rate: p.eurRate, amount_eur: cents(amount / p.eurRate),
       document_type: 'proforma', pl_impact: false, status: 'unpaid', account_number: p.accountNumber || null,
       note: `Predračun napravljen iz uplate od ${when}` + (p.description ? `: ${p.description}` : ''),
     },

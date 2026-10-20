@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabase'
 import { matchesAmount } from '../services/amountSearch'
 import { brand } from '../config/brand'
@@ -167,6 +167,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   /** How much of each proforma this advance invoice covers, as typed. */
   const [coverage, setCoverage] = useState<Record<string, string>>({})
   const [coverageTouched, setCoverageTouched] = useState(false)
+  /** The links this document already has were read: only then may a save
+   *  replace them (a save before they arrive would replace them with none). */
+  const [coverageLoaded, setCoverageLoaded] = useState(!invoice?.id)
+  const [usageLoaded, setUsageLoaded] = useState(!invoice?.id)
   /** A supplier's bill: the advance invoices with something left to use. */
   const [openAdvances, setOpenAdvances] = useState<OpenAdvance[]>([])
   /** How much of each advance this final invoice uses, as typed. */
@@ -387,6 +391,14 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     }
   })()
 
+  // A proforma or an advance invoice is stored with no P&L; turned into a
+  // bill, it is in the P&L again (the person can still switch it off).
+  const wasNoPl = useRef(noPl)
+  useEffect(() => {
+    if (wasNoPl.current && !noPl) setPlImpact(true)
+    wasNoPl.current = noPl
+  }, [noPl])
+
   // The type follows the sign until the person picks one.
   useEffect(() => {
     if (!docTypeChosen) setDocType(defaultDocumentType(parseFloat(amount)))
@@ -479,6 +491,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         paid: Number(r.paid_amount) || 0, covered: (Number(r.covered) || 0) - (mine.get(r.id) || 0),
       })).filter((r: PaidProforma) => r.paid - r.covered > 0.005)
       setPaidProformas(rows)
+      setCoverageLoaded(true)
       if (mine.size > 0) {
         setCoverage(Object.fromEntries(Array.from(mine.entries()).map(([k, v]) => [k, String(v)])))
         setCoverageTouched(true)
@@ -521,6 +534,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         id: r.id, invoice_number: r.invoice_number, invoice_date: r.invoice_date, currency: r.currency,
         amount: Number(r.amount) || 0, open: (Number(r.advance_open) || 0) + (mine.get(r.id) || 0),
       })).filter((a: OpenAdvance) => a.open > 0.005))
+      setUsageLoaded(true)
       if (mine.size > 0) {
         setUsage(Object.fromEntries(Array.from(mine.entries()).map(([k, v]) => [k, String(v)])))
         setUsageTouched(true)
@@ -957,18 +971,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       // changed a thing, and the dialog reported a save that never happened.
       // Same pattern as TransactionDialog's save.
       let invoiceId: string
-      if (invoice?.id && (docType === 'advance_invoice' || invoice.document_type === 'advance_invoice')) {
-        // Coverage first: the database checks at commit that an advance
-        // invoice with coverage is covered exactly, and an amount changed
-        // under its old coverage would fail that.
-        const { error: delErr } = await supabase.from('advance_coverage').delete().eq('advance_invoice_id', invoice.id)
-        if (delErr) throw delErr
-      }
-      if (invoice?.id && isSupplierBill) {
-        // The advances it uses go first: an amount lowered under them is refused.
-        const { error: delErr } = await supabase.from('advance_usage').delete().eq('final_invoice_id', invoice.id)
-        if (delErr) throw delErr
-      }
       if (invoice?.id) {
         const { data: updated, error: updErr } = await supabase.from('invoices').update(payload).eq('id', invoice.id).select('id')
         if (updErr) throw updErr
@@ -1024,8 +1026,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       //
       // An advance from an earlier period is booked first (no proforma, no
       // P&L, at this bill's rates), then every use in one insert.
-      if (usageRows.length > 0 || priorAdvances.length > 0) {
-        const ids: { id: string; amount: number }[] = usageRows.map(r => ({ id: r.a.id, amount: r.amount }))
+      const usageIds: { id: string; amount: number }[] = usageRows.map(r => ({ id: r.a.id, amount: r.amount }))
+      {
+        const ids = usageIds
         for (const pa of priorAdvances) {
           const rsd = Math.round(pa.amount * (booked.exchange_rate || 1) * 100) / 100
           const { data: made, error: madeErr } = await supabase.from('invoices').insert({
@@ -1041,16 +1044,25 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           if (!made?.id) throw new Error(`Račun je sačuvan, ali avansni račun ${pa.number} nije — baza nije vratila red.`)
           ids.push({ id: made.id, amount: pa.amount })
         }
-        const { error: useErr } = await supabase.from('advance_usage').insert(
-          ids.map(u => ({ final_invoice_id: invoiceId, advance_invoice_id: u.id, amount: Math.round(u.amount * 100) / 100 })))
-        if (useErr) throw new Error(`Račun je sačuvan, ali veza sa avansom nije: ${useErr.message}`)
       }
 
-      // ── The proformas an advance invoice covers, after it exists ─────
-      if (coverageRows.length > 0) {
-        const { error: covErr } = await supabase.from('advance_coverage').insert(
-          coverageRows.map(r => ({ advance_invoice_id: invoiceId, proforma_id: r.p.id, amount: Math.round(r.amount * 100) / 100 })))
-        if (covErr) throw new Error(`Avansni račun je sačuvan, ali veza sa predračunom nije: ${covErr.message}`)
+      // ── Its links, replaced in ONE transaction ──────────────────────
+      //
+      // The proformas an advance invoice covers, the advances a supplier's
+      // bill uses. One call: a refusal leaves the links that were there
+      // (replace_advance_links, 20261021100000). Left alone (null) where the
+      // document has no such links or they were not read yet.
+      {
+        const p_coverage = docType === 'advance_invoice' && coverageLoaded
+          ? coverageRows.map(r => ({ proforma_id: r.p.id, amount: Math.round(r.amount * 100) / 100 }))
+          : null
+        const p_usage = isSupplierBill && usageLoaded
+          ? usageIds.map(u => ({ advance_invoice_id: u.id, amount: Math.round(u.amount * 100) / 100 }))
+          : null
+        if (p_coverage !== null || p_usage !== null) {
+          const { error: linkErr } = await supabase.rpc('replace_advance_links', { p_invoice: invoiceId, p_coverage, p_usage })
+          if (linkErr) throw new Error(`Dokument je sačuvan, ali veze sa avansom nisu (ostale su kakve su bile): ${linkErr.message}`)
+        }
       }
 
       if (linkedTxId && invoiceId) {

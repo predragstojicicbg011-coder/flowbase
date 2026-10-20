@@ -777,20 +777,36 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
    */
   /** Why a proforma could not be made from this payment. */
   const [proformaWhy, setProformaWhy] = useState('')
+  /** A proforma proposed from this payment, written when the payment is posted. */
+  const [pendingProforma, setPendingProforma] = useState<Record<string, unknown> | null>(null)
 
-  /** Money released to a supplier with no proforma: make one and pay it. */
+  /**
+   * Money released to a supplier with no proforma: the proforma is PROPOSED
+   * here and written only when the payment is saved (a cancelled payment
+   * leaves nothing payable behind). Until then it stands in the list of open
+   * documents under a placeholder id.
+   */
   const makeProformaFrom = async () => {
+    if (linkedInvoices.some(l => l.invoice_id === 'pending-proforma')) return
+    let eurRate: number | null = null
+    try { eurRate = (await getBookRates(txDate)).eurRate } catch { eurRate = null }
     const made = proformaFromPayment({
       companyId: companyId || null, partnerId: partnerId || null, date: txDate,
       amount: Math.max(0, (parseFloat(amount) || 0) - totalAllocatedOwn), currency: currency || 'RSD',
-      accountNumber: accNum || null, description: note || null,
+      accountNumber: accNum || null, description: note || null, eurRate,
     })
     if (!made.ok) { setProformaWhy(made.why); return }
-    const { data: inserted, error } = await supabase.from('invoices').insert(made.row).select('id').single()
-    if (error || !inserted?.id) { setProformaWhy(`Predračun nije napravljen: ${error?.message || 'baza nije vratila red'}`); return }
-    const { data: open } = await supabase.from('v_invoice_status').select('*').eq('id', inserted.id).single()
+    const r = made.row as any
+    const placeholder = {
+      ...r, id: 'pending-proforma', invoice_number: 'Novi predračun',
+      partner_name: partners.find((p: any) => p.id === partnerId)?.name || '—',
+      paid_amount: 0, remaining_rsd: r.amount_rsd, remaining_eur: r.amount_eur, calculated_status: 'unpaid',
+      advance_deducted: 0, adjustments: 0, advance_used: 0,
+    }
+    setPendingProforma(made.row)
     setProformaWhy('')
-    if (open) { setOpenInvoices(prev => [...prev, open]); addInvoiceLink(open) }
+    setOpenInvoices(prev => [...prev.filter(i => i.id !== 'pending-proforma'), placeholder])
+    addInvoiceLink(placeholder)
   }
 
   const addInvoiceLink = (inv: any) => {
@@ -1284,7 +1300,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
             }
           }
 
-          for (const link of linkedInvoices.filter(l => l.allocated_own > 0)) {
+          // A proforma proposed from this payment is written now, with it.
+          let links = linkedInvoices
+          if (pendingProforma && links.some(l => l.invoice_id === 'pending-proforma')) {
+            const { data: made, error: madeErr } = await supabase.from('invoices').insert(pendingProforma).select('id').single()
+            if (madeErr || !made?.id) throw new Error(`Predračun nije napravljen: ${madeErr?.message || 'baza nije vratila red'}`)
+            links = links.map(l => l.invoice_id === 'pending-proforma' ? { ...l, invoice_id: made.id } : l)
+          }
+          for (const link of links.filter(l => l.allocated_own > 0)) {
             // THE FIGURE THAT WAS TYPED IS THE FIGURE THAT IS STORED. It goes
             // into `allocated_amount`, which is the column the settled/partial
             // rule reads, and the dinars and euros are derived from it at the
@@ -1391,7 +1414,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           // So the claim is read back in the database's own terms. It cannot
           // undo anything by this point, and it does not pretend to — it says
           // what happened while the person is still here.
-          const expectations: Expectation[] = linkedInvoices
+          const expectations: Expectation[] = links
             .filter(l => l.allocated_own > 0)
             .map(l => ({
               invoiceId: l.invoice_id,
