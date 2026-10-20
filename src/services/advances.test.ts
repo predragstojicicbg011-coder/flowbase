@@ -1,5 +1,5 @@
 import {
-  coverageProblem, openAdvancesNotice, proformaFromPayment, proformaNumbersIn, proposeCoverage, proposeUsage, usageProblem,
+  advancePaymentProblem, coverageProblem, openAdvancesNotice, proformaFromPayment, proformaNumbersIn, proposeCoverage, proposeUsage, usageProblem,
   type OpenAdvance, type PaidProforma,
 } from './advances'
 
@@ -113,5 +113,26 @@ describe('a proforma made from a payment', () => {
     expect(proformaFromPayment({ ...pay, amount: 0 })).toEqual({ ok: false, why: 'Predračun se pravi samo iz isplate.' })
     expect(proformaFromPayment({ ...pay, eurRate: null })).toEqual({ ok: false, why: 'Nema EUR kursa za dan uplate; unesite predračun ručno.' })
     expect(proformaFromPayment({ ...pay, currency: 'EUR' })).toEqual({ ok: false, why: 'Iz uplate se pravi samo dinarski predračun; devizni unesite kao predračun.' })
+  })
+})
+
+describe('paying an advance invoice from the bank statement', () => {
+  const pay = { companyId: 'co1', partnerId: 'p1', date: '2026-10-12', amount: 18144, currency: 'RSD', accountNumber: '160-1-11', description: 'Uplata', eurRate: 117.2 }
+
+  it('the proforma made for it names the advance invoice', () => {
+    const made = proformaFromPayment({ ...pay, forAdvance: 'RA2027179' })
+    expect(made.ok && made.row.note).toBe('Predračun napravljen iz uplate od 12.10.2026 za avansni račun RA2027179: Uplata')
+  })
+
+  it('a payment smaller than the advance invoice cannot cover it', () => {
+    expect(advancePaymentProblem(10000, { invoice_number: 'RA2027179', amount: 18144, currency: 'RSD' }, 'RSD'))
+      .toBe('Uplata (10.000,00) je manja od avansnog računa RA2027179 (18.144,00): avansni račun ne može biti veći od plaćenog.')
+    expect(advancePaymentProblem(18144, { invoice_number: 'RA2027179', amount: 18144, currency: 'RSD' }, 'RSD')).toBeNull()
+    expect(advancePaymentProblem(20000, { invoice_number: 'RA2027179', amount: 18144, currency: 'RSD' }, 'RSD')).toBeNull()
+  })
+
+  it('only in the same currency', () => {
+    expect(advancePaymentProblem(200, { invoice_number: 'A-1', amount: 100, currency: 'EUR' }, 'RSD'))
+      .toBe('Avansni račun A-1 je u EUR, a uplata u RSD.')
   })
 })

@@ -1,4 +1,4 @@
-import { proformaFromPayment } from '../services/advances'
+import { advancePaymentProblem, proformaFromPayment } from '../services/advances'
 import { isPayable } from '../services/documentType'
 import React, { useState, useMemo, useEffect } from 'react'
 import { supabase } from '../supabase'
@@ -491,6 +491,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         .order('due_date', { ascending: true })
       // A credit or debit note is settled through its bill, never by a payment.
       if (data) setOpenInvoices(data.filter((i: any) => isPayable(i.document_type ?? 'invoice')))
+      // Advance invoices booked before their payment: this payment can pay one.
+      const { data: adv } = await supabase.from('v_invoice_status').select('*').eq('company_id', companyId)
+        .eq('document_type', 'advance_invoice').eq('unlinked', true)
+      setUnlinkedAdvances((adv || []).filter((a: any) => a.unlinked))
     }
     fetchOpenInvoices()
   }, [companyId])
@@ -779,6 +783,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const [proformaWhy, setProformaWhy] = useState('')
   /** A proforma proposed from this payment, written when the payment is posted. */
   const [pendingProforma, setPendingProforma] = useState<Record<string, unknown> | null>(null)
+  /** Advance invoices with no proforma yet, and the one this payment pays. */
+  const [unlinkedAdvances, setUnlinkedAdvances] = useState<any[]>([])
+  const [paysAdvance, setPaysAdvance] = useState<{ id: string; amount: number; invoice_number: string | null } | null>(null)
 
   /**
    * Money released to a supplier with no proforma: the proforma is PROPOSED
@@ -786,14 +793,20 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
    * leaves nothing payable behind). Until then it stands in the list of open
    * documents under a placeholder id.
    */
-  const makeProformaFrom = async () => {
+  const makeProformaFrom = async (advance?: any) => {
     if (linkedInvoices.some(l => l.invoice_id === 'pending-proforma')) return
+    const left = Math.max(0, (parseFloat(amount) || 0) - totalAllocatedOwn)
+    if (advance) {
+      const why = advancePaymentProblem(left, { invoice_number: advance.invoice_number, amount: Number(advance.amount) || 0, currency: advance.currency }, currency || 'RSD')
+      if (why) { setProformaWhy(why); return }
+    }
     let eurRate: number | null = null
     try { eurRate = (await getBookRates(txDate)).eurRate } catch { eurRate = null }
     const made = proformaFromPayment({
-      companyId: companyId || null, partnerId: partnerId || null, date: txDate,
-      amount: Math.max(0, (parseFloat(amount) || 0) - totalAllocatedOwn), currency: currency || 'RSD',
+      companyId: companyId || null, partnerId: advance?.partner_id || partnerId || null, date: txDate,
+      amount: left, currency: currency || 'RSD',
       accountNumber: accNum || null, description: note || null, eurRate,
+      forAdvance: advance ? (advance.invoice_number || 'bez broja') : null,
     })
     if (!made.ok) { setProformaWhy(made.why); return }
     const r = made.row as any
@@ -804,6 +817,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       advance_deducted: 0, adjustments: 0, advance_used: 0,
     }
     setPendingProforma(made.row)
+    setPaysAdvance(advance ? { id: advance.id, amount: Number(advance.amount) || 0, invoice_number: advance.invoice_number } : null)
     setProformaWhy('')
     setOpenInvoices(prev => [...prev.filter(i => i.id !== 'pending-proforma'), placeholder])
     addInvoiceLink(placeholder)
@@ -1302,10 +1316,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
           // A proforma proposed from this payment is written now, with it.
           let links = linkedInvoices
+          let madeProformaId: string | null = null
           if (pendingProforma && links.some(l => l.invoice_id === 'pending-proforma')) {
             const { data: made, error: madeErr } = await supabase.from('invoices').insert(pendingProforma).select('id').single()
             if (madeErr || !made?.id) throw new Error(`Predračun nije napravljen: ${madeErr?.message || 'baza nije vratila red'}`)
             links = links.map(l => l.invoice_id === 'pending-proforma' ? { ...l, invoice_id: made.id } : l)
+            madeProformaId = made.id
           }
           for (const link of links.filter(l => l.allocated_own > 0)) {
             // THE FIGURE THAT WAS TYPED IS THE FIGURE THAT IS STORED. It goes
@@ -1414,6 +1430,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           // So the claim is read back in the database's own terms. It cannot
           // undo anything by this point, and it does not pretend to — it says
           // what happened while the person is still here.
+          // The advance invoice this payment pays: covered by the proforma
+          // just made and paid, in one transaction.
+          if (paysAdvance && madeProformaId) {
+            const { error: covErr } = await supabase.rpc('replace_advance_links', {
+              p_invoice: paysAdvance.id, p_coverage: [{ proforma_id: madeProformaId, amount: paysAdvance.amount }], p_usage: null,
+            })
+            if (covErr) throw new Error(`Plaćanje je proknjiženo, ali avansni račun ${paysAdvance.invoice_number || ''} nije vezan: ${covErr.message}`)
+          }
           const expectations: Expectation[] = links
             .filter(l => l.allocated_own > 0)
             .map(l => ({
@@ -1931,9 +1955,17 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                     </div>
                   )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                    <button type="button" style={s.linkBtn} onClick={makeProformaFrom}>Nov predračun iz ove uplate</button>
+                    <button type="button" style={s.linkBtn} onClick={() => makeProformaFrom()}>Nov predračun iz ove uplate</button>
                     {proformaWhy && <span style={{ fontSize: '11px', color: DIALOG.red }}>{proformaWhy}</span>}
                   </div>
+                  {!transaction?.id && unlinkedAdvances.filter(a => !partnerId || a.partner_id === partnerId).map(a => (
+                    <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontSize: '12px', color: DIALOG.text }}>
+                      <span style={{ flex: 1 }}>{a.partner_name || '—'} · {a.invoice_number || 'bez broja'} · {formatMoney(Number(a.amount) || 0, a.currency || 'RSD')} · <span style={{ color: DIALOG.amber }}>avansni račun bez predračuna</span></span>
+                      <button type="button" style={s.linkBtn} onClick={() => makeProformaFrom(a)}>
+                        {paysAdvance?.id === a.id ? '✓ Plaća se ovom uplatom' : 'Plati ovom uplatom'}
+                      </button>
+                    </div>
+                  ))}
                   <input style={{ ...s.input, marginBottom: '10px', width: '100%', boxSizing: 'border-box' as const }}
                     value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)}
                     placeholder="Pretraga po partneru, broju fakture ili iznosu…" />

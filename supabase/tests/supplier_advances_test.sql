@@ -226,6 +226,25 @@ begin
   assert (select amount from public.advance_usage where final_invoice_id = v_fin2) = 25000, 'links replaced';
   raise notice '16 ok';
 
+  -- 17. An advance invoice booked before its payment: the statement makes the
+  -- proforma, pays it, and links the advance invoice to it.
+  declare v_av3 uuid; v_pf3 uuid; v_tx3 uuid;
+  begin
+    insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, document_type)
+    values (v_co, v_p2, 'RA2027179', current_date, 'expense', 'RSD', 18144, 18144, 1, 'advance_invoice') returning id into v_av3;
+    assert (select unlinked from public.v_invoice_status where id = v_av3), 'unlinked before the payment';
+    insert into public.transactions (company_id, partner_id, transaction_date, type, currency, amount, amount_rsd, pl_impact, status)
+    values (v_co, v_p2, current_date, 'invoice_payment', 'RSD', 18144, 18144, false, 'posted') returning id into v_tx3;
+    insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, document_type)
+    values (v_co, v_p2, null, current_date, 'expense', 'RSD', 18144, 18144, 1, 'proforma') returning id into v_pf3;
+    insert into public.invoice_transaction_links (invoice_id, transaction_id, allocated_amount, allocated_amount_rsd) values (v_pf3, v_tx3, 18144, 18144);
+    perform public.replace_advance_links(v_av3, jsonb_build_array(jsonb_build_object('proforma_id', v_pf3, 'amount', 18144)), null);
+    set constraints all immediate;
+    set constraints all deferred;
+    assert not (select unlinked from public.v_invoice_status where id = v_av3), 'linked by the statement';
+  end;
+  raise notice '17 ok';
+
   set constraints all immediate;
   raise notice 'ALL TESTS PASSED';
 end $$;

@@ -1,4 +1,4 @@
-import { proformaFromPayment } from '../services/advances'
+import { advancePaymentProblem, proformaFromPayment } from '../services/advances'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabase'
 import { matchesAmount } from '../services/amountSearch'
@@ -203,6 +203,12 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   const [proformaWhy, setProformaWhy] = useState<Record<string, string>>({})
   /** Proformas proposed from a row's payment, written when the statement is posted. */
   const [pendingProformas, setPendingProformas] = useState<Record<string, Record<string, unknown>>>({})
+  /** Advance invoices booked before their payment (no proforma yet): a payment
+   *  can pay one straight from the statement. */
+  const [unlinkedAdvances, setUnlinkedAdvances] = useState<any[]>([])
+  /** The advance invoice a row's payment pays, by row: its proposed proforma
+   *  is covered by it once the statement is posted. */
+  const [pendingAdvance, setPendingAdvance] = useState<Record<string, { id: string; amount: number; invoice_number: string | null }>>({})
   const [partners, setPartners] = useState<any[]>([])
   /** The one-off loads are in; `startEdit` reads partners to name rows. */
   const [refsLoaded, setRefsLoaded] = useState(false)
@@ -467,6 +473,9 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       .in('document_type', ['invoice', 'proforma'])
       .in('calculated_status', ['unpaid', 'partial']).order('due_date', { ascending: true })
       .then(({ data }) => { if (data) setOpenInvoices(data) })
+    supabase.from('v_invoice_status').select('*').eq('company_id', company)
+      .eq('document_type', 'advance_invoice').eq('unlinked', true)
+      .then(({ data }) => { if (data) setUnlinkedAdvances(data.filter((a: any) => a.unlinked)) })
   }, [company])
 
   const getPlSubs = (catId: string) => plSubcategories.filter(s => s.category_id === catId)
@@ -892,13 +901,19 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
    * leaves nothing payable behind). Until then it stands in the list of open
    * documents under a placeholder id.
    */
-  const makeProformaFrom = async (row: StatementRow) => {
+  const makeProformaFrom = async (row: StatementRow, advance?: any) => {
+    if (advance) {
+      const why = advancePaymentProblem(parseFloat(row.debit) || 0,
+        { invoice_number: advance.invoice_number, amount: Number(advance.amount) || 0, currency: advance.currency }, row.currency || defaultCurrency)
+      if (why) { setProformaWhy(prev => ({ ...prev, [row.id]: why })); return }
+    }
     let eurRate: number | null = null
     try { eurRate = (await getBookRates(row.date)).eurRate } catch { eurRate = null }
     const made = proformaFromPayment({
-      companyId: company || null, partnerId: row.partner_id, date: row.date,
+      companyId: company || null, partnerId: advance?.partner_id || row.partner_id, date: row.date,
       amount: parseFloat(row.debit) || 0, currency: row.currency || defaultCurrency,
       accountNumber: row.account_number || null, description: row.description || null, eurRate,
+      forAdvance: advance ? (advance.invoice_number || 'bez broja') : null,
     })
     if (!made.ok) { setProformaWhy(prev => ({ ...prev, [row.id]: made.why })); return }
     const id = `pending-${row.id}`
@@ -909,6 +924,12 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       paid_amount: 0, remaining_rsd: r.amount_rsd, remaining_eur: r.amount_eur, calculated_status: 'unpaid',
       advance_deducted: 0, adjustments: 0, advance_used: 0,
     }])
+    setPendingAdvance(prev => {
+      const next = { ...prev }
+      if (advance) next[row.id] = { id: advance.id, amount: Number(advance.amount) || 0, invoice_number: advance.invoice_number }
+      else delete next[row.id]
+      return next
+    })
     setProformaWhy(prev => ({ ...prev, [row.id]: '' }))
     updateRow(row.id, { linked_invoice_id: id })
   }
@@ -961,6 +982,14 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       }
     }
 
+    // An advance invoice paid from a row: the row may have changed since.
+    for (const row of validRows) {
+      const adv = row.linked_invoice_id.startsWith('pending-') ? pendingAdvance[row.id] : undefined
+      if (!adv) continue
+      const why = advancePaymentProblem(parseFloat(row.debit) || 0, { ...adv, currency: row.currency || defaultCurrency }, row.currency || defaultCurrency)
+      if (why) { setError(`Stavka ${row.date}: ${why} Ništa nije sačuvano.`); setPosting(false); return }
+    }
+
     // Pre-flight: check every rate BEFORE the first write, so a statement
     // cannot end up half in the database and half not.
     try {
@@ -988,6 +1017,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
     try {
       for (let rowIndex = 0; rowIndex < validRows.length; rowIndex++) {
         let row = validRows[rowIndex]
+        let madeProformaId: string | null = null
         const importHash = await importRowHash([
           company, bank, statementNumber, rowIndex,
           row.date, row.debit, row.credit, row.currency || defaultCurrency,
@@ -1169,6 +1199,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
             .insert({ ...draft, partner_id: partnerId || draft.partner_id }).select('id').single()
           if (madeErr || !made?.id) throw new Error(`Stavka ${row.date}: predračun nije napravljen: ${madeErr?.message || 'baza nije vratila red'}`)
           row = { ...row, linked_invoice_id: made.id }
+          madeProformaId = made.id
         }
 
         if (row.tx_type === 'invoice_payment' && row.linked_invoice_id && newTx?.id) {
@@ -1319,6 +1350,18 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
             // Status follows what is allocated, in the invoice's own currency.
             await refreshInvoiceStatus(row.linked_invoice_id)
           }
+        }
+
+        // The advance invoice this payment pays: covered by the proforma just
+        // made and paid, in one transaction (replace_advance_links).
+        const paysAdvance = validRows[rowIndex] && pendingAdvance[validRows[rowIndex].id]
+        if (paysAdvance && madeProformaId) {
+          const { error: covErr } = await supabase.rpc('replace_advance_links', {
+            p_invoice: paysAdvance.id,
+            p_coverage: [{ proforma_id: madeProformaId, amount: paysAdvance.amount }],
+            p_usage: null,
+          })
+          if (covErr) throw new Error(`Stavka ${row.date}: uplata je proknjižena, ali avansni račun ${paysAdvance.invoice_number || ''} nije vezan: ${covErr.message}`)
         }
       }
 
@@ -2114,6 +2157,26 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                           </div>
                                         )
                                     })}
+                                    {/* Not while editing a saved statement: the proposed proforma is
+                                        written by the first posting only. */}
+                                    {!editing && parseFloat(row.debit) > 0 && unlinkedAdvances
+                                      .filter(a => !row.partner_id || a.partner_id === row.partner_id)
+                                      .map(a => {
+                                        const selected = pendingAdvance[row.id]?.id === a.id && row.linked_invoice_id.startsWith('pending-')
+                                        return (
+                                          <div key={`adv-${a.id}`}
+                                            style={{ padding: '7px 10px', borderRadius: '7px', border: selected ? '1.5px solid ' + DIALOG.amber : '0.5px solid ' + DIALOG.border, background: selected ? DIALOG.amberFill : DIALOG.raised, cursor: 'pointer', fontSize: '12px', color: DIALOG.text }}
+                                            onClick={e => { e.stopPropagation(); makeProformaFrom(row, a) }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                                              <span><strong>{a.partner_name || '—'}</strong> · {a.invoice_number || 'bez broja'} · <span style={{ color: DIALOG.amber }}>avansni račun — plaćanje</span></span>
+                                              <span style={{ fontWeight: 600 }}>{fmtMoney(Number(a.amount) || 0, a.currency || 'RSD')}</span>
+                                            </div>
+                                            <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px' }}>
+                                              Uplata pravi predračun, zatvara ga i vezuje avansni račun za njega (bez P&L).
+                                            </div>
+                                          </div>
+                                        )
+                                      })}
                                   </div>
                                 </>
                               )}

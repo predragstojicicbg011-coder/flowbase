@@ -125,6 +125,8 @@ export function proformaFromPayment(p: {
   currency: string | null; accountNumber: string | null; description: string | null
   /** RSD per EUR on the payment's date: every record carries it beside the booking rate. */
   eurRate: number | null
+  /** The advance invoice this payment pays, when it is paid straight from the statement. */
+  forAdvance?: string | null
 }): { ok: true; row: Record<string, unknown> } | { ok: false; why: string } {
   if (!p.partnerId) return { ok: false, why: 'Prvo izaberite dobavljača.' }
   if (!(p.amount > 0)) return { ok: false, why: 'Predračun se pravi samo iz isplate.' }
@@ -139,7 +141,24 @@ export function proformaFromPayment(p: {
       type: 'expense', currency: 'RSD', amount, amount_rsd: amount, exchange_rate: 1,
       eur_rate: p.eurRate, amount_eur: cents(amount / p.eurRate),
       document_type: 'proforma', pl_impact: false, status: 'unpaid', account_number: p.accountNumber || null,
-      note: `Predračun napravljen iz uplate od ${when}` + (p.description ? `: ${p.description}` : ''),
+      note: `Predračun napravljen iz uplate od ${when}` + (p.forAdvance ? ` za avansni račun ${p.forAdvance}` : '')
+        + (p.description ? `: ${p.description}` : ''),
     },
   }
+}
+
+/**
+ * Why this payment cannot pay that advance invoice straight from the bank
+ * statement, or null. The payment becomes a proforma that the advance invoice
+ * covers in full, so it may not be smaller (an advance invoice is never larger
+ * than what was paid) and must be in the same currency.
+ */
+export function advancePaymentProblem(
+  paymentAmount: number, advance: { invoice_number: string | null; amount: number; currency: string | null }, paymentCurrency: string | null,
+): string | null {
+  const cur = advance.currency || 'RSD'
+  if (cur !== (paymentCurrency || 'RSD')) return `Avansni račun ${advance.invoice_number || ''} je u ${cur}, a uplata u ${paymentCurrency || 'RSD'}.`
+  if (paymentAmount + 0.005 < advance.amount)
+    return `Uplata (${fmtNum(paymentAmount)}) je manja od avansnog računa ${advance.invoice_number || ''} (${fmtNum(advance.amount)}): avansni račun ne može biti veći od plaćenog.`
+  return null
 }
