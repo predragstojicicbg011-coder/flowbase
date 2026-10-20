@@ -13,6 +13,7 @@ const ubl = (over: Partial<UblInvoice> = {}): UblInvoice => ({
   invoiceNumber: '2026-0412', issueDate: '2026-09-30', dueDate: '2026-10-31',
   deliveryDate: null,
   currency: 'RSD', typeCode: '380', isCreditNote: false, isDebitNote: false, billingReference: null,
+  isAdvanceInvoice: false, billingReferences: [], grossTotal: null, advanceUsed: 0, advanceText: '',
   supplierName: 'Telekom Srbija', supplierVatNumber: '100002887',
   supplierRegistrationNumber: '17162543',
   customerName: 'PRIMALAC DOO BEOGRAD', customerVatNumber: '100000001',
@@ -500,5 +501,30 @@ describe('the document type of the draft', () => {
   it('a debit note is a debit note', () => {
     const d = draftFromUbl(ubl({ typeCode: '383', isDebitNote: true }), row, 'p1', null)
     expect(d.document_type).toBe('debit_note')
+  })
+})
+
+describe('advances in the draft', () => {
+  it('an advance invoice opens as one, with no P&L and the proforma it names', () => {
+    const d = draftFromUbl(parseUbl(fixture('advance-invoice-sample.xml')), row, 'p1', null)
+    expect(d.document_type).toBe('advance_invoice')
+    expect(d.pl_impact).toBe(false)
+    expect(d.proforma_hints).toEqual(['256173'])
+  })
+
+  it('a final invoice books its full amount and carries the advances it names', () => {
+    const u = parseUbl(fixture('final-invoice-sample.xml'))
+    const d = draftFromUbl(u, row, 'p1', null)
+    expect(d.document_type).toBe('invoice')
+    expect(d.amount).toBe(18144)
+    expect(d.advance_refs).toEqual([{ number: 'RA2027179', date: '2026-10-08', amount: 18144 }])
+    expect(d.advance_used).toBe(18144)
+    expect(reviewNotesFor(u, { matchedBy: 'pib', proposal: null, saved: [] } as any).join(' ')).toMatch(/Konačni račun: pun iznos 18144\.00 ide u troškove, avans 18144\.00 je već plaćen, za plaćanje 0\.00\./)
+  })
+
+  it('an ordinary bill is booked as before', () => {
+    const d = draftFromUbl(ubl(), row, 'p1', null)
+    expect(d.amount).toBe(12000)
+    expect(d.advance_refs).toBeUndefined()
   })
 })

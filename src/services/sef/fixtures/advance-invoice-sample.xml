@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<env:DocumentEnvelope xmlns:env="urn:eFaktura:MinFinrs:envelop:schema">
+  <env:DocumentHeader>
+    <env:SalesInvoiceId>900000001</env:SalesInvoiceId>
+    <env:PurchaseInvoiceId>900000001</env:PurchaseInvoiceId>
+    <env:DocumentId>00000000-0000-4000-8000-000000000001</env:DocumentId>
+    <env:CreationDate>2026-10-08</env:CreationDate>
+    <env:SendingDate>2026-10-08</env:SendingDate>
+    <env:DocumentPdf mimeCode="application/pdf"></env:DocumentPdf>
+  </env:DocumentHeader>
+  <env:DocumentBody>
+    <Invoice xmlns:cec="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:sbt="http://mfin.gov.rs/srbdt/srbdtext" xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+      <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliantt#urn:mfin.gov.rs:srbdt:2021</cbc:CustomizationID>
+      <cbc:ID>RA2027179</cbc:ID>
+      <cbc:IssueDate>2026-10-08</cbc:IssueDate>
+      <cbc:DueDate>2026-10-07</cbc:DueDate>
+      <cbc:InvoiceTypeCode>386</cbc:InvoiceTypeCode>
+      <cbc:DocumentCurrencyCode>RSD</cbc:DocumentCurrencyCode>
+      <cac:InvoicePeriod>
+        <cbc:DescriptionCode>432</cbc:DescriptionCode>
+      </cac:InvoicePeriod>
+      <cac:AccountingSupplierParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000004</cbc:EndpointID>
+          <cac:PartyName>
+            <cbc:Name>DOBAVLJAČ VENTILACIJE DOO</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>Ulica 1</cbc:StreetName>
+            <cbc:CityName>Beograd</cbc:CityName>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000004</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>DOBAVLJAČ VENTILACIJE DOO</cbc:RegistrationName>
+            <cbc:CompanyID>20000004</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+          <cac:Contact>
+            <cbc:ElectronicMail>prodaja@example.invalid</cbc:ElectronicMail>
+          </cac:Contact>
+        </cac:Party>
+      </cac:AccountingSupplierParty>
+      <cac:AccountingCustomerParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000001</cbc:EndpointID>
+          <cac:PartyName>
+            <cbc:Name>PRIMALAC DOO BEOGRAD</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>Ulica 1</cbc:StreetName>
+            <cbc:CityName>Beograd</cbc:CityName>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000001</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>PRIMALAC DOO BEOGRAD</cbc:RegistrationName>
+            <cbc:CompanyID>20000001</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+          <cac:Contact>
+            <cbc:ElectronicMail>kupac@example.invalid</cbc:ElectronicMail>
+          </cac:Contact>
+        </cac:Party>
+      </cac:AccountingCustomerParty>
+      <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cbc:PaymentID>RA2027179</cbc:PaymentID>
+        <cac:PayeeFinancialAccount>
+          <cbc:ID>160-0000000000004-44</cbc:ID>
+          <cbc:Name>OTP BANKA</cbc:Name>
+        </cac:PayeeFinancialAccount>
+      </cac:PaymentMeans>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="RSD">3024.0000</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+          <cbc:TaxableAmount currencyID="RSD">15120.0000</cbc:TaxableAmount>
+          <cbc:TaxAmount currencyID="RSD">3024.0000</cbc:TaxAmount>
+          <cac:TaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20.0000</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="RSD">15120.0000</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="RSD">15120.0000</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="RSD">18144.0000</cbc:TaxInclusiveAmount>
+        <cbc:AllowanceTotalAmount currencyID="RSD">0.0000</cbc:AllowanceTotalAmount>
+        <cbc:PayableAmount currencyID="RSD">18144.0000</cbc:PayableAmount>
+      </cac:LegalMonetaryTotal>
+      <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">1.0000</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">15120.0000</cbc:LineExtensionAmount>
+        <cac:Item>
+          <cbc:Name>Avansna uplata po predračunu br. 256173</cbc:Name>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20.0000</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">15120.0000</cbc:PriceAmount>
+          <cbc:BaseQuantity unitCode="H87">1</cbc:BaseQuantity>
+          <cac:AllowanceCharge>
+            <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+            <cbc:Amount currencyID="RSD">0.0000</cbc:Amount>
+            <cbc:BaseAmount currencyID="RSD">15120.0000</cbc:BaseAmount>
+          </cac:AllowanceCharge>
+        </cac:Price>
+      </cac:InvoiceLine>
+    </Invoice>
+  </env:DocumentBody>
+</env:DocumentEnvelope>

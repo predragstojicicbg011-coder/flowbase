@@ -64,6 +64,20 @@ export interface UblInvoice {
   /** The number of the bill a credit or debit note adjusts
    *  (`BillingReference/InvoiceDocumentReference/ID`); null where none is named. */
   billingReference: string | null
+  /** Type 386: an advance invoice (avansni račun). Never in the P&L. */
+  isAdvanceInvoice: boolean
+  /** Every earlier document the bill names (`BillingReference`). On a final
+   *  invoice these are the advance invoices it closes. */
+  billingReferences: { number: string; date: string | null; amount?: number }[]
+  /** What the bill comes to before any advance: `TaxInclusiveAmount`, or
+   *  net + VAT without it. On a final invoice `total` (PayableAmount) is
+   *  already less the advance, so it is not the cost. */
+  grossTotal: number | null
+  /** On a final invoice: the advance already paid — `PrepaidAmount`, or
+   *  gross − total without it. */
+  advanceUsed: number
+  /** The notes and line names, where an advance invoice names its proforma. */
+  advanceText: string
   supplierName: string | null
   supplierVatNumber: string | null       // PIB, digits only
   supplierRegistrationNumber: string | null
@@ -186,6 +200,7 @@ const pickTaxAmount = (root: Element, currency: string | null): number | null =>
 const empty = (): UblInvoice => ({
   invoiceNumber: null, issueDate: null, dueDate: null, currency: null,
   typeCode: null, isCreditNote: false, isDebitNote: false, billingReference: null,
+  isAdvanceInvoice: false, billingReferences: [], grossTotal: null, advanceUsed: 0, advanceText: '',
   documentCurrency: null, documentTotal: null,
   supplierName: null, supplierVatNumber: null, supplierRegistrationNumber: null,
   customerName: null, customerVatNumber: null, customerRegistrationNumber: null,
@@ -259,6 +274,43 @@ export function parseUbl(xml: string): UblInvoice {
       vatPercent: num(child(line, 'Item', 'ClassifiedTaxCategory', 'Percent')),
     }))
 
+  const net = sign(indexed ? indexed.net : num(child(root, 'LegalMonetaryTotal', 'TaxExclusiveAmount')))
+  const vat = sign(indexed ? indexed.vat : pickTaxAmount(root, documentCurrency))
+  const total = sign(indexed
+    ? Math.round((indexed.net + indexed.vat) * 100) / 100
+    : num(child(root, 'LegalMonetaryTotal', 'PayableAmount')))
+  // What each advance paid, where the supplier says it: the SEF extension
+  // (SrbDtExt/InvoicedPrepaymentAmmount, taxable + VAT per advance invoice).
+  // The extension also holds reduced totals of its own, which is why every
+  // total below is read from the root.
+  const prepaidBy = new Map<string, number>()
+  for (const ext of Array.from(doc.getElementsByTagNameNS('*', 'InvoicedPrepaymentAmmount'))) {
+    const id = text(child(ext, 'ID'))
+    const taxable = kids(child(ext, 'TaxTotal'), 'TaxSubtotal').reduce((sum, t) => sum + (num(child(t, 'TaxableAmount')) || 0), 0)
+    const tax = num(child(ext, 'TaxTotal', 'TaxAmount')) || 0
+    if (id) prepaidBy.set(id, Math.round((taxable + tax) * 100) / 100)
+  }
+  const billingReferences = kids(root, 'BillingReference')
+    .map(b => {
+      const number = text(child(b, 'InvoiceDocumentReference', 'ID')) || ''
+      const ref: { number: string; date: string | null; amount?: number } = { number, date: text(child(b, 'InvoiceDocumentReference', 'IssueDate')) }
+      const paid = prepaidBy.get(number)
+      if (paid !== undefined) ref.amount = paid
+      return ref
+    })
+    .filter(b => b.number)
+  const inclusive = indexed ? null : num(child(root, 'LegalMonetaryTotal', 'TaxInclusiveAmount'))
+  const grossTotal = inclusive !== null && inclusive > 0 ? inclusive
+    : net !== null && vat !== null ? Math.round((net + vat) * 100) / 100 : null
+  const prepaid = indexed ? null : num(child(root, 'LegalMonetaryTotal', 'PrepaidAmount'))
+  // A final invoice: an ordinary bill (not a note, not an advance invoice)
+  // that names earlier documents and asks for less than it comes to.
+  const isFinal = !isCreditNote && typeCode !== '386' && typeCode !== '383' && billingReferences.length > 0
+  const advanceUsed = !isFinal ? 0
+    : prepaid !== null && prepaid > 0 ? prepaid
+    : grossTotal !== null && total !== null && grossTotal - total > 0.005 ? Math.round((grossTotal - total) * 100) / 100 : 0
+  const advanceText = [...kids(root, 'Note').map(n => text(n) || ''), ...lines.map(l => l.name)].filter(Boolean).join(' ')
+
   return {
     invoiceNumber: text(child(root, 'ID')),
     issueDate: text(child(root, 'IssueDate')),
@@ -284,11 +336,14 @@ export function parseUbl(xml: string): UblInvoice {
     paymentModel: payId.model,
     // A credit note reduces what is owed. Booked positive it is wrong in the
     // P&L and in the payables at once, and it reads as an ordinary bill.
-    net: sign(indexed ? indexed.net : num(child(root, 'LegalMonetaryTotal', 'TaxExclusiveAmount'))),
-    vat: sign(indexed ? indexed.vat : pickTaxAmount(root, documentCurrency)),
-    total: sign(indexed
-      ? Math.round((indexed.net + indexed.vat) * 100) / 100
-      : num(child(root, 'LegalMonetaryTotal', 'PayableAmount'))),
+    net,
+    vat,
+    total,
+    isAdvanceInvoice: typeCode === '386',
+    billingReferences,
+    grossTotal,
+    advanceUsed,
+    advanceText,
     documentCurrency,
     documentTotal: sign(num(child(root, 'LegalMonetaryTotal', 'PayableAmount'))),
     sefPurchaseInvoiceId: text(child(envelope, 'DocumentHeader', 'PurchaseInvoiceId')),

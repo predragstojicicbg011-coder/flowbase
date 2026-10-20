@@ -28,7 +28,7 @@ export interface PaidProforma {
 }
 
 /** An advance invoice a final invoice names (SEF BillingReference). */
-export interface AdvanceRef { number: string; date: string | null }
+export interface AdvanceRef { number: string; date: string | null; amount?: number }
 
 const cents = (n: number) => Math.round(n * 100) / 100
 
@@ -46,7 +46,8 @@ export function proposeUsage(
   for (const ref of refs) {
     const a = advances.find(x => invoiceNumberKey(x.invoice_number) === invoiceNumberKey(ref.number))
     if (!a) { missing.push(ref); continue }
-    const amount = cents(Math.min(a.open, left))
+    // What the bill says this advance paid, where it says it (SEF extension).
+    const amount = cents(Math.min(a.open, left, ref.amount ?? left))
     if (amount > 0) { usage.push({ advanceId: a.id, amount }); left = cents(left - amount) }
   }
   return { usage, missing, left }

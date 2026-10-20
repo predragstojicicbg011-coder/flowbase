@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="utf-8"?>
+<env:DocumentEnvelope xmlns:env="urn:eFaktura:MinFinrs:envelop:schema">
+  <env:DocumentHeader>
+    <env:SalesInvoiceId>900000001</env:SalesInvoiceId>
+    <env:PurchaseInvoiceId>900000001</env:PurchaseInvoiceId>
+    <env:DocumentId>00000000-0000-4000-8000-000000000001</env:DocumentId>
+    <env:CreationDate>2026-10-08</env:CreationDate>
+    <env:SendingDate>2026-10-08</env:SendingDate>
+    <env:DocumentPdf mimeCode="application/pdf"></env:DocumentPdf>
+  </env:DocumentHeader>
+  <env:DocumentBody>
+    <Invoice xmlns:cec="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:sbt="http://mfin.gov.rs/srbdt/srbdtext" xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+      <cec:UBLExtensions>
+        <cec:UBLExtension>
+          <cec:ExtensionContent>
+            <sbt:SrbDtExt>
+              <xsd:InvoicedPrepaymentAmmount>
+                <cbc:ID>RA2027179</cbc:ID>
+                <cac:TaxTotal>
+                  <cbc:TaxAmount currencyID="RSD">3024.0000</cbc:TaxAmount>
+                  <cac:TaxSubtotal>
+                    <cbc:TaxableAmount currencyID="RSD">15120.0000</cbc:TaxableAmount>
+                    <cbc:TaxAmount currencyID="RSD">3024.0000</cbc:TaxAmount>
+                    <cac:TaxCategory>
+                      <cbc:ID>S</cbc:ID>
+                      <cbc:Percent>20.0000</cbc:Percent>
+                      <cac:TaxScheme>
+                        <cbc:ID>VAT</cbc:ID>
+                      </cac:TaxScheme>
+                    </cac:TaxCategory>
+                  </cac:TaxSubtotal>
+                </cac:TaxTotal>
+              </xsd:InvoicedPrepaymentAmmount>
+              <xsd:ReducedTotals>
+                <cac:TaxTotal>
+                  <cbc:TaxAmount currencyID="RSD">0.0000</cbc:TaxAmount>
+                  <cac:TaxSubtotal>
+                    <cbc:TaxableAmount currencyID="RSD">0.0000</cbc:TaxableAmount>
+                    <cbc:TaxAmount currencyID="RSD">0.0000</cbc:TaxAmount>
+                    <cac:TaxCategory>
+                      <cbc:ID>S</cbc:ID>
+                      <cbc:Percent>20.0000</cbc:Percent>
+                      <cac:TaxScheme>
+                        <cbc:ID>VAT</cbc:ID>
+                      </cac:TaxScheme>
+                    </cac:TaxCategory>
+                  </cac:TaxSubtotal>
+                </cac:TaxTotal>
+                <cac:LegalMonetaryTotal>
+                  <cbc:TaxExclusiveAmount currencyID="RSD">15120.0000</cbc:TaxExclusiveAmount>
+                  <cbc:TaxInclusiveAmount currencyID="RSD">0.0000</cbc:TaxInclusiveAmount>
+                  <cbc:PayableAmount currencyID="RSD">0.0000</cbc:PayableAmount>
+                </cac:LegalMonetaryTotal>
+              </xsd:ReducedTotals>
+            </sbt:SrbDtExt>
+          </cec:ExtensionContent>
+        </cec:UBLExtension>
+      </cec:UBLExtensions>
+      <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliantt#urn:mfin.gov.rs:srbdt:2021</cbc:CustomizationID>
+      <cbc:ID>21404-01-26</cbc:ID>
+      <cbc:IssueDate>2026-10-08</cbc:IssueDate>
+      <cbc:DueDate>2026-10-08</cbc:DueDate>
+      <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+      <cbc:DocumentCurrencyCode>RSD</cbc:DocumentCurrencyCode>
+      <cac:InvoicePeriod>
+        <cbc:DescriptionCode>35</cbc:DescriptionCode>
+      </cac:InvoicePeriod>
+      <cac:BillingReference>
+        <cac:InvoiceDocumentReference>
+          <cbc:ID>RA2027179</cbc:ID>
+          <cbc:IssueDate>2026-10-08</cbc:IssueDate>
+        </cac:InvoiceDocumentReference>
+      </cac:BillingReference>
+      <cac:DespatchDocumentReference>
+        <cbc:ID>221668</cbc:ID>
+        <cbc:IssueDate>2026-10-08</cbc:IssueDate>
+      </cac:DespatchDocumentReference>
+      <cac:AdditionalDocumentReference>
+        <cbc:ID>21404</cbc:ID>
+        <cac:Attachment>
+          <cbc:EmbeddedDocumentBinaryObject mimeCode="application/pdf" encodingCode="base64" filename="AT1-21404-01-26.pdf">REMOVED_FROM_FIXTURE</cbc:EmbeddedDocumentBinaryObject>
+        </cac:Attachment>
+      </cac:AdditionalDocumentReference>
+      <cac:AccountingSupplierParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000004</cbc:EndpointID>
+          <cac:PartyName>
+            <cbc:Name>DOBAVLJAČ VENTILACIJE DOO</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>Ulica 1</cbc:StreetName>
+            <cbc:CityName>Beograd</cbc:CityName>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000004</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>DOBAVLJAČ VENTILACIJE DOO</cbc:RegistrationName>
+            <cbc:CompanyID>20000004</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+          <cac:Contact>
+            <cbc:ElectronicMail>prodaja@example.invalid</cbc:ElectronicMail>
+          </cac:Contact>
+        </cac:Party>
+      </cac:AccountingSupplierParty>
+      <cac:AccountingCustomerParty>
+        <cac:Party>
+          <cbc:EndpointID schemeID="9948">100000001</cbc:EndpointID>
+          <cac:PartyName>
+            <cbc:Name>PRIMALAC DOO BEOGRAD</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>Ulica 1</cbc:StreetName>
+            <cbc:CityName>Beograd</cbc:CityName>
+            <cac:Country>
+              <cbc:IdentificationCode>RS</cbc:IdentificationCode>
+            </cac:Country>
+          </cac:PostalAddress>
+          <cac:PartyTaxScheme>
+            <cbc:CompanyID>RS100000001</cbc:CompanyID>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:PartyTaxScheme>
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>PRIMALAC DOO BEOGRAD</cbc:RegistrationName>
+            <cbc:CompanyID>20000001</cbc:CompanyID>
+          </cac:PartyLegalEntity>
+          <cac:Contact>
+            <cbc:ElectronicMail>kupac@example.invalid</cbc:ElectronicMail>
+          </cac:Contact>
+        </cac:Party>
+      </cac:AccountingCustomerParty>
+      <cac:Delivery>
+        <cbc:ActualDeliveryDate>2026-10-08</cbc:ActualDeliveryDate>
+      </cac:Delivery>
+      <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cbc:PaymentID>21404-01-26</cbc:PaymentID>
+        <cac:PayeeFinancialAccount>
+          <cbc:ID>160-0000000000004-44</cbc:ID>
+          <cbc:Name>OTP BANKA</cbc:Name>
+        </cac:PayeeFinancialAccount>
+      </cac:PaymentMeans>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="RSD">3024.0000</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+          <cbc:TaxableAmount currencyID="RSD">15120.0000</cbc:TaxableAmount>
+          <cbc:TaxAmount currencyID="RSD">3024.0000</cbc:TaxAmount>
+          <cac:TaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20.0000</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="RSD">15120.0000</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="RSD">15120.0000</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="RSD">18144.0000</cbc:TaxInclusiveAmount>
+        <cbc:AllowanceTotalAmount currencyID="RSD">1680.0000</cbc:AllowanceTotalAmount>
+        <cbc:PrepaidAmount currencyID="RSD">18144.0000</cbc:PrepaidAmount>
+        <cbc:PayableAmount currencyID="RSD">0.0000</cbc:PayableAmount>
+      </cac:LegalMonetaryTotal>
+      <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="H87">6.0000</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="RSD">15120.0000</cbc:LineExtensionAmount>
+        <cac:AllowanceCharge>
+          <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+          <cbc:AllowanceChargeReason>Ugovoreni rabat</cbc:AllowanceChargeReason>
+          <cbc:MultiplierFactorNumeric>10.0000</cbc:MultiplierFactorNumeric>
+          <cbc:Amount currencyID="RSD">1680.0000</cbc:Amount>
+        </cac:AllowanceCharge>
+        <cac:Item>
+          <cbc:Name>ERA VENTILATOR F100 SILENT 4C TURBO</cbc:Name>
+          <cac:SellersItemIdentification>
+            <cbc:ID>550093</cbc:ID>
+          </cac:SellersItemIdentification>
+          <cac:StandardItemIdentification>
+            <cbc:ID schemeID="0160">4605098040073</cbc:ID>
+          </cac:StandardItemIdentification>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20.0000</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+          <cbc:PriceAmount currencyID="RSD">2800.0000</cbc:PriceAmount>
+          <cbc:BaseQuantity unitCode="H87">1</cbc:BaseQuantity>
+          <cac:AllowanceCharge>
+            <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+            <cbc:Amount currencyID="RSD">280.0000</cbc:Amount>
+          </cac:AllowanceCharge>
+        </cac:Price>
+      </cac:InvoiceLine>
+    </Invoice>
+  </env:DocumentBody>
+</env:DocumentEnvelope>

@@ -33,6 +33,13 @@ describe('which advances a final invoice uses', () => {
     expect(r.usage).toEqual([{ advanceId: 'x2', amount: 80000 }, { advanceId: 'x1', amount: 70000 }])
   })
 
+  it('takes from each advance what the bill says it paid', () => {
+    const r = proposeUsage(
+      [{ number: 'A-1', date: null, amount: 30000 }, { number: 'A-2', date: null, amount: 70000 }], 100000,
+      [adv({ id: 'x1', invoice_number: 'A-1', open: 100000 }), adv({ id: 'x2', invoice_number: 'A-2', open: 100000 })])
+    expect(r.usage).toEqual([{ advanceId: 'x1', amount: 30000 }, { advanceId: 'x2', amount: 70000 }])
+  })
+
   it('an advance not in the books is missing, and what it would cover is left', () => {
     const r = proposeUsage([{ number: 'RA-9', date: '2025-01-01' }], 5000, [adv({})])
     expect(r).toEqual({ usage: [], missing: [{ number: 'RA-9', date: '2025-01-01' }], left: 5000 })

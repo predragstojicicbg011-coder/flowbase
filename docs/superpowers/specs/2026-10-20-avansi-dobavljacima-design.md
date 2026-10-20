@@ -34,11 +34,15 @@ Otvoreno 5 avansnih i 5 konačnih računa:
   Nije strukturiran podatak.
 - **Konačni račun** ima vrstu `380` i za svaki avans
   `cac:BillingReference/cac:InvoiceDocumentReference` sa `cbc:ID` (broj
-  avansnog računa) i `cbc:IssueDate`. `PayableAmount` je već umanjen za avans;
-  `TaxInclusiveAmount` je kod nekih dobavljača takođe umanjen (0), pa se na
-  njega ne može osloniti. Pun iznos računa = `TaxExclusiveAmount` + PDV iz
-  `TaxTotal/TaxAmount`. Iskorišćen avans = pun iznos − `PayableAmount`.
-  `PrepaidAmount` se u ovim dokumentima ne popunjava.
+  avansnog računa) i `cbc:IssueDate`. U glavnom `LegalMonetaryTotal`:
+  `TaxInclusiveAmount` je pun iznos sa PDV-om, `PrepaidAmount` iskorišćeni
+  avans, `PayableAmount` ostatak za plaćanje. Neki dobavljači (B.B. Link, DST)
+  u SEF proširenju `SrbDtExt/InvoicedPrepaymentAmmount` navode i iznos po
+  svakom avansnom računu (osnovica + PDV); drugi (Bepro, Peri) ne. U istom
+  proširenju je i umanjeni zbir (`ReducedTotals`), koji nije pun iznos.
+  (Ispravka 20.10.2026: prva analiza je čitala blokove iz proširenja i
+  pogrešno zaključila da je `TaxInclusiveAmount` umanjen i da `PrepaidAmount`
+  nije popunjen.)
 - Primeri: B.B. Link 21404-01-26 → RA2027179 (pun 18.144,00, avans 18.144,00,
   za plaćanje 0); DST 427/26 → 0033/26 (17.340,00 / 13.260,00 / 4.080,00);
   Bepro 745/2026 → AV104/2026 (323.125,57 / 323.125,57 iz avansa od
@@ -188,8 +192,10 @@ Otvoreno 5 avansnih i 5 konačnih računa:
    iskorišćenim avansom kao što računa knjižno odobrenje (umanjuje ostatak,
    oznaka „zatvoreno avansom“); avansni račun je uvek „zatvoren“ za plaćanje;
    predračun se plaća kao račun.
-3. **Pun iznos sa SEF-a:** parser vraća pun iznos (`TaxExclusiveAmount` +
-   PDV) i iskorišćeni avans; postojeći `total` za obične račune ostaje isti.
+3. **Pun iznos sa SEF-a:** parser vraća pun iznos (`TaxInclusiveAmount`, a
+   bez njega osnovica + PDV), iskorišćeni avans (`PrepaidAmount`, a bez njega
+   pun − za plaćanje) i iznos po avansnom računu iz proširenja kad postoji;
+   postojeći `total` za obične račune ostaje isti.
 4. **Pravila u bazi** (triggeri, kao kod odobrenja), a forma ih ponavlja da
    korisnik vidi razlog pre čuvanja.
 5. **SQL testovi na demo bazi**, render testovi formi i panela; pre

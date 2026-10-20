@@ -444,3 +444,56 @@ describe('which bill a note adjusts, and a debit note', () => {
     expect(d.total).toBeGreaterThan(0)
   })
 })
+
+describe('an advance invoice and the final invoice it closes (real documents)', () => {
+  const fx = (name: string) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8')
+
+  it('type 386 is an advance invoice, and its text names the proforma', () => {
+    const a = parseUbl(fx('advance-invoice-sample.xml'))
+    expect(a.isAdvanceInvoice).toBe(true)
+    expect(a.total).toBe(18144)
+    expect(a.advanceUsed).toBe(0)
+    expect(a.advanceText).toContain('256173')
+  })
+
+  it('a final invoice: the full amount, the advance it names and what that advance paid', () => {
+    const f = parseUbl(fx('final-invoice-sample.xml'))
+    expect(f.isAdvanceInvoice).toBe(false)
+    expect(f.billingReferences).toEqual([{ number: 'RA2027179', date: '2026-10-08', amount: 18144 }])
+    expect(f.grossTotal).toBe(18144)
+    expect(f.total).toBe(0)
+    expect(f.advanceUsed).toBe(18144)
+  })
+
+  /** The root totals only: the SEF extension carries totals of its own. */
+  const editRoot = (xml: string, edit: (root: string) => string) => {
+    const at = xml.indexOf('</cec:UBLExtensions>')
+    return xml.slice(0, at) + edit(xml.slice(at))
+  }
+  const setRoot = (tag: string, value: string) => (r: string) =>
+    r.replace(new RegExp('(<cbc:' + tag + ' currencyID="RSD">)[^<]*'), (_m: string, a: string) => a + value)
+
+  it('reads what each advance paid from the SEF extension', () => {
+    expect(parseUbl(fx('final-invoice-sample.xml')).billingReferences[0].amount).toBe(18144)
+  })
+
+  it('a final invoice the advance closes in part (DST: 17.340, 13.260 from the advance, 4.080 to pay)', () => {
+    const f = parseUbl(editRoot(fx('final-invoice-sample.xml'),
+      r => setRoot('PayableAmount', '4080')(setRoot('PrepaidAmount', '13260')(setRoot('TaxInclusiveAmount', '17340')(r)))))
+    expect(f.grossTotal).toBe(17340)
+    expect(f.advanceUsed).toBe(13260)
+    expect(f.total).toBe(4080)
+  })
+
+  it('without PrepaidAmount the advance is what the bill comes to less what it asks', () => {
+    const f = parseUbl(editRoot(fx('final-invoice-sample.xml'), r => r.replace(/<cbc:PrepaidAmount[^>]*>[^<]*<\/cbc:PrepaidAmount>/, '')))
+    expect(f.advanceUsed).toBe(18144)
+  })
+
+  it('an ordinary bill has no advance', () => {
+    const b = parseUbl(fx('invoice-sample.xml'))
+    expect(b.billingReferences).toEqual([])
+    expect(b.advanceUsed).toBe(0)
+    expect(b.isAdvanceInvoice).toBe(false)
+  })
+})

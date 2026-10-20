@@ -1,3 +1,4 @@
+import { proformaNumbersIn } from '../advances'
 import type { UblInvoice } from './ublInvoice'
 import type { Proposal } from './proposeClassification'
 import { sameAccountNumber } from '../partnerAccountChoice'
@@ -130,7 +131,8 @@ export function draftFromUbl(
     ...(account === null && offered.length > 0 ? { unresolved: true } : {}),
     model: ubl.paymentModel,
     reference_number: ubl.paymentReference,
-    pl_impact: true,
+    // An advance invoice is never in the P&L (20261021090000).
+    pl_impact: !ubl.isAdvanceInvoice,
     pl_category: proposal?.pl_category ?? null,
     pl_subcategory: proposal?.pl_subcategory ?? null,
     department: proposal?.department ?? null,
@@ -140,8 +142,20 @@ export function draftFromUbl(
     note: ubl.isCreditNote ? 'Knjižno odobrenje sa SEF-a' : ubl.isDebitNote ? 'Knjižno zaduženje sa SEF-a' : null,
     // The dialog opens with this type and proposes the partner's bill whose
     // number is the reference (compared on letters and digits only).
-    document_type: ubl.isCreditNote ? 'credit_note' : ubl.isDebitNote ? 'debit_note' : 'invoice',
+    document_type: ubl.isCreditNote ? 'credit_note' : ubl.isDebitNote ? 'debit_note'
+      : ubl.isAdvanceInvoice ? 'advance_invoice' : 'invoice',
     billing_reference: ubl.billingReference,
+    // An advance invoice names its proforma only in words; the dialog
+    // proposes the paid proforma with that number.
+    ...(ubl.isAdvanceInvoice ? { proforma_hints: proformaNumbersIn(ubl.advanceText) } : {}),
+    // A FINAL INVOICE: the cost is the full amount, not what is left to pay
+    // after the advance; the dialog links the advances it names before it
+    // can be posted.
+    ...(ubl.advanceUsed > 0 && ubl.grossTotal !== null ? {
+      amount: ubl.grossTotal,
+      advance_refs: ubl.billingReferences,
+      advance_used: ubl.advanceUsed,
+    } : {}),
   }
 }
 
@@ -240,6 +254,13 @@ export function reviewNotesFor(
 
   if (ubl.isCreditNote) {
     notes.push('Ovo je knjižno odobrenje, pa je iznos unet kao negativan.')
+  }
+
+  if (ubl.advanceUsed > 0 && ubl.grossTotal !== null) {
+    notes.push(`Konačni račun: pun iznos ${ubl.grossTotal.toFixed(2)} ide u troškove, avans ${ubl.advanceUsed.toFixed(2)} je već plaćen, za plaćanje ${(ubl.total ?? 0).toFixed(2)}.`)
+  }
+  if (ubl.isAdvanceInvoice) {
+    notes.push('Ovo je avansni račun: ne ulazi u troškove i ne plaća se; vezuje se za plaćeni predračun.')
   }
 
   // WHICH DATE IT IS BOOKED ON. Said whenever it is not the one the bill is
