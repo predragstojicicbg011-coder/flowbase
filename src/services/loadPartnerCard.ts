@@ -31,7 +31,7 @@ export async function loadPartnerCard(client: any, partnerId: string, companyId:
 
   const documents = await fetchAllPages<any>((from, to) =>
     scoped(client.from('v_invoice_status')
-      .select('id, invoice_number, invoice_date, type, document_type, currency, amount, amount_rsd, adjusts_invoice_id, prior_period, advance_open, advance_deducted_rsd')
+      .select('id, invoice_number, invoice_date, due_date, type, document_type, currency, amount, amount_rsd, adjusts_invoice_id, prior_period, advance_open, advance_deducted_rsd')
       .eq('partner_id', partnerId))
       .order('invoice_date', { ascending: true }).order('id').range(from, to))
   const ids = documents.map(d => d.id)

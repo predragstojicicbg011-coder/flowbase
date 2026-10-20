@@ -92,3 +92,19 @@ describe('exporting the card', () => {
     expect(frame.srcdoc).toContain('Račun F-412/26')
   })
 })
+
+describe('the IOS', () => {
+  it('prints the open items on the end date of the card into a frame', async () => {
+    await open()
+    fireEvent.change(screen.getByLabelText('Do'), { target: { value: '2026-10-31' } })
+    fireEvent.click(screen.getByText('IOS'))
+    await new Promise(r => setTimeout(r, 20))
+    const frame = document.querySelector('iframe[title="IOS za štampu"]') as HTMLIFrameElement
+    expect(frame).not.toBeNull()
+    expect(frame.srcdoc).toContain('IZVOD OTVORENIH STAVKI')
+    expect(frame.srcdoc).toContain('na dan 31.10.2026')
+    expect(frame.srcdoc).toContain('IOS-100000004-20261031')
+    expect(frame.srcdoc).toContain('F-412/26')
+    expect(frame.srcdoc).toContain('60.000,00 RSD')
+  })
+})

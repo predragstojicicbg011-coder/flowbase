@@ -25,6 +25,8 @@ export interface CardDocument {
   id: string
   invoice_number: string | null
   invoice_date: string | null
+  /** Due date, for the IOS. */
+  due_date?: string | null
   type: string | null
   document_type: string | null
   currency: string | null

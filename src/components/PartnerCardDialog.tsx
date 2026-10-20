@@ -7,6 +7,7 @@ import { buildPartnerCard } from '../services/partnerCard'
 import { loadPartnerCard, type PartnerCardData } from '../services/loadPartnerCard'
 import InvoiceDocumentsDialog from './InvoiceDocumentsDialog'
 import { partnerCardPrintHtml } from '../services/partnerCardPrint'
+import { iosNumber, iosPrintHtml, openItemsAsOf } from '../services/iosStatement'
 
 // ─── Kartica partnera ───────────────────────────────────────────────────────
 //
@@ -48,14 +49,7 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
     if (!card) return
     setExporting(true)
     try {
-      const [{ data: company }, { data: who }] = await Promise.all([
-        companyId
-          ? supabase.from('company_profiles').select('full_legal_name, address, city, pib').eq('company_id', companyId).maybeSingle()
-          : Promise.resolve({ data: null }),
-        supabase.from('partners').select('name, tax_id, address, city').eq('id', partner.id).maybeSingle(),
-      ])
-      const d = new Date()
-      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const { company, who, today } = await parties()
       const html = partnerCardPrintHtml({
         company: company || { full_legal_name: companies.find(c => c.id === companyId)?.name || '' },
         partner: who || { name: partner.name },
@@ -63,17 +57,56 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
         card,
         generatedOn: today,
       })
-      document.querySelectorAll('iframe[title="Kartica za štampu"]').forEach(f => f.remove())
-      const frame = document.createElement('iframe')
-      frame.title = 'Kartica za štampu'
-      frame.style.position = 'fixed'
-      frame.style.width = '0'
-      frame.style.height = '0'
-      frame.style.border = '0'
-      frame.style.right = '0'
-      frame.style.bottom = '0'
-      frame.srcdoc = html
-      document.body.appendChild(frame)
+      printInFrame(html, 'Kartica za štampu')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  /** Both parties for a printed page, and today in the local calendar. */
+  const parties = async () => {
+    const [{ data: company }, { data: who }] = await Promise.all([
+      companyId
+        ? supabase.from('company_profiles').select('full_legal_name, address, city, pib, mb').eq('company_id', companyId).maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase.from('partners').select('name, tax_id, registration_number, address, city').eq('id', partner.id).maybeSingle(),
+    ])
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return { company: company || { full_legal_name: companies.find(c => c.id === companyId)?.name || '' }, who: who || { name: partner.name }, today }
+  }
+
+  /** A page into a hidden frame, which opens the print dialog (Save as PDF). */
+  const printInFrame = (html: string, title: string) => {
+    document.querySelectorAll(`iframe[title="${title}"]`).forEach(f => f.remove())
+    const frame = document.createElement('iframe')
+    frame.title = title
+    Object.assign(frame.style, { position: 'fixed', width: '0', height: '0', border: '0', right: '0', bottom: '0' })
+    frame.srcdoc = html
+    document.body.appendChild(frame)
+  }
+
+  /**
+   * IOS (izvod otvorenih stavki) on the card's end date: the open documents
+   * and their total, which is the card's balance on that day; advances apart.
+   */
+  const exportIos = async () => {
+    if (!data) return
+    setExporting(true)
+    try {
+      const { company, who, today } = await parties()
+      const asOf = to || today
+      const onDay = buildPartnerCard(data, { from: null, to: asOf })
+      const html = iosPrintHtml({
+        company, partner: who, asOf,
+        statement: openItemsAsOf(data, asOf),
+        advancesOpen: onDay.advances.invoices.reduce((sum, a) => sum + a.open, 0),
+        number: iosNumber((who as any).tax_id, asOf),
+        generatedOn: today,
+      })
+      printInFrame(html, 'IOS za štampu')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -113,6 +146,10 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
             <button onClick={exportPdf} disabled={!card || exporting}
               style={{ ...input, cursor: card ? 'pointer' : 'default', color: DIALOG.accent }}>
               {exporting ? '…' : 'Izvezi PDF'}
+            </button>
+            <button onClick={exportIos} disabled={!data || exporting} title="Izvod otvorenih stavki na dan „Do“"
+              style={{ ...input, cursor: data ? 'pointer' : 'default', color: DIALOG.accent }}>
+              IOS
             </button>
             <button aria-label="Zatvori" onClick={onClose} style={{ background: 'none', border: 'none', color: DIALOG.dim, fontSize: '20px', cursor: 'pointer' }}>×</button>
           </div>
