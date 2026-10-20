@@ -1,3 +1,4 @@
+import PartnerCardDialog from '../components/PartnerCardDialog'
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import { SkeletonRows } from '../components/motion'
@@ -14,6 +15,8 @@ export default function Partners() {
   const [filterIndividual, setFilterIndividual] = useState('all')
   const [showDialog, setShowDialog] = useState(false)
   const [editPartner, setEditPartner] = useState<any>(null)
+  /** The partner whose card is open (kartica partnera). */
+  const [cardPartner, setCardPartner] = useState<{ id: string; name: string } | null>(null)
 
   const fetchPartners = async () => {
     setLoading(true)
@@ -194,6 +197,7 @@ Partner je obrisan, ali su njegovi tekući računi ostali.`)
                       </span>
                     </td>
                     <td style={s.td} onClick={e => e.stopPropagation()}>
+                      <button style={{ ...s.deleteBtn, marginRight: '6px' }} title="Kartica partnera" onClick={() => setCardPartner({ id: p.id, name: p.name })}>📒 Kartica</button>
                       <button style={s.deleteBtn} onClick={() => deletePartner(p.id, p.name)}>🗑</button>
                     </td>
                   </tr>
@@ -212,6 +216,7 @@ Partner je obrisan, ali su njegovi tekući računi ostali.`)
           onDelete={async (id, name) => { setShowDialog(false); setEditPartner(null); await deletePartner(id, name) }}
         />
       )}
+      {cardPartner && <PartnerCardDialog partner={cardPartner} onClose={() => setCardPartner(null)} />}
     </div>
   )
 }
