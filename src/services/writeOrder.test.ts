@@ -1,7 +1,7 @@
 import {
   planDelete, reportStepFailure, reportLinkFailure, isMissingFunction,
   DELETE_STEP_ORDER, LINK_STEP_ORDER,
-  deleteTransactionSafely, deleteTransactionInSteps, reallocateInvoiceLink,
+  deleteTransactionSafely, deleteTransactionInSteps, reallocateInvoiceLink, reallocateInvoiceLinks,
   reportPostFailure, softDeleteRow, runWrite,
   type SupabaseLike,
 } from './writeOrder'
@@ -620,5 +620,41 @@ describe('runWrite', () => {
   it('carries the message through rather than replacing it', async () => {
     const r = await runWrite('Delete department', answer({ message: 'Period 2026-01 is locked' }))
     expect(r.message).toContain('Period 2026-01 is locked')
+  })
+})
+
+// ─── An invoice closed by several transactions ──────────────────────────────
+
+describe('reallocateInvoiceLinks', () => {
+  let db: MockDb
+  beforeEach(() => {
+    db = freshDb()
+    db.rows.invoice_transaction_links = [
+      { id: 'l-old', invoice_id: 'inv-1', transaction_id: 'tx-old', allocated_amount: 50, allocated_amount_rsd: 50, allocated_amount_eur: 0.43 },
+      { id: 'l-keep', invoice_id: 'inv-1', transaction_id: 'tx-1', allocated_amount: 10, allocated_amount_rsd: 10, allocated_amount_eur: 0.09 },
+      { id: 'l-other', invoice_id: 'inv-2', transaction_id: 'tx-other', allocated_amount: 70, allocated_amount_rsd: 70, allocated_amount_eur: 0.6 },
+    ]
+  })
+
+  const links = [
+    { transactionId: 'tx-1', allocatedAmount: 300, allocatedAmountRsd: 300, allocatedAmountEur: 2.56 },
+    { transactionId: 'tx-2', allocatedAmount: 200, allocatedAmountRsd: 200, allocatedAmountEur: 1.71 },
+  ]
+
+  it('writes every link, then removes only the ones no longer chosen', async () => {
+    const out = await reallocateInvoiceLinks(makeClient(db), 'inv-1', links, 'Upareno')
+    expect(out.ok).toBe(true)
+    const mine = db.rows.invoice_transaction_links.filter(l => l.invoice_id === 'inv-1')
+    expect(mine.map(l => [l.transaction_id, l.allocated_amount]).sort()).toEqual([['tx-1', 300], ['tx-2', 200]])
+    expect(db.rows.invoice_transaction_links.find(l => l.id === 'l-other')).toBeTruthy()
+  })
+
+  it('a refused link leaves the previous ones in place', async () => {
+    db.errors['invoice_transaction_links:upsert'] = { message: 'zaključan period' }
+    const out = await reallocateInvoiceLinks(makeClient(db), 'inv-1', links, null)
+    expect(out.ok).toBe(false)
+    expect(out.message).toContain('Ništa nije uklonjeno')
+    expect(db.rows.invoice_transaction_links.map(l => l.id)).toEqual(['l-old', 'l-keep', 'l-other'])
+    expect(db.calls.some(c => c.op === 'delete')).toBe(false)
   })
 })

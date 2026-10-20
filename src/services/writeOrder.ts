@@ -398,6 +398,39 @@ export async function reallocateInvoiceLink(
   return { ok: true, message: '', done: [...LINK_STEP_ORDER] }
 }
 
+/**
+ * Point an invoice at exactly these transactions (one bill closed by several),
+ * without a moment in which it points at none: every link is written first,
+ * and only then are the links no longer chosen removed. A refused write
+ * leaves the previous allocation standing.
+ */
+export async function reallocateInvoiceLinks(
+  client: SupabaseLike,
+  invoiceId: string,
+  links: { transactionId: string; allocatedAmount: number; allocatedAmountRsd: number; allocatedAmountEur: number }[],
+  note: string | null,
+): Promise<LinkOutcome> {
+  for (const l of links) {
+    const { error: upErr } = await client.from('invoice_transaction_links').upsert({
+      invoice_id: invoiceId, transaction_id: l.transactionId,
+      allocated_amount: l.allocatedAmount, allocated_amount_rsd: l.allocatedAmountRsd, allocated_amount_eur: l.allocatedAmountEur,
+      note,
+    }, { onConflict: 'invoice_id,transaction_id' })
+    if (upErr) return { ok: false, message: reportLinkFailure('insertReplacement', upErr.message), done: [] }
+  }
+  const { data: current, error: readErr } = await client.from('invoice_transaction_links')
+    .select('transaction_id').eq('invoice_id', invoiceId)
+  if (readErr) return { ok: false, message: reportLinkFailure('removeSuperseded', readErr.message), done: ['insertReplacement'] }
+  const keep = new Set(links.map(l => l.transactionId))
+  const stale = (current || []).map((r: any) => r.transaction_id).filter((t: string) => !keep.has(t))
+  if (stale.length > 0) {
+    const { error: delErr } = await client.from('invoice_transaction_links')
+      .delete().eq('invoice_id', invoiceId).in('transaction_id', stale)
+    if (delErr) return { ok: false, message: reportLinkFailure('removeSuperseded', delErr.message), done: ['insertReplacement'] }
+  }
+  return { ok: true, message: '', done: [...LINK_STEP_ORDER] }
+}
+
 // ─── A post that writes several tables in sequence ──────────────────────────
 //
 // The payroll dialogs, the invoice dialog and the reconcile panel each write

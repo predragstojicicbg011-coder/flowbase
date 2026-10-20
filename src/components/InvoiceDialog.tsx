@@ -17,7 +17,8 @@ import { bookAmountsAtRate, getBookRates, rateFor, type BookAmounts } from '../s
 import PartnerDialog from './PartnerDialog'
 import { DIALOG, chrome } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
-import { reallocateInvoiceLink } from '../services/writeOrder'
+import { reallocateInvoiceLinks } from '../services/writeOrder'
+import { allocateAcross } from '../services/multiLink'
 import {
   chooseAccount, carriedAccountOf, defaultAccount, sameAccountNumber,
 } from '../services/partnerAccountChoice'
@@ -95,7 +96,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [deptSubcategories, setDeptSubcategories] = useState<any[]>([])
   const [expenseDescriptions, setExpenseDescriptions] = useState<any[]>([])
   const [directTransactions, setDirectTransactions] = useState<any[]>([])
-  const [linkedTxId, setLinkedTxId] = useState('')
+  /** Direct transactions already in the books that this bill closes: one,
+   *  or several (a bank's fees through the month). P&L stays on them. */
+  const [linkedTxIds, setLinkedTxIds] = useState<string[]>([])
+  const linkedTxId = linkedTxIds[0] || ''
   const [reconcileSearch, setReconcileSearch] = useState('')
   const [plImpact, setPlImpact] = useState(true)
   const [partnerAccounts, setPartnerAccounts] = useState<any[]>([])
@@ -811,7 +815,11 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   }
 
   const handleLinkTransaction = (tx: any) => {
-    setLinkedTxId(tx.id); setPlImpact(false)
+    if (linkedTxIds.includes(tx.id)) return
+    // A further transaction only adds to what closes the bill; the first one
+    // fills the form, as before.
+    if (linkedTxIds.length > 0) { setLinkedTxIds(prev => [...prev, tx.id]); return }
+    setLinkedTxIds([tx.id]); setPlImpact(false)
     if (tx.partners) { setPartnerId(tx.partners.id || ''); setPartnerSearch(tx.partners.name || '') }
     if (tx.pl_category) { const cat = plCategories.find(c => c.name === tx.pl_category); if (cat) { setPlCatId(cat.id); setPlCatName(cat.name) } }
     if (tx.pl_subcategory) { setPlSubName(tx.pl_subcategory); const sub = plSubcategories.find(s => s.name === tx.pl_subcategory); if (sub) setPlSubId(sub.id) }
@@ -823,7 +831,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     if (tx.dept_split_type) setDeptSplit(tx.dept_split_type)
     if (tx.tags) setTags(tx.tags)
     if (tx.note) setNote(tx.note)
-    if (tx.amount) setAmount(tx.amount.toString())
+    // The bill's own amount stands where it has one (a SEF bill, or one the
+    // transactions only partly cover).
+    if (tx.amount && !amount) setAmount(Math.abs(tx.amount).toString())
     if (tx.currency) setCurrency(tx.currency)
     if (tx.exchange_rate) { setExRate(tx.exchange_rate.toString()); setRateSource('iz transakcije') }
     if (tx.eur_rate) setEurRate(tx.eur_rate.toString())
@@ -831,7 +841,12 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     if (invoiceNumber) setRefNum(invoiceNumber)
   }
 
-  const handleUnlink = () => { setLinkedTxId(''); setPlImpact(true) }
+  const handleUnlink = () => { setLinkedTxIds([]); setPlImpact(true) }
+  const unlinkOne = (id: string) => setLinkedTxIds(prev => {
+    const next = prev.filter(x => x !== id)
+    if (next.length === 0) setPlImpact(true)
+    return next
+  })
 
   useEffect(() => {
     if (!invoice) return
@@ -879,7 +894,14 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       // offered, because he types whichever he is reading.
       matchesAmount(reconcileSearch, tx.amount, tx.amount_rsd)
   })
-  const linkedTx = directTransactions.find(t => t.id === linkedTxId)
+  const linkedTxs = linkedTxIds.map(id => directTransactions.find(t => t.id === id)).filter(Boolean) as any[]
+  /** How the bill is shared over the linked transactions, at its own rates. */
+  const linkAllocation = (bookedAmounts: BookAmounts | null) => bookedAmounts && linkedTxs.length > 0
+    ? allocateAcross(
+        { amount: parseFloat(amount) || 0, currency: currency || 'RSD', ...bookedAmounts },
+        linkedTxs.map(t => ({ id: t.id, amount_rsd: Math.abs(Number(t.amount_rsd) || 0) })))
+    : null
+  const linkPreview = linkAllocation(book.amounts)
 
   const touch = (field: string) => setTouched(prev => ({ ...prev, [field]: true }))
   const fieldErr = (field: string) => touched[field] ? errors[field] : undefined
@@ -952,7 +974,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         finalPartnerId = newP.id
       }
       const effectivePlImpact = linkedTxId || noPl ? false : plImpact
-      const effectiveStatus = linkedTxId ? 'paid' : 'unpaid'
+      // Several transactions may cover the bill only in part: then it stays
+      // partly closed, its remainder open (the client's decision).
+      const savedLinks = linkAllocation(booked)
+      const effectiveStatus = linkedTxId ? (savedLinks && savedLinks.left > 0.005 ? 'partial' : 'paid') : 'unpaid'
       // A split bill's projects are on its lines; the bill itself is on none.
       const ownProjectId = splitActive ? null : projectId
 
@@ -1001,10 +1026,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           throw new Error(`Faktura ${invoice.id} nije izmenjena — ništa nije sačuvano.`)
         invoiceId = invoice.id
         if (linkedTxId && plCatName) {
-          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, revenue_stream: revStream || null, project_id: ownProjectId }).eq('id', linkedTxId).select('id')
+          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, revenue_stream: revStream || null, project_id: ownProjectId }).in('id', linkedTxIds).select('id')
           if (txErr) throw txErr
-          if (!tx || tx.length === 0)
-            throw new Error(`Faktura je sačuvana, ali transakcija ${linkedTxId} nije izmenjena — njena P&L klasifikacija se sada ne slaže sa fakturom.`)
+          if (!tx || tx.length < linkedTxIds.length)
+            throw new Error(`Faktura je sačuvana, ali ${linkedTxIds.length > 1 ? 'neke povezane transakcije nisu izmenjene' : `transakcija ${linkedTxId} nije izmenjena`} — njihova P&L klasifikacija se sada ne slaže sa fakturom.`)
         }
       } else {
         const { data: newInv, error: insErr } = await supabase.from('invoices').insert(payload).select().single()
@@ -1021,10 +1046,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           try { await onSaved(newInv.id) } catch { /* the caller shows its own failure; see `onSaved` above */ }
         }
         if (linkedTxId && plCatName) {
-          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, project_id: ownProjectId }).eq('id', linkedTxId).select('id')
+          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, project_id: ownProjectId }).in('id', linkedTxIds).select('id')
           if (txErr) throw txErr
-          if (!tx || tx.length === 0)
-            throw new Error(`Faktura je sačuvana, ali transakcija ${linkedTxId} nije izmenjena — njena P&L klasifikacija se sada ne slaže sa fakturom.`)
+          if (!tx || tx.length < linkedTxIds.length)
+            throw new Error(`Faktura je sačuvana, ali ${linkedTxIds.length > 1 ? 'neke povezane transakcije nisu izmenjene' : `transakcija ${linkedTxId} nije izmenjena`} — njihova P&L klasifikacija se sada ne slaže sa fakturom.`)
         }
       }
       // ── The split, after the bill itself ────────────────────────────
@@ -1095,15 +1120,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         // `reallocateInvoiceLink` writes the replacement first and only then
         // removes what it supersedes, so a failure leaves the old allocation
         // standing rather than nothing at all.
-        const outcome = await reallocateInvoiceLink(supabase, {
-          invoiceId,
-          transactionId: linkedTxId,
-          // The whole bill, so its book columns are the bill's own.
-          allocatedAmount: parseFloat(amount),
-          allocatedAmountRsd: booked.amount_rsd,
-          allocatedAmountEur: booked.amount_eur,
-          note: 'Upareno — P&L je već proknjižen kroz direktnu transakciju',
-        })
+        // Each transaction its share of the bill, at the bill's rates; the
+        // last one of a covered bill takes the exact remainder.
+        const outcome = await reallocateInvoiceLinks(supabase, invoiceId, savedLinks?.links || [],
+          'Upareno — P&L je već proknjižen kroz direktnu transakciju')
         if (!outcome.ok) throw new Error(outcome.message)
       }
       setSuccess(true)
@@ -1366,48 +1386,59 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                       <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.blue }}>🔗 Poveži sa postojećom direktnom transakcijom</div>
                       <div style={{ fontSize: '11px', color: DIALOG.blue, marginTop: '2px' }}>Izaberite direktnu transakciju da se sva polja popune automatski. Faktura će biti označena kao plaćena, bez dvostrukog P&L.</div>
                     </div>
-                    {linkedTxId && <button style={s.unlinkBtn} onClick={handleUnlink}>✕ Raskini vezu</button>}
+                    {linkedTxId && <button style={s.unlinkBtn} onClick={handleUnlink}>{linkedTxIds.length > 1 ? '✕ Raskini sve veze' : '✕ Raskini vezu'}</button>}
                   </div>
-                  {linkedTx ? (
+                  {linkedTxs.length > 0 && (
                     <div style={s.linkedTxCard}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '16px' }}>✅</span>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.accent }}>{linkedTx.partners?.name || '—'}</div>
-                          <div style={{ fontSize: '11px', color: DIALOG.accent }}>{linkedTx.transaction_date} · {linkedTx.pl_category || '—'} · {linkedTx.banks?.name || '—'} · {fmtMoney(linkedTx.amount_rsd || 0, 'RSD')}</div>
+                      {linkedTxs.map(t => (
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '14px' }}>✅</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.accent }}>{t.partners?.name || '—'}</div>
+                            <div style={{ fontSize: '11px', color: DIALOG.accent }}>{t.transaction_date} · {t.pl_category || '—'} · {t.banks?.name || '—'} · {fmtMoney(Math.abs(t.amount_rsd || 0), 'RSD')}</div>
+                          </div>
+                          <button type="button" aria-label="Ukloni transakciju" style={s.unlinkBtn} onClick={() => unlinkOne(t.id)}>✕</button>
                         </div>
-                      </div>
-                      <div style={{ ...s.infoBox, marginTop: '10px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, fontSize: '11px' }}>
-                        ℹ️ Polja su popunjena iz transakcije. I dalje ih možete menjati ispod. P&L se usklađuje pri knjiženju.
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <input style={{ ...s.input, marginBottom: '8px', width: '100%', boxSizing: 'border-box' as const }}
-                        value={reconcileSearch} onChange={e => setReconcileSearch(e.target.value)} placeholder="Pretraga po partneru, kategoriji, datumu ili iznosu…" />
-                      {directTransactions.length === 0 ? (
-                        <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>Ova firma još nema direktnih transakcija.</div>
-                      ) : (
-                        <div style={s.txList}>
-                          {filteredDirectTx.slice(0, 8).map(tx => (
-                            <div key={tx.id} style={s.txRow} onClick={() => handleLinkTransaction(tx)}>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.text }}>{tx.partners?.name || '—'}</div>
-                                <div style={{ fontSize: '11px', color: DIALOG.dim }}>{tx.transaction_date} · {tx.pl_category || '—'} · {tx.banks?.name || '—'}</div>
-                              </div>
-                              <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
-                                <div style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.red }}>{fmtLocal(tx.amount || 0, tx.currency)}</div>
-                                <div style={{ fontSize: '11px', color: DIALOG.dim }}>{fmtMoney(tx.amount_rsd || 0, 'RSD')}</div>
-                              </div>
-                            </div>
-                          ))}
-                          {filteredDirectTx.length === 0 && reconcileSearch && (
-                            <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>Nema rezultata za „{reconcileSearch}“</div>
-                          )}
+                      ))}
+                      {linkPreview && book.amounts && (
+                        <div style={{ fontSize: '11px', color: linkPreview.left > 0.005 ? DIALOG.amber : DIALOG.accent, marginTop: '4px' }}>
+                          {`Izabrano: ${countOf(linkedTxs.length, 'transakcija', 'transakcije', 'transakcija')} · `
+                            + `${fmtMoney(linkPreview.links.reduce((sum, l) => sum + l.allocatedAmountRsd, 0), 'RSD')} od ${fmtMoney(book.amounts.amount_rsd, 'RSD')}`
+                            + (linkPreview.left > 0.005
+                              ? ` · ostaje ${fmtMoney(round2(book.amounts.amount_rsd - linkPreview.links.reduce((sum, l) => sum + l.allocatedAmountRsd, 0)), 'RSD')} — račun ostaje delimično zatvoren`
+                              : ' · račun je zatvoren')}
                         </div>
                       )}
-                    </>
+                      <div style={{ ...s.infoBox, marginTop: '8px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, fontSize: '11px' }}>
+                        ℹ️ Polja su popunjena iz prve transakcije. I dalje ih možete menjati ispod. P&L se usklađuje pri knjiženju. Ispod možete dodati još transakcija.
+                      </div>
+                    </div>
                   )}
+                  <>
+                    <input style={{ ...s.input, margin: '8px 0', width: '100%', boxSizing: 'border-box' as const }}
+                      value={reconcileSearch} onChange={e => setReconcileSearch(e.target.value)} placeholder="Pretraga po partneru, kategoriji, datumu ili iznosu…" />
+                    {directTransactions.length === 0 ? (
+                      <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>Ova firma još nema direktnih transakcija.</div>
+                    ) : (
+                      <div style={s.txList}>
+                        {filteredDirectTx.filter(tx => !linkedTxIds.includes(tx.id)).slice(0, 8).map(tx => (
+                          <div key={tx.id} style={s.txRow} onClick={() => handleLinkTransaction(tx)}>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.text }}>{tx.partners?.name || '—'}</div>
+                              <div style={{ fontSize: '11px', color: DIALOG.dim }}>{tx.transaction_date} · {tx.pl_category || '—'} · {tx.banks?.name || '—'}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
+                              <div style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.red }}>{fmtLocal(tx.amount || 0, tx.currency)}</div>
+                              <div style={{ fontSize: '11px', color: DIALOG.dim }}>{fmtMoney(tx.amount_rsd || 0, 'RSD')}</div>
+                            </div>
+                          </div>
+                        ))}
+                        {filteredDirectTx.length === 0 && reconcileSearch && (
+                          <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>Nema rezultata za „{reconcileSearch}“</div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 </div>
               )}
 
@@ -1418,7 +1449,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                     <div style={s.field}>
                       <label style={s.lbl}>Firma <span style={s.req}>*</span></label>
                       <select style={{ ...s.select, ...(fieldErr('companyId') ? s.inputError : {}) }} value={companyId}
-                        onChange={e => { setCompanyId(e.target.value); setCurrency(''); setLinkedTxId(''); touch('companyId') }} onBlur={() => touch('companyId')}>
+                        onChange={e => { setCompanyId(e.target.value); setCurrency(''); setLinkedTxIds([]); touch('companyId') }} onBlur={() => touch('companyId')}>
                         <option value="">Izaberite firmu…</option>
                         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
