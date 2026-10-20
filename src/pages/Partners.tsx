@@ -1,6 +1,6 @@
-import PartnerCardDialog from '../components/PartnerCardDialog'
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
+import PartnerCardDialog from '../components/PartnerCardDialog'
 import { SkeletonRows } from '../components/motion'
 import { runWrite } from '../services/writeOrder'
 import PartnerDialog from '../components/PartnerDialog'

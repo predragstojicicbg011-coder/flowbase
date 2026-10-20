@@ -23,9 +23,10 @@ beforeEach(() => {
     documents: [
       doc({ id: 'f412', invoice_number: 'F-412/26', invoice_date: '2026-10-03', amount: 120000, amount_rsd: 120000 }),
       doc({ id: 'av1', invoice_number: 'AV104/2026', document_type: 'advance_invoice', amount: 329725.45, amount_rsd: 329725.45, advance_open: 6599.88, prior_period: true }),
+      doc({ id: 'f745', invoice_number: '745/2026', invoice_date: '2026-10-14', amount: 323125.57, amount_rsd: 323125.57 }),
     ],
     payments: [{ invoice_id: 'f412', transaction_id: 't1', date: '2026-10-12', amount_rsd: 60000, bank: 'OTP banka' }],
-    usage: [], coverage: [],
+    usage: [{ final_invoice_id: 'f745', advance_invoice_id: 'av1', amount_rsd: 323125.57 }], coverage: [],
     direct: [{ id: 'd1', date: '2026-10-15', amount_rsd: 8400, bank: 'Banca Intesa', note: 'prevoz robe', direction: 'out' }],
     withDocs: new Set(['f412']),
   })
@@ -47,7 +48,8 @@ describe('the partner card', () => {
   it('lists advances and direct payments below, out of the balance', async () => {
     await open()
     expect(screen.getByText('Avansi kod dobavljača (ne ulaze u saldo)')).toBeInTheDocument()
-    expect(screen.getByText(/AV104\/2026/)).toBeInTheDocument()
+    expect(screen.getByText(/Avansni račun AV104\/2026/)).toBeInTheDocument()
+    expect(screen.getByText(/^Zatvoreno avansom AV104\/2026/)).toBeInTheDocument()
     expect(screen.getByText(/otvoreno 6\.599,88/)).toBeInTheDocument()
     expect(screen.getByText('Direktna plaćanja bez računa (ne menjaju saldo)')).toBeInTheDocument()
     expect(screen.getByText(/prevoz robe/)).toBeInTheDocument()

@@ -20,7 +20,8 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
   const { companies, defaultCompany, showPicker } = useCompanies()
   const [companyId, setCompanyId] = useState<string>(defaultCompany?.id || '')
   const [from, setFrom] = useState('')
-  const [to, setTo] = useState(new Date().toISOString().split('T')[0])
+  // Today in the local calendar: toISOString() is UTC, a day behind after midnight here.
+  const [to, setTo] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })
   const [data, setData] = useState<PartnerCardData | null>(null)
   const [error, setError] = useState('')
   const [docsId, setDocsId] = useState<string | null>(null)

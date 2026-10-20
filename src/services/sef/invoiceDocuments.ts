@@ -176,6 +176,14 @@ export async function linkInvoiceToSef(client: DocsClient, rowId: string, invoic
 /** The invoice ids, of those given, that have any document: a SEF row or an upload. */
 export async function invoicesWithDocuments(client: DocsClient, invoiceIds: string[]): Promise<Set<string>> {
   if (invoiceIds.length === 0) return new Set()
+  // In chunks: a few hundred ids in one `.in()` is a URL too long for PostgREST.
+  if (invoiceIds.length > 200) {
+    const all = new Set<string>()
+    for (let i = 0; i < invoiceIds.length; i += 200) {
+      (await invoicesWithDocuments(client, invoiceIds.slice(i, i + 200))).forEach(id => all.add(id))
+    }
+    return all
+  }
   const [sef, up] = await Promise.all([
     client.from('sef_inbox').select('imported_invoice_id').in('imported_invoice_id', invoiceIds),
     client.from('invoice_documents').select('invoice_id').in('invoice_id', invoiceIds).is('removed_at', null),

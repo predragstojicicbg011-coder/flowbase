@@ -104,3 +104,46 @@ describe('a customer card', () => {
     expect(c.verdict).toBe('Partner nam duguje')
   })
 })
+
+describe('the card after review', () => {
+  const empty = { documents: [] as CardDocument[], payments: [] as CardPayment[], usage: [] as any[], direct: [] as any[], coverage: [] as any[] }
+
+  it('shows an advance in a foreign currency in dinars, as of the period end', () => {
+    const c = buildPartnerCard({
+      ...empty,
+      documents: [
+        doc({ id: 'ae', invoice_number: 'AE-1', currency: 'EUR', document_type: 'advance_invoice', amount: 1000, amount_rsd: 117000, advance_open: 400, prior_period: true }),
+        doc({ id: 'fe', invoice_number: 'FE-1', invoice_date: '2026-11-05', currency: 'EUR', amount: 600, amount_rsd: 70200 }),
+      ],
+      usage: [{ final_invoice_id: 'fe', advance_invoice_id: 'ae', amount_rsd: 70200 }],
+    }, { from: null, to: '2026-10-31' })
+    expect(c.advances.invoices[0]).toMatchObject({ amount: 117000, used: 0, open: 117000 })
+  })
+
+  it('counts a foreign-currency proforma covered in full as covered', () => {
+    const c = buildPartnerCard({
+      ...empty,
+      documents: [doc({ id: 'pe', invoice_number: 'PE-1', currency: 'EUR', document_type: 'proforma', amount: 1000, amount_rsd: 117000 })],
+      payments: [pay({ invoice_id: 'pe', amount_rsd: 117000 })],
+      coverage: [{ proforma_id: 'pe', amount: 1000 }],
+    }, { from: null, to: null })
+    expect(c.advances.paidWithoutAdvance).toBe(0)
+  })
+
+  it('names a currency difference and money coming back from a supplier for what they are', () => {
+    const c = buildPartnerCard({
+      ...empty,
+      documents: [
+        doc({ id: 'b', invoice_number: 'B-1', amount: 10000, amount_rsd: 10000 }),
+        doc({ id: 'k', invoice_number: 'KO-9', document_type: 'credit_note', amount: -2000, amount_rsd: -2000 }),
+      ],
+      payments: [
+        pay({ invoice_id: 'b', amount_rsd: 9700, bank: 'OTP banka', date: '2026-10-05' }),
+        pay({ invoice_id: 'b', amount_rsd: 300, kind: 'fx', date: '2026-10-05' }),
+        pay({ invoice_id: 'k', amount_rsd: -2000, direction: 'in', bank: 'OTP banka', date: '2026-10-06' }),
+      ],
+    }, { from: null, to: null })
+    expect(c.rows.map(r => r.label)).toEqual(['Račun B-1', 'Knjižno odobrenje KO-9', 'Isplata — OTP banka', 'Kursna razlika', 'Uplata — OTP banka'])
+    expect(c.closing).toBe(0)
+  })
+})

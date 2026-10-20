@@ -44,6 +44,10 @@ export interface CardPayment {
   date: string
   amount_rsd: number
   bank: string | null
+  /** A currency difference booked against the bill (never touched the bank). */
+  kind?: 'payment' | 'fx'
+  /** Which way the money went, where the transaction says it. */
+  direction?: 'in' | 'out' | null
 }
 
 export interface CardUsage { final_invoice_id: string; advance_invoice_id: string; amount_rsd: number }
@@ -125,8 +129,12 @@ export function buildPartnerCard(
       continue
     }
     const revenue = d.type === 'revenue'
+    // Named by what the money did: a refund from a supplier is a receipt
+    // although it is linked to their credit note.
+    const inbound = p.direction ? p.direction === 'in' : revenue
+    const label = p.kind === 'fx' ? 'Kursna razlika' : `${inbound ? 'Uplata' : 'Isplata'} — ${p.bank || 'banka'}`
     changes.push({
-      date: p.date, order: 3, label: `${revenue ? 'Uplata' : 'Isplata'} — ${p.bank || 'banka'}`,
+      date: p.date, order: 3, label,
       documentId: d.id, refers: d.invoice_number, owe: revenue ? num(p.amount_rsd) : -num(p.amount_rsd),
     })
   }
@@ -147,19 +155,28 @@ export function buildPartnerCard(
   }
   const closing = rows.length ? rows[rows.length - 1].balance : opening
 
+  // As of the period's end, in dinars: what final invoices dated by then used.
   const usedBy = new Map<string, number>()
-  for (const u of input.usage) usedBy.set(u.advance_invoice_id, r2((usedBy.get(u.advance_invoice_id) || 0) + num(u.amount_rsd)))
+  for (const u of input.usage) {
+    if (!inTo(byId.get(u.final_invoice_id)?.invoice_date ?? null)) continue
+    usedBy.set(u.advance_invoice_id, r2((usedBy.get(u.advance_invoice_id) || 0) + num(u.amount_rsd)))
+  }
   const advanceInvoices = input.documents
     .filter(d => d.document_type === 'advance_invoice' && inTo(d.invoice_date))
     .map(d => {
       const used = usedBy.get(d.id) || 0
       return {
         id: d.id, invoice_number: d.invoice_number, date: d.invoice_date, amount: r2(num(d.amount_rsd)), used,
-        open: d.advance_open != null ? r2(num(d.advance_open)) : r2(num(d.amount_rsd) - used), priorPeriod: !!d.prior_period,
+        open: r2(num(d.amount_rsd) - used), priorPeriod: !!d.prior_period,
       }
     })
   const paidOnProformas = proformaPayments.reduce((s, p) => s + p.amount, 0)
-  const covered = input.coverage.reduce((s, c) => s + num(c.amount), 0)
+  // Coverage is in the proforma's currency; in dinars at the proforma's rate.
+  const covered = input.coverage.reduce((s, c) => {
+    const pf = byId.get(c.proforma_id)
+    const rate = pf && num(pf.amount) !== 0 ? num(pf.amount_rsd) / num(pf.amount) : 1
+    return s + num(c.amount) * rate
+  }, 0)
 
   return {
     opening, rows, closing,
