@@ -5,6 +5,8 @@ import {
   closureNote,
   creditProblem,
   defaultDocumentType,
+  hasNoPl,
+  isPayable,
   invoiceNumberKey,
   scaleSplits,
   signProblem,
@@ -20,7 +22,16 @@ describe('documentType', () => {
   it('names the three types in Serbian', () => {
     expect(DOCUMENT_TYPE_LABEL).toEqual({
       invoice: 'Račun', credit_note: 'Knjižno odobrenje', debit_note: 'Knjižno zaduženje',
+      proforma: 'Predračun', advance_invoice: 'Avansni račun',
     })
+  })
+
+  it('knows which documents are paid and which never reach the P&L', () => {
+    expect(['invoice', 'credit_note', 'debit_note', 'proforma', 'advance_invoice'].filter(t => isPayable(t as any))).toEqual(['invoice', 'proforma'])
+    expect(['invoice', 'credit_note', 'debit_note', 'proforma', 'advance_invoice'].filter(t => hasNoPl(t as any))).toEqual(['proforma', 'advance_invoice'])
+    expect(signProblem('proforma', 0)).toBe('Iznos mora biti veći od 0')
+    expect(signProblem('advance_invoice', -5)).toBe('Iznos mora biti veći od 0')
+    expect(signProblem('advance_invoice', 5)).toBeNull()
   })
 
   it('takes the default type from the sign', () => {

@@ -9,14 +9,27 @@
 
 import { fmtNum } from '../utils/formatters'
 
-export type DocumentType = 'invoice' | 'credit_note' | 'debit_note'
+export type DocumentType = 'invoice' | 'credit_note' | 'debit_note' | 'proforma' | 'advance_invoice'
 
-export const DOCUMENT_TYPES: DocumentType[] = ['invoice', 'credit_note', 'debit_note']
+export const DOCUMENT_TYPES: DocumentType[] = ['invoice', 'credit_note', 'debit_note', 'proforma', 'advance_invoice']
 
 export const DOCUMENT_TYPE_LABEL: Record<DocumentType, string> = {
   invoice: 'Račun',
   credit_note: 'Knjižno odobrenje',
   debit_note: 'Knjižno zaduženje',
+  proforma: 'Predračun',
+  advance_invoice: 'Avansni račun',
+}
+
+/** Paid through the unpaid list, Halcom and the bank: a bill and a proforma.
+ *  A note is settled through its bill, an advance invoice never is. */
+export function isPayable(t: DocumentType): boolean {
+  return t === 'invoice' || t === 'proforma'
+}
+
+/** Never in the P&L: a proforma and an advance invoice (20261021090000). */
+export function hasNoPl(t: DocumentType): boolean {
+  return t === 'proforma' || t === 'advance_invoice'
 }
 
 /** The type a document gets until the person picks one: a minus means a credit note. */
@@ -29,6 +42,7 @@ export function signProblem(type: DocumentType, amount: number | null): string |
   if (amount == null || !Number.isFinite(amount)) return null
   if (type === 'credit_note' && amount >= 0) return 'Knjižno odobrenje mora imati negativan iznos'
   if (type === 'debit_note' && amount <= 0) return 'Knjižno zaduženje mora imati pozitivan iznos'
+  if (hasNoPl(type) && amount <= 0) return 'Iznos mora biti veći od 0'
   return null
 }
 
