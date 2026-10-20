@@ -14,3 +14,10 @@ describe('a bank account, written and named', () => {
     expect(bankNameForAccount('999-1-11')).toBeNull()
   })
 })
+
+describe('a foreign account', () => {
+  it('is kept as written', () => {
+    expect(formatAccount('DE89 3704 0044 0532 0130 00')).toBe('DE89 3704 0044 0532 0130 00')
+    expect(bankNameForAccount('DE89370400440532013000')).toBeNull()
+  })
+})

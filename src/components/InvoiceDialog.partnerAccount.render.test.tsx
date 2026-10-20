@@ -105,3 +105,14 @@ describe('the source documents in the header', () => {
     expect(screen.queryByText(/Račun i prilozi/)).not.toBeInTheDocument()
   })
 })
+
+describe('saving the account', () => {
+  it('a double click saves it once', async () => {
+    render(<InvoiceDialog onClose={() => {}} invoice={draft()} />)
+    const btn = await screen.findByText('+ Sačuvaj račun kod partnera')
+    fireEvent.click(btn)
+    fireEvent.click(btn)
+    await screen.findByText('Račun je sačuvan kod partnera.')
+    expect(mockState.inserted.filter(i => i.table === 'partner_accounts')).toHaveLength(1)
+  })
+})

@@ -97,15 +97,21 @@ export function sameAccountNumber(
  * not recognised.
  */
 export function canonicalAccount(n: string | null | undefined): string {
-  const raw = (n || '').trim().replace(/^RS\d{2}/i, '').replace(/\s/g, '')
+  let raw = (n || '').trim().replace(/\s/g, '')
+  if (/^RS\d{2}/i.test(raw)) raw = raw.slice(4)
+  // A foreign IBAN or anything with letters: compared whole, as written.
+  else if (/[A-Za-z]/.test(raw)) return raw.toUpperCase()
   const parts = raw.split('-').filter(Boolean)
-  // Written bank-account-control: the middle part padded to 13.
   if (parts.length === 3 && parts.every(p => /^\d+$/.test(p))) {
-    return parts[0].padStart(3, '0').slice(-3) + parts[1].padStart(13, '0').slice(-13) + parts[2].padStart(2, '0').slice(-2)
+    // A part longer than its place is not cut to fit: that would read two
+    // different accounts as one.
+    if (parts[0].length > 3 || parts[1].length > 13 || parts[2].length > 2) return parts.join('')
+    return parts[0].padStart(3, '0') + parts[1].padStart(13, '0') + parts[2].padStart(2, '0')
   }
   const digits = raw.replace(/\D/g, '')
-  if (digits.length >= 18) return digits.slice(-18)
-  if (digits.length > 5) return digits.slice(0, 3) + digits.slice(3, -2).padStart(13, '0') + digits.slice(-2)
+  if (digits.length === 18) return digits
+  // A Serbian account written without the middle part's leading zeros.
+  if (digits.length >= 10 && digits.length < 18) return digits.slice(0, 3) + digits.slice(3, -2).padStart(13, '0') + digits.slice(-2)
   return digits
 }
 

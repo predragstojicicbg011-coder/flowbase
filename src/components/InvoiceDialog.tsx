@@ -793,14 +793,18 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   // The bill names an account the partner does not have saved: it can be
   // saved from here, in full form and with its bank (the obvious next step).
   const [accountSaved, setAccountSaved] = useState('')
+  const savingAccount = useRef(false)
   const accountIsNew = !!partnerId && accNum.trim() !== ''
     && !partnerAccounts.some(a => sameAccountNumber(a.account_number, accNum))
   const saveAccountToPartner = async () => {
+    if (savingAccount.current) return
+    savingAccount.current = true
     const row = {
       partner_id: partnerId, account_number: formatAccount(accNum), bank_name: bankNameForAccount(accNum),
       currency: 'RSD', is_primary: partnerAccounts.length === 0,
     }
     const { data, error } = await supabase.from('partner_accounts').insert(row).select().single()
+    savingAccount.current = false
     if (error || !data) { setAccountSaved(`Račun nije sačuvan: ${error?.message || 'baza nije vratila red'}`); return }
     setPartnerAccounts(prev => [...prev, data])
     setSelectedAccountId(data.id)
@@ -833,10 +837,14 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     if (tx.note) setNote(tx.note)
     // The bill's own amount stands where it has one (a SEF bill, or one the
     // transactions only partly cover).
-    if (tx.amount && !amount) setAmount(Math.abs(tx.amount).toString())
-    if (tx.currency) setCurrency(tx.currency)
-    if (tx.exchange_rate) { setExRate(tx.exchange_rate.toString()); setRateSource('iz transakcije') }
-    if (tx.eur_rate) setEurRate(tx.eur_rate.toString())
+    // Amount, currency and rates come over together, or not at all: a bill
+    // in euros linked to a dinar transaction stays in euros.
+    if (tx.amount && !amount) {
+      setAmount(Math.abs(tx.amount).toString())
+      if (tx.currency) setCurrency(tx.currency)
+      if (tx.exchange_rate) { setExRate(tx.exchange_rate.toString()); setRateSource('iz transakcije') }
+      if (tx.eur_rate) setEurRate(tx.eur_rate.toString())
+    }
     if (tx.is_indexed !== undefined) setIsIndexed(tx.is_indexed)
     if (invoiceNumber) setRefNum(invoiceNumber)
   }
@@ -899,7 +907,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const linkAllocation = (bookedAmounts: BookAmounts | null) => bookedAmounts && linkedTxs.length > 0
     ? allocateAcross(
         { amount: parseFloat(amount) || 0, currency: currency || 'RSD', ...bookedAmounts },
-        linkedTxs.map(t => ({ id: t.id, amount_rsd: Math.abs(Number(t.amount_rsd) || 0) })))
+        linkedTxs.map(t => ({ id: t.id, amount_rsd: Math.abs(Number(t.amount_rsd) || 0), amount: Math.abs(Number(t.amount) || 0), currency: t.currency })))
     : null
   const linkPreview = linkAllocation(book.amounts)
 
@@ -977,6 +985,13 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       // Several transactions may cover the bill only in part: then it stays
       // partly closed, its remainder open (the client's decision).
       const savedLinks = linkAllocation(booked)
+      // The transactions the bill actually uses; one it did not need keeps its own classification.
+      const usedTxIds = (savedLinks?.links || []).map(l => l.transactionId)
+      if (linkedTxId && usedTxIds.length === 0) {
+        setSaving(false)
+        setSaveError('Izabrane transakcije nisu učitane, pa račun nije vezan ni za jednu. Ništa nije sačuvano.')
+        return
+      }
       const effectiveStatus = linkedTxId ? (savedLinks && savedLinks.left > 0.005 ? 'partial' : 'paid') : 'unpaid'
       // A split bill's projects are on its lines; the bill itself is on none.
       const ownProjectId = splitActive ? null : projectId
@@ -1026,9 +1041,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           throw new Error(`Faktura ${invoice.id} nije izmenjena — ništa nije sačuvano.`)
         invoiceId = invoice.id
         if (linkedTxId && plCatName) {
-          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, revenue_stream: revStream || null, project_id: ownProjectId }).in('id', linkedTxIds).select('id')
+          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, revenue_stream: revStream || null, project_id: ownProjectId }).in('id', usedTxIds).select('id')
           if (txErr) throw txErr
-          if (!tx || tx.length < linkedTxIds.length)
+          if (!tx || tx.length < usedTxIds.length)
             throw new Error(`Faktura je sačuvana, ali ${linkedTxIds.length > 1 ? 'neke povezane transakcije nisu izmenjene' : `transakcija ${linkedTxId} nije izmenjena`} — njihova P&L klasifikacija se sada ne slaže sa fakturom.`)
         }
       } else {
@@ -1046,9 +1061,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           try { await onSaved(newInv.id) } catch { /* the caller shows its own failure; see `onSaved` above */ }
         }
         if (linkedTxId && plCatName) {
-          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, project_id: ownProjectId }).in('id', linkedTxIds).select('id')
+          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, project_id: ownProjectId }).in('id', usedTxIds).select('id')
           if (txErr) throw txErr
-          if (!tx || tx.length < linkedTxIds.length)
+          if (!tx || tx.length < usedTxIds.length)
             throw new Error(`Faktura je sačuvana, ali ${linkedTxIds.length > 1 ? 'neke povezane transakcije nisu izmenjene' : `transakcija ${linkedTxId} nije izmenjena`} — njihova P&L klasifikacija se sada ne slaže sa fakturom.`)
         }
       }
@@ -1304,8 +1319,8 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                 </button>
                 {docsOpen && (
                   <div role="menu" style={{ position: 'absolute', top: '110%', right: 0, zIndex: 10, background: DIALOG.raised, border: '0.5px solid ' + DIALOG.border, borderRadius: '8px', padding: '4px', minWidth: '220px' }}>
-                    {sourceDocuments.map(d => (
-                      <button key={d.label} type="button" role="menuitem" onClick={() => { d.open(); setDocsOpen(false) }}
+                    {sourceDocuments.map((d, i) => (
+                      <button key={`${i}-${d.label}`} type="button" role="menuitem" onClick={() => { d.open(); setDocsOpen(false) }}
                         style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', color: DIALOG.text, fontSize: '12px', padding: '6px 8px', cursor: 'pointer' }}>
                         {d.label}
                       </button>
@@ -1396,6 +1411,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.accent }}>{t.partners?.name || '—'}</div>
                             <div style={{ fontSize: '11px', color: DIALOG.accent }}>{t.transaction_date} · {t.pl_category || '—'} · {t.banks?.name || '—'} · {fmtMoney(Math.abs(t.amount_rsd || 0), 'RSD')}</div>
+                            {linkPreview?.unused.includes(t.id) && <div style={{ fontSize: '10px', color: DIALOG.amber }}>nije potrebna — račun je već pokriven; neće biti vezana</div>}
                           </div>
                           <button type="button" aria-label="Ukloni transakciju" style={s.unlinkBtn} onClick={() => unlinkOne(t.id)}>✕</button>
                         </div>

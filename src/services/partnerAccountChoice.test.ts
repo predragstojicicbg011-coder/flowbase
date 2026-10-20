@@ -186,3 +186,19 @@ describe('the same account written in another form', () => {
     expect(sameAccountNumber('160-553857-18', '265-553857-18')).toBe(false)
   })
 })
+
+describe('two different accounts are never read as one', () => {
+  it('a part longer than its place is not cut to fit', () => {
+    expect(sameAccountNumber('160-553857-118', '160-553857-18')).toBe(false)
+    expect(sameAccountNumber('160-12345678901234-18', '160-2345678901234-18')).toBe(false)
+  })
+
+  it('a foreign IBAN or extra digits are not cut to their last 18', () => {
+    expect(sameAccountNumber('DE89 3704 0044 0532 0130 00', 'DE11 3704 0044 0532 0130 00')).toBe(false)
+    expect(sameAccountNumber('9160000000055385718', '160000000055385718')).toBe(false)
+  })
+
+  it('short numbers are not padded into the same account', () => {
+    expect(sameAccountNumber('123456', '1230456')).toBe(false)
+  })
+})

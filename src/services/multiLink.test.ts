@@ -32,3 +32,18 @@ describe('allocating one bill across several transactions', () => {
     expect(r.left).toBe(0)
   })
 })
+
+describe('a transaction in the same currency as the bill', () => {
+  it('pays in that currency, so a different booking rate leaves nothing open', () => {
+    const eur = { amount: 100, amount_rsd: 11720, amount_eur: 100, currency: 'EUR', exchange_rate: 117.2, eur_rate: 117.2 }
+    const r = allocateAcross(eur, [{ id: 't1', amount_rsd: 11710, amount: 100, currency: 'EUR' }])
+    expect(r.links.map(l => [l.allocatedAmount, l.allocatedAmountRsd])).toEqual([[100, 11720]])
+    expect(r.left).toBe(0)
+  })
+
+  it('names the transactions it did not need', () => {
+    const r = allocateAcross({ amount: 1000, amount_rsd: 1000, amount_eur: 8.53, currency: 'RSD', exchange_rate: 1, eur_rate: 117.2 },
+      [{ id: 't1', amount_rsd: 800 }, { id: 't2', amount_rsd: 800 }, { id: 't3', amount_rsd: 50 }])
+    expect(r.unused).toEqual(['t3'])
+  })
+})

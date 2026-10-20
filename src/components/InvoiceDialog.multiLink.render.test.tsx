@@ -116,3 +116,25 @@ describe('one bill, several transactions', () => {
     expect(await screen.findByText(/Izabrano: 1 transakcija · 450,00 RSD/)).toBeInTheDocument()
   })
 })
+
+describe('after review', () => {
+  it('linking a dinar transaction keeps a euro bill in euros', async () => {
+    render(<InvoiceDialog onClose={() => {}} invoice={{ ...draft, currency: 'EUR', amount: 100, exchange_rate: 117.2, eur_rate: 117.2 }} />)
+    await pick('2026-10-05')
+    next(); next(); next(); post()
+    await waitFor(() => expect(mockState.writes.find(w => w.table === 'invoices' && w.op === 'insert')).toBeTruthy())
+    expect(mockState.writes.find(w => w.table === 'invoices' && w.op === 'insert')?.payload).toMatchObject({ currency: 'EUR', amount: 100 })
+  })
+
+  it('a transaction the bill did not need is not linked, not reclassified, and says so', async () => {
+    mockState.tables.transactions = [fee('t1', '2026-10-05', 800), fee('t2', '2026-10-15', 800), fee('t3', '2026-10-25', 50)]
+    render(<InvoiceDialog onClose={() => {}} invoice={draft} />)
+    await pick('2026-10-05')
+    await pick('2026-10-15')
+    await pick('2026-10-25')
+    expect(await screen.findByText(/nije potrebna — račun je već pokriven/)).toBeInTheDocument()
+    next(); next(); next(); post()
+    await waitFor(() => expect(mockState.writes.filter(w => w.op === 'upsert')).toHaveLength(2))
+    expect(mockState.writes.find(w => w.table === 'transactions' && w.op === 'update')?.ids).toEqual(['t1', 't2'])
+  })
+})

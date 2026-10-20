@@ -24,12 +24,12 @@ const BANKS: Record<string, string> = {
 /** „160-0000000553857-18“ from any written form; a number too short to be an account stays as written. */
 export function formatAccount(n: string | null | undefined): string {
   const c = canonicalAccount(n)
-  if (c.length !== 18) return (n || '').trim()
+  if (!/^\d{18}$/.test(c)) return (n || '').trim()
   return `${c.slice(0, 3)}-${c.slice(3, 16)}-${c.slice(16)}`
 }
 
 /** The bank the account is at, where its code is known; null otherwise. */
 export function bankNameForAccount(n: string | null | undefined): string | null {
   const c = canonicalAccount(n)
-  return c.length === 18 ? BANKS[c.slice(0, 3)] ?? null : null
+  return /^\d{18}$/.test(c) ? BANKS[c.slice(0, 3)] ?? null : null
 }
