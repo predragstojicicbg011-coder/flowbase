@@ -19,7 +19,7 @@ import { DIALOG, chrome } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
 import { reallocateInvoiceLink } from '../services/writeOrder'
 import {
-  chooseAccount, carriedAccountOf, defaultAccount,
+  chooseAccount, carriedAccountOf, defaultAccount, sameAccountNumber,
 } from '../services/partnerAccountChoice'
 import { fmtLocal, fmtMoney, fmtNum } from '../utils/formatters'
 import { fetchAllPartners } from '../services/allPartners'
@@ -31,6 +31,7 @@ import {
 } from '../services/revenue'
 import { round2 } from '../services/bookAmounts'
 import { countOf } from '../utils/plural'
+import { bankNameForAccount, formatAccount } from '../services/bankCodes'
 import {
   DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL, billTotal, creditProblem, defaultDocumentType, hasNoPl, invoiceNumberKey, scaleSplits, signProblem,
   type AdjustableBill, type DocumentType,
@@ -780,6 +781,24 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   useEffect(() => {
     if (invoiceNumber && !linkedTxId) setRefNum(invoiceNumber)
   }, [invoiceNumber]) // eslint-disable-line
+
+  // The bill names an account the partner does not have saved: it can be
+  // saved from here, in full form and with its bank (the obvious next step).
+  const [accountSaved, setAccountSaved] = useState('')
+  const accountIsNew = !!partnerId && accNum.trim() !== ''
+    && !partnerAccounts.some(a => sameAccountNumber(a.account_number, accNum))
+  const saveAccountToPartner = async () => {
+    const row = {
+      partner_id: partnerId, account_number: formatAccount(accNum), bank_name: bankNameForAccount(accNum),
+      currency: 'RSD', is_primary: partnerAccounts.length === 0,
+    }
+    const { data, error } = await supabase.from('partner_accounts').insert(row).select().single()
+    if (error || !data) { setAccountSaved(`Račun nije sačuvan: ${error?.message || 'baza nije vratila red'}`); return }
+    setPartnerAccounts(prev => [...prev, data])
+    setSelectedAccountId(data.id)
+    setAccNum(data.account_number || row.account_number)
+    setAccountSaved('Račun je sačuvan kod partnera.')
+  }
 
   const handleAccountSelect = (accountId: string) => {
     setSelectedAccountId(accountId)
@@ -1568,6 +1587,13 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                       <input style={s.input} value={accNum} onChange={e => setAccNum(e.target.value)} placeholder="Tekući račun partnera" />
                     )}
                     {partnerAccounts.length > 0 && <div style={{ fontSize: '10px', color: DIALOG.accent, marginTop: '2px' }}>Pronađeno računa: {partnerAccounts.length}</div>}
+                    {accountIsNew && (
+                      <button type="button" style={{ ...s.linkBtn, fontSize: '11px' }} onClick={saveAccountToPartner}
+                        title={`Čuva ${formatAccount(accNum)}${bankNameForAccount(accNum) ? ` (${bankNameForAccount(accNum)})` : ''} kod partnera`}>
+                        + Sačuvaj račun kod partnera
+                      </button>
+                    )}
+                    {accountSaved && <div style={{ fontSize: '10px', color: accountSaved.startsWith('Račun nije') ? DIALOG.red : DIALOG.accent, marginTop: '2px' }}>{accountSaved}</div>}
                   </div>
                   <div style={s.field}>
                     <label style={s.lbl}>Model</label>
