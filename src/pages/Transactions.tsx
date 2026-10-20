@@ -824,7 +824,7 @@ export default function Transactions() {
                         <td style={s.td}><span style={s.partnerCell}>{inv.partner_name || '—'}</span></td>
                         <td style={s.td}>
                           <span style={s.invNumCell}>{inv.invoice_number || '—'}</span>
-                          <DocumentTypeTag documentType={inv.document_type} unlinked={inv.unlinked} />
+                          <DocumentTypeTag documentType={inv.document_type} unlinked={inv.unlinked} priorPeriod={inv.prior_period} />
                           {withSef.has(inv.id) && (
                             <button style={s.docsBtn} title="Račun i prilozi" aria-label="Dokumenti fakture"
                               onClick={e => { e.stopPropagation(); setDocsInvoiceId(inv.id) }}>📎</button>

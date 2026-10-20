@@ -20,3 +20,12 @@ describe('DocumentTypeTag', () => {
     expect(screen.getByText('nije vezano')).toBeInTheDocument()
   })
 })
+
+describe('DocumentTypeTag on advances', () => {
+  it('names a proforma and an advance invoice from an earlier period', () => {
+    render(<><DocumentTypeTag documentType="proforma" unlinked={false} /><DocumentTypeTag documentType="advance_invoice" unlinked={false} priorPeriod /></>)
+    expect(screen.getByText('Predračun')).toBeInTheDocument()
+    expect(screen.getByText('Avansni račun')).toBeInTheDocument()
+    expect(screen.getByText('iz ranijeg perioda')).toBeInTheDocument()
+  })
+})

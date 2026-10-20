@@ -1,3 +1,4 @@
+import SupplierAdvancesPanel from '../components/SupplierAdvancesPanel'
 import { isPayable } from '../services/documentType'
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { useNav } from '../navigation'
@@ -766,6 +767,7 @@ export default function Reports() {
   const { setPage } = useNav()
   const [activeReport, setActiveReport] = useState('')
   const [showUnpaidPanel, setShowUnpaidPanel] = useState(false)
+  const [showAdvancesPanel, setShowAdvancesPanel] = useState(false)
   const { companies, showPicker } = useCompanies()
   // The KPIs sum each row's own figure in the display currency.
   const { pick, format } = useDisplayCurrency()
@@ -839,6 +841,7 @@ export default function Reports() {
     { id: 'bank-rec',         title: 'Usaglašavanje sa bankom', desc: 'Izvod naspram proknjiženih transakcija po računu',              category: 'Novčani tok',  icon: '🏦', color: '#0C447C', bg: '#E6F1FB', page: 'cashflow' as Page,     action: null },
     { id: 'passthrough',      title: 'Stanje prolaznih stavki', desc: 'Mesečno stanje prolaznih uplata i isplata',                   category: 'Usklađenost', icon: '⚖️', color: '#633806', bg: '#FAEEDA', page: 'cashflow' as Page,     action: null },
     { id: 'unmatched',        title: 'Neuparene fakture',    desc: 'Neplaćene fakture · izvoz za Hal E-Bank (TKDIS)', category: 'Usklađenost', icon: '⚠️', color: '#854F0B', bg: '#FAEEDA', page: 'reports' as Page,      action: 'unpaid' },
+    { id: 'supplier-advances', title: 'Avansi dobavljačima', desc: 'Plaćeni predračuni, avansni računi i šta je ostalo otvoreno', category: 'Usklađenost', icon: '⏳', color: '#854F0B', bg: '#FAEEDA', page: 'reports' as Page, action: 'advances' },
     { id: 'exchange-rates',   title: 'Evidencija kurseva',   desc: 'Kursevi korišćeni po periodu i transakciji',                       category: 'Referentno',  icon: '💱', color: '#444',    bg: '#f0f0ee', page: 'reports' as Page,      action: null },
     { id: 'partner-summary',  title: 'Pregled partnera',     desc: 'Ukupne transakcije po partneru u svim firmama',                     category: 'Referentno',  icon: '🤝', color: '#444',    bg: '#f0f0ee', page: 'partners' as Page,     action: null },
   ]
@@ -935,6 +938,7 @@ export default function Reports() {
                   onClick={() => setActiveReport(activeReport === report.id ? '' : report.id)}
                   onView={() => {
                     if (report.action === 'unpaid') setShowUnpaidPanel(true)
+                    else if (report.action === 'advances') setShowAdvancesPanel(true)
                     else setPage(report.page)
                   }}
                 />
@@ -945,6 +949,7 @@ export default function Reports() {
       </div>
 
       {showUnpaidPanel && <UnpaidInvoicesPanel onClose={() => setShowUnpaidPanel(false)} />}
+      {showAdvancesPanel && <SupplierAdvancesPanel onClose={() => setShowAdvancesPanel(false)} />}
     </div>
   )
 }

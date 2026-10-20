@@ -110,6 +110,7 @@ export interface ClosureRow {
   calculated_status?: string | null
   currency?: string | null
   adjustments?: number | null
+  advance_used?: number | null
   paid_amount?: number | null
   amount_due?: number | null
 }
@@ -127,6 +128,11 @@ export function closureNote(r: ClosureRow): string {
   if (adj < 0 && paid > due + 0.005) {
     const who = r.type === 'revenue' ? 'kupcu dugujemo povraćaj' : 'dobavljač duguje povraćaj'
     return `${who} ${fmtNum(paid - due)} ${r.currency || 'RSD'}`
+  }
+  // A final invoice the supplier's advance settled (20261021090000).
+  if ((Number(r.advance_used) || 0) > 0 && paid <= 0) {
+    if (r.calculated_status === 'paid') return 'zatvoreno avansom'
+    if (r.calculated_status === 'partial') return 'delimično zatvoreno avansom'
   }
   if (adj < 0 && paid <= 0) {
     if (r.calculated_status === 'paid') return 'zatvoreno knjižnim odobrenjem'

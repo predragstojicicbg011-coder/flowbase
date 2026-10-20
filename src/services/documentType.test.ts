@@ -109,3 +109,14 @@ describe('what closed a bill', () => {
     expect(closureNote(row({ document_type: 'credit_note', amount: -5 }))).toBe('')
   })
 })
+
+describe('a bill an advance closed', () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    document_type: 'invoice', type: 'expense', calculated_status: 'paid', currency: 'RSD',
+    amount: 18144, adjustments: 0, advance_used: 18144, paid_amount: 0, amount_due: 0, ...over,
+  })
+  it('says the advance closed it, in full or in part', () => {
+    expect(closureNote(row())).toBe('zatvoreno avansom')
+    expect(closureNote(row({ calculated_status: 'partial', amount: 17340, advance_used: 13260, amount_due: 4080 }))).toBe('delimično zatvoreno avansom')
+  })
+})
