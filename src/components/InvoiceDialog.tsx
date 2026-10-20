@@ -68,11 +68,15 @@ interface Props {
    *  a bill's must be greater than zero. The type can still be changed in the
    *  header. */
   creditNote?: boolean
+  /** Documents of the source (a SEF invoice's PDF and attachments), offered
+   *  from the header while booking it. */
+  sourceDocuments?: { label: string; open: () => void }[]
 }
 
 interface ValidationErrors { [key: string]: string }
 
-export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, creditNote }: Props) {
+export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, creditNote, sourceDocuments }: Props) {
+  const [docsOpen, setDocsOpen] = useState(false)
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -1272,6 +1276,24 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
             <div style={s.headerSub}>Korak {step} od 4 — {stepTitles[step - 1]}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {sourceDocuments && sourceDocuments.length > 0 && (
+              <div style={{ position: 'relative' }}>
+                <button type="button" aria-expanded={docsOpen} onClick={() => setDocsOpen(o => !o)}
+                  style={{ ...s.select, width: 'auto', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}>
+                  📎 Račun i prilozi ({sourceDocuments.length})
+                </button>
+                {docsOpen && (
+                  <div role="menu" style={{ position: 'absolute', top: '110%', right: 0, zIndex: 10, background: DIALOG.raised, border: '0.5px solid ' + DIALOG.border, borderRadius: '8px', padding: '4px', minWidth: '220px' }}>
+                    {sourceDocuments.map(d => (
+                      <button key={d.label} type="button" role="menuitem" onClick={() => { d.open(); setDocsOpen(false) }}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', color: DIALOG.text, fontSize: '12px', padding: '6px 8px', cursor: 'pointer' }}>
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <select aria-label="Vrsta dokumenta" style={{ ...s.select, width: 'auto', padding: '6px 10px', fontSize: '12px' }}
               value={docType}
               onChange={e => { setDocType(e.target.value as DocumentType); setDocTypeChosen(true); touch('amount') }}>

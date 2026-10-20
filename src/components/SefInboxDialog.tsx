@@ -97,6 +97,9 @@ interface Booking {
   draft: Record<string, unknown>
   notes: string[]
   isCreditNote: boolean
+  /** The invoice's PDF and the supplier's attachments, saved by the fetch
+   *  that opened it: offered in the booking dialog from the start. */
+  documents: { label: string; open: () => void }[]
 }
 
 // Named, not `*`: the table also holds each invoice's whole UBL document and
@@ -596,9 +599,25 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     })
     if (savedUnread) notes.push("Računi ovog dobavljača nisu mogli da se pročitaju, pa nijedan račun sa fakture nije upoređen sa njima.")
 
+    // The fetch just saved the PDF and the attachments; the row in the list
+    // predates it. Read both again so the booking dialog can show them now,
+    // not only after it is closed and the inbox reloads.
+    const [{ data: fresh }, { data: atts }] = await Promise.all([
+      supabase.from('sef_inbox').select(INBOX_COLUMNS).eq('id', row.id).maybeSingle(),
+      supabase.from('sef_inbox_attachments').select(ATTACHMENT_COLUMNS).eq('inbox_id', row.id).order('n'),
+    ])
+    const opened = { ...row, ...((fresh as any) || {}) } as SefRow
+    const documents = [
+      ...(opened.pdf_path ? [{
+        label: opened.pdf_kind === 'supplier_attachment' ? 'PDF dobavljača' : 'Račun (SEF)',
+        open: () => showPdf(opened),
+      }] : []),
+      ...((atts || []) as SefAttachmentRow[]).map(a => ({ label: attachmentLabel(a), open: () => showAttachment(opened, a) })),
+    ]
+
     if (!mounted.current) return
     setBooking({
-      row, notes, isCreditNote: ubl.isCreditNote,
+      row, notes, isCreditNote: ubl.isCreditNote, documents,
       draft: draftFromUbl(ubl, row, partnerId, proposal, saved, companyId, rate, eurRate),
     })
   })
@@ -990,6 +1009,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
         <InvoiceDialog
           invoice={booking.draft}
           creditNote={booking.isCreditNote}
+          sourceDocuments={booking.documents}
           reviewNotes={booking.notes}
           // Left open until the dialog closes itself, so the owner sees its
           // confirmation; the queue behind it is refreshed by `markImported`.

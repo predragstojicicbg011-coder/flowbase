@@ -86,3 +86,22 @@ describe('the partner\'s account on the bill', () => {
     expect(mockState.inserted[0].payload.is_primary).toBe(true)
   })
 })
+
+describe('the source documents in the header', () => {
+  it('opens the invoice PDF and an attachment from the header while booking', async () => {
+    const pdf = jest.fn()
+    const att = jest.fn()
+    render(<InvoiceDialog onClose={() => {}} invoice={draft()} sourceDocuments={[{ label: 'Račun (SEF)', open: pdf }, { label: 'OTP-1', open: att }]} />)
+    fireEvent.click(screen.getByText('📎 Račun i prilozi (2)'))
+    fireEvent.click(screen.getByText('OTP-1'))
+    expect(att).toHaveBeenCalled()
+    fireEvent.click(screen.getByText('📎 Račun i prilozi (2)'))
+    fireEvent.click(screen.getByText('Račun (SEF)'))
+    expect(pdf).toHaveBeenCalled()
+  })
+
+  it('is not there for a bill typed by hand', async () => {
+    render(<InvoiceDialog onClose={() => {}} invoice={draft()} />)
+    expect(screen.queryByText(/Račun i prilozi/)).not.toBeInTheDocument()
+  })
+})
