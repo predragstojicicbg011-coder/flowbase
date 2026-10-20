@@ -32,9 +32,10 @@ import {
 import { round2 } from '../services/bookAmounts'
 import { countOf } from '../utils/plural'
 import {
-  DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL, billTotal, creditProblem, defaultDocumentType, invoiceNumberKey, scaleSplits, signProblem,
+  DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL, billTotal, creditProblem, defaultDocumentType, hasNoPl, invoiceNumberKey, scaleSplits, signProblem,
   type AdjustableBill, type DocumentType,
 } from '../services/documentType'
+import { coverageProblem, proposeCoverage, type PaidProforma } from '../services/advances'
 
 /** Display labels for the stored tag keys; the keys stay as they are in the data. */
 const TAG_LABEL: Record<string, string> = {
@@ -153,7 +154,16 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [baseBills, setBaseBills] = useState<any[]>([])
   /** The picked bill's split, to scale to this note's amount. */
   const [baseSplit, setBaseSplit] = useState<{ amount: number; lines: SplitLine[] } | null>(null)
-  const isNote = docType !== 'invoice'
+  const isNote = docType === 'credit_note' || docType === 'debit_note'
+  /** A proforma or an advance invoice: never in the P&L (20261021090000). */
+  const noPl = hasNoPl(docType)
+  /** An advance invoice paid before the books: no proforma. */
+  const [priorPeriod, setPriorPeriod] = useState<boolean>(!!invoice?.prior_period)
+  /** The partner's paid proformas an advance invoice can cover. */
+  const [paidProformas, setPaidProformas] = useState<PaidProforma[]>([])
+  /** How much of each proforma this advance invoice covers, as typed. */
+  const [coverage, setCoverage] = useState<Record<string, string>>({})
+  const [coverageTouched, setCoverageTouched] = useState(false)
   // RSD per 1 unit of `currency`, and RSD per 1 EUR — fetched from NBS or
   // typed by hand. On a EUR invoice the two are the same number.
   const [exRate, setExRate] = useState('')
@@ -429,6 +439,56 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     if (match) pickBase(match.id)
   }, [baseBills]) // eslint-disable-line
 
+  // An advance invoice: the partner's proformas with something paid and not
+  // yet covered (this invoice's own coverage counted back in when editing).
+  useEffect(() => {
+    if (docType !== 'advance_invoice' || !companyId || !partnerId) { setPaidProformas([]); return }
+    let cancelled = false
+    const load = async () => {
+      const [{ data, error }, own] = await Promise.all([
+        supabase.from('v_invoice_status')
+          .select('id, invoice_number, invoice_date, currency, paid_amount, covered')
+          .eq('company_id', companyId).eq('partner_id', partnerId).eq('document_type', 'proforma')
+          .order('invoice_date', { ascending: true }).limit(300),
+        invoice?.id
+          ? supabase.from('advance_coverage').select('proforma_id, amount').eq('advance_invoice_id', invoice.id)
+          : Promise.resolve({ data: [] as any[] }),
+      ])
+      if (cancelled) return
+      if (error) console.warn('proformas load error:', error.message)
+      const mine = new Map<string, number>(((own as any).data || []).map((c: any) => [c.proforma_id, Number(c.amount) || 0]))
+      const rows: PaidProforma[] = (data || []).map((r: any) => ({
+        id: r.id, invoice_number: r.invoice_number, currency: r.currency,
+        paid: Number(r.paid_amount) || 0, covered: (Number(r.covered) || 0) - (mine.get(r.id) || 0),
+      })).filter((r: PaidProforma) => r.paid - r.covered > 0.005)
+      setPaidProformas(rows)
+      if (mine.size > 0) {
+        setCoverage(Object.fromEntries(Array.from(mine.entries()).map(([k, v]) => [k, String(v)])))
+        setCoverageTouched(true)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [docType, companyId, partnerId]) // eslint-disable-line
+
+  // Until the person types, the coverage follows the amount: the proforma the
+  // advance invoice names first, then the oldest.
+  useEffect(() => {
+    if (docType !== 'advance_invoice' || coverageTouched || priorPeriod) return
+    const a = parseFloat(amount)
+    if (!(a > 0) || paidProformas.length === 0) return
+    const hints: string[] = Array.isArray(invoice?.proforma_hints) ? invoice.proforma_hints : []
+    const proposal = proposeCoverage(a, paidProformas, hints)
+    setCoverage(Object.fromEntries(proposal.map(p => [p.proformaId, String(p.amount)])))
+  }, [docType, amount, paidProformas, coverageTouched, priorPeriod]) // eslint-disable-line
+
+  /** The coverage as it will be saved: proformas with an amount. */
+  const coverageRows = docType === 'advance_invoice' && !priorPeriod
+    ? paidProformas
+        .map(p => ({ p, amount: parseFloat((coverage[p.id] || '').replace(',', '.')) || 0 }))
+        .filter(r => r.amount > 0)
+    : []
+
   const runValidation = () => {
     const e: ValidationErrors = {}
     if (!companyId) e.companyId = 'Firma je obavezna'
@@ -449,7 +509,15 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       }
     } else if (!amount || parseFloat(amount) <= 0) e.amount = 'Iznos mora biti veći od 0'
     if (currency && parseFloat(amount) && !book.amounts) e.exRate = book.error || 'Kurs je obavezan'
-    if (invType === 'expense' && plImpact && !linkedTxId) {
+    if (docType === 'advance_invoice' && coverageRows.length > 0) {
+      const total = Math.round(coverageRows.reduce((sum, r) => sum + r.amount, 0) * 100) / 100
+      const a = parseFloat(amount) || 0
+      const over = coverageRows.find(r => r.amount > r.p.paid - r.p.covered + 0.005)
+      if (over || total > a + 0.005) e.coverage = coverageProblem(a, coverageRows.map(r => r.p)) || `Pokriće (${fmtNum(total)}) je veće od avansnog računa (${fmtNum(a)}).`
+      else if (Math.abs(total - a) > 0.005) e.coverage = coverageProblem(a, coverageRows.map(r => r.p))
+        || `Zbir pokrića (${fmtNum(total)}) nije jednak avansnom računu (${fmtNum(a)}).`
+    }
+    if (invType === 'expense' && plImpact && !noPl && !linkedTxId) {
       // A split bill is classified by its lines, and the fields below are
       // filled from them. Demanding them again would refuse a bill that is
       // fully classified, which is how a correct entry comes to look wrong.
@@ -475,7 +543,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions, docType, adjustsId, baseBills]) // eslint-disable-line
+  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions, docType, adjustsId, baseBills, coverage, paidProformas, priorPeriod]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -757,7 +825,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         if (!newP?.id) throw new Error('Novi partner je sačuvan, ali baza nije vratila njegov ID — ništa nije proknjiženo.')
         finalPartnerId = newP.id
       }
-      const effectivePlImpact = linkedTxId ? false : plImpact
+      const effectivePlImpact = linkedTxId || noPl ? false : plImpact
       const effectiveStatus = linkedTxId ? 'paid' : 'unpaid'
       // A split bill's projects are on its lines; the bill itself is on none.
       const ownProjectId = splitActive ? null : projectId
@@ -780,6 +848,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         cf_reimbursable_date: cfType === 'reimbursable' ? (cfReimbursableDate || null) : null,
         currency, amount: parseFloat(amount),
         document_type: docType, adjusts_invoice_id: isNote ? (adjustsId || null) : null,
+        prior_period: docType === 'advance_invoice' && priorPeriod,
         exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
         amount_rsd: booked.amount_rsd, amount_eur: booked.amount_eur,
         is_indexed: isIndexed, account_number: accNum || null,
@@ -799,6 +868,13 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       // changed a thing, and the dialog reported a save that never happened.
       // Same pattern as TransactionDialog's save.
       let invoiceId: string
+      if (invoice?.id && (docType === 'advance_invoice' || invoice.document_type === 'advance_invoice')) {
+        // Coverage first: the database checks at commit that an advance
+        // invoice with coverage is covered exactly, and an amount changed
+        // under its old coverage would fail that.
+        const { error: delErr } = await supabase.from('advance_coverage').delete().eq('advance_invoice_id', invoice.id)
+        if (delErr) throw delErr
+      }
       if (invoice?.id) {
         const { data: updated, error: updErr } = await supabase.from('invoices').update(payload).eq('id', invoice.id).select('id')
         if (updErr) throw updErr
@@ -842,12 +918,19 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         const outcome = await saveSplits(
           supabase, 'invoice', invoiceId,
           { amount: parseFloat(amount) || 0, currency, ...booked },
-          splitLines)
+          noPl ? [] : splitLines)
         if (!outcome.ok) {
           setSaving(false)
           setSaveError(outcome.message)
           return
         }
+      }
+
+      // ── The proformas an advance invoice covers, after it exists ─────
+      if (coverageRows.length > 0) {
+        const { error: covErr } = await supabase.from('advance_coverage').insert(
+          coverageRows.map(r => ({ advance_invoice_id: invoiceId, proforma_id: r.p.id, amount: Math.round(r.amount * 100) / 100 })))
+        if (covErr) throw new Error(`Avansni račun je sačuvan, ali veza sa predračunom nije: ${covErr.message}`)
       }
 
       if (linkedTxId && invoiceId) {
@@ -1044,7 +1127,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
               {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{DOCUMENT_TYPE_LABEL[t]}</option>)}
             </select>
             <div style={{ ...s.invBadge, ...(linkedTxId ? { background: 'rgba(12,68,124,0.2)', color: DIALOG.blue, borderColor: 'rgba(12,68,124,0.3)' } : {}) }}>
-              {linkedTxId ? '🔗 Uparena' : 'Utiče na P&L'}
+              {linkedTxId ? '🔗 Uparena' : noPl ? 'Bez P&L' : 'Utiče na P&L'}
             </div>
             <span style={s.logoText}>{brand.appName}</span>
             <button style={s.closeBtn} onClick={onClose}>×</button>
@@ -1260,6 +1343,36 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                     )}
                   </div>
                 )}
+                {docType === 'advance_invoice' && (
+                  <fieldset aria-label="Plaćeni predračuni" style={{ border: 0, padding: 0, margin: '0 0 14px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: DIALOG.text, marginBottom: '8px' }}>
+                      <input type="checkbox" aria-label="Iz ranijeg perioda" checked={priorPeriod}
+                        onChange={e => { setPriorPeriod(e.target.checked); touch('coverage') }} />
+                      Iz ranijeg perioda (plaćen pre početka knjiga, bez predračuna)
+                    </label>
+                    {!priorPeriod && (
+                      <>
+                        <div style={s.lbl}>Plaćeni predračuni koje ovaj avansni račun pokriva</div>
+                        {paidProformas.map(p => (
+                          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                            <span style={{ flex: 1, fontSize: '12px', color: DIALOG.text }}>
+                              {p.invoice_number || 'bez broja'} · plaćeno {fmtNum(p.paid)} · nepokriveno {fmtNum(p.paid - p.covered)}
+                            </span>
+                            <input aria-label={`Pokriće ${p.invoice_number || p.id}`} style={{ ...s.input, width: '140px' }}
+                              value={coverage[p.id] || ''} placeholder="0,00"
+                              onChange={e => { setCoverage(prev => ({ ...prev, [p.id]: e.target.value })); setCoverageTouched(true); touch('coverage') }} />
+                          </div>
+                        ))}
+                        {coverageRows.length === 0 && (
+                          <div style={{ ...s.infoBox, marginTop: '6px', background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber, fontSize: '12px' }}>
+                            Nije vezano za predračun — veže se kasnije
+                          </div>
+                        )}
+                        {fieldErr('coverage') && <span style={s.errorMsg}>{fieldErr('coverage')}</span>}
+                      </>
+                    )}
+                  </fieldset>
+                )}
                 <div style={s.sectionTitle}>Podaci za plaćanje</div>
                 <div style={s.row3}>
                   <div style={s.field}>
@@ -1362,7 +1475,12 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           )}
 
           {/* ── STEP 3 ── */}
-          {step === 3 && (
+          {step === 3 && noPl && (
+            <div style={{ ...s.infoBox, margin: '10px 0' }}>
+              {DOCUMENT_TYPE_LABEL[docType]} ne ulazi u troškove (bez uticaja na P&L). Trošak se knjiži konačnim računom.
+            </div>
+          )}
+          {step === 3 && !noPl && (
             <>
               {/* ONE BILL, SEVERAL COSTS.
                   Above the classification rather than below it, because the
@@ -1661,7 +1779,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                   <span>✅</span>
                   <div>
                     <div style={{ fontWeight: '500', marginBottom: '2px' }}>Sva polja su ispravna — spremno za knjiženje</div>
-                    <div style={{ fontSize: '11px', opacity: 0.85 }}>{linkedTxId ? 'Faktura će biti uparena. P&L polja se usklađuju sa direktnom transakcijom.' : `Faktura utiče na P&L na datum ${invoiceDate}.`}</div>
+                    <div style={{ fontSize: '11px', opacity: 0.85 }}>{linkedTxId ? 'Faktura će biti uparena. P&L polja se usklađuju sa direktnom transakcijom.' : noPl ? `${DOCUMENT_TYPE_LABEL[docType]} ne utiče na P&L.` : `Faktura utiče na P&L na datum ${invoiceDate}.`}</div>
                   </div>
                 </div>
               ) : (
@@ -1681,7 +1799,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                   ['Datum fakture', invoiceDate || '—'],
                   ['Datum dospeća', dueDate || '—'],
                   ['Tip', invType === 'revenue' ? 'Izlazna' : 'Ulazna'],
-                  ['Uticaj na P&L', linkedTxId ? '❌ Nema — upareno sa direktnom transakcijom' : '✅ Da'],
+                  ['Uticaj na P&L', linkedTxId ? '❌ Nema — upareno sa direktnom transakcijom' : noPl ? `❌ Nema — ${DOCUMENT_TYPE_LABEL[docType].toLowerCase()}` : '✅ Da'],
                 ]},
                 { title: 'Iznosi', rows: [
                   ['Originalni iznos', amount ? fmtLocal(parseFloat(amount), currency) : '—'],
