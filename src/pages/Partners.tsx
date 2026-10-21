@@ -197,7 +197,7 @@ Partner je obrisan, ali su njegovi tekući računi ostali.`)
                       </span>
                     </td>
                     <td style={s.td} onClick={e => e.stopPropagation()}>
-                      <button style={{ ...s.deleteBtn, marginRight: '6px' }} title="Kartica partnera" onClick={() => setCardPartner({ id: p.id, name: p.name })}>📒 Kartica</button>
+                      <button style={s.cardBtn} title="Kartica partnera — promene i saldo" onClick={() => setCardPartner({ id: p.id, name: p.name })}>📒 Kartica</button>
                       <button style={s.deleteBtn} onClick={() => deletePartner(p.id, p.name)}>🗑</button>
                     </td>
                   </tr>
@@ -250,4 +250,6 @@ const s: Record<string, React.CSSProperties> = {
   monoCell: { fontSize: '12px', fontFamily: 'monospace', color: '#7A9BB8', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px', border: '0.5px solid rgba(255,255,255,0.10)' },
   smallCell: { fontSize: '12px', color: '#7A9BB8' },
   deleteBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', padding: '4px', opacity: 0.3 },
+  // The card is what the row is opened for most: plain to see, not faded like delete.
+  cardBtn: { background: 'rgba(0,212,126,0.12)', border: '0.5px solid rgba(0,212,126,0.45)', color: '#00D47E', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px', marginRight: '8px', whiteSpace: 'nowrap' },
 }

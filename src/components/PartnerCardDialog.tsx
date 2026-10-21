@@ -4,8 +4,8 @@ import { useCompanies } from '../contexts/CompaniesContext'
 import { DIALOG, chrome } from './dialogTheme'
 import { fmtMoney } from '../utils/formatters'
 import { buildPartnerCard } from '../services/partnerCard'
-import { loadPartnerCard, type PartnerCardData } from '../services/loadPartnerCard'
-import InvoiceDocumentsDialog from './InvoiceDocumentsDialog'
+import { loadPartnerCard, type CardCurrency, type PartnerCardData } from '../services/loadPartnerCard'
+import DocumentViewerDialog from './DocumentViewerDialog'
 import { partnerCardPrintHtml } from '../services/partnerCardPrint'
 import { iosNumber, iosPrintHtml, openItemsAsOf } from '../services/iosStatement'
 
@@ -14,7 +14,8 @@ import { iosNumber, iosPrintHtml, openItemsAsOf } from '../services/iosStatement
 // Every change with one partner in date order, with the running balance, for
 // reconciling with the partner's own card (layout A, agreed 20.10.2026).
 // Advances to suppliers and direct payments are listed below the balance and
-// do not move it. The 📎 opens the bill and the supplier's attachments.
+// do not move it. „PDF“ shows the bill and the supplier's attachments in place.
+// In dinars or in euros, as booked.
 
 const dateSr = (d: string | null) => (d ? d.split('-').reverse().join('.') : '—')
 
@@ -26,18 +27,19 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
   const [to, setTo] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })
   const [data, setData] = useState<PartnerCardData | null>(null)
   const [error, setError] = useState('')
-  const [docsId, setDocsId] = useState<string | null>(null)
+  const [viewing, setViewing] = useState<{ id: string; title: string } | null>(null)
+  const [currency, setCurrency] = useState<CardCurrency>('RSD')
 
   useEffect(() => { if (!companyId && defaultCompany?.id) setCompanyId(defaultCompany.id) }, [defaultCompany?.id]) // eslint-disable-line
 
   useEffect(() => {
     let cancelled = false
     setData(null); setError('')
-    loadPartnerCard(supabase, partner.id, companyId || null)
+    loadPartnerCard(supabase, partner.id, companyId || null, currency)
       .then(d => { if (!cancelled) setData(d) })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
-  }, [partner.id, companyId])
+  }, [partner.id, companyId, currency])
 
   const [exporting, setExporting] = useState(false)
 
@@ -56,6 +58,7 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
         period: { from: from || null, to: to || null },
         card,
         generatedOn: today,
+        currency,
       })
       printInFrame(html, 'Kartica za štampu')
     } catch (err) {
@@ -105,6 +108,7 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
         advancesOpen: onDay.advances.invoices.reduce((sum, a) => sum + a.open, 0),
         number: iosNumber((who as any).tax_id, asOf),
         generatedOn: today,
+        currency,
       })
       printInFrame(html, 'IOS za štampu')
     } catch (err) {
@@ -115,32 +119,42 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
   }
 
   const card = useMemo(() => data && buildPartnerCard(data, { from: from || null, to: to || null }), [data, from, to])
-  const money = (n: number) => fmtMoney(n, 'RSD')
-  const clip = (id: string | null) => id && data?.withDocs.has(id)
-    ? <button aria-label="Račun i prilozi" title="Račun i prilozi" onClick={() => setDocsId(id)}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', padding: 0 }}>📎</button>
-    : null
+  const money = (n: number) => fmtMoney(n, currency)
+  /** The document's PDF, named by its number: on a payment's row it is the bill paid. */
+  const clip = (id: string | null) => {
+    if (!id || !data?.withDocs.has(id)) return null
+    const number = data.documents.find(d => d.id === id)?.invoice_number || 'bez broja'
+    return <button aria-label={`PDF ${number}`} title="Prikaži račun i priloge" onClick={() => setViewing({ id, title: `${partner.name} · ${number}` })} style={pdfChip}>PDF</button>
+  }
 
   const th: React.CSSProperties = { textAlign: 'left', fontSize: '11px', color: DIALOG.dim, fontWeight: 500, padding: '6px 8px', whiteSpace: 'nowrap' }
   const td: React.CSSProperties = { fontSize: '12px', color: DIALOG.text, padding: '6px 8px', borderTop: '0.5px solid ' + DIALOG.border, verticalAlign: 'top' }
   const num: React.CSSProperties = { ...td, textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }
   const box: React.CSSProperties = { marginTop: '14px', padding: '10px 12px', borderRadius: '8px', border: '0.5px solid ' + DIALOG.border }
+  const pdfChip: React.CSSProperties = { background: DIALOG.accentFill, border: '0.5px solid ' + DIALOG.accentSoft, color: DIALOG.accent, borderRadius: '5px', padding: '1px 7px', fontSize: '10.5px', fontWeight: 600, cursor: 'pointer', marginLeft: '6px', verticalAlign: 'middle' }
   const input: React.CSSProperties = { background: DIALOG.raised, border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', color: DIALOG.text, padding: '5px 8px', fontSize: '12px' }
 
   return (
     <div style={chrome.overlay}>
       <div style={{ background: DIALOG.panel, borderRadius: '16px', width: '1000px', maxWidth: '96vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 1.5rem', borderBottom: '0.5px solid ' + DIALOG.border, gap: '12px', flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: '15px', fontWeight: 500, color: DIALOG.text }}>Kartica — {partner.name}</div>
-            <div style={{ fontSize: '12px', color: DIALOG.dim, marginTop: '2px' }}>Sve promene sa partnerom i saldo, za usaglašavanje stanja</div>
+        <div style={{ padding: '1rem 1.5rem', borderBottom: '0.5px solid ' + DIALOG.border }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 500, color: DIALOG.text }}>Kartica — {partner.name}</div>
+              <div style={{ fontSize: '12px', color: DIALOG.dim, marginTop: '2px' }}>Sve promene sa partnerom i saldo, za usaglašavanje stanja</div>
+            </div>
+            <button aria-label="Zatvori" onClick={onClose} style={{ background: 'none', border: 'none', color: DIALOG.dim, fontSize: '22px', lineHeight: 1, cursor: 'pointer', padding: 0 }}>×</button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: DIALOG.dim }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: DIALOG.dim, marginTop: '10px', flexWrap: 'wrap' }}>
             {showPicker && (
               <select aria-label="Firma" style={input} value={companyId} onChange={e => setCompanyId(e.target.value)}>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
+            <select aria-label="Valuta" style={input} value={currency} onChange={e => setCurrency(e.target.value as CardCurrency)}>
+              <option value="RSD">RSD</option>
+              <option value="EUR">EUR</option>
+            </select>
             <label>Od <input aria-label="Od" type="date" style={input} value={from} onChange={e => setFrom(e.target.value)} /></label>
             <label>Do <input aria-label="Do" type="date" style={input} value={to} onChange={e => setTo(e.target.value)} /></label>
             <button onClick={exportPdf} disabled={!card || exporting}
@@ -151,7 +165,6 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
               style={{ ...input, cursor: data ? 'pointer' : 'default', color: DIALOG.accent }}>
               IOS
             </button>
-            <button aria-label="Zatvori" onClick={onClose} style={{ background: 'none', border: 'none', color: DIALOG.dim, fontSize: '20px', cursor: 'pointer' }}>×</button>
           </div>
         </div>
 
@@ -163,7 +176,7 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
-                    <th style={th}>Datum</th><th style={th}>Promena</th><th style={th}></th>
+                    <th style={th}>Datum</th><th style={th}>Promena</th><th style={th}>Dokument</th>
                     <th style={{ ...th, textAlign: 'right' }}>Duguje</th>
                     <th style={{ ...th, textAlign: 'right' }}>Potražuje</th>
                     <th style={{ ...th, textAlign: 'right' }}>Saldo</th>
@@ -241,7 +254,7 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
           )}
         </div>
       </div>
-      {docsId && <InvoiceDocumentsDialog invoiceId={docsId} onClose={() => setDocsId(null)} />}
+      {viewing && <DocumentViewerDialog invoiceId={viewing.id} title={viewing.title} onClose={() => setViewing(null)} />}
     </div>
   )
 }

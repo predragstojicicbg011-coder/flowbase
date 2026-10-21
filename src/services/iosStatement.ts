@@ -101,7 +101,10 @@ export function iosPrintHtml(p: {
   advancesOpen: number
   number: string
   generatedOn: string
+  /** The currency the statement is in; dinars when not given. */
+  currency?: string
 }): string {
+  const currency = p.currency || 'RSD'
   const day = dateSr(p.asOf)
   const { items, total } = p.statement
   const rows = items.length
@@ -159,12 +162,12 @@ Ukoliko u tom roku ne dobijemo odgovor, smatraćemo da je stanje usaglašeno.</p
 ${rows}
 </tbody>
 </table>
-<div class="total"><span>${esc(verdict)}</span><span>${esc(fmtMoney(Math.abs(total), 'RSD'))}</span></div>
-${p.advancesOpen > 0.005 ? `<div class="adv">Dati avansi (ne ulaze u stanje): ${esc(fmtMoney(p.advancesOpen, 'RSD'))}</div>` : ''}
+<div class="total"><span>${esc(verdict)}</span><span>${esc(fmtMoney(Math.abs(total), currency))}</span></div>
+${p.advancesOpen > 0.005 ? `<div class="adv">Dati avansi (ne ulaze u stanje): ${esc(fmtMoney(p.advancesOpen, currency))}</div>` : ''}
 <div class="answer">
   <h2>Odgovor partnera</h2>
   <div><span class="box"></span>Potvrđujemo da je stanje usaglašeno.</div>
-  <div style="margin-top:4mm"><span class="box"></span>Osporavamo stanje u iznosu od <span class="line">&nbsp;</span> RSD, iz razloga:</div>
+  <div style="margin-top:4mm"><span class="box"></span>Osporavamo stanje u iznosu od <span class="line">&nbsp;</span> ${esc(currency)}, iz razloga:</div>
   <div style="margin-top:6mm; border-bottom:1px solid #111">&nbsp;</div>
   <div style="margin-top:6mm; border-bottom:1px solid #111">&nbsp;</div>
 </div>

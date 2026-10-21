@@ -34,6 +34,8 @@ jest.mock('../contexts/DisplayCurrencyContext', () => ({
   useDisplayCurrency: () => ({ currency: 'RSD', pick: (r: any) => r.amount_rsd ?? r.amount, format: (n: number | null) => (n === null ? '—' : String(n)) }),
 }))
 jest.mock('../navigation', () => ({ useNav: () => ({ page: 'reports', setPage: () => {} }) }))
+jest.mock('../services/sef/invoiceDocuments', () => ({ invoicesWithDocuments: async () => new Set(['i1']) }))
+jest.mock('../components/DocumentViewerDialog', () => ({ invoiceId, title }: any) => <div>Pregled {invoiceId} · {title}</div>)
 
 const inv = (id: string, number: string, amount: number, partner: string) => ({
   id, invoice_number: number, amount, amount_rsd: amount, currency: 'RSD', type: 'expense',
@@ -197,5 +199,16 @@ describe('the payee account of a bill booked from SEF', () => {
     expect(select.value).toBe('pa2')
     fireEvent.change(select, { target: { value: 'bill' } })
     expect(select.selectedOptions[0].textContent).toBe('205-0000000654321-11 — Sa fakture')
+  })
+})
+
+describe('the PDF of a bill in the unpaid list', () => {
+  it('is shown in place for a bill that has one, and not offered for one without', async () => {
+    await open()
+    expect(await screen.findByLabelText('PDF F-1')).toBeInTheDocument()
+    expect(screen.queryByLabelText('PDF F-2')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('PDF F-1'))
+    expect(screen.getByText('Pregled i1 · Beton Plus · F-1')).toBeInTheDocument()
+    expect(screen.getByText('Armatura')).toBeInTheDocument()
   })
 })

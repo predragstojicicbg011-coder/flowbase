@@ -51,4 +51,19 @@ describe('loading a partner card', () => {
     expect(sef.length).toBeGreaterThan(1)
     expect(Math.max(...sef.map(c => c.inSize))).toBeLessThanOrEqual(200)
   })
+
+  it('in euros, reads every amount from the euro columns', async () => {
+    const calls: any[] = []
+    const client = fakeClient({
+      v_invoice_status: [{ ...docs(1)[0], amount_rsd: 11720, amount_eur: 100, advance_deducted_eur: 0 }],
+      invoice_transaction_links: [
+        { invoice_id: 'i0', transaction_id: 't1', allocated_amount_rsd: 5860, allocated_amount_eur: 50, transactions: { transaction_date: '2026-10-02', deleted_at: null, type: 'bank', tx_subtype: 'expense', note: null, banks: null } },
+      ],
+      transactions: [{ id: 'free', transaction_date: '2026-10-03', amount_rsd: -2344, amount_eur: -20, tx_subtype: 'expense', note: null, banks: null }],
+    }, calls)
+    const d = await loadPartnerCard(client, 'p1', 'co', 'EUR')
+    expect(d.documents[0].amount_rsd).toBe(100)
+    expect(d.payments[0].amount_rsd).toBe(50)
+    expect(d.direct[0].amount_rsd).toBe(20)
+  })
 })

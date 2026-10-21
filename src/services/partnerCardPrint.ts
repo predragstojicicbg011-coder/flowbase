@@ -15,7 +15,6 @@ export interface PrintParty { name?: string | null; full_legal_name?: string | n
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
 const dateSr = (d: string | null | undefined) => (d ? d.split('-').reverse().join('.') : '—')
-const money = (n: number) => esc(fmtMoney(n, 'RSD'))
 const plain = (n: number) => (n ? esc(fmtNum(n)) : '')
 
 function party(title: string, p: PrintParty): string {
@@ -34,8 +33,12 @@ export function partnerCardPrintHtml(p: {
   period: { from: string | null; to: string | null }
   card: PartnerCard
   generatedOn: string
+  /** The currency the card is in (loadPartnerCard); dinars when not given. */
+  currency?: string
 }): string {
   const { card, period } = p
+  const currency = p.currency || 'RSD'
+  const money = (n: number) => esc(fmtMoney(n, currency))
   const periodText = `${period.from ? dateSr(period.from) : 'od početka knjiga'} – ${period.to ? dateSr(period.to) : 'danas'}`
   const rows = [
     period.from
@@ -89,7 +92,7 @@ export function partnerCardPrintHtml(p: {
 </style></head>
 <body>
 <h1>Kartica partnera</h1>
-<div class="meta">Period: ${periodText} · Izrađeno ${dateSr(p.generatedOn)} · iznosi u RSD</div>
+<div class="meta">Period: ${periodText} · Izrađeno ${dateSr(p.generatedOn)} · iznosi u ${esc(currency)}</div>
 <div class="parties">${party('Naša firma', p.company)}${party('Partner', p.partner)}</div>
 <table>
 <thead><tr><th>Datum</th><th>Promena</th><th class="n">Duguje</th><th class="n">Potražuje</th><th class="n">Saldo</th></tr></thead>

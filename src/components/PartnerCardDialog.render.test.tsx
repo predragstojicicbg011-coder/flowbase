@@ -3,14 +3,16 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import PartnerCardDialog from './PartnerCardDialog'
 
 // The partner's card on screen: the running balance, the verdict, the two
-// lists below it that do not move the balance, and the 📎 that opens a bill.
+// lists below it that do not move the balance, the PDF shown in place, and
+// the card in dinars or in euros.
 
 const mockData: any = {}
-jest.mock('../services/loadPartnerCard', () => ({ loadPartnerCard: async () => mockData }))
+const mockLoads: string[] = []
+jest.mock('../services/loadPartnerCard', () => ({ loadPartnerCard: async (_c: any, _p: string, _co: string, currency: string) => { mockLoads.push(currency); return mockData } }))
 jest.mock('../contexts/CompaniesContext', () => ({
   useCompanies: () => ({ companies: [{ id: 'co', name: 'Firma doo' }], defaultCompany: { id: 'co', name: 'Firma doo' }, showPicker: false }),
 }))
-jest.mock('./InvoiceDocumentsDialog', () => ({ invoiceId }: any) => <div>Dokumenti {invoiceId}</div>)
+jest.mock('./DocumentViewerDialog', () => ({ invoiceId, title }: any) => <div>Pregled {invoiceId} · {title}</div>)
 jest.mock('../supabase', () => {
   const rows: Record<string, any> = {
     company_profiles: { full_legal_name: 'Firma doo', address: 'Ulica 1', city: 'Beograd', pib: '100000001' },
@@ -29,6 +31,7 @@ const doc = (over: any) => ({
 })
 
 beforeEach(() => {
+  mockLoads.length = 0
   Object.assign(mockData, {
     documents: [
       doc({ id: 'f412', invoice_number: 'F-412/26', invoice_date: '2026-10-03', amount: 120000, amount_rsd: 120000 }),
@@ -65,10 +68,32 @@ describe('the partner card', () => {
     expect(screen.getByText(/prevoz robe/)).toBeInTheDocument()
   })
 
-  it('opens a bill and its attachments from the 📎', async () => {
+  it('shows a bill and its attachments in place from its PDF button', async () => {
     await open()
-    fireEvent.click(screen.getAllByLabelText('Račun i prilozi')[0])
-    expect(screen.getByText('Dokumenti f412')).toBeInTheDocument()
+    // On the bill's row and on its payment's; the advance has no PDF.
+    expect(screen.getAllByLabelText('PDF F-412/26')).toHaveLength(2)
+    expect(screen.queryByLabelText('PDF AV104/2026')).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByLabelText('PDF F-412/26')[0])
+    expect(screen.getByText('Pregled f412 · Beton Plus doo · F-412/26')).toBeInTheDocument()
+  })
+
+  it('is shown in euros when asked, read again from the euro amounts', async () => {
+    await open()
+    expect(mockLoads).toEqual(['RSD'])
+    fireEvent.change(screen.getByLabelText('Valuta'), { target: { value: 'EUR' } })
+    await screen.findAllByText('60.000,00 EUR')
+    expect(mockLoads).toEqual(['RSD', 'EUR'])
+  })
+
+  it('closes from the top corner, apart from the filters', async () => {
+    const onClose = jest.fn()
+    render(<PartnerCardDialog partner={{ id: 'p1', name: 'Beton Plus doo' }} onClose={onClose} />)
+    await screen.findByText('Račun F-412/26')
+    const close = screen.getByLabelText('Zatvori')
+    expect(close.parentElement).toContainElement(screen.getByText('Kartica — Beton Plus doo'))
+    expect(close.parentElement).not.toContainElement(screen.getByLabelText('Do'))
+    fireEvent.click(close)
+    expect(onClose).toHaveBeenCalled()
   })
 
   it('counts what came before the period as the opening balance', async () => {

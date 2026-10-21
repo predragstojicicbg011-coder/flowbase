@@ -14,6 +14,8 @@ import { fmtMoney, fmtNum } from '../utils/formatters'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { findAccountByNumber, defaultAccount } from '../services/partnerAccountChoice'
 import { countOf } from '../utils/plural'
+import { invoicesWithDocuments } from '../services/sef/invoiceDocuments'
+import DocumentViewerDialog from '../components/DocumentViewerDialog'
 import { HALCOM_SIFRE, buildTkdis, tkdisBytes, tkdisFileName } from '../services/payments/halcomTkdis'
 import {
   newLine, lineAmount, lineProblem, remainingAfter, batchesByBank, orderFor, round2,
@@ -91,6 +93,10 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
   const [companyProfile, setCompanyProfile] = useState<any>(null)
   const { defaultCompany, loading: companiesLoading } = useCompanies()
   const [invoiceAccountMap, setInvoiceAccountMap] = useState<Record<string, { account_number: string; model: string; bank_name: string }>>({})
+  // Which bills have a PDF, and the one being looked at — over the list, so
+  // what is about to be paid is seen without leaving it.
+  const [withDocs, setWithDocs] = useState<Set<string>>(new Set())
+  const [viewing, setViewing] = useState<{ id: string; title: string } | null>(null)
   const [partnerAccountsMap, setPartnerAccountsMap] = useState<Record<string, any[]>>({})
   const [asOfDate, setAsOfDate] = useState('')
   const today = new Date().toISOString().split('T')[0]
@@ -190,6 +196,8 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
         .sort((a: any, b: any) => (a.due_date || '').localeCompare(b.due_date || ''))
       if (invData.length > 0) {
         setInvoices(invDataWithRemaining)
+        // Not waited for: the list is usable before it is known which bills have a PDF.
+        invoicesWithDocuments(supabase, invData.map(i => i.id)).then(setWithDocs).catch(() => {})
         const partnerIds = [...new Set(invData.map(i => i.partner_id).filter(Boolean))]
         if (partnerIds.length > 0) {
           const { data: pAccounts } = await supabase.from('partner_accounts').select('*').in('partner_id', partnerIds).eq('currency', 'RSD').order('is_primary', { ascending: false })
@@ -623,6 +631,13 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                           <span style={{ fontSize: '11px', fontFamily: "'DM Mono', monospace", background: 'rgba(255,255,255,0.05)', padding: '2px 7px', borderRadius: '5px', color: '#7A9BB8', border: '0.5px solid rgba(255,255,255,0.06)' }}>
                             {inv.invoice_number || '—'}
                           </span>
+                          {withDocs.has(inv.id) && (
+                            <button aria-label={`PDF ${inv.invoice_number || ''}`} title="Prikaži račun i priloge"
+                              onClick={() => setViewing({ id: inv.id, title: `${inv.partners?.name || ''} · ${inv.invoice_number || ''}` })}
+                              style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 7px', borderRadius: '5px', cursor: 'pointer', background: 'rgba(0,212,126,0.12)', color: '#00D47E', border: '0.5px solid rgba(0,212,126,0.4)' }}>
+                              PDF
+                            </button>
+                          )}
                           {inv.document_type === 'proforma' && (
                             <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '20px', background: 'rgba(78,168,255,0.15)', color: '#4EA8FF', border: '0.5px solid rgba(78,168,255,0.3)', whiteSpace: 'nowrap' as const }}>
                               PREDRAČUN
@@ -771,6 +786,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
           )}
         </div>
       </div>
+      {viewing && <DocumentViewerDialog invoiceId={viewing.id} title={viewing.title} onClose={() => setViewing(null)} />}
     </div>
   )
 }
