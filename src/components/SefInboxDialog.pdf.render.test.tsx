@@ -146,3 +146,55 @@ describe('repairing a row that kept the supplier’s attachment', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('SEF answered 500')
   })
 })
+
+describe('the PDF and attachments of a waiting invoice, as soon as it is listed', () => {
+  const unopened = (over: Record<string, unknown> = {}) => row({ ubl_fetched_at: null, pdf_path: null, pdf_kind: null, sef_status: 'Approved', ...over })
+
+  it('fetches them by itself for an invoice SEF has already seen, and shows them on the row', async () => {
+    mockState.rows = [unopened()]
+    mockState.invoke.mockImplementation(async () => {
+      mockState.rows = [row({ sef_status: 'Approved' })]
+      mockState.attachments = [attachment(1)]
+      return { data: { ubl_xml: '<x/>', pdf_path: 'c/101.pdf', attachments: 1 }, error: null }
+    })
+    await show()
+    expect(await screen.findByText('Prikaži fakturu')).toBeInTheDocument()
+    expect(screen.getByText('Prilozi (1)')).toBeInTheDocument()
+    expect(mockState.invoke).toHaveBeenCalledTimes(1)
+    expect(mockState.invoke).toHaveBeenCalledWith('sef-fetch-invoice', { body: { id: 'r1' } })
+  })
+
+  it('never fetches a New one by itself: it offers it, and asks first', async () => {
+    mockState.rows = [unopened({ sef_status: 'New' })]
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false)
+    await show()
+    fireEvent.click(screen.getByText('Preuzmi PDF i priloge'))
+    expect(confirm).toHaveBeenCalled()
+    expect(mockState.invoke).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByText('Preuzmi PDF i priloge')).toBeEnabled())
+    confirm.mockReturnValue(true)
+    mockState.invoke.mockImplementation(async () => {
+      mockState.rows = [row({ sef_status: 'Seen' })]
+      return { data: { ubl_xml: '<x/>', pdf_path: 'c/101.pdf', attachments: 0 }, error: null }
+    })
+    fireEvent.click(screen.getByText('Preuzmi PDF i priloge'))
+    expect(await screen.findByText('Prikaži fakturu')).toBeInTheDocument()
+    expect(mockState.invoke).toHaveBeenCalledTimes(1)
+    confirm.mockRestore()
+  })
+
+  it('fetches nothing for someone who does not keep the books', async () => {
+    mockState.canEdit = false
+    mockState.rows = [unopened()]
+    await show()
+    await new Promise(r => setTimeout(r, 20))
+    expect(mockState.invoke).not.toHaveBeenCalled()
+  })
+
+  it('says on the row why a fetch failed', async () => {
+    mockState.rows = [unopened()]
+    mockState.invoke.mockResolvedValue({ data: { error: 'SEF could not be reached: timeout' }, error: null })
+    await show()
+    expect(await screen.findByText(/Za 1 fakturu PDF nije preuzet: SEF could not be reached: timeout/)).toBeInTheDocument()
+  })
+})

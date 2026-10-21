@@ -25,6 +25,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { fetchScripts } from '../services/quickFillStore'
 import { getBookRates, rateFor } from '../services/bookAmounts'
 import type { ScriptLike } from '../services/expenseSplit'
+import { fetchesQuietly, runLimited } from '../services/sef/documentPrefetch'
 
 // The inbox of invoices SEF has sent us.
 //
@@ -337,6 +338,55 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
 
   useEffect(() => { load() }, [load])
 
+  // ── The PDFs of waiting invoices, fetched as soon as they are listed ──
+  //
+  // Only for invoices SEF has already seen or settled, where the fetch changes
+  // nothing there (documentPrefetch). Two at a time, each row once per visit,
+  // and the row shows its PDF and attachments the moment its own fetch is
+  // done. "Otvori i proknjiži" on a row still being fetched waits for it
+  // rather than asking SEF a second time.
+  const prefetchTried = useRef(new Set<string>())
+  const prefetching = useRef(new Map<string, Promise<void>>())
+  const [prefetch, setPrefetch] = useState<{ done: number; total: number; failed: number; reason: string } | null>(null)
+
+  /** A row and its attachments read again, after its document was fetched. */
+  const refreshRow = useCallback(async (id: string) => {
+    const [{ data: fresh }, { data: atts }] = await Promise.all([
+      supabase.from('sef_inbox').select(INBOX_COLUMNS).eq('id', id),
+      supabase.from('sef_inbox_attachments').select(ATTACHMENT_COLUMNS).eq('inbox_id', id).order('n'),
+    ])
+    if (!mounted.current) return
+    const updated = ((fresh || []) as unknown as SefRow[]).find(r => r.id === id)
+    if (updated) setRows(prev => prev.map(r => (r.id === id ? { ...r, ...updated } : r)))
+    setAttachments(prev => new Map(prev).set(id, ((atts || []) as SefAttachmentRow[]).filter(a => a.inbox_id === id)))
+  }, [])
+
+  /** The document of one row, from the function that keeps its PDFs. Throws the refusal. */
+  const fetchDocuments = useCallback(async (id: string) => {
+    const { data, error: fnErr } = await supabase.functions.invoke('sef-fetch-invoice', { body: { id } })
+    if (fnErr) throw new Error(await reasonFrom(fnErr))
+    if (!data || data.error) throw new Error(data?.error || 'Dokument nije mogao da se preuzme.')
+    await refreshRow(id)
+  }, [refreshRow])
+
+  useEffect(() => {
+    if (!keepsBooks) return
+    const todo = rows.filter(r => fetchesQuietly(r) && !prefetchTried.current.has(r.id))
+    if (todo.length === 0) return
+    todo.forEach(r => prefetchTried.current.add(r.id))
+    setPrefetch(prev => ({ done: prev?.done ?? 0, total: (prev?.total ?? 0) + todo.length, failed: prev?.failed ?? 0, reason: prev?.reason ?? '' }))
+    runLimited(todo, 2, async r => {
+      const run = fetchDocuments(r.id)
+        .then(() => { if (mounted.current) setPrefetch(p => p && { ...p, done: p.done + 1 }) })
+        .catch(e => {
+          if (mounted.current) setPrefetch(p => p && { ...p, done: p.done + 1, failed: p.failed + 1, reason: p.reason || (e instanceof Error ? e.message : String(e)) })
+        })
+        .finally(() => prefetching.current.delete(r.id))
+      prefetching.current.set(r.id, run)
+      await run
+    })
+  }, [rows, keepsBooks, fetchDocuments])
+
   /** Runs one action at a time. Everything that writes, or will fetch, goes through it. */
   const exclusive = async (fn: () => Promise<void>) => {
     if (inFlight.current) return
@@ -455,6 +505,24 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
    * again, for its PDFs only. Offered only when SEF no longer shows it New, so
    * nothing changes there; the function refuses New as well.
    */
+  /**
+   * The PDF and the attachments of a row that is not fetched by itself (New,
+   * renotified, or of unknown status), when someone asks for them. For a New
+   * one that marks it Seen on SEF, which is said first.
+   */
+  const fetchDocumentsNow = (row: SefRow) => exclusive(async () => {
+    setError(''); setNotice(''); setRowError(null)
+    const status = String(row.sef_status ?? '').trim().toLowerCase()
+    if (status !== 'seen' && !window.confirm(
+      'Preuzimanje dokumenta sa SEF-a će ovu fakturu tamo označiti kao pregledanu, i to vidi i knjigovodstvena agencija.\n\nPreuzeti PDF i priloge?',
+    )) return
+    try {
+      await fetchDocuments(row.id)
+    } catch (e) {
+      setRowError({ id: row.id, text: e instanceof Error ? e.message : String(e) })
+    }
+  })
+
   const refetchInvoicePdf = (row: SefRow) => exclusive(async () => {
     setError(''); setNotice(''); setRowError(null); setRowNotice(null)
     try {
@@ -496,6 +564,8 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
    */
   const openAndBook = (row: SefRow) => exclusive(async () => {
     setError(''); setNotice(''); setRowError(null)
+    // Its documents may be on their way already; one SEF call is enough.
+    await prefetching.current.get(row.id)
 
     const { data, error: fnErr } = await supabase.functions
       .invoke('sef-fetch-invoice', { body: { id: row.id } })
@@ -891,6 +961,11 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
               <button style={s.btnGhost} disabled={busy} onClick={() => restore(row)}>Vrati u red</button>
             )}
             {/* Only an opened row can have a PDF: it is kept at that one fetch. */}
+            {!opened && row.state === 'pending' && keepsBooks && (prefetching.current.has(row.id) || fetchesQuietly(row)
+              ? <span style={{ ...s.hint, marginTop: 0, alignSelf: 'center' }}>Preuzimam PDF i priloge…</span>
+              : <button style={{ ...s.btnGhost, opacity: busy ? 0.5 : 1 }} disabled={busy}
+                  title='Preuzima dokument sa SEF-a radi PDF-a i priloga. Faktura na SEF-u time postaje pregledana.'
+                  onClick={() => fetchDocumentsNow(row)}>Preuzmi PDF i priloge</button>)}
             {opened && (row.pdf_path
               ? <button style={s.btnGhost}
                   title={row.pdf_kind === 'supplier_attachment'
@@ -973,6 +1048,16 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
 
             {error && <div style={{ ...s.banner, background: DIALOG.redFill, borderColor: DIALOG.redSoft, color: DIALOG.red }}>{error}</div>}
             {notice && <div style={{ ...s.banner, background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber }}>{notice}</div>}
+            {prefetch && prefetch.done < prefetch.total && (
+              <div role="status" style={{ ...s.banner, background: DIALOG.raised, borderColor: DIALOG.border, color: DIALOG.dim }}>
+                Preuzimam PDF i priloge sa SEF-a: {prefetch.done} od {prefetch.total}. Status faktura na SEF-u se ne menja.
+              </div>
+            )}
+            {prefetch && prefetch.done >= prefetch.total && prefetch.failed > 0 && (
+              <div style={{ ...s.banner, background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber }}>
+                Za {prefetch.failed} {plural(prefetch.failed, 'fakturu', 'fakture', 'faktura')} PDF nije preuzet: {prefetch.reason}
+              </div>
+            )}
 
             {!loading && inboxFailed && (
               <div style={s.empty}>
