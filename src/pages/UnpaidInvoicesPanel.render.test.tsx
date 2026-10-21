@@ -173,3 +173,29 @@ describe('proformas and final invoices in the unpaid list', () => {
     expect((screen.getByLabelText('Iznos za plaćanje 427/26') as HTMLInputElement).value).toBe('4080,00')
   })
 })
+
+describe('the payee account of a bill booked from SEF', () => {
+  const twoAccounts = [
+    { id: 'pa1', partner_id: 'p-i1', account_number: '265-1110312345678-24', bank_name: 'Raiffeisen banka', is_primary: false, currency: 'RSD' },
+    { id: 'pa2', partner_id: 'p-i1', account_number: '160-0000000553857-18', bank_name: 'Banca Intesa', is_primary: true, currency: 'RSD' },
+  ]
+
+  it('is chosen although the bill writes the number in another form', async () => {
+    mockTables.partner_accounts = twoAccounts
+    mockTables.invoices = [{ ...inv('i1', 'F-1', 100000, 'Beton Plus'), account_number: '265111031234567824' }]
+    await open()
+    expect((screen.getByLabelText('Račun primaoca F-1') as HTMLSelectElement).value).toBe('pa1')
+  })
+
+  it('a number on the bill the partner does not have saved is offered and chosen', async () => {
+    mockTables.partner_accounts = twoAccounts
+    mockTables.invoices = [{ ...inv('i1', 'F-1', 100000, 'Beton Plus'), account_number: '205-0000000654321-11' }]
+    await open()
+    const select = screen.getByLabelText('Račun primaoca F-1') as HTMLSelectElement
+    expect(select.selectedOptions[0].textContent).toBe('205-0000000654321-11 — Sa fakture')
+    fireEvent.change(select, { target: { value: 'pa2' } })
+    expect(select.value).toBe('pa2')
+    fireEvent.change(select, { target: { value: 'bill' } })
+    expect(select.selectedOptions[0].textContent).toBe('205-0000000654321-11 — Sa fakture')
+  })
+})

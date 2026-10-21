@@ -345,10 +345,15 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
     .map(l => ({ l, problem: problemOf(l) }))
     .filter(x => x.problem !== null)
 
-  const handleAccountSelect = (invId: string, accountId: string, partnerId: string) => {
-    const accounts = partnerAccountsMap[partnerId] || []
+  const handleAccountSelect = (inv: any, accountId: string) => {
+    // Back to the number the bill itself names.
+    if (accountId === 'bill' && inv.account_number) {
+      setInvoiceAccountMap(prev => ({ ...prev, [inv.id]: { account_number: inv.account_number, model: inv.model || '97', bank_name: 'Sa fakture' } }))
+      return
+    }
+    const accounts = partnerAccountsMap[inv.partner_id] || []
     const acc = accounts.find(a => a.id === accountId)
-    if (acc) setInvoiceAccountMap(prev => ({ ...prev, [invId]: { account_number: acc.account_number, model: acc.model || '97', bank_name: acc.bank_name || '' } }))
+    if (acc) setInvoiceAccountMap(prev => ({ ...prev, [inv.id]: { account_number: acc.account_number, model: acc.model || '97', bank_name: acc.bank_name || '' } }))
   }
 
   // Recorded first (when a client app records files), downloaded second: a
@@ -584,6 +589,12 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                   const partnerAccounts = partnerAccountsMap[partnerId] || []
                   const selectedAcc = invoiceAccountMap[inv.id]
                   const hasAccount = !!(selectedAcc?.account_number || inv.account_number)
+                  // A bill from SEF writes the number its own way ("265111031234567824",
+                  // "160-553857-18"), so the saved account is found by the number and
+                  // not by how it is written; one the partner does not have saved is
+                  // still offered, as the bill's.
+                  const chosenSaved = findAccountByNumber(partnerAccounts, selectedAcc?.account_number)
+                  const billUnsaved = !!inv.account_number && !findAccountByNumber(partnerAccounts, inv.account_number)
                   const line = lines[inv.id]
                   const problem = line ? problemOf(line) : null
                   const badge = ext?.badge?.(inv.id)
@@ -672,10 +683,12 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                         {partnerAccounts.length > 1 ? (
                           <select
                             style={{ fontFamily: "'Inter', sans-serif", fontSize: '11px', padding: '4px 7px', border: `0.5px solid ${hasAccount ? 'rgba(255,255,255,0.08)' : '#FF5B5A'}`, borderRadius: '6px', background: '#111F30', color: '#DCE9F6', maxWidth: '200px', cursor: 'pointer', outline: 'none' }}
-                            value={partnerAccounts.find(a => a.account_number === selectedAcc?.account_number)?.id || ''}
-                            onChange={e => handleAccountSelect(inv.id, e.target.value, partnerId)}
+                            aria-label={`Račun primaoca ${inv.invoice_number || ''}`}
+                            value={chosenSaved?.id || (billUnsaved && selectedAcc?.account_number === inv.account_number ? 'bill' : '')}
+                            onChange={e => handleAccountSelect(inv, e.target.value)}
                           >
                             <option value="">Izaberite račun…</option>
+                            {billUnsaved && <option value="bill">{inv.account_number} — Sa fakture</option>}
                             {partnerAccounts.map(pa => (
                               <option key={pa.id} value={pa.id}>{pa.account_number}{pa.is_primary ? ' ★' : ''}{pa.bank_name ? ` — ${pa.bank_name.substring(0, 20)}` : ''}</option>
                             ))}
