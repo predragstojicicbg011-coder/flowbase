@@ -53,6 +53,8 @@ import SystemCategoryNotice from './SystemCategoryNotice'
 import { creditLegBooker, checkCreditCurrency, UnsupportedCreditCurrencyError } from '../services/creditPayment'
 import { fetchAllPartners } from '../services/allPartners'
 import { countOf } from '../utils/plural'
+import { fetchAllPages, fetchByIds } from '../utils/fetchAllPages'
+import { matchOpenInvoice, classifyFromHistory, hasOpenBill, type PastBooking } from '../services/statementRecognition'
 
 // credit payment P&L logic is inline
 
@@ -92,23 +94,22 @@ interface ParsedRow {
   natural_key?: string
 }
 
-interface AIProposal {
-  tx_type: 'direct' | 'invoice_payment'
-  tx_subtype: 'expense' | 'revenue' | null
-  pl_category: string
-  department: string
-  expense_description: string
-  revenue_stream: string
-  partner_match: string | null
-  confidence: 'high' | 'medium' | 'low'
-  notes: string
+/**
+ * What the import recognised on a row by itself (statementRecognition), and
+ * why. Sure or not, the row waits for the person importing to accept it.
+ */
+interface Recognition {
+  /** Rules that were right every time on the history; otherwise "to be checked". */
+  sure: boolean
+  /** "Faktura F-12 · poziv na broj", "Kao prethodnih 4 plaćanja", … */
+  label: string
 }
 
 type RowStatus = 'pending' | 'accepted' | 'rejected'
 
 interface ImportRow {
   parsed: ParsedRow
-  proposal: AIProposal | null
+  recognition: Recognition | null
   status: RowStatus
   override_tx_type: 'direct' | 'invoice_payment' | 'passthrough' | 'credit_payment'
   override_tx_subtype: 'expense' | 'revenue'
@@ -414,7 +415,7 @@ const formatDate = (d: string): string => isoDate(d)
 
 /**
  * A row's four stored columns, as the analysis step attached them, or null.
- * Read from `parsed` because that is where `analyzeWithAI` puts them.
+ * Read from `parsed` because that is where `recognize` puts them.
  */
 function attachedBook(p: any): BookAmounts | null {
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -449,7 +450,7 @@ function makeImportRow(parsed: ParsedRow): ImportRow {
   const txType = isPassthrough ? 'passthrough' : 'direct'
   const ptDirection = isExpense ? 'out' : 'in'
   return {
-    parsed, proposal: null, status: 'pending',
+    parsed, recognition: null, status: 'pending',
     override_tx_type: txType,
     override_tx_subtype: isExpense ? 'expense' : 'revenue',
     override_pt_direction: ptDirection,
@@ -491,6 +492,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
   const [analyzing, setAnalyzing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [analyzeError, setAnalyzeError] = useState('')
+  const [onlyToCheck, setOnlyToCheck] = useState(false)
   const { companies, defaultCompany, showPicker } = useCompanies()
   /** Where a credit instalment's two legs post — see services/systemCategories. */
   const systemCategories = useSystemCategories()
@@ -650,11 +652,16 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
   useEffect(() => {
     if (!company) return
     const fetchInvoices = async () => {
-      const { data, error } = await supabase.from('v_invoice_status').select('*').eq('company_id', company)
-        .in('document_type', ['invoice', 'proforma'])
-        .in('calculated_status', ['unpaid', 'partial']).order('due_date', { ascending: true })
-      if (error) console.warn('v_invoice_status error (non-critical):', error.message)
-      if (data) setOpenInvoices(data)
+      // Paged: recognition reads "the only open bill of this amount" off this
+      // list, and a bill past the server's 1000-row cap would make another
+      // look like the only one.
+      try {
+        setOpenInvoices(await fetchAllPages<any>((from, to) => supabase.from('v_invoice_status').select('*').eq('company_id', company)
+          .in('document_type', ['invoice', 'proforma'])
+          .in('calculated_status', ['unpaid', 'partial']).order('due_date', { ascending: true }).order('id').range(from, to)))
+      } catch (error: any) {
+        console.warn('v_invoice_status error (non-critical):', error?.message || error)
+      }
     }
     fetchInvoices()
   }, [company])
@@ -911,78 +918,155 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
     if (file) handleFile(file)
   }
 
-  const analyzeWithAI = async () => {
+  /**
+   * Rates first, then recognition by rules: the open bill a line pays, or
+   * the way the partner's earlier lines were booked. No AI and no cost.
+   * Nothing is accepted here — every row waits for the person importing.
+   */
+  const recognize = async () => {
     if (!company || !bank) return
     setAnalyzing(true); setAnalyzeError(''); setProgress(0)
-    const supabaseUrl = process.env.REACT_APP_SUPABASE_URL
-    const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY
     // Every row's book columns at the NBS rates for its date — an RSD row too,
     // which still needs the EUR rate for amount_eur.
     const bookRow = makeBooker()
     let rowsWithRates: typeof rows
     try {
-    rowsWithRates = await Promise.all(rows.map(async (row) => {
-      const { currency, date, debit, credit } = row.parsed
-      const amount = (debit || 0) > 0 ? (debit || 0) : (credit || 0)
-      if (!amount) return row
-      const booked = await bookRow(amount, currency, formatDate(date))
-      return { ...row, parsed: { ...row.parsed, ...booked } }
-    }))
+      rowsWithRates = await Promise.all(rows.map(async (row) => {
+        const { currency, date, debit, credit } = row.parsed
+        const amount = (debit || 0) > 0 ? (debit || 0) : (credit || 0)
+        if (!amount) return row
+        const booked = await bookRow(amount, currency, formatDate(date))
+        return { ...row, parsed: { ...row.parsed, ...booked } }
+      }))
     } catch (err: any) {
-      setAnalyzeError(`Kurs nije dostupan: ${err.message}. Analiza je zaustavljena.`)
+      setAnalyzeError(`Kurs nije dostupan: ${err.message}. Prepoznavanje je zaustavljeno.`)
       setAnalyzing(false)
       return
     }
-    setRows(rowsWithRates)
-    const partnerNames = partners.map(p => p.name).join(', ')
-    const batchSize = 5
-    const snapshot = [...rowsWithRates]
-    const result: ImportRow[] = snapshot.map(r => ({ ...r }))
-    for (let i = 0; i < snapshot.length; i += batchSize) {
-      const batch = snapshot.slice(i, i + batchSize)
-      const batchPayload = batch.map(r => ({ row_id: r.parsed.id, date: r.parsed.date, partner: r.parsed.partner_name, description: r.parsed.description, debit: r.parsed.debit, credit: r.parsed.credit, reference: r.parsed.reference_number }))
-      try {
-        const response = await fetch(`${supabaseUrl}/functions/v1/ai-categorize`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseAnonKey}`, 'apikey': supabaseAnonKey || '' },
-          body: JSON.stringify({ rows: batchPayload, partnerNames }),
-        })
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const data = await response.json()
-        let proposals: AIProposal[] = []
-        try { proposals = JSON.parse((data.result || '[]').replace(/```json|```/g, '').trim()) } catch { proposals = [] }
-        for (let j = i; j < Math.min(i + batchSize, snapshot.length); j++) {
-          const proposal = proposals.find((p: any) => p.row_id === snapshot[j].parsed.id)
-          if (proposal) {
-            const isExpense = (snapshot[j].parsed.debit || 0) > 0
-            const matchedCat = plCategories.find(c => c.name === proposal.pl_category)
-            const matchedDept = departments.find(d => d.name === proposal.department)
-            const existingTxType = result[j].override_tx_type
-            const resolvedTxType = existingTxType === 'passthrough' ? 'passthrough' : (proposal.tx_type || 'direct')
-            // Preserve partner_id if already matched by account number
-            const existingPartnerId = result[j].override_partner_id
-            result[j] = {
-              ...result[j], proposal, status: 'accepted',
-              override_tx_type: resolvedTxType,
-              override_tx_subtype: proposal.tx_subtype || (isExpense ? 'expense' : 'revenue'),
-              override_pl_category_id: matchedCat?.id || '',
-              override_pl_category_name: matchedCat?.name || proposal.pl_category || '',
-              override_pl_subcategory_id: '', override_pl_subcategory_name: '',
-              override_department_id: matchedDept?.id || '',
-              override_department_name: matchedDept?.name || proposal.department || '',
-              override_dept_subcategory_id: '', override_dept_subcategory_name: '',
-              override_expense_description: proposal.expense_description || '',
-              override_revenue_stream: proposal.revenue_stream || '',
-              // Only override partner if not already matched by account
-              override_partner_name: existingPartnerId ? result[j].override_partner_name : (proposal.partner_match || snapshot[j].parsed.partner_name),
-              override_partner_id: existingPartnerId || '',
-            }
-          }
-        }
-      } catch (err: any) { setAnalyzeError(`AI analiza nije uspela: ${err.message}`); setAnalyzing(false); return }
-      setProgress(Math.round(((i + batchSize) / snapshot.length) * 100))
+    setProgress(30)
+
+    // A partner the account did not find, by its exact name.
+    const byName = new Map<string, any>()
+    partners.forEach(pt => { if (pt.name) byName.set(String(pt.name).trim().toLowerCase(), pt) })
+    // Every row starts afresh: a second run must not keep an earlier run's
+    // links or classification, nor anything accepted before it.
+    const fresh = rowsWithRates.map(r => r.already_imported ? r : {
+      ...makeImportRow(r.parsed),
+      override_partner_id: r.override_partner_id, override_partner_name: r.override_partner_name,
+      import_hash: r.import_hash, already_imported: r.already_imported,
+    })
+    const withPartners = fresh.map(r => {
+      if (r.override_partner_id || r.already_imported) return r
+      const pt = byName.get((r.parsed.partner_name || '').trim().toLowerCase())
+      return pt ? { ...r, override_partner_id: pt.id, override_partner_name: pt.name } : r
+    })
+
+    // The partners' earlier lines and bills, newest first.
+    const partnerIds = [...new Set(withPartners.map(r => r.override_partner_id).filter(Boolean))]
+    const HISTORY = 'id, partner_id, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, project_id'
+    let pastLines: any[] = []
+    let pastBills: any[] = []
+    let splitIds = new Set<string>()
+    try {
+      pastLines = await fetchByIds<any>(partnerIds, async chunk => ({
+        data: await fetchAllPages<any>((from, to) => supabase.from('transactions')
+          .select(`${HISTORY}, transaction_date, created_at, tx_subtype`)
+          .eq('company_id', company).eq('type', 'direct').is('deleted_at', null).in('partner_id', chunk)
+          .order('transaction_date', { ascending: false }).order('created_at', { ascending: false }).order('id').range(from, to)),
+        error: null,
+      }), 50)
+      pastBills = await fetchByIds<any>(partnerIds, async chunk => ({
+        data: await fetchAllPages<any>((from, to) => supabase.from('invoices')
+          .select(`${HISTORY}, invoice_date, created_at, type`)
+          .eq('company_id', company).eq('document_type', 'invoice').eq('pl_impact', true).is('deleted_at', null).in('partner_id', chunk)
+          .order('invoice_date', { ascending: false }).order('created_at', { ascending: false }).order('id').range(from, to)),
+        error: null,
+      }), 50)
+      const splitRows = await fetchByIds<any>(pastLines.map(t => t.id), chunk =>
+        supabase.from('pl_splits').select('source_id').eq('source', 'transaction').in('source_id', chunk))
+      splitIds = new Set(splitRows.map(r => r.source_id))
+    } catch (err: any) {
+      setAnalyzeError(`Ranija knjiženja partnera nisu pročitana, pa raspodela po istoriji nije predložena: ${err.message || err}`)
     }
+    setProgress(70)
+
+    const asBooking = (r: any, date: string): PastBooking => ({
+      date, pl_category: r.pl_category ?? null, pl_subcategory: r.pl_subcategory ?? null,
+      department: r.department ?? null, dept_subcategory: r.dept_subcategory ?? null,
+      expense_description: r.expense_description ?? null, revenue_stream: r.revenue_stream ?? null,
+      project_id: r.project_id ?? null, split: splitIds.has(r.id),
+    })
+    const linesOf = (partnerId: string, subtype: string) => pastLines
+      .filter(t => t.partner_id === partnerId && (t.tx_subtype || 'expense') === subtype)
+      .map(t => asBooking(t, t.transaction_date))
+    const billsOf = (partnerId: string, type: string) => pastBills
+      .filter(b => b.partner_id === partnerId && b.type === type)
+      .map(b => ({ ...asBooking(b, b.invoice_date), split: false }))
+
+    const REASON: Record<string, string> = { reference: 'poziv na broj', number: 'broj fakture u opisu', amount: 'isti iznos' }
+    const taken = new Set<string>()
+    const result = withPartners.map(r => {
+      if (r.already_imported || r.override_tx_type === 'passthrough') return r
+      const p = r.parsed
+      const isExpense = (p.debit || 0) > 0
+      const amount = isExpense ? (p.debit || 0) : (p.credit || 0)
+      const subtype = isExpense ? 'expense' : 'revenue'
+      const match = matchOpenInvoice({
+        partnerId: r.override_partner_id || null, isExpense, amount, currency: p.currency || 'RSD',
+        date: formatDate(p.date), reference: p.reference_number || '', description: p.description || '',
+      }, openInvoices, taken)
+
+      if (match?.kind === 'invoice') {
+        taken.add(match.invoiceId)
+        const inv = openInvoices.find(i => i.id === match.invoiceId)
+        return {
+          ...r, override_tx_type: 'invoice_payment' as const, override_tx_subtype: subtype as 'expense' | 'revenue',
+          override_linked_invoice_id: match.invoiceId, override_linked_invoice_ids: [match.invoiceId],
+          recognition: { sure: true, label: `Faktura ${inv?.invoice_number || ''} · ${REASON[match.reason]}`.replace('  ', ' ') },
+        }
+      }
+      if (match?.kind === 'ambiguous') {
+        return {
+          ...r, override_tx_type: 'invoice_payment' as const, override_tx_subtype: subtype as 'expense' | 'revenue',
+          recognition: { sure: false, label: `${match.candidates.length} otvorene fakture odgovaraju (${REASON[match.reason]}) — izaberite koju plaća` },
+        }
+      }
+
+      const partnerId = r.override_partner_id
+      if (!partnerId) return r
+      const fromLines = classifyFromHistory(linesOf(partnerId, subtype))
+      const fromBills = fromLines ? null : classifyFromHistory(billsOf(partnerId, subtype))
+      const c = fromLines || fromBills
+      if (!c) return r
+      const f = c.fields
+      const cat = plCategories.find(x => x.name === f.pl_category)
+      const sub = plSubcategories.find(x => x.name === f.pl_subcategory && x.category_id === cat?.id)
+      const dept = departments.find(x => x.name === f.department)
+      const dsub = deptSubcategories.find(x => x.name === f.dept_subcategory && x.department_id === dept?.id)
+      const what = fromLines
+        ? (c.count === 1 ? 'Kao prethodno plaćanje' : `Kao prethodnih ${c.count} plaćanja`)
+        : (c.count === 1 ? 'Kao prethodna faktura partnera' : `Kao prethodnih ${c.count} faktura partnera`)
+      // A partner still owed a bill may be being paid for it: booked as a cost
+      // as well, the bill's cost would count twice. So is one whose only
+      // history is bills. Neither is ever "sure".
+      const billOpen = hasOpenBill(partnerId, isExpense, openInvoices)
+      const sure = c.sure && !!fromLines && !billOpen
+      const label = billOpen ? `${what} — partner ima otvorenu fakturu, proverite da li je plaća`
+        : c.split ? `${what} — poslednje je bilo podeljeno, proverite podelu`
+        : sure ? what : `${what} — ${fromLines ? 'ranije različito' : 'po fakturama, ne po plaćanjima'}, proverite`
+      return {
+        ...r, override_tx_type: 'direct' as const, override_tx_subtype: subtype as 'expense' | 'revenue',
+        override_pl_category_id: cat?.id || '', override_pl_category_name: f.pl_category || '',
+        override_pl_subcategory_id: sub?.id || '', override_pl_subcategory_name: f.pl_subcategory || '',
+        override_department_id: dept?.id || '', override_department_name: f.department || '',
+        override_dept_subcategory_id: dsub?.id || '', override_dept_subcategory_name: f.dept_subcategory || '',
+        override_expense_description: f.expense_description || '', override_revenue_stream: f.revenue_stream || '',
+        override_project_id: f.project_id || '',
+        recognition: { sure, label },
+      }
+    })
     setRows(result)
+    setProgress(100)
     setAnalyzing(false)
     setStep('review')
   }
@@ -1038,8 +1122,14 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
   const rejectRow = (id: string) => updateRow(id, { status: 'rejected' })
   // Vec uvezeni redovi se namjerno preskacu: baza bi ih ionako odbila, a
   // prihvatanje bi korisniku prikazalo broj koji nikad nece biti proknjizen.
+  /** A payment of a bill that names no bill: accepted only one by one, on purpose. */
+  const unlinkedBillPayment = (r: ImportRow) => r.override_tx_type === 'invoice_payment'
+    && !r.override_linked_invoice_id && !(r.override_linked_invoice_ids?.length > 0)
   const acceptAll = () => setRows(prev => prev.map(r =>
-    r.already_imported ? r : { ...r, status: 'accepted' as RowStatus }))
+    r.already_imported || unlinkedBillPayment(r) ? r : { ...r, status: 'accepted' as RowStatus }))
+  /** Only what the rules were sure of; the rest stays waiting. */
+  const acceptSure = () => setRows(prev => prev.map(r =>
+    !r.already_imported && r.status === 'pending' && r.recognition?.sure ? { ...r, status: 'accepted' as RowStatus } : r))
   const rejectAll = () => setRows(prev => prev.map(r => ({ ...r, status: 'rejected' as RowStatus })))
 
   const postAccepted = async () => {
@@ -1598,7 +1688,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
         // ── An unknown amount is the WHOLE invoice, not none of it ───────
         //
         // The claims are compared in RSD, and `amount_rsd` is attached by
-        // `analyzeWithAI`. A row that never went through it — or one whose
+        // `recognize`. A row that never went through it — or one whose
         // rate lookup gave nothing — had no dinar figure, and this read that
         // as a claim of zero: the row plainly closed a 505,023 RSD invoice,
         // claimed nothing, and the invoice went on being offered to every
@@ -1625,11 +1715,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
 
   const alreadyImported = rows.filter(r => r.already_imported).length
 
-  const confStyle = (c?: string) => {
-    if (c === 'high') return { bg: DIALOG.accentFill, color: DIALOG.accent }
-    if (c === 'medium') return { bg: DIALOG.amberFill, color: DIALOG.amber }
-    return { bg: DIALOG.redFill, color: DIALOG.red }
-  }
+  const toCheck = (r: ImportRow) => !r.already_imported && r.status === 'pending' && !r.recognition?.sure
 
   const getTxTypeBadge = (type: string) => {
     if (type === 'direct') return { bg: DIALOG.accentFill, color: DIALOG.accent, label: '⚡ Direktna' }
@@ -1831,7 +1917,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
               )}
               {analyzing && (
                 <div style={s.analyzingBox}>
-                  <div style={{ fontSize: '13px', color: DIALOG.accent, marginBottom: '8px' }}>🤖 AI analizira stavke ({rows.length})…</div>
+                  <div style={{ fontSize: '13px', color: DIALOG.accent, marginBottom: '8px' }}>🔎 Prepoznajem stavke ({rows.length}): otvorene fakture i ranija knjiženja partnera…</div>
                   <div style={s.progressBar}><div style={{ ...s.progressFill, width: `${progress}%`, transition: 'width 0.5s' }} /></div>
                   <div style={{ fontSize: '11px', color: DIALOG.accent, marginTop: '6px' }}>završeno {progress}%</div>
                 </div>
@@ -1853,19 +1939,25 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                     <span style={{ fontSize: '11px', color: '#7A9BB8' }}>Već uvezeno</span>
                   </div>
                 )}
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <label style={{ fontSize: '11px', color: '#7A9BB8', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={onlyToCheck} onChange={e => setOnlyToCheck(e.target.checked)} style={{ accentColor: DIALOG.amber }} />
+                    Samo za proveru ({rows.filter(toCheck).length})
+                  </label>
+                  {rows.some(r => !r.already_imported && r.status === 'pending' && r.recognition?.sure) && (
+                    <button style={s.btnSmallGreen} onClick={acceptSure}>✓ Prihvati sve sigurne</button>
+                  )}
                   <button style={s.btnSmallGreen} onClick={acceptAll}>✓ Prihvati sve</button>
                   <button style={s.btnSmallRed} onClick={rejectAll}>✕ Odbij sve</button>
                 </div>
               </div>
 
               <div style={s.reviewList}>
-                {rows.map(row => {
+                {rows.filter(r => !onlyToCheck || toCheck(r)).map(row => {
                   const p = row.parsed
                   const isExpense = (p.debit || 0) > 0
                   const amount = isExpense ? p.debit : p.credit
                   const isExpanded = expandedRow === p.id
-                  const conf = row.proposal?.confidence ? confStyle(row.proposal.confidence) : null
                   const plSubs = getPlSubs(row.override_pl_category_id)
                   const deptSubs = getDeptSubs(row.override_department_id)
                   const expDescs = getExpDescs(row.override_dept_subcategory_id)
@@ -1888,7 +1980,11 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', flexWrap: 'wrap' as const }}>
                             <span style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6' }}>{row.override_partner_name || p.partner_name || '—'}</span>
                             {row.override_partner_id && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: DIALOG.accentFill, color: DIALOG.accent }}>✓ baza</span>}
-                            {conf && row.proposal && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: conf.bg, color: conf.color }}>{({ high: 'visoka', medium: 'srednja', low: 'niska' } as Record<string, string>)[row.proposal.confidence] || row.proposal.confidence}</span>}
+                            {row.recognition && !row.already_imported && (
+                              <span title={row.recognition.label} style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: row.recognition.sure ? DIALOG.accentFill : DIALOG.amberFill, color: row.recognition.sure ? DIALOG.accent : DIALOG.amber }}>
+                                {row.recognition.sure ? '✓ ' : 'proveri · '}{row.recognition.label}
+                              </span>
+                            )}
                             <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: typeBadge.bg, color: typeBadge.color }}>{typeBadge.label}</span>
                             <span style={{ fontSize: '10px', color: DIALOG.faint }}>{FORMAT_LABELS[p.source_format]}</span>
                             {row.already_imported && (
@@ -1926,7 +2022,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
 
                       {isExpanded && (
                         <div style={s.editPanel} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
-                          {row.proposal && <div style={s.aiNotes}>🤖 AI: {row.proposal.notes}</div>}
+                          {row.recognition && <div style={s.recognitionNote}>{row.recognition.sure ? '✓ Prepoznato' : '⚠ Proverite'}: {row.recognition.label}</div>}
 
                           {/* The line as the file read it, and correctable --
                               a statement is not always right, and until now
@@ -2315,7 +2411,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                                 </div>
                               </div>
                               {(row.override_linked_invoice_ids?.length > 0) && (
-                                <div style={{ ...s.aiNotes, background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, marginTop: '8px' }}>
+                                <div style={{ ...s.recognitionNote, background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, marginTop: '8px' }}>
                                   💳 Zatvaraće redom {countOf(row.override_linked_invoice_ids.length, 'fakturu', 'fakture', 'faktura')} ·
                                   Ukupno preostalo: <strong>{fmtRSD(row.override_linked_invoice_ids.reduce((s, id) => { const inv = openInvoices.find(i => i.id === id); return s + (inv?.remaining_rsd || 0) }, 0))}</strong>
                                 </div>
@@ -2710,11 +2806,11 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                 <button style={{ ...s.btnGhost, opacity: (!company || !bank || rows.length === 0 || analyzing) ? 0.5 : 1 }}
                   onClick={() => { if (company && bank && rows.length > 0) { setRows(prev => prev.map(r => r.already_imported ? r : ({ ...r, status: 'pending' as RowStatus }))); setStep('review') } }}
                   disabled={!company || !bank || rows.length === 0 || analyzing}>
-                  📋 Bez AI — pregledaj ručno
+                  📋 Pregledaj ručno
                 </button>
                 <button style={{ ...s.btnPrimary, opacity: (!company || !bank || rows.length === 0 || analyzing) ? 0.5 : 1 }}
-                  onClick={analyzeWithAI} disabled={!company || !bank || rows.length === 0 || analyzing}>
-                  {analyzing ? `🤖 Analiza… ${progress}%` : '🤖 Analiziraj uz AI'}
+                  onClick={recognize} disabled={!company || !bank || rows.length === 0 || analyzing}>
+                  {analyzing ? `🔎 Prepoznavanje… ${progress}%` : '🔎 Prepoznaj i pregledaj'}
                 </button>
               </div>
             </>
@@ -2924,7 +3020,7 @@ const s: Record<string, React.CSSProperties> = {
   reviewRowPassthrough: { border: '1px solid rgba(245,166,35,0.4)', background: 'rgba(245,166,35,0.05)' },
   reviewRowMain: { display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', cursor: 'pointer', background: '#111F30', borderRadius: '10px 10px 0 0' },
   editPanel: { padding: '14px 16px', borderTop: '1px solid rgba(255,255,255,0.07)', background: '#0D1B2C' },
-  aiNotes: { fontSize: '11px', color: '#00D47E', background: 'rgba(0,212,126,0.08)', border: '1px solid rgba(0,212,126,0.2)', borderRadius: '6px', padding: '6px 10px', marginBottom: '12px' },
+  recognitionNote: { fontSize: '11px', color: '#00D47E', background: 'rgba(0,212,126,0.08)', border: '1px solid rgba(0,212,126,0.2)', borderRadius: '6px', padding: '6px 10px', marginBottom: '12px' },
   editSectionTitle: { fontSize: '10px', fontWeight: '600', color: '#7A9BB8', textTransform: 'uppercase' as const, letterSpacing: '0.08em', marginTop: '14px', marginBottom: '8px', paddingBottom: '4px', borderBottom: '1px solid rgba(255,255,255,0.06)' },
   editGrid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
   editField: { display: 'flex', flexDirection: 'column' as const, gap: '4px' },
