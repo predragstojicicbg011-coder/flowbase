@@ -173,3 +173,24 @@ describe('a note from SEF', () => {
     expect(pick.value).toBe('')
   })
 })
+
+describe('a debit note', () => {
+  it('points to its bill but keeps its own rate and its own account to be paid at', async () => {
+    render(<InvoiceDialog onClose={() => {}} invoice={draft({
+      document_type: 'debit_note', invoice_number: 'KZ-103/26', amount: 5000, eur_rate: 117.4,
+      account_number: '340-0000000034018-17', reference_number: 'KZ-103/26',
+    })} />)
+    expect(typeSelect().value).toBe('debit_note')
+    const pick = await screen.findByLabelText('Odnosi se na račun') as HTMLSelectElement
+    await waitFor(() => expect(pick.querySelectorAll('option').length).toBe(2))
+    fireEvent.change(pick, { target: { value: 'b1' } })
+    next(); next(); next()
+    fireEvent.click(screen.getByText(/Proknjiži fakturu|Sačuvaj izmene/))
+    await waitFor(() => expect(mockState.inserted).toHaveLength(1))
+    expect(mockState.inserted[0]).toMatchObject({
+      document_type: 'debit_note', adjusts_invoice_id: 'b1', amount: 5000, eur_rate: 117.4,
+      account_number: '340-0000000034018-17', reference_number: 'KZ-103/26',
+      pl_category: 'Materijal', pl_impact: true,
+    })
+  })
+})

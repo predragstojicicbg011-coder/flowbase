@@ -1,8 +1,10 @@
 // ─── documentType ───────────────────────────────────────────────────────────
 //
 // A bill, a credit note (knjižno odobrenje) or a debit note (knjižno
-// zaduženje). A credit note reduces one bill and is negative; a debit note
-// adds to one bill and is positive. The database holds the same rules
+// zaduženje). A credit note reduces one bill and is negative. A debit note is
+// positive and points to its bill for reference only: it is owed and paid by
+// itself, at its own account, and leaves the bill as it is
+// (20261027090000_debit_note_owed_by_itself). The database holds the same rules
 // (20261020100000_credit_and_debit_notes.sql, invoices_adjustment_rules);
 // these are the form's copy of them, so the person reads the reason before
 // saving instead of a refusal after.
@@ -21,10 +23,12 @@ export const DOCUMENT_TYPE_LABEL: Record<DocumentType, string> = {
   advance_invoice: 'Avansni račun',
 }
 
-/** Paid through the unpaid list, Halcom and the bank: a bill and a proforma.
- *  A note is settled through its bill, an advance invoice never is. */
+/** Paid through the unpaid list, Halcom and the bank: a bill, a debit note and
+ *  a proforma. A credit note is settled through its bill, an advance invoice never is. */
+export const PAYABLE_TYPES: DocumentType[] = ['invoice', 'debit_note', 'proforma']
+
 export function isPayable(t: DocumentType): boolean {
-  return t === 'invoice' || t === 'proforma'
+  return PAYABLE_TYPES.includes(t)
 }
 
 /** Never in the P&L: a proforma and an advance invoice (20261021090000). */

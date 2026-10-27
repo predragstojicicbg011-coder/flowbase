@@ -458,9 +458,13 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setPlImpact(b.pl_impact !== false)
     setCfType(b.cf_type || '')
     if (b.currency) setCurrency(b.currency)
-    if (b.exchange_rate != null) setExRate(String(b.exchange_rate))
-    if (b.eur_rate != null) setEurRate(String(b.eur_rate))
-    setRateSource('kurs osnovnog računa'); setRateMissing(false)
+    // A credit note is in its bill's figures; a debit note is a document of
+    // its own, at its own date's rate (20261027090000).
+    if (docType === 'credit_note') {
+      if (b.exchange_rate != null) setExRate(String(b.exchange_rate))
+      if (b.eur_rate != null) setEurRate(String(b.eur_rate))
+      setRateSource('kurs osnovnog računa'); setRateMissing(false)
+    }
     const rows = await loadSplits(supabase, 'invoice', id)
     if (rows.length > 0) setBaseSplit({ amount: Number(b.amount) || 0, lines: linesFrom(rows as any, n => `line-${n}`) })
     else setSplitLines([])

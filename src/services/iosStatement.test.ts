@@ -94,3 +94,18 @@ describe('the printed IOS', () => {
     expect(html).toContain('Dati avansi (ne ulaze u stanje): 6.599,88 RSD')
   })
 })
+
+describe('a debit note', () => {
+  it('is an open item of its own, and leaves its bill as it is', () => {
+    const r = openItemsAsOf({
+      documents: [
+        doc({ id: 'b', invoice_number: 'R23/131', amount: 713850.49, amount_rsd: 713850.49 }),
+        doc({ id: 'kz', invoice_number: 'R23/KZ-103', invoice_date: '2026-10-20', document_type: 'debit_note', amount: 55088.59, amount_rsd: 55088.59, adjusts_invoice_id: 'b' }),
+      ],
+      payments: [pay({ invoice_id: 'b', date: '2026-10-05', amount_rsd: 713850.49 })],
+      usage: [],
+    }, '2026-10-31')
+    expect(r.items.map(i => [i.number, i.amount, i.open])).toEqual([['R23/KZ-103', 55088.59, 55088.59]])
+    expect(r.total).toBe(55088.59)
+  })
+})

@@ -6,8 +6,8 @@
 // balance on that day: a document's remainder is its amount with the notes
 // linked to it, less the payments and the advances used, all dated by then.
 //
-// Open items are bills, debit notes and credit notes not linked to a bill
-// (folded into their bill when linked); our invoices to a customer count
+// Open items are bills, debit notes, and credit notes not linked to a bill (a
+// linked credit note is folded into its bill; a debit note is its own item); our invoices to a customer count
 // against us. Proformas, advance invoices and direct payments are not open
 // items: advances are shown apart, under the total (the client's decision).
 //
@@ -36,8 +36,8 @@ export function openItemsAsOf(
 ): { items: OpenItem[]; total: number } {
   const by = (d: string | null | undefined) => (d || '') <= asOf
   const byId = new Map(input.documents.map(d => [d.id, d]))
-  // A note linked to a bill belongs to that bill's line.
-  const lineOf = (d: CardDocument) => (d.adjusts_invoice_id && byId.has(d.adjusts_invoice_id) ? d.adjusts_invoice_id : d.id)
+  // A credit note linked to a bill belongs to that bill's line; a debit note is owed by itself.
+  const lineOf = (d: CardDocument) => (d.document_type === 'credit_note' && d.adjusts_invoice_id && byId.has(d.adjusts_invoice_id) ? d.adjusts_invoice_id : d.id)
   const lines = new Map<string, { head: CardDocument; amount: number; settled: number }>()
 
   for (const d of input.documents) {

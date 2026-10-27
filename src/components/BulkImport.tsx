@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '../supabase'
+import { PAYABLE_TYPES } from '../services/documentType'
 import {
   editedAmounts, amountText, correctLine, isoDate,
 } from '../services/statementLineEdit'
@@ -657,7 +658,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
       // look like the only one.
       try {
         setOpenInvoices(await fetchAllPages<any>((from, to) => supabase.from('v_invoice_status').select('*').eq('company_id', company)
-          .in('document_type', ['invoice', 'proforma'])
+          .in('document_type', PAYABLE_TYPES)
           .in('calculated_status', ['unpaid', 'partial']).order('due_date', { ascending: true }).order('id').range(from, to)))
       } catch (error: any) {
         console.warn('v_invoice_status error (non-critical):', error?.message || error)

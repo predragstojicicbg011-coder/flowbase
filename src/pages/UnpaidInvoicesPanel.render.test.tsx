@@ -23,7 +23,7 @@ jest.mock('../supabase', () => {
 })
 jest.mock('../utils/fetchAllPages', () => ({
   fetchAllPages: async (page: any) => (await page(0, 999)).data,
-  fetchByIds: async (_ids: string[], q: any) => (await q(_ids)).data,
+  fetchByIds: async (ids: string[], q: any) => ((await q(ids)).data || []).filter((r: any) => !r.id || ids.includes(r.id)),
   countRows: async () => 0,
 }))
 // One object for the whole test, as the real context gives: the panel reloads
@@ -154,6 +154,18 @@ describe('credit and debit notes in the unpaid list', () => {
     expect(screen.queryByText('KO-1/25')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Plati KO-1/25')).not.toBeInTheDocument()
     expect(screen.getByText('1 knjižno odobrenje nije vezano za račun')).toBeInTheDocument()
+  })
+
+  it('offers a debit note to pay by itself, at the account on it, and leaves its paid bill out', async () => {
+    mockTables.v_invoice_status = [
+      { id: 'd1', calculated_status: 'unpaid', amount: 55088.59, paid_amount: 0, document_type: 'debit_note', adjustments: 0, unlinked: false },
+    ]
+    mockTables.invoices = [{ ...inv('d1', 'KZ-103/26', 55088.59, 'Wiener'), account_number: '340-0000000034018-17' }]
+    render(<UnpaidInvoicesPanel onClose={() => {}} />)
+    await screen.findByText('Wiener')
+    fireEvent.click(await screen.findByLabelText('Plati KZ-103/26'))
+    expect((screen.getByLabelText('Iznos za plaćanje KZ-103/26') as HTMLInputElement).value).toBe('55088,59')
+    expect(screen.getByText('340-0000000034018-17')).toBeInTheDocument()
   })
 })
 

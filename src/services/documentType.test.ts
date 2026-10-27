@@ -27,7 +27,7 @@ describe('documentType', () => {
   })
 
   it('knows which documents are paid and which never reach the P&L', () => {
-    expect(['invoice', 'credit_note', 'debit_note', 'proforma', 'advance_invoice'].filter(t => isPayable(t as any))).toEqual(['invoice', 'proforma'])
+    expect(['invoice', 'credit_note', 'debit_note', 'proforma', 'advance_invoice'].filter(t => isPayable(t as any))).toEqual(['invoice', 'debit_note', 'proforma'])
     expect(['invoice', 'credit_note', 'debit_note', 'proforma', 'advance_invoice'].filter(t => hasNoPl(t as any))).toEqual(['proforma', 'advance_invoice'])
     expect(signProblem('proforma', 0)).toBe('Iznos mora biti veći od 0')
     expect(signProblem('advance_invoice', -5)).toBe('Iznos mora biti veći od 0')

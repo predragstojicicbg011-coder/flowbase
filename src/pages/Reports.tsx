@@ -1,5 +1,5 @@
 import SupplierAdvancesPanel from '../components/SupplierAdvancesPanel'
-import { isPayable } from '../services/documentType'
+import { isPayable, PAYABLE_TYPES } from '../services/documentType'
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { useNav } from '../navigation'
 import type { Page } from '../navigation'
@@ -131,7 +131,7 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
         supabase.from('v_invoice_status')
           .select('id, calculated_status, amount, paid_amount, remaining_rsd, remaining_eur, document_type, adjustments, advance_used, unlinked')
           .eq('company_id', compData.id)
-          .in('document_type', ['invoice', 'proforma'])
+          .in('document_type', PAYABLE_TYPES)
           .in('calculated_status', ['unpaid', 'partial'])
           .order('due_date', { ascending: true }).order('id')
           .range(from, to))

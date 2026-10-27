@@ -1,6 +1,7 @@
 import { advancePaymentProblem, proformaFromPayment } from '../services/advances'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabase'
+import { PAYABLE_TYPES } from '../services/documentType'
 import { matchesAmount } from '../services/amountSearch'
 import { brand } from '../config/brand'
 import { useCompanies } from '../contexts/CompaniesContext'
@@ -470,7 +471,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   useEffect(() => {
     if (!company) return
     supabase.from('v_invoice_status').select('*').eq('company_id', company)
-      .in('document_type', ['invoice', 'proforma'])
+      .in('document_type', PAYABLE_TYPES)
       .in('calculated_status', ['unpaid', 'partial']).order('due_date', { ascending: true })
       .then(({ data }) => { if (data) setOpenInvoices(data) })
     supabase.from('v_invoice_status').select('*').eq('company_id', company)
