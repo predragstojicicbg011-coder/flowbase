@@ -97,7 +97,8 @@ export function orderFor(line: PaymentLine, bill: PayableBill): TkdisOrder {
     purpose: `UPLATA PO FAKTURI ${bill.invoice_number || ''}`.trim(),
     paymentCode: line.paymentCode,
     amount: lineAmount(line) ?? 0,
-    creditModel: bill.reference_number ? (bill.model || '97') : '',
+    // Only the model the bill carries: none is a valid model, 97 is not a default.
+    creditModel: bill.reference_number ? (bill.model || '') : '',
     creditReference: bill.reference_number || bill.invoice_number || '',
   }
 }

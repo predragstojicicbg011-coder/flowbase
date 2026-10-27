@@ -44,6 +44,8 @@ const inv = (id: string, number: string, amount: number, partner: string) => ({
 })
 
 let downloads: string[] = []
+let blobs: Blob[] = []
+const textOf = (blob: Blob) => new Promise<string>(ok => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.readAsText(blob) })
 beforeEach(() => {
   downloads = []
   Object.assign(mockTables, {
@@ -59,7 +61,8 @@ beforeEach(() => {
     invoices: [inv('i1', 'F-1', 100000, 'Beton Plus'), inv('i2', 'F-2', 50000, 'Armatura')],
     partner_accounts: [],
   })
-  ;(global as any).URL.createObjectURL = jest.fn(() => 'blob:x')
+  blobs = []
+  ;(global as any).URL.createObjectURL = jest.fn((blob: Blob) => { blobs.push(blob); return 'blob:x' })
   ;(global as any).URL.revokeObjectURL = jest.fn()
   jest.spyOn(window, 'confirm').mockReturnValue(true)
   jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { downloads.push(this.download) })
@@ -222,5 +225,25 @@ describe('the PDF of a bill in the unpaid list', () => {
     fireEvent.click(screen.getByLabelText('PDF F-1'))
     expect(screen.getByText('Pregled i1 · Beton Plus · F-1')).toBeInTheDocument()
     expect(screen.getByText('Armatura')).toBeInTheDocument()
+  })
+})
+
+describe('the model on the payment order', () => {
+  it('is the one on the bill: a bill with no model is exported with none, never 97', async () => {
+    mockTables.invoices = [
+      { ...inv('i1', 'F-1', 100000, 'Beton Plus'), model: null, reference_number: '2026-555' },
+      { ...inv('i2', 'F-2', 50000, 'Armatura'), model: '97', reference_number: '12-2026-01' },
+    ]
+    mockTables.partner_accounts = [{ id: 'pa1', partner_id: 'p-i1', account_number: '205-0000000654321-11', bank_name: 'NLB', is_primary: true, currency: 'RSD', model: '97' }]
+    await open()
+    fireEvent.click(screen.getByLabelText('Plati F-1'))
+    fireEvent.click(screen.getByLabelText('Plati F-2'))
+    fireEvent.click(screen.getAllByText('↓ Izvezi')[0])
+    await waitFor(() => expect(blobs.length).toBe(1))
+    const lines = (await textOf(blobs[0])).split(/\r?\n/)
+    const f1 = lines.find(l => l.includes('2026-555'))!
+    const f2 = lines.find(l => l.includes('12-2026-01'))!
+    expect(f1.slice(184, 186)).toBe('  ')
+    expect(f2.slice(184, 186)).toBe('97')
   })
 })

@@ -220,13 +220,16 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
                 const chosen = findAccountByNumber(accounts, inv.account_number)
                 accMap[inv.id] = {
                   account_number: inv.account_number,
-                  model: inv.model || chosen?.model || '97',
+                  // The bill's own model, empty included: many are paid with
+                  // none, and a 97 put in their place is refused by the bank
+                  // when the reference has no check digits.
+                  model: inv.model || '',
                   bank_name: chosen?.bank_name || 'Sa fakture',
                 }
                 return
               }
               const primary = defaultAccount(accounts)
-              if (primary) accMap[inv.id] = { account_number: primary.account_number || '', model: primary.model || inv.model || '97', bank_name: primary.bank_name || '' }
+              if (primary) accMap[inv.id] = { account_number: primary.account_number || '', model: inv.model || primary.model || '', bank_name: primary.bank_name || '' }
             })
             setInvoiceAccountMap(accMap)
           }
@@ -356,12 +359,12 @@ export function UnpaidInvoicesPanel({ onClose }: { onClose: () => void }) {
   const handleAccountSelect = (inv: any, accountId: string) => {
     // Back to the number the bill itself names.
     if (accountId === 'bill' && inv.account_number) {
-      setInvoiceAccountMap(prev => ({ ...prev, [inv.id]: { account_number: inv.account_number, model: inv.model || '97', bank_name: 'Sa fakture' } }))
+      setInvoiceAccountMap(prev => ({ ...prev, [inv.id]: { account_number: inv.account_number, model: inv.model || '', bank_name: 'Sa fakture' } }))
       return
     }
     const accounts = partnerAccountsMap[inv.partner_id] || []
     const acc = accounts.find(a => a.id === accountId)
-    if (acc) setInvoiceAccountMap(prev => ({ ...prev, [inv.id]: { account_number: acc.account_number, model: acc.model || '97', bank_name: acc.bank_name || '' } }))
+    if (acc) setInvoiceAccountMap(prev => ({ ...prev, [inv.id]: { account_number: acc.account_number, model: inv.model || acc.model || '', bank_name: acc.bank_name || '' } }))
   }
 
   // Recorded first (when a client app records files), downloaded second: a

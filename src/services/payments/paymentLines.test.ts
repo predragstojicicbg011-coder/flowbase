@@ -75,4 +75,11 @@ describe('one file per bank', () => {
     expect(o.creditReference).toBe('12-34')
     expect(orderFor(newLine(bill({ id: 'b' }), 'b1'), bill({ id: 'b' })).creditModel).toBe('')
   })
+
+  it('never invents a model: a bill with a reference and no model is paid with none', () => {
+    const noModel = bill({ id: 'a', reference_number: '2026-555', model: null })
+    expect(orderFor(newLine(noModel, 'b1'), noModel)).toMatchObject({ creditModel: '', creditReference: '2026-555' })
+    const empty = bill({ id: 'a', reference_number: '2026-555', model: '' })
+    expect(orderFor(newLine(empty, 'b1'), empty).creditModel).toBe('')
+  })
 })
