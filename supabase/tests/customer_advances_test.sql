@@ -11,7 +11,7 @@
 do $$
 declare
   v_co uuid; v_c1 uuid; v_c2 uuid; v_pf uuid; v_tx uuid; v_av uuid; v_fin uuid; v_ef uuid; v_epf uuid;
-  v_av2 uuid; v_av3 uuid; v_f1 uuid; v_f2 uuid; v_f3 uuid; v_pf2 uuid; v_pf3 uuid; r record; n numeric;
+  v_av2 uuid; v_av3 uuid; v_f1 uuid; v_f2 uuid; v_f3 uuid; v_pf2 uuid; v_pf3 uuid; v_d1 uuid; v_prj uuid; v_d2 uuid; v_av4 uuid; r record; n numeric;
 begin
   insert into public.companies (name, country, currency) values ('Test avansi kupaca (TEST-AK)', 'Srbija', 'RSD') returning id into v_co;
   insert into public.partners (name) values ('Test kupac A (TEST-AK)') returning id into v_c1;
@@ -103,6 +103,27 @@ begin
   insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, document_type)
   values (v_co, v_c2, 'IPR-77', current_date, 'revenue', 'RSD', 2000, 2000, 1, 'proforma') returning id into v_pf3;
   raise notice '7 ok';
+
+  -- 8. The old project advance (advance_deducted) and the advance chain never meet on one invoice.
+  insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, document_type)
+  values (v_co, v_c2, 'IAV-4', current_date, 'revenue', 'RSD', 500000, 500000, 1, 'advance_invoice') returning id into v_av4;
+  insert into public.projects (company_id, name) values (v_co, 'Test gradiliste (TEST-AK)') returning id into v_prj;
+  insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, project_id, advance_deducted, advance_deducted_rsd, advance_deducted_eur)
+  values (v_co, v_c2, 'IF-D1', current_date, 'revenue', 'RSD', 300000, 300000, 1, v_prj, 300000, 300000, 0) returning id into v_d1;
+  begin
+    insert into public.advance_usage (final_invoice_id, advance_invoice_id, amount) values (v_d1, v_av4, 1000);
+    raise exception 'FAIL: advance chain on an invoice with a project advance';
+  exception when check_violation then null;
+  end;
+  insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate)
+  values (v_co, v_c2, 'IF-D2', current_date, 'revenue', 'RSD', 300000, 300000, 1) returning id into v_d2;
+  insert into public.advance_usage (final_invoice_id, advance_invoice_id, amount) values (v_d2, v_av4, 1000);
+  begin
+    update public.invoices set project_id = v_prj, advance_deducted = 1000, advance_deducted_rsd = 1000 where id = v_d2;
+    raise exception 'FAIL: project advance on an invoice with the advance chain';
+  exception when check_violation then null;
+  end;
+    raise notice '8 ok';
 
   raise notice 'ALL TESTS PASSED';
 end $$;

@@ -108,6 +108,10 @@ begin
     raise exception 'Avansni račun % nije istog dobavljača, firme i valute kao konačni račun.', v_av.invoice_number
       using errcode = 'check_violation';
   end if;
+  if coalesce(v_fin.advance_deducted, 0) > 0 then
+    raise exception 'Račun % već ima odbijen avans po projektu (stari način); avansni račun se na njega ne vezuje.', v_fin.invoice_number
+      using errcode = 'check_violation';
+  end if;
   select coalesce(sum(u.amount), 0) into v_other
     from public.advance_usage u join public.invoices f on f.id = u.final_invoice_id and f.deleted_at is null
    where u.advance_invoice_id = v_av.id and u.id <> new.id;
@@ -130,6 +134,30 @@ begin
                          then round(new.amount * v_fin.amount_eur / v_fin.amount, 2) end;
   return new;
 end $$;
+
+-- ── The old project advance and the advance chain never meet on one invoice ──
+
+create or replace function public.invoices_project_or_chain_advance()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if coalesce(new.advance_deducted, 0) > 0
+     and exists (select 1 from public.advance_usage u where u.final_invoice_id = new.id) then
+    raise exception 'Račun % već koristi avansni račun; avans po projektu se na njega ne odbija.', new.invoice_number
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists invoices_project_or_chain_advance on public.invoices;
+create trigger invoices_project_or_chain_advance
+  before insert or update of advance_deducted on public.invoices
+  for each row execute function public.invoices_project_or_chain_advance();
+
+revoke all on function public.invoices_project_or_chain_advance() from public, anon, authenticated;
 
 -- ── v_customer_advances: the chain per customer and project ────────────────
 create or replace view public.v_customer_advances with (security_invoker = 'on') as
