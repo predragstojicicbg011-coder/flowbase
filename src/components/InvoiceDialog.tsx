@@ -37,6 +37,8 @@ import {
 import { leaseMonthRent, type RentalLease } from '../services/revenuePlan'
 import { isDuplicateRentError } from '../services/revenuePage'
 import { countOf } from '../utils/plural'
+import { useAuth } from '../contexts/AuthContext'
+import { deleteConsequences, deleteInvoiceCascade, previewDelete, type DeletePreview } from '../services/invoiceDelete'
 import { bankNameForAccount, formatAccount } from '../services/bankCodes'
 import {
   DOCUMENT_TYPES, DOCUMENT_TYPE_LABEL, billTotal, creditProblem, defaultDocumentType, hasNoPl, invoiceNumberKey, scaleSplits, signProblem,
@@ -91,6 +93,23 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [showValidationSummary, setShowValidationSummary] = useState(false)
   /** What the database refused, shown to the owner instead of logged to a console they never open. */
   const [saveError, setSaveError] = useState('')
+  // Deleting an existing revenue invoice and everything linked to it.
+  const { canEdit: keepsBooks } = useAuth()
+  const [delPreview, setDelPreview] = useState<DeletePreview | null>(null)
+  const [delBusy, setDelBusy] = useState(false)
+  const canDeleteInvoice = !!invoice?.id && invoice.type === 'revenue' && keepsBooks
+  const askDelete = async () => {
+    setDelBusy(true)
+    try { setDelPreview(await previewDelete(supabase, invoice.id)); setSaveError('') }
+    catch (e: any) { setSaveError(e?.message || 'Brisanje nije uspelo.') }
+    finally { setDelBusy(false) }
+  }
+  const confirmDelete = async () => {
+    setDelBusy(true)
+    try { await deleteInvoiceCascade(supabase, invoice.id); onClose() }
+    catch (e: any) { setSaveError(e?.message || 'Brisanje nije uspelo.'); setDelPreview(null) }
+    finally { setDelBusy(false) }
+  }
 
   const { companies, defaultCompany, showPicker } = useCompanies()
   const { projects } = useProjects()
@@ -2253,9 +2272,29 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           )}
         </div>
 
+        {delPreview && (
+          <div data-testid="delete-panel" style={{ ...s.validationBanner, background: DIALOG.redFill, borderColor: DIALOG.red, color: DIALOG.text, margin: '0 1.5rem 0.75rem' }}>
+            <div style={{ flex: 1, fontSize: '12px', lineHeight: 1.5 }}>
+              <div style={{ fontWeight: '500' }}>Brisanje fakture {delPreview.invoice_number || ''}</div>
+              {deleteConsequences(delPreview).map((line, i) => <div key={i} style={{ marginTop: '4px' }}>{line}</div>)}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button style={{ ...s.btnPrimary, background: DIALOG.red, color: '#fff' }} disabled={delBusy} onClick={confirmDelete}>
+                  {delBusy ? 'Brisanje…' : 'Obriši'}
+                </button>
+                <button style={s.btnGhost} disabled={delBusy} onClick={() => setDelPreview(null)}>Odustani</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={s.footer}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '12px', color: DIALOG.dim }}>Korak {step} od 4</span>
+            {canDeleteInvoice && !delPreview && (
+              <button style={{ ...s.btnGhost, color: DIALOG.red, padding: '4px 10px', fontSize: '12px' }} disabled={delBusy} onClick={askDelete}>
+                Obriši fakturu i sve vezano
+              </button>
+            )}
             {totalErrors > 0 && touched.companyId && (
               <span style={{ fontSize: '11px', color: DIALOG.red, background: DIALOG.redFill, padding: '2px 8px', borderRadius: '20px' }}>
                 Nedostaje polja: {totalErrors}
