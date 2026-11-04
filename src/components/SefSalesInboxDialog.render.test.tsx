@@ -30,6 +30,8 @@ function mockQuery(table: string) {
     if (table === 'sef_inbox') return { data: isUpdate ? [{ id: 'r1' }] : mockState.rows, error: null }
     if (table === 'invoices') return { data: mockState.ledger, error: null }
     if (table === 'partners') return { data: mockState.partners, error: null }
+    if (table === 'companies') return { data: [{ id: 'co1', name: 'Primer Gradnja d.o.o.' }], error: null }
+    if (table === 'company_profiles') return { data: [{ company_id: 'co1', pib: '100000009', mb: '87654321' }], error: null }
     if (table === 'rental_leases') return { data: mockState.leases, error: null }
     if (table === 'projects') return { data: mockState.projects, error: null }
     return { data: [], error: null }
@@ -112,7 +114,7 @@ describe('the sales inbox', () => {
 
   it('proposes the lease when the amount is the monthly rent', async () => {
     mockState.leases = [{
-      id: 'l1', project_id: 'zgrada', tenant_partner_id: 'k1', monthly_rent: 100000, currency: 'RSD',
+      id: 'l1', company_id: 'co1', project_id: 'zgrada', tenant_partner_id: 'k1', monthly_rent: 100000, currency: 'RSD',
       start_date: '2026-01-01', end_date: null, invoice_day: 1, payment_days: 15, active: true,
     }]
     await show()
@@ -122,6 +124,20 @@ describe('the sales inbox', () => {
       revenue_kind: 'lease', lease_id: 'l1', service_month: '2026-10-01', project_id: 'zgrada',
     })
     expect(mockState.invoiceProps.reviewNotes.join(' ')).toMatch(/Predlog razvrstavanja — zakup/)
+  })
+
+  it('does not propose a lease of another company', async () => {
+    mockState.leases = [{
+      id: 'l9', company_id: 'other', project_id: 'zgrada', tenant_partner_id: 'k1', monthly_rent: 100000, currency: 'RSD',
+      start_date: '2026-01-01', end_date: null, invoice_day: 1, payment_days: 15, active: true,
+    }]
+    mockState.projects = [{ id: 'pX', company_id: 'other', name: 'Tuđ projekat', code: 'TP', kind: 'construction', investor_partner_id: 'k1', active: true }]
+    await show()
+    fireEvent.click(screen.getByText('Proknjiži'))
+    await screen.findByTestId('booking')
+    expect(mockState.invoiceProps.invoice.lease_id).toBeUndefined()
+    expect(mockState.invoiceProps.invoice.project_id).toBeUndefined()
+    expect(mockState.invoiceProps.invoice.revenue_kind).toBeUndefined()
   })
 
   it('proposes the project of the customer when it is the investor of the only site', async () => {

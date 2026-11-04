@@ -344,6 +344,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const whySplit = whySplitNotSavable(splitParent, splitLines)
 
   const splitActive = splitLines.length > 0
+  // A split revenue invoice is on no project of its own; its lines carry them.
+  useEffect(() => {
+    if (invType === 'revenue' && splitActive && revKind !== 'lease' && revKind !== 'project') setRevKind('project')
+  }, [invType, splitActive, revKind])
 
   /** Lines changed in the editor: the project moves between the bill and
    *  its lines by one rule (splitProjectChange) — never on both at once. */
@@ -656,7 +660,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     if (invType === 'revenue' && !revStream) e.revStream = 'Vrsta prihoda je obavezna'
     if (invType === 'revenue') {
       const why = classificationProblem(
-        { kind: revKind, projectId, leaseId: leaseId || null, serviceMonth: serviceMonth || null }, docType)
+        { kind: revKind, projectId, leaseId: leaseId || null, serviceMonth: serviceMonth || null, split: splitActive }, docType)
       if (why) e.classification = why
     }
     if (advanceOwn > 0) {

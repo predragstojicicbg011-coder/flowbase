@@ -159,14 +159,18 @@ export function proposeProject(
 // ── What stops the invoice from being saved ─────────────────────────────────
 
 export function classificationProblem(
-  c: { kind: RevenueKind | null; projectId: string | null; leaseId: string | null; serviceMonth: string | null },
+  c: {
+    kind: RevenueKind | null; projectId: string | null; leaseId: string | null; serviceMonth: string | null
+    /** The invoice is split: its lines carry the projects, so it has none of its own. */
+    split?: boolean
+  },
   docType: DocumentType,
 ): string | null {
   if (!c.kind) return 'Izaberite: projekat, zakup ili prodaja usluga.'
   if (c.kind === 'lease' && docType !== 'invoice') {
     return 'Zakup se bira samo na računu; ovaj dokument ide na projekat zgrade.'
   }
-  if (c.kind === 'project' && !c.projectId) return 'Izaberite projekat.'
+  if (c.kind === 'project' && !c.projectId && !c.split) return 'Izaberite projekat.'
   if (c.kind === 'lease' && (!c.leaseId || !c.serviceMonth)) return 'Izaberite zakup i mesec usluge.'
   return null
 }

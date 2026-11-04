@@ -199,7 +199,11 @@ describe('leases', () => {
     expect(provisionalRentNumber('x', '2026-01-01')).toBe('ZAK-X-2026-01')
   })
   it('recognises the duplicate rent invoice refusal', () => {
-    expect(isDuplicateRentError({ code: '23505', message: 'x' })).toBe(true)
+    expect(isDuplicateRentError({ code: '23505', message: 'duplicate key value violates unique constraint "invoices_lease_month_key"' })).toBe(true)
+    expect(isDuplicateRentError({ code: '23505', message: 'x', details: 'constraint invoices_lease_month_key' })).toBe(true)
+    // Any other unique violation is not the rent one: a revenue number booked twice.
+    expect(isDuplicateRentError({ code: '23505', message: 'Izlazna faktura broj IF-1/2026 je već proknjižena.' })).toBe(false)
+    expect(isDuplicateRentError({ code: '23505', message: 'x' })).toBe(false)
     expect(isDuplicateRentError({ message: 'duplicate key value violates unique constraint "invoices_lease_month_key"' })).toBe(true)
     expect(isDuplicateRentError({ code: '42501', message: 'rls' })).toBe(false)
     expect(isDuplicateRentError(null)).toBe(false)

@@ -158,6 +158,12 @@ describe('classificationProblem', () => {
     expect(classificationProblem(c({ kind: 'lease', leaseId: 'l1', serviceMonth: '2026-10-01' }), 'invoice')).toBeNull()
   })
 
+  it('a split invoice is a project through its lines', () => {
+    expect(classificationProblem(c({ projectId: null, split: true }), 'invoice')).toBeNull()
+    expect(classificationProblem(c({ projectId: null, split: false }), 'invoice')).toBe('Izaberite projekat.')
+    expect(classificationProblem(c({ kind: null, projectId: null, split: true }), 'invoice')).toBe('Izaberite: projekat, zakup ili prodaja usluga.')
+  })
+
   it('keeps rent to invoices', () => {
     const why = 'Zakup se bira samo na računu; ovaj dokument ide na projekat zgrade.'
     for (const t of ['credit_note', 'debit_note', 'proforma', 'advance_invoice'] as const) {

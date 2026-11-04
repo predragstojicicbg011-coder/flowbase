@@ -76,10 +76,10 @@ const INBOX_COLUMNS = [
   'dismiss_reason', 'dismissed_at', 'imported_at', 'pdf_path',
 ].join(', ')
 
-const LEDGER_COLUMNS = 'id, invoice_number, invoice_date, amount, currency, partner_id, project_id, lease_id, service_month'
+const LEDGER_COLUMNS = 'id, invoice_number, invoice_date, amount, currency, partner_id, company_id, project_id, lease_id, service_month'
 
 /** A revenue invoice in the books: for the duplicate check and for classifying the next one. */
-type LedgerRow = LedgerInvoice & { project_id?: string | null; lease_id?: string | null; service_month?: string | null }
+type LedgerRow = LedgerInvoice & { company_id?: string | null; project_id?: string | null; lease_id?: string | null; service_month?: string | null }
 
 function fmtDate(value: string | null | undefined): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value || '')
@@ -334,14 +334,19 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
     // What the invoice is: rent from a lease first, then a project. Only a
     // suggestion: the person confirms or changes it in the dialog.
     const draft = salesDraftFromUbl(ubl, row, match?.partnerId ?? null, companyId, rate, eurRate)
-    {
+    // Only the invoice company's own leases, projects and invoices: a tenant's
+    // lease in another company is never proposed. No company, no proposal.
+    if (companyId) {
+      const ownLeases = leases.filter(l => l.company_id === companyId)
+      const ownProjects = projects.filter(p => p.company_id === companyId)
+      const ownLedger = ledger.filter(l => l.company_id === companyId)
       const partnerId = match?.partnerId ?? null
       // The notes and line names. Not the number: IF-12/2026 is not December.
       const text = ubl.advanceText
       const asLease = ubl.isCreditNote || ubl.isDebitNote || ubl.isAdvanceInvoice ? null : proposeLease({
         partnerId, net: ubl.net, gross: ubl.grossTotal ?? ubl.total, currency: ubl.currency || row.currency,
         date: bookedDateOf(ubl) || '', text,
-      }, leases, ledger.map(l => ({
+      }, ownLeases, ownLedger.map(l => ({
         project_id: l.project_id ?? null, type: 'revenue', invoice_date: l.invoice_date || '',
         lease_id: l.lease_id ?? null, service_month: l.service_month ?? null,
       })))
@@ -353,7 +358,7 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
         notes.push(`Predlog razvrstavanja — zakup: ${asLease.why}`)
         if (asLease.alreadyBilled) notes.push('Za taj mesec već postoji faktura za ovaj zakup. Proverite da nije ista faktura.')
       } else {
-        const asProject = proposeProject({ partnerId, number: ubl.invoiceNumber, text }, projects, ledger.map(l => ({
+        const asProject = proposeProject({ partnerId, number: ubl.invoiceNumber, text }, ownProjects, ownLedger.map(l => ({
           partner_id: l.partner_id, project_id: l.project_id ?? null, invoice_date: l.invoice_date, lease_id: l.lease_id ?? null,
         })))
         if (asProject) {
@@ -365,6 +370,8 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
           notes.push('Razvrstavanje nije predloženo: izaberite projekat, zakup ili prodaju usluga.')
         }
       }
+    } else {
+      notes.push('Razvrstavanje nije predloženo jer firma nije prepoznata: izaberite projekat, zakup ili prodaju usluga.')
     }
 
     const documents = [

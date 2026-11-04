@@ -501,11 +501,16 @@ export function rentInvoiceRow(
   }
 }
 
-/** Whether a refused insert is the one-rent-invoice-per-lease-and-month index. */
-export function isDuplicateRentError(err: { code?: string | null; message?: string | null } | null | undefined): boolean {
+/**
+ * Whether a refused insert is the one-rent-invoice-per-lease-and-month index.
+ * Recognised by the constraint's name, not by the bare unique-violation code:
+ * a revenue invoice number booked twice raises 23505 too (invoices_one_per_own_number).
+ */
+export function isDuplicateRentError(
+  err: { code?: string | null; message?: string | null; details?: string | null } | null | undefined,
+): boolean {
   if (!err) return false
-  if (err.code === '23505') return true
-  return /invoices_lease_month_key|duplicate key/i.test(err.message || '')
+  return /invoices_lease_month_key/i.test(`${err.message || ''} ${err.details || ''}`)
 }
 
 /** `1 faktura`, `3 fakture`, `5 faktura`, `21 faktura`… — Serbian plural. */

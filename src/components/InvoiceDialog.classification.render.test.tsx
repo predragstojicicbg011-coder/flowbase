@@ -9,6 +9,8 @@ const mockState = {
   leases: [] as any[],
   billed: [] as any[],
   inserted: [] as any[],
+  updated: [] as any[],
+  splits: [] as any[],
   insertError: null as null | { code?: string; message: string },
 }
 
@@ -28,6 +30,14 @@ function mockQuery(table: string) {
       ? { data: null, error: mockState.insertError }
       : { data: { id: 'new1' }, error: null })
     return ins
+  }
+  q.update = (payload: any) => {
+    mockState.updated.push(payload)
+    const upd: any = {}
+    upd.eq = () => upd
+    upd.select = () => upd
+    upd.then = (ok: any, bad: any) => Promise.resolve({ data: [{ id: 'x1' }], error: null }).then(ok, bad)
+    return upd
   }
   q.maybeSingle = async () => result()
   q.single = async () => result()
@@ -63,7 +73,7 @@ jest.mock('../services/quickFillStore', () => ({
   fetchScripts: async () => [], saveScript: async () => ({}), whyNotSavable: () => null,
 }))
 jest.mock('../services/saveSplits', () => ({
-  loadSplits: async () => [],
+  loadSplits: async () => mockState.splits,
   saveSplits: async (_c: any, _s: string, _id: string, _p: any, lines: any[]) => ({ ok: true, lines: lines.length, message: '' }),
 }))
 jest.mock('./SplitEditor', () => () => null)
@@ -98,6 +108,8 @@ beforeEach(() => {
   mockState.leases = [lease()]
   mockState.billed = []
   mockState.inserted = []
+  mockState.updated = []
+  mockState.splits = []
   mockState.insertError = null
 })
 
@@ -199,6 +211,34 @@ describe('classification of a revenue invoice', () => {
     save()
     expect(await screen.findByText('Za ovaj zakup i mesec faktura već postoji.')).toBeInTheDocument()
     expect(screen.queryByText(/invoices_lease_month_key/)).not.toBeInTheDocument()
+  })
+
+  it('saves a split revenue invoice as a project: its lines carry the projects', async () => {
+    mockState.splits = [
+      { amount: 30000, pl_category: 'Zakup', department: 'Prihodi', project_id: 'pr1', sort_order: 0 },
+      { amount: 20000, pl_category: 'Zakup', department: 'Prihodi', project_id: 'zgrada', sort_order: 1 },
+    ]
+    render(<InvoiceDialog onClose={() => {}} invoice={draft({ id: 'x1', project_id: null })} />)
+    next(); next()
+    await screen.findByRole('group', { name: 'Razvrstavanje' })
+    await waitFor(() => expect(radio('Projekat').checked).toBe(true))
+    expect(radio('Prodaja usluga').checked).toBe(false)
+    expect(screen.getByText(/svaka stavka iznad nosi svoj projekat/)).toBeInTheDocument()
+    next()
+    save()
+    await waitFor(() => expect(mockState.updated).toHaveLength(1))
+    expect(mockState.updated[0].project_id).toBeNull()
+    expect(screen.queryByText(/Izaberite projekat/)).not.toBeInTheDocument()
+  })
+
+  it('shows another unique refusal as it is, not as a duplicate rent', async () => {
+    mockState.insertError = { code: '23505', message: 'Izlazna faktura broj IF-12/2026 je već proknjižena.' }
+    render(<InvoiceDialog onClose={() => {}} invoice={draft({ revenue_kind: 'lease', lease_id: 'l1', service_month: '2026-10-01', project_id: 'zgrada' })} />)
+    await toClassification()
+    next()
+    save()
+    expect(await screen.findByText('Izlazna faktura broj IF-12/2026 je već proknjižena.')).toBeInTheDocument()
+    expect(screen.queryByText('Za ovaj zakup i mesec faktura već postoji.')).not.toBeInTheDocument()
   })
 
   it('keeps rent to invoices', async () => {
