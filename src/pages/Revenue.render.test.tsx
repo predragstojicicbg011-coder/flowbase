@@ -54,7 +54,11 @@ describe('Prihodi page — empty', () => {
 
   it('explains each empty section in Serbian', async () => {
     show()
-    expect(await screen.findByText(/Još nema izlaznih faktura, avansa, plana ni zakupa/)).toBeInTheDocument()
+    const intro = await screen.findByText(/Još nema izlaznih faktura, avansa, plana ni zakupa/)
+    // Advances go through a proforma and an advance invoice, not a flagged receipt.
+    expect(intro.textContent).toMatch(/predračun kupcu/)
+    expect(intro.textContent).toMatch(/avansni račun/)
+    expect(intro.textContent).not.toMatch(/označene kao avans/)
     expect(screen.getByText('Nema otvorenih potraživanja')).toBeInTheDocument()
     expect(screen.getByText('Nema aktivnih projekata')).toBeInTheDocument()
     expect(screen.getByText('Nema objekata u zakupu')).toBeInTheDocument()

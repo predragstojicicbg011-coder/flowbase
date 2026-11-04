@@ -232,7 +232,8 @@ export default function Revenue() {
         {nothingYet && (
           <div style={rs.info} role="status">
             Još nema izlaznih faktura, avansa, plana ni zakupa. Situacije se unose kao fakture vrste „prihod",
-            avansi kao primljene uplate označene kao avans, a plan i zakupi ovde ispod.
+            avans kao predračun kupcu koji se zatvara uplatom, pa avansni račun koji konačna faktura koristi,
+            a plan i zakupi ovde ispod.
           </div>
         )}
 
