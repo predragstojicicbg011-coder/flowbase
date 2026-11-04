@@ -1,4 +1,4 @@
-import { rankLinkCandidates, pdfStateOf, uploadRefusal, uploadPath, newUuid, type BookedInvoice, type SefDocRow } from './invoiceDocuments'
+import { rankLinkCandidates, loadLinkCandidates, pdfStateOf, uploadRefusal, uploadPath, newUuid, type BookedInvoice, type SefDocRow } from './invoiceDocuments'
 
 const inv = (over: Partial<BookedInvoice> = {}): BookedInvoice => ({
   id: 'inv', company_id: 'c', type: 'expense', invoice_number: '2026/0412', invoice_date: '2026-10-14',
@@ -6,7 +6,7 @@ const inv = (over: Partial<BookedInvoice> = {}): BookedInvoice => ({
 })
 
 const row = (over: Partial<SefDocRow> & { id: string }): SefDocRow => ({
-  sef_invoice_id: 1, document_number: '2026-0412', supplier_name: 'Dobavljač', supplier_vat_number: '100200300',
+  sef_invoice_id: 1, direction: 'purchase', customer_name: null, customer_vat_number: null, document_number: '2026-0412', supplier_name: 'Dobavljač', supplier_vat_number: '100200300',
   amount: 12000, currency: 'RSD', sent_date: '2026-10-14T08:00:00Z', sef_status: 'Seen', state: 'pending',
   ubl_fetched_at: null, pdf_path: null, pdf_kind: null, pdf_note: null, ...over,
 })
@@ -41,6 +41,22 @@ describe('pairing a hand-typed invoice with a waiting SEF row', () => {
   it('does not count an amount in another currency as the same', () => {
     const got = rankLinkCandidates(inv(), [row({ id: 'eur', currency: 'EUR' })])
     expect(got[0].reasons).not.toContain('isti iznos')
+  })
+
+  it('ranks a sales row by the customer PIB', () => {
+    const got = rankLinkCandidates(inv({ type: 'revenue', partner_tax_id: '100000002' }), [
+      row({ id: 's', direction: 'sales', customer_vat_number: '100000002', supplier_vat_number: '100000009', document_number: '1' }),
+    ])
+    expect(got[0].reasons).toContain('isti PIB')
+  })
+
+  it('asks for sales rows when pairing a revenue invoice', async () => {
+    const calls: Array<[string, unknown[]]> = []
+    const q: any = {}
+    for (const m of ['select', 'eq', 'is', 'order']) q[m] = (...a: unknown[]) => { calls.push([m, a]); return q }
+    q.limit = async () => ({ data: [], error: null })
+    await loadLinkCandidates({ from: () => q } as any, inv({ type: 'revenue' }))
+    expect(calls).toContainEqual(['eq', ['direction', 'sales']])
   })
 
   it('breaks a tie by how close the dates are', () => {

@@ -14,6 +14,8 @@ const mockState = {
   createSignedUrl: jest.fn(),
 }
 
+const eqCalls: Array<[string, string, unknown]> = []
+
 function mockQuery(table: string) {
   const result = () => {
     if (table === 'sef_inbox') return { data: mockState.rows, error: null }
@@ -22,7 +24,8 @@ function mockQuery(table: string) {
     return { data: [], error: null }
   }
   const q: any = {}
-  for (const m of ['select', 'eq', 'is', 'order', 'range', 'limit', 'update', 'in']) q[m] = () => q
+  for (const m of ['select', 'is', 'order', 'range', 'limit', 'update', 'in']) q[m] = () => q
+  q.eq = (col: string, val: unknown) => { eqCalls.push([table, col, val]); return q }
   q.maybeSingle = async () => result()
   q.single = async () => result()
   q.then = (ok: any, bad: any) => Promise.resolve(result()).then(ok, bad)
@@ -72,6 +75,14 @@ beforeEach(() => {
   openSpy = jest.spyOn(window, 'open').mockImplementation(() => ({ opener: {}, location: { href: '' }, close: jest.fn() }) as any)
 })
 afterEach(() => openSpy.mockRestore())
+
+describe('which direction the inbox reads', () => {
+  it('reads only purchase rows', async () => {
+    eqCalls.length = 0
+    await show()
+    expect(eqCalls.filter(c => c[0] === 'sef_inbox').map(c => [c[1], c[2]])).toContainEqual(['direction', 'purchase'])
+  })
+})
 
 describe('the invoice first, the attachments beside it', () => {
   it('shows the invoice and opens it through a ten-minute link', async () => {

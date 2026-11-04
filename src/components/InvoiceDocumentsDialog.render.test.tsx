@@ -58,7 +58,7 @@ jest.mock('../supabase', () => {
 })
 
 const sefRow = (over: any) => ({
-  id: 'r1', company_id: 'co', sef_invoice_id: 77, document_number: '2026-0412', supplier_name: 'Beton Plus d.o.o.',
+  id: 'r1', company_id: 'co', sef_invoice_id: 77, direction: 'purchase', document_number: '2026-0412', supplier_name: 'Beton Plus d.o.o.',
   supplier_vat_number: '100200300', amount: 12000, currency: 'RSD', sent_date: '2026-10-14T08:00:00Z',
   sef_status: 'Seen', state: 'pending', imported_invoice_id: null, ubl_fetched_at: '2026-10-14T09:00:00Z',
   pdf_path: 'co/77.pdf', pdf_kind: 'sef_rendering', pdf_note: null, ...over,

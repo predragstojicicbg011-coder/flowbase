@@ -18,9 +18,13 @@ import { ATTACHMENT_COLUMNS, type SefAttachmentRow } from './sefPdf'
 export interface SefDocRow {
   id: string
   sef_invoice_id: number
+  /** `purchase` is what the company received, `sales` what it issued. */
+  direction: 'purchase' | 'sales'
   document_number: string | null
   supplier_name: string | null
   supplier_vat_number: string | null
+  customer_name: string | null
+  customer_vat_number: string | null
   amount: number | null
   currency: string | null
   sent_date: string | null
@@ -33,7 +37,7 @@ export interface SefDocRow {
 }
 
 export const DOC_ROW_COLUMNS =
-  'id, sef_invoice_id, document_number, supplier_name, supplier_vat_number, amount, currency, sent_date, '
+  'id, sef_invoice_id, direction, document_number, supplier_name, supplier_vat_number, customer_name, customer_vat_number, amount, currency, sent_date, '
   + 'sef_status, state, ubl_fetched_at, pdf_path, pdf_kind, pdf_note'
 
 /** The booked invoice, as much as pairing needs. */
@@ -83,7 +87,9 @@ export function rankLinkCandidates(invoice: BookedInvoice, rows: SefDocRow[]): L
     if (row.state !== 'pending') continue
     const reasons: string[] = []
     let score = 0
-    const taxHit = tax !== '' && foldTaxId(row.supplier_vat_number) === tax
+    // The other party: the customer of an issued invoice, the supplier of a received one.
+    const otherTax = row.direction === 'sales' ? row.customer_vat_number : row.supplier_vat_number
+    const taxHit = tax !== '' && foldTaxId(otherTax) === tax
     const numHit = num !== '' && foldNumber(row.document_number) === num
     if (!taxHit && !numHit) continue
     if (taxHit) { score += 4; reasons.push('isti PIB') }
@@ -161,6 +167,7 @@ export async function loadInvoiceDocuments(client: DocsClient, invoiceId: string
 export async function loadLinkCandidates(client: DocsClient, invoice: BookedInvoice): Promise<LinkCandidate[]> {
   let q = client.from('sef_inbox').select(DOC_ROW_COLUMNS)
     .eq('state', 'pending').is('imported_invoice_id', null)
+    .eq('direction', invoice.type === 'revenue' ? 'sales' : 'purchase')
   if (invoice.company_id) q = q.eq('company_id', invoice.company_id)
   const { data, error } = await q.order('sent_date', { ascending: false }).limit(2000)
   if (error) throw new Error(error.message)

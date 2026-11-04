@@ -246,6 +246,9 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
       // rows above everything that has a date.
       fetchAllPages<SefRow>((from, to) =>
         supabase.from('sef_inbox').select(INBOX_COLUMNS)
+          // The inbox is what the company RECEIVES; its issued invoices are a
+          // different queue and a different screen.
+          .eq('direction', 'purchase')
           .order('sent_date', { ascending: false, nullsFirst: false }).order('id')
           .range(from, to))
         .catch((e: any) => { problems.push(`Could not read the inbox: ${e?.message || e}`); return null }),
