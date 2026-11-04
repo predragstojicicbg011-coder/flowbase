@@ -18,6 +18,9 @@ import {
   sefPdfUrl, sefObjectUrl, attachmentsByInbox, attachmentLabel, ATTACHMENT_COLUMNS, type SefAttachmentRow,
 } from '../services/sef/sefPdf'
 import { getBookRates, rateFor } from '../services/bookAmounts'
+import { fetchProjects, type Project } from '../services/projects'
+import type { RentalLease } from '../services/revenuePlan'
+import { proposeLease, proposeProject } from '../services/revenueClassification'
 
 // The inbox of invoices WE issued, as SEF lists them (direction 'sales').
 //
@@ -73,7 +76,10 @@ const INBOX_COLUMNS = [
   'dismiss_reason', 'dismissed_at', 'imported_at', 'pdf_path',
 ].join(', ')
 
-const LEDGER_COLUMNS = 'id, invoice_number, invoice_date, amount, currency, partner_id'
+const LEDGER_COLUMNS = 'id, invoice_number, invoice_date, amount, currency, partner_id, project_id, lease_id, service_month'
+
+/** A revenue invoice in the books: for the duplicate check and for classifying the next one. */
+type LedgerRow = LedgerInvoice & { project_id?: string | null; lease_id?: string | null; service_month?: string | null }
 
 function fmtDate(value: string | null | undefined): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value || '')
@@ -112,7 +118,9 @@ const EMPTY_TEXT: Record<Filter, string> = {
 
 export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
   const [rows, setRows] = useState<SalesRow[]>([])
-  const [ledger, setLedger] = useState<LedgerInvoice[]>([])
+  const [ledger, setLedger] = useState<LedgerRow[]>([])
+  const [leases, setLeases] = useState<RentalLease[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
   const [partners, setPartners] = useState<PartnerLite[]>([])
   const [companies, setCompanies] = useState<CompanyLite[]>([])
   const [attachments, setAttachments] = useState<Map<string, SefAttachmentRow[]>>(new Map())
@@ -138,20 +146,20 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
 
   const load = useCallback(async () => {
     const problems: string[] = []
-    const [inbox, ledgerRows, partnerRows, companyRows, attachmentRows] = await Promise.all([
+    const [inbox, ledgerRows, partnerRows, companyRows, attachmentRows, leaseRows, projectRows] = await Promise.all([
       fetchAllPages<SalesRow>((from, to) =>
         supabase.from('sef_inbox').select(INBOX_COLUMNS)
           .eq('direction', 'sales')
           .order('issue_date', { ascending: false, nullsFirst: false }).order('id')
           .range(from, to))
         .catch((e: any) => { problems.push(`Sanduče nije pročitano: ${e?.message || e}`); return null }),
-      fetchAllPages<LedgerInvoice>((from, to) =>
+      fetchAllPages<LedgerRow>((from, to) =>
         supabase.from('invoices').select(LEDGER_COLUMNS)
           .eq('type', 'revenue')
           .is('parent_invoice_id', null)
           .order('invoice_date', { ascending: false }).order('id')
           .range(from, to))
-        .catch((e: any) => { problems.push(`Knjige nisu pročitane, pa duplikati nisu provereni: ${e?.message || e}`); return [] as LedgerInvoice[] }),
+        .catch((e: any) => { problems.push(`Knjige nisu pročitane, pa duplikati nisu provereni: ${e?.message || e}`); return [] as LedgerRow[] }),
       fetchAllPages<PartnerLite>((from, to) =>
         supabase.from('partners').select('id, name, tax_id, registration_number')
           .order('id').range(from, to))
@@ -177,12 +185,19 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
         supabase.from('sef_inbox_attachments').select(ATTACHMENT_COLUMNS)
           .order('id').range(from, to))
         .catch((e: any) => { problems.push(`Prilozi nisu pročitani: ${e?.message || e}`); return [] as SefAttachmentRow[] }),
+      fetchAllPages<RentalLease>((from, to) =>
+        supabase.from('rental_leases').select('*').order('id').range(from, to))
+        .catch((e: any) => { problems.push(`Zakupi nisu pročitani, pa zakup nije predložen: ${e?.message || e}`); return [] as RentalLease[] }),
+      fetchProjects(supabase)
+        .catch((e: any) => { problems.push(`Projekti nisu pročitani, pa projekat nije predložen: ${e?.message || e}`); return [] as Project[] }),
     ])
 
     if (!mounted.current) return
     setInboxFailed(!inbox)
     if (inbox) setRows(inbox)
     setLedger(ledgerRows)
+    setLeases(leaseRows)
+    setProjects(projectRows)
     setPartners(partnerRows)
     setCompanies(companyRows)
     setAttachments(attachmentsByInbox(attachmentRows))
@@ -316,6 +331,42 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
       },
     })
 
+    // What the invoice is: rent from a lease first, then a project. Only a
+    // suggestion: the person confirms or changes it in the dialog.
+    const draft = salesDraftFromUbl(ubl, row, match?.partnerId ?? null, companyId, rate, eurRate)
+    {
+      const partnerId = match?.partnerId ?? null
+      // The notes and line names. Not the number: IF-12/2026 is not December.
+      const text = ubl.advanceText
+      const asLease = ubl.isCreditNote || ubl.isDebitNote || ubl.isAdvanceInvoice ? null : proposeLease({
+        partnerId, net: ubl.net, gross: ubl.grossTotal ?? ubl.total, currency: ubl.currency || row.currency,
+        date: bookedDateOf(ubl) || '', text,
+      }, leases, ledger.map(l => ({
+        project_id: l.project_id ?? null, type: 'revenue', invoice_date: l.invoice_date || '',
+        lease_id: l.lease_id ?? null, service_month: l.service_month ?? null,
+      })))
+      if (asLease) {
+        Object.assign(draft, {
+          revenue_kind: 'lease', lease_id: asLease.leaseId, service_month: asLease.serviceMonth,
+          project_id: asLease.projectId, classification_why: `Zakup: ${asLease.why}`,
+        })
+        notes.push(`Predlog razvrstavanja — zakup: ${asLease.why}`)
+        if (asLease.alreadyBilled) notes.push('Za taj mesec već postoji faktura za ovaj zakup. Proverite da nije ista faktura.')
+      } else {
+        const asProject = proposeProject({ partnerId, number: ubl.invoiceNumber, text }, projects, ledger.map(l => ({
+          partner_id: l.partner_id, project_id: l.project_id ?? null, invoice_date: l.invoice_date, lease_id: l.lease_id ?? null,
+        })))
+        if (asProject) {
+          Object.assign(draft, {
+            revenue_kind: 'project', project_id: asProject.projectId, classification_why: `Projekat: ${asProject.why}`,
+          })
+          notes.push(`Predlog razvrstavanja — projekat: ${asProject.why}`)
+        } else {
+          notes.push('Razvrstavanje nije predloženo: izaberite projekat, zakup ili prodaju usluga.')
+        }
+      }
+    }
+
     const documents = [
       ...(row.pdf_path ? [{ label: 'Faktura (SEF)', open: () => showPdf(row) }] : []),
       ...(attachments.get(row.id) || []).map(a => ({ label: attachmentLabel(a), open: () => showAttachment(row, a) })),
@@ -324,7 +375,7 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
     if (!mounted.current) return
     setBooking({
       row, notes, isCreditNote: ubl.isCreditNote, documents,
-      draft: salesDraftFromUbl(ubl, row, match?.partnerId ?? null, companyId, rate, eurRate),
+      draft,
     })
   })
 

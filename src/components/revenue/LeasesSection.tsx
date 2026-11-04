@@ -1,5 +1,5 @@
-// "Zakup": the leases of each rental building, the lease form, and the rent
-// invoices a month still needs.
+// "Zakup": the leases of each rental building, the lease form, and the months
+// that still have no rent invoice (a reminder; the invoice comes from SEF).
 
 import React, { useMemo, useState } from 'react'
 import { rs } from './styles'
@@ -60,7 +60,7 @@ export default function LeasesSection({
         <label style={rs.dateLabel}>Mesec
           <input type="month" style={rs.filterInput} value={month} onChange={e => setMonth(e.target.value)} aria-label="Mesec za fakture zakupa" />
         </label>
-        <button style={rs.newBtn} onClick={propose} disabled={!companyId}>Predloži fakture za zakup</button>
+        <button style={rs.newBtn} onClick={propose} disabled={!companyId}>Meseci bez fakture za zakup</button>
       </div>
 
       {rentalProjects.map(p => {
@@ -124,8 +124,8 @@ export default function LeasesSection({
       )}
       {proposals && (
         <RentInvoiceProposals month={proposals.month} proposals={proposals.list}
-          tenantName={partnerName} projectName={projectName} companyId={companyId}
-          onClose={() => setProposals(null)} onCreated={onChanged} />
+          tenantName={partnerName} projectName={projectName}
+          onClose={() => setProposals(null)} />
       )}
     </>
   )

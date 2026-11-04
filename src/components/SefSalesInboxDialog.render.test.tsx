@@ -14,6 +14,8 @@ const mockState = {
   rows: [] as any[],
   ledger: [] as any[],
   partners: [] as any[],
+  leases: [] as any[],
+  projects: [] as any[],
   invoke: jest.fn(),
   rpc: jest.fn(),
   updates: [] as any[],
@@ -28,6 +30,8 @@ function mockQuery(table: string) {
     if (table === 'sef_inbox') return { data: isUpdate ? [{ id: 'r1' }] : mockState.rows, error: null }
     if (table === 'invoices') return { data: mockState.ledger, error: null }
     if (table === 'partners') return { data: mockState.partners, error: null }
+    if (table === 'rental_leases') return { data: mockState.leases, error: null }
+    if (table === 'projects') return { data: mockState.projects, error: null }
     return { data: [], error: null }
   }
   const q: any = {}
@@ -78,6 +82,8 @@ beforeEach(() => {
   mockState.rows = [row()]
   mockState.ledger = []
   mockState.partners = [buyer]
+  mockState.leases = []
+  mockState.projects = []
   mockState.invoke = jest.fn()
   mockState.rpc = jest.fn(async () => ({ data: null, error: null }))
   mockState.updates = []
@@ -102,6 +108,37 @@ describe('the sales inbox', () => {
     expect(mockState.invoiceProps.invoice).toMatchObject({ type: 'revenue', partner_id: 'k1', amount: 120000 })
     expect(mockState.invoiceProps.sourceDocuments[0].label).toBe('Faktura (SEF)')
     expect(mockState.invoke).not.toHaveBeenCalled()
+  })
+
+  it('proposes the lease when the amount is the monthly rent', async () => {
+    mockState.leases = [{
+      id: 'l1', project_id: 'zgrada', tenant_partner_id: 'k1', monthly_rent: 100000, currency: 'RSD',
+      start_date: '2026-01-01', end_date: null, invoice_day: 1, payment_days: 15, active: true,
+    }]
+    await show()
+    fireEvent.click(screen.getByText('Proknjiži'))
+    await screen.findByTestId('booking')
+    expect(mockState.invoiceProps.invoice).toMatchObject({
+      revenue_kind: 'lease', lease_id: 'l1', service_month: '2026-10-01', project_id: 'zgrada',
+    })
+    expect(mockState.invoiceProps.reviewNotes.join(' ')).toMatch(/Predlog razvrstavanja — zakup/)
+  })
+
+  it('proposes the project of the customer when it is the investor of the only site', async () => {
+    mockState.projects = [{ id: 'pr1', company_id: 'co1', name: 'Novi Beograd A1', code: 'NB-01', kind: 'construction', investor_partner_id: 'k1', active: true }]
+    await show()
+    fireEvent.click(screen.getByText('Proknjiži'))
+    await screen.findByTestId('booking')
+    expect(mockState.invoiceProps.invoice).toMatchObject({ revenue_kind: 'project', project_id: 'pr1' })
+    expect(mockState.invoiceProps.invoice.lease_id).toBeUndefined()
+  })
+
+  it('proposes nothing it cannot back, and says so', async () => {
+    await show()
+    fireEvent.click(screen.getByText('Proknjiži'))
+    await screen.findByTestId('booking')
+    expect(mockState.invoiceProps.invoice.revenue_kind).toBeUndefined()
+    expect(mockState.invoiceProps.reviewNotes.join(' ')).toMatch(/Razvrstavanje nije predloženo/)
   })
 
   it('marks the row booked after saving', async () => {

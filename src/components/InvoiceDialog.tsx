@@ -31,6 +31,11 @@ import {
   type AdvanceDeduction, type AdvanceReceipt,
 } from '../services/revenue'
 import { round2 } from '../services/bookAmounts'
+import {
+  REVENUE_KIND_LABEL, classificationProblem, revenueKindOf, type RevenueKind,
+} from '../services/revenueClassification'
+import { leaseMonthRent, type RentalLease } from '../services/revenuePlan'
+import { isDuplicateRentError } from '../services/revenuePage'
 import { countOf } from '../utils/plural'
 import { bankNameForAccount, formatAccount } from '../services/bankCodes'
 import {
@@ -146,6 +151,14 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   // The site or building this bill belongs to; null is company overhead.
   // Null while the bill is split — the lines carry the projects then.
   const [projectId, setProjectId] = useState<string | null>(null)
+  // A revenue invoice is a project, a lease or sales of services: chosen by
+  // the person, null until then. For a lease, `serviceMonth` is `YYYY-MM`.
+  const [revKind, setRevKind] = useState<RevenueKind | null>(null)
+  const [leaseId, setLeaseId] = useState('')
+  const [serviceMonth, setServiceMonth] = useState('')
+  const [leases, setLeases] = useState<RentalLease[]>([])
+  /** `leaseId|YYYY-MM` of the months of the loaded leases that already have a live invoice. */
+  const [billedMonths, setBilledMonths] = useState<Set<string>>(new Set())
   const [deptSplit, setDeptSplit] = useState('none')
   const [note, setNote] = useState('')
   const [tags, setTags] = useState<string[]>([])
@@ -371,7 +384,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const revenueStreams = REVENUE_STREAMS
 
   /** Whether this bill may deduct an advance at all. */
-  const advanceEligible = invType === 'revenue' && !splitActive && !!projectId && (parseFloat(amount) || 0) > 0
+  const advanceEligible = invType === 'revenue' && revKind !== 'lease' && !splitActive && !!projectId && (parseFloat(amount) || 0) > 0
   /** The deduction as it will be saved, in the invoice's currency: 0 where not allowed. */
   const advanceOwn = advanceEligible ? round2(Math.max(0, parseFloat(advanceInput) || 0)) : 0
   /** The project's advance still to deduct, this bill's own old deduction left out. */
@@ -641,6 +654,11 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       if (!deptId && !splitActive) e.dept = 'Sektor je obavezan'
     }
     if (invType === 'revenue' && !revStream) e.revStream = 'Vrsta prihoda je obavezna'
+    if (invType === 'revenue') {
+      const why = classificationProblem(
+        { kind: revKind, projectId, leaseId: leaseId || null, serviceMonth: serviceMonth || null }, docType)
+      if (why) e.classification = why
+    }
     if (advanceOwn > 0) {
       const why = validateAdvanceDeduction({
         invoice: {
@@ -659,7 +677,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions, docType, adjustsId, baseBills, coverage, paidProformas, priorPeriod, usage, openAdvances, priorAdvances]) // eslint-disable-line
+  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions, docType, adjustsId, baseBills, coverage, paidProformas, priorPeriod, usage, openAdvances, priorAdvances, revKind, leaseId, serviceMonth]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -707,6 +725,34 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     load()
     return () => { cancelled = true }
   }, [invType, projectId])
+
+  // The company's active leases, for the Zakup choice, and which of their
+  // months already have a live invoice (the database refuses a second one).
+  useEffect(() => {
+    if (invType !== 'revenue' || !companyId) { setLeases([]); setBilledMonths(new Set()); return }
+    let cancelled = false
+    const load = async () => {
+      try {
+        const { data, error } = await supabase.from('rental_leases')
+          .select('id, company_id, project_id, tenant_partner_id, monthly_rent, currency, start_date, end_date, invoice_day, payment_days, active')
+          .eq('company_id', companyId).eq('active', true)
+        if (cancelled) return
+        if (error) throw error
+        const list = (data || []) as RentalLease[]
+        setLeases(list)
+        if (list.length === 0) { setBilledMonths(new Set()); return }
+        const { data: billed, error: billedErr } = await supabase.from('invoices')
+          .select('lease_id, service_month').in('lease_id', list.map(l => l.id)).is('deleted_at', null)
+        if (cancelled) return
+        if (billedErr) throw billedErr
+        setBilledMonths(new Set((billed || []).map((b: any) => `${b.lease_id}|${String(b.service_month || '').slice(0, 7)}`)))
+      } catch (e: any) {
+        if (!cancelled) console.warn('lease load error:', e?.message || e)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [invType, companyId])
 
   // A revenue invoice's stream follows its project's kind until the user
   // picks one: 'Građevinske situacije' on a construction site, 'Zakup' on a
@@ -869,6 +915,16 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setPlSubName(invoice.pl_subcategory || ''); setDeptName(invoice.department || '')
     setDeptSubName(invoice.dept_subcategory || ''); setExpDesc(invoice.expense_description || '')
     setRevStream(invoice.revenue_stream || ''); setProjectId(invoice.project_id ?? null)
+    // The classification of a revenue invoice. A booked one is read from what
+    // it is on; a draft says what it was drafted as, or leaves it to the person.
+    {
+      const kind: RevenueKind | null = invoice.revenue_kind
+        || (invoice.id || invoice.lease_id || invoice.project_id ? revenueKindOf(invoice) : null)
+      setRevKind(kind)
+      setLeaseId(invoice.lease_id || '')
+      setServiceMonth(invoice.service_month ? String(invoice.service_month).slice(0, 7) : '')
+      if (kind === 'services') setProjectId(null)
+    }
     // An existing bill's stream is the user's, not the project's default.
     setRevStreamChosen(!!invoice.revenue_stream)
     setAdvanceInput(Number(invoice.advance_deducted) > 0 ? String(invoice.advance_deducted) : '')
@@ -923,14 +979,14 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const touchStep = (n: number) => {
     if (n === 1) setTouched(p => ({ ...p, companyId: true, currency: true, invoiceDate: true, partnerId: true }))
     if (n === 2) setTouched(p => ({ ...p, amount: true, exRate: true }))
-    if (n === 3) setTouched(p => ({ ...p, plCat: true, dept: true, revStream: true, advance: true }))
+    if (n === 3) setTouched(p => ({ ...p, plCat: true, dept: true, revStream: true, advance: true, classification: true }))
   }
 
   const stepHasError = (n: number) => {
     const stepFields: Record<number, string[]> = {
       1: ['companyId', 'currency', 'invoiceDate', 'partnerId'],
       2: ['amount', 'exRate'],
-      3: ['plCat', 'dept', 'revStream', 'advance'],
+      3: ['plCat', 'dept', 'revStream', 'advance', 'classification'],
     }
     return (stepFields[n] || []).some(f => !!errors[f])
   }
@@ -998,7 +1054,16 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       }
       const effectiveStatus = linkedTxId ? (savedLinks && savedLinks.left > 0.005 ? 'partial' : 'paid') : 'unpaid'
       // A split bill's projects are on its lines; the bill itself is on none.
-      const ownProjectId = splitActive ? null : projectId
+      // A revenue invoice: sales of services is on no project, a lease is on
+      // its own building, whatever the project picker last held.
+      const leaseOf = invType === 'revenue' && revKind === 'lease' ? leases.find(l => l.id === leaseId) : undefined
+      const ownProjectId = invType === 'revenue' && revKind === 'services' ? null
+        : leaseOf && !invoice?.id ? leaseOf.project_id
+          : splitActive ? null : projectId
+      // A new rent invoice carries its lease and month; a booked one keeps
+      // them through an edit (never written here).
+      const rentLink = !invoice?.id && invType === 'revenue' && revKind === 'lease'
+        ? { lease_id: leaseId, service_month: `${serviceMonth}-01` } : {}
 
       const payload = {
         company_id: companyId || null, partner_id: finalPartnerId || null,
@@ -1031,6 +1096,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         // CHECK refuses it). lease_id and service_month are never written
         // here: a rent invoice keeps them through an edit.
         ...advanceDeductionBook(advanceOwn, booked),
+        ...rentLink,
       }
 
       // `.select('id')` is what turns a zero-row update back into an error.
@@ -1156,7 +1222,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       // went unnoticed for as long as it did. Every write above now reads its
       // own `error` and throws it here itself; that, and only that, is what
       // reaches this block.
-      setSaveError(err?.message || String(err))
+      setSaveError(
+        !invoice?.id && invType === 'revenue' && revKind === 'lease' && isDuplicateRentError(err)
+          ? 'Za ovaj zakup i mesec faktura već postoji.'
+          : err?.message || String(err))
       setSaving(false)
       return
     }
@@ -1183,6 +1252,8 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   // ── Project panel ────────────────────────────
   // One picker; null is company overhead. Hidden while the bill is split,
   // because then each line carries its own project and this one is null.
+  // A booked rent invoice stays on its lease and month, as it always did.
+  const lockedLease = !!invoice?.id && !!invoice?.lease_id
   const projectPanel = (
     <div style={s.section}>
       <div style={s.sectionTitle}>Projekat</div>
@@ -1191,7 +1262,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           Faktura je podeljena — svaka stavka iznad nosi svoj projekat.
           Uklonite podelu da biste celu fakturu stavili na jedan projekat.
         </div>
-      ) : invoice?.lease_id ? (
+      ) : lockedLease ? (
         <>
           <ProjectSelect value={projectId} onChange={() => {}} companyId={companyId || null}
             style={pickerChrome} disabled title="Faktura za zakup pripada projektu ugovora o zakupu" />
@@ -1204,6 +1275,79 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           style={pickerChrome} />
       )}
     </div>
+  )
+
+
+  // ── Classification of a revenue invoice ──────
+  // Exactly one of: a project, a lease (and its month), sales of services.
+  const pickRevKind = (k: RevenueKind) => {
+    touch('classification')
+    if (k === 'services') setProjectId(null)
+    else if (k === 'lease') setProjectId(leases.find(l => l.id === leaseId)?.project_id ?? null)
+    else if (revKind === 'lease') setProjectId(null)
+    setRevKind(k)
+  }
+  const pickLease = (id: string) => {
+    touch('classification')
+    setLeaseId(id)
+    setProjectId(leases.find(l => l.id === id)?.project_id ?? null)
+  }
+  const chosenLease = leases.find(l => l.id === leaseId)
+  const monthAlreadyBilled = !lockedLease && !!leaseId && !!serviceMonth && billedMonths.has(`${leaseId}|${serviceMonth}`)
+  const partnerNameOf = (id: string) => partners.find(p => p.id === id)?.name || '—'
+  const classificationPanel = (
+    <fieldset aria-label="Razvrstavanje" style={{ ...s.section, border: 'none', padding: 0, margin: '0 0 1.5rem' }}>
+      <div style={s.sectionTitle}>Razvrstavanje <span style={s.req}>*</span></div>
+      <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', marginBottom: '10px' }}>
+        {(['project', 'lease', 'services'] as RevenueKind[]).map(k => {
+          const blocked = lockedLease || (k === 'lease' && !!invoice?.id)
+          return (
+            <label key={k} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: blocked && revKind !== k ? DIALOG.faint : DIALOG.text }}
+              title={blocked && k === 'lease' && !lockedLease ? 'Zakup se bira pri unosu nove fakture' : undefined}>
+              <input type="radio" name="revenue-kind" checked={revKind === k} disabled={blocked}
+                onChange={() => pickRevKind(k)} />
+              {REVENUE_KIND_LABEL[k]}
+            </label>
+          )
+        })}
+      </div>
+      {revKind === 'project' && projectPanel}
+      {revKind === 'lease' && (lockedLease ? projectPanel : (
+        <div>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <select aria-label="Zakup" style={{ ...s.select, flex: '1 1 260px' }} value={leaseId}
+              onChange={e => pickLease(e.target.value)}>
+              <option value="">Izaberite zakup…</option>
+              {leases.map(l => (
+                <option key={l.id} value={l.id}>{partnerNameOf(l.tenant_partner_id)} · {projectLabelById(projects, l.project_id)}</option>
+              ))}
+            </select>
+            <input type="month" aria-label="Mesec usluge" style={{ ...s.select, flex: '0 0 170px' }} value={serviceMonth}
+              onChange={e => { setServiceMonth(e.target.value); touch('classification') }} />
+          </div>
+          {chosenLease && serviceMonth && (
+            <div style={{ fontSize: '11.5px', color: DIALOG.dim, marginTop: '6px', lineHeight: 1.5 }}>
+              Zakupnina za taj mesec po ugovoru: {fmtMoney(leaseMonthRent(chosenLease, serviceMonth), chosenLease.currency)}.
+              Faktura se vezuje za objekat ugovora.
+            </div>
+          )}
+          {monthAlreadyBilled && (
+            <div role="alert" style={{ fontSize: '11.5px', color: DIALOG.amber, marginTop: '6px', lineHeight: 1.5 }}>
+              Za ovaj zakup je mesec već fakturisan.
+            </div>
+          )}
+        </div>
+      ))}
+      {revKind === 'services' && (
+        <div style={{ fontSize: '11.5px', color: DIALOG.dim, lineHeight: 1.5 }}>
+          Prodaja usluga ne ide ni na jedan projekat.
+        </div>
+      )}
+      {invoice?.classification_why && (
+        <div style={{ fontSize: '11.5px', color: DIALOG.dim, marginTop: '6px', lineHeight: 1.5 }}>{invoice.classification_why}</div>
+      )}
+      {fieldErr('classification') && <span style={s.errorMsg}>{fieldErr('classification')}</span>}
+    </fieldset>
   )
 
   // ── Cash Flow Classification panel ──────────────────
@@ -1749,6 +1893,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
               {DOCUMENT_TYPE_LABEL[docType]} ne ulazi u troškove (bez uticaja na P&L). Trošak se knjiži konačnim računom.
             </div>
           )}
+          {step === 3 && noPl && invType === 'revenue' && classificationPanel}
           {step === 3 && !noPl && (
             <>
               {/* ONE BILL, SEVERAL COSTS.
@@ -1944,14 +2089,14 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                     </select>
                     {fieldErr('revStream') && <span style={s.errorMsg}>{fieldErr('revStream')}</span>}
                   </div>
-                  {invoice?.lease_id && (
+                  {lockedLease && (
                     <div style={{ fontSize: '11.5px', color: DIALOG.dim, marginTop: '6px', lineHeight: 1.5 }}>
                       Faktura zakupa{invoice.service_month ? ` za ${String(invoice.service_month).slice(0, 7)}` : ''} — ostaje vezana za ugovor o zakupu i svoj mesec.
                     </div>
                   )}
                 </div>
               )}
-              {invType === 'revenue' && projectPanel}
+              {invType === 'revenue' && classificationPanel}
 
               {invType === 'revenue' && (
                 <div style={s.section}>

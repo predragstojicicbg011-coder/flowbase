@@ -138,12 +138,15 @@ describe('Prihodi page — populated', () => {
     expect(within(leases).getByText(/neograničeno/)).toBeInTheDocument()
   })
 
-  it('proposes this month\'s rent invoice with a provisional number', async () => {
+  it('lists the leases without an invoice this month, as a reminder only', async () => {
     show()
-    fireEvent.click(await screen.findByRole('button', { name: 'Predloži fakture za zakup' }))
-    const dialog = screen.getByRole('dialog', { name: 'Predlog faktura za zakup' })
-    expect(within(dialog).getByText(`ZAK-ABCD1234-${today.slice(0, 7)}`)).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: 'Meseci bez fakture za zakup' }))
+    const dialog = screen.getByRole('dialog', { name: 'Meseci bez fakture za zakup' })
+    expect(within(dialog).getByText('Zakupac Market')).toBeInTheDocument()
     expect(within(dialog).getByText('1.000,00 EUR')).toBeInTheDocument()
+    expect(within(dialog).getByText(/Faktura za zakup se izdaje na SEF-u ili u Calculus-u/)).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /Izdaj/ })).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/ZAK-/)).not.toBeInTheDocument()
   })
 })
 
