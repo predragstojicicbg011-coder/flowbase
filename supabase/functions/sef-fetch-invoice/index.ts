@@ -105,9 +105,16 @@ Deno.serve(async (req) => {
 
   const { data: row, error: rowErr } = await supabase
     .from('sef_inbox')
-    .select('id, company_id, sef_invoice_id, state, sef_status, ubl_xml, pdf_path, pdf_kind, pdf_note')
+    .select('id, company_id, sef_invoice_id, direction, state, sef_status, ubl_xml, pdf_path, pdf_kind, pdf_note')
     .eq('id', id).single()
   if (rowErr || !row) return json({ error: 'No such row in the inbox.' }, 404)
+
+  // An issued invoice is not opened here: its document is pulled by
+  // `sef-pull-sales`, and this function's purchase-invoice endpoint would ask
+  // SEF about a different invoice that happens to share the number.
+  if (row.direction === 'sales') {
+    return json({ error: 'To je izlazna faktura; otvara se iz sandučeta izlaznih faktura.' }, 409)
+  }
 
   // ── The repair: the PDFs again, for a row that has already been opened ──
   //

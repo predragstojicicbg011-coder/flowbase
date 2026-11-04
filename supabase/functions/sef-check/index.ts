@@ -38,6 +38,10 @@ const SEF_TIMEOUT_MS = 20_000
 const KEY_REJECTED =
   'SEF je odbio ključ — proverite da je ključ aktivan u SEF portalu (Podešavanja → API upravljanje)'
 const SEF_UNAVAILABLE = 'SEF nije dostupan'
+// A copy of SALES_FORBIDDEN in `sef-pull-sales/salesInvoice.ts`, where it is tested: a function
+// is deployed on its own, so it does not import another function's folder. Change both together.
+const SALES_FORBIDDEN =
+  'SEF ključ nema pravo na izlazne fakture — u SEF portalu dodelite ulogu „Korisnik za izlazne dokumente“ korisniku ovog API ključa.'
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -105,10 +109,46 @@ Deno.serve(async (req) => {
     return fail(502, 'sef_refused', 'SEF je odgovorio nečim što nije spisak faktura.', { environment })
   }
 
+  // ── THE SECOND CALL: MAY THIS KEY READ ISSUED INVOICES? ─────────────────
+  // A key can be good for incoming invoices and still lack the SEF role for
+  // outgoing ones. `ids` lists nothing and moves nothing, so it is as harmless
+  // as the call above. Its failure never fails the check: the incoming half
+  // stands, and the answer says what the sales half found.
+  let salesOk = false
+  let salesSeen = 0
+  let salesMessage = ''
+  try {
+    const sres = await fetch(
+      `${base}/sales-invoice/ids?status=Sent&dateFrom=${today}&dateTo=${today}`,
+      { method: 'POST', headers: { ApiKey: cred.api_key }, signal: AbortSignal.timeout(SEF_TIMEOUT_MS) })
+    if (sres.status === 403) {
+      salesMessage = SALES_FORBIDDEN
+    } else if (sres.status === 401) {
+      salesMessage = 'Izlazne fakture: SEF je odbio ključ.'
+    } else if (!sres.ok) {
+      salesMessage = `Izlazne fakture: SEF je odgovorio sa ${sres.status}.`
+    } else {
+      const body = await sres.json().catch(() => null)
+      const list = body && typeof body === 'object'
+        ? Object.entries(body as Record<string, unknown>).find(([k]) => k.toLowerCase() === 'salesinvoiceids')?.[1]
+        : undefined
+      if (Array.isArray(list)) { salesOk = true; salesSeen = list.length }
+      else salesMessage = 'Izlazne fakture: SEF je odgovorio nečim što nije spisak.'
+    }
+  } catch (e) {
+    console.error('sef-check: sales probe failed:', e instanceof Error ? e.name : 'error')
+    salesMessage = 'Izlazne fakture: SEF nije dostupan.'
+  }
+
   return json({
     ok: true,
     environment,
     invoices_seen: rows.length,
     message: `Veza sa SEF-om radi. Danas pristiglih faktura: ${rows.length}.`,
+    sales_ok: salesOk,
+    sales_seen: salesSeen,
+    sales_message: salesOk
+      ? `Izlazne fakture: dozvoljeno, danas izdatih: ${salesSeen}.`
+      : salesMessage,
   })
 })

@@ -4,6 +4,7 @@ import {
   KEY_EMPTY_MESSAGE, KEY_SHAPE_MESSAGE, ENVIRONMENT_MESSAGE, KEY_REJECTED_MESSAGE, SEF_UNAVAILABLE_MESSAGE,
   NOT_CONFIGURED, type RpcClientLike, type FunctionsClientLike,
 } from './sefKey'
+import { SALES_FORBIDDEN } from '../../../supabase/functions/sef-pull-sales/salesInvoice'
 
 const KEY = '462d9282-22cf-4d0b-afbe-17411d375a18'
 
@@ -117,6 +118,14 @@ describe('checking the connection', () => {
       ok: true, environment: 'production', invoicesSeen: 3,
       message: 'Veza sa SEF-om radi. Danas pristiglih faktura: 3.',
     })
+  })
+  it('adds what the key may do with sales invoices', () => {
+    const no = mapSefCheckSuccess({ ok: true, invoices_seen: 2, sales_ok: false, sales_message: SALES_FORBIDDEN })
+    expect(no).toMatchObject({ ok: true, sales: { ok: false, message: SALES_FORBIDDEN } })
+    expect(no.ok && no.message).toContain('nema pravo na izlazne fakture')
+    const yes = mapSefCheckSuccess({ ok: true, invoices_seen: 2, sales_ok: true, sales_seen: 3 })
+    expect(yes).toMatchObject({ sales: { ok: true, message: 'Izlazne fakture: dozvoljeno, danas izdatih: 3.' } })
+    expect(yes.ok && yes.message).toBe('Veza sa SEF-om radi. Danas pristiglih faktura: 2. Izlazne fakture: dozvoljeno, danas izdatih: 3.')
   })
   it('reads a missing count as zero', () => {
     expect(mapSefCheckSuccess({ ok: true }).ok && mapSefCheckSuccess({ ok: true })).toMatchObject({ invoicesSeen: 0 })

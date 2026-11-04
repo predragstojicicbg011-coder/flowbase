@@ -17,7 +17,8 @@ export interface SefKeyStatus {
 }
 
 export type SefCheckResult =
-  | { ok: true; environment: string | null; invoicesSeen: number; message: string }
+  // `sales` is absent when the check function predates the sales probe.
+  | { ok: true; environment: string | null; invoicesSeen: number; message: string; sales?: { ok: boolean; message: string } }
   | { ok: false; code: string; message: string; httpStatus: number | null }
 
 export interface RpcClientLike {
@@ -147,11 +148,23 @@ export function mapSefCheckSuccess(data: any): SefCheckResult {
   }
   const n = Number(data.invoices_seen)
   const invoicesSeen = Number.isFinite(n) && n >= 0 ? n : 0
+  const purchase = `Veza sa SEF-om radi. Danas pristiglih faktura: ${invoicesSeen}.`
+  // What the key may do with ISSUED invoices is a second question, asked by the
+  // function after the first. Whatever it answers is added; nothing is made up.
+  let sales: { ok: boolean; message: string } | undefined
+  if (typeof data.sales_ok === 'boolean') {
+    const s = Number(data.sales_seen)
+    const seen = Number.isFinite(s) && s >= 0 ? s : 0
+    sales = data.sales_ok
+      ? { ok: true, message: `Izlazne fakture: dozvoljeno, danas izdatih: ${seen}.` }
+      : { ok: false, message: typeof data.sales_message === 'string' && data.sales_message ? data.sales_message : 'Izlazne fakture: provera nije uspela.' }
+  }
   return {
     ok: true,
     environment: data.environment ?? null,
     invoicesSeen,
-    message: `Veza sa SEF-om radi. Danas pristiglih faktura: ${invoicesSeen}.`,
+    message: sales ? `${purchase} ${sales.message}` : purchase,
+    ...(sales ? { sales } : {}),
   }
 }
 

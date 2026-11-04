@@ -171,10 +171,14 @@ Deno.serve(async (req) => {
   // ── THE ROW ─────────────────────────────────────────────────────────────
   const { data: row, error: rowErr } = await supabase
     .from('sef_inbox')
-    .select('id, company_id, sef_invoice_id, ubl_fetched_at, sef_decision, sef_status')
+    .select('id, company_id, sef_invoice_id, direction, ubl_fetched_at, sef_decision, sef_status')
     .eq('id', inboxId).maybeSingle()
   if (rowErr) return fail(500, 'failed', `Faktura nije mogla da se pročita: ${rowErr.message}`)
   if (!row) return fail(404, 'not_found', 'Te fakture nema u SEF sandučetu.')
+  // Accepting or rejecting is the buyer's decision about a received invoice.
+  if (row.direction === 'sales') {
+    return fail(409, 'sales_row', 'To je izlazna faktura; otvara se iz sandučeta izlaznih faktura.')
+  }
 
   if (!row.ubl_fetched_at) {
     return fail(409, 'not_opened', 'Prvo otvorite fakturu: odluka se donosi o dokumentu koji je neko pročitao.')
