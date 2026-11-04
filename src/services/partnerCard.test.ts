@@ -147,3 +147,26 @@ describe('the card after review', () => {
     expect(c.closing).toBe(0)
   })
 })
+
+describe('a customer final invoice closed by an advance invoice', () => {
+  const customer = {
+    documents: [
+      doc({ id: 'av', invoice_number: 'AV-1/26', invoice_date: '2026-10-01', type: 'revenue', document_type: 'advance_invoice', amount: 120000, amount_rsd: 120000 }),
+      doc({ id: 'fin', invoice_number: 'IF-7/26', invoice_date: '2026-10-20', type: 'revenue', amount: 300000, amount_rsd: 300000 }),
+    ],
+    payments: [pay({ invoice_id: 'fin', date: '2026-10-25', amount_rsd: 180000, direction: 'in' })],
+    usage: [{ final_invoice_id: 'fin', advance_invoice_id: 'av', amount_rsd: 120000 }],
+    direct: [], coverage: [],
+  }
+
+  it('takes the advance used off what the customer owes', () => {
+    const c = buildPartnerCard(customer, { from: null, to: null })
+    expect(c.rows.map(r => [r.label, r.debit, r.credit, r.balance])).toEqual([
+      ['Izlazni račun IF-7/26', 300000, 0, -300000],
+      ['Zatvoreno avansom AV-1/26', 0, 120000, -180000],
+      ['Uplata — Banca Intesa', 0, 180000, 0],
+    ])
+    expect(c.closing).toBe(0)
+    expect(c.verdict).toBe('Nema duga')
+  })
+})

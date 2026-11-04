@@ -61,7 +61,7 @@ export function openItemsAsOf(
   for (const u of input.usage) {
     const fin = byId.get(u.final_invoice_id)
     const line = fin && by(fin.invoice_date) ? lines.get(lineOf(fin)) : undefined
-    if (line) line.settled = r2(line.settled + num(u.amount_rsd))
+    if (line) line.settled = r2(line.settled + (line.head.type === 'revenue' ? -1 : 1) * num(u.amount_rsd))
   }
 
   const items: OpenItem[] = []

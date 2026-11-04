@@ -109,3 +109,30 @@ describe('a debit note', () => {
     expect(r.total).toBe(55088.59)
   })
 })
+
+describe('a customer final invoice closed by an advance invoice', () => {
+  it('is no open item once the advance and the receipt cover it', () => {
+    const r = openItemsAsOf({
+      documents: [
+        doc({ id: 'av', invoice_number: 'AV-1/26', invoice_date: '2026-10-01', type: 'revenue', document_type: 'advance_invoice', amount: 120000, amount_rsd: 120000 }),
+        doc({ id: 'fin', invoice_number: 'IF-7/26', invoice_date: '2026-10-20', type: 'revenue', amount: 300000, amount_rsd: 300000 }),
+      ],
+      payments: [pay({ invoice_id: 'fin', date: '2026-10-25', amount_rsd: 180000 })],
+      usage: [{ final_invoice_id: 'fin', advance_invoice_id: 'av', amount_rsd: 120000 }],
+    }, '2026-10-31')
+    expect(r.items).toEqual([])
+    expect(r.total).toBe(0)
+  })
+
+  it('leaves what the advance did not cover open against the customer', () => {
+    const r = openItemsAsOf({
+      documents: [
+        doc({ id: 'av', invoice_number: 'AV-1/26', invoice_date: '2026-10-01', type: 'revenue', document_type: 'advance_invoice', amount: 120000, amount_rsd: 120000 }),
+        doc({ id: 'fin', invoice_number: 'IF-7/26', invoice_date: '2026-10-20', type: 'revenue', amount: 300000, amount_rsd: 300000 }),
+      ],
+      payments: [],
+      usage: [{ final_invoice_id: 'fin', advance_invoice_id: 'av', amount_rsd: 120000 }],
+    }, '2026-10-31')
+    expect(r.items.map(i => [i.number, i.amount, i.open])).toEqual([['IF-7/26', -300000, -180000]])
+  })
+})

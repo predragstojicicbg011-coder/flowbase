@@ -10,6 +10,7 @@
 //   credit note on a supplier's bill   Duguje      balance falls
 //   payment of a supplier's bill       Duguje      balance falls
 //   advance closing a final invoice    Duguje      balance falls (on the final invoice's date)
+//   advance closing our final invoice  Potražuje   balance rises (on the final invoice's date)
 //   our invoice to a customer          Duguje      balance falls (they owe us)
 //   credit note on our invoice         Potražuje   balance rises
 //   receipt from a customer            Potražuje   balance rises
@@ -118,7 +119,9 @@ export function buildPartnerCard(
     if (!fin) continue
     changes.push({
       date: fin.invoice_date || '', order: 2, label: `Zatvoreno avansom ${adv?.invoice_number || ''}`.trim(),
-      documentId: u.advance_invoice_id, refers: fin.invoice_number, owe: -num(u.amount_rsd),
+      // Closes the final invoice: a supplier's lowers what we owe, a customer's
+      // lowers what they owe us.
+      documentId: u.advance_invoice_id, refers: fin.invoice_number, owe: fin.type === 'revenue' ? num(u.amount_rsd) : -num(u.amount_rsd),
     })
   }
 
