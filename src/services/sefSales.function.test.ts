@@ -66,7 +66,7 @@ describe('the header off the document', () => {
     const note = fiktura
       .replace('<Invoice ', '<CreditNote ').replace('</Invoice>', '</CreditNote>')
       .replace('<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>', '<cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>')
-      .replace('      <cbc:DueDate>2026-11-15</cbc:DueDate>' + String.fromCharCode(10), '')
+      .replace(/ {6}<cbc:DueDate>2026-11-15<\/cbc:DueDate>\r?\n/, '')
     expect(headerFromUbl(note)).toMatchObject({ documentType: 'CreditNote', dueDate: null, amount: 120000, documentNumber: 'IF-12/2026' })
   })
   it('leaves what is missing empty', () => {
