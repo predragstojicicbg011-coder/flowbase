@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   PULLED_STATUSES, MAX_NEW_PER_PASS, isVoided, idsUrl, readIds, readStatus, readChanges,
   headerFromUbl, slimXml, ublPdfAttachments, salesPdfPath, salesAttachmentPath,
-  pickAskAgain, mergeStatusUpdates, choosePdf, salesRefusal, type StatusUpdate, type SalesChange,
+  pickAskAgain, mergeStatusUpdates, choosePdf, salesRefusal, paceWaitMs, retryPlan, type StatusUpdate, type SalesChange,
 } from './salesInvoice.ts'
 
 // ─── Reading what the company issued ────────────────────────────────────────
@@ -34,6 +34,9 @@ const SEF_TIMEOUT_MS = 60_000
 // Three calls per new invoice: a pass stops starting new ones after this long
 // and says `more: true`, so the next pass takes up where it stopped.
 const PASS_BUDGET_MS = 110_000
+
+/** Thrown when the time budget would run out while waiting out a rate limit: the pass ends with `more: true`. */
+class OutOfTime extends Error {}
 
 /** Thrown for a refusal that stops the whole pass: a dead key, a key without the role. */
 class Refused extends Error {
@@ -156,23 +159,54 @@ Deno.serve(async (req) => {
     // A refusal that stops everything is thrown as `Refused`; any other
     // failure is the caller's to handle, since one broken invoice must not
     // stop the rest.
+    // Every request goes through here: it keeps a gap from the one before
+    // (SEF allows about 3 a second, and the purchase pull shares the key),
+    // and a 429 is waited out (1 s, 2 s, 4 s) before it is called a failure.
+    // A wait that would pass the time budget is not started (`OutOfTime`).
+    let lastStartedAt: number | null = null
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
     const sef = async (method: 'GET' | 'POST', path: string): Promise<Response> => {
-      let res: Response
-      try {
-        res = await fetch(`${base}${path}`, { method, headers: { ApiKey: cred.api_key }, signal: AbortSignal.timeout(SEF_TIMEOUT_MS) })
-      } catch (e) {
-        throw new Error(`SEF could not be reached: ${e instanceof Error ? e.message : String(e)}`)
+      for (let attempt = 0; ; attempt++) {
+        const pace = paceWaitMs(lastStartedAt, Date.now())
+        if (pace > 0) {
+          if (Date.now() - startedAt + pace >= PASS_BUDGET_MS) throw new OutOfTime()
+          await sleep(pace)
+        }
+        lastStartedAt = Date.now()
+        let res: Response
+        try {
+          res = await fetch(`${base}${path}`, { method, headers: { ApiKey: cred.api_key }, signal: AbortSignal.timeout(SEF_TIMEOUT_MS) })
+        } catch (e) {
+          throw new Error(`SEF could not be reached: ${e instanceof Error ? e.message : String(e)}`)
+        }
+        const refusal = salesRefusal(res.status)
+        if (refusal) throw new Refused(refusal, res.status)
+        const plan = retryPlan(attempt, res.status, Date.now() - startedAt, PASS_BUDGET_MS)
+        if (plan.action === 'done') return res
+        await res.text().catch(() => '')
+        if (plan.action === 'out_of_time') throw new OutOfTime()
+        if (plan.action === 'rate_limited') throw new Refused(plan.message, 429)
+        await sleep(plan.waitMs)
       }
-      const refusal = salesRefusal(res.status)
-      if (refusal) throw new Refused(refusal, res.status)
-      return res
+    }
+
+    // The budget ran out during a wait: what is done is kept, the rest is the next pass's.
+    const stoppedForTime = async (partial: Record<string, unknown>) => {
+      const closed = await close({ status: 'complete', error: 'Time budget reached while waiting for SEF; the next pass continues.' })
+      return json({ provider: PROVIDER, status: 'complete', more: true, ...partial, ...closed })
     }
 
     // ── 1. WHAT SEF LISTS ─────────────────────────────────────────────────
     // One list per issued status. Never Cancelled, Storno or Rejected.
     const listedStatus = new Map<number, string>()
     for (const status of PULLED_STATUSES) {
-      const res = await sef('POST', idsUrl('', status, w.date_from, w.date_to))
+      let res: Response
+      try {
+        res = await sef('POST', idsUrl('', status, w.date_from, w.date_to))
+      } catch (e) {
+        if (e instanceof OutOfTime) return await stoppedForTime({ listed: 0, inserted: 0, refreshed: 0, from: w.date_from, to: w.date_to })
+        throw e
+      }
       if (!res.ok) return await fail(`SEF answered ${res.status} for status ${status}: ${(await res.text()).slice(0, 500)}`)
       const ids = readIds(await res.json().catch(() => null))
       for (const id of ids) if (!listedStatus.has(id)) listedStatus.set(id, status)
@@ -210,6 +244,7 @@ Deno.serve(async (req) => {
         if (r === 'inserted') inserted++
       } catch (e) {
         if (e instanceof Refused) throw e
+        if (e instanceof OutOfTime) { more = true; break }
         problems.push(`${id}: ${e instanceof Error ? e.message : String(e)}`)
       }
     }
@@ -271,7 +306,7 @@ Deno.serve(async (req) => {
           if (pres.ok) body = new Uint8Array(await pres.arrayBuffer())
           else httpProblem = `SEF ${pres.status}`
         } catch (e) {
-          if (e instanceof Refused) throw e
+          if (e instanceof Refused || e instanceof OutOfTime) throw e
           httpProblem = e instanceof Error ? e.message : String(e)
         }
         const chosen = choosePdf(body, xml, httpProblem)
@@ -306,7 +341,7 @@ Deno.serve(async (req) => {
           if (error) problems.push(`Prilozi nisu zabeleženi: ${error.message}`)
         }
       } catch (e) {
-        if (e instanceof Refused) throw e
+        if (e instanceof Refused || e instanceof OutOfTime) throw e
         problems.push(`PDF nije sačuvan: ${e instanceof Error ? e.message : String(e)}`)
       }
       return { saved, ...(problems.length ? { error: problems.join(' ') } : {}) }
@@ -336,6 +371,7 @@ Deno.serve(async (req) => {
         for (const c of readChanges(await cres.json().catch(() => null))) changes.push({ ...c, date: c.date ?? date })
       } catch (e) {
         if (e instanceof Refused) throw e
+        if (e instanceof OutOfTime) { more = true; break }
         problems.push(`changes ${date}: ${e instanceof Error ? e.message : String(e)}`)
       }
     }
@@ -367,6 +403,7 @@ Deno.serve(async (req) => {
         if (st?.status) live.set(id, { sefInvoiceId: id, status: st.status, comment: st.comment })
       } catch (e) {
         if (e instanceof Refused) throw e
+        if (e instanceof OutOfTime) { more = true; break }
         problems.push(`${id}: ${e instanceof Error ? e.message : String(e)}`)
       }
     }

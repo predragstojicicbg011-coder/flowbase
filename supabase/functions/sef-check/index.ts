@@ -118,9 +118,18 @@ Deno.serve(async (req) => {
   let salesSeen = 0
   let salesMessage = ''
   try {
-    const sres = await fetch(
+    // The probe follows the call above within a moment, and SEF answers 429
+    // above about three requests a second: wait a second and ask once more.
+    const probe = () => fetch(
       `${base}/sales-invoice/ids?status=Sent&dateFrom=${today}&dateTo=${today}`,
       { method: 'POST', headers: { ApiKey: cred.api_key }, signal: AbortSignal.timeout(SEF_TIMEOUT_MS) })
+    await new Promise(r => setTimeout(r, 500))
+    let sres = await probe()
+    if (sres.status === 429) {
+      await sres.text().catch(() => '')
+      await new Promise(r => setTimeout(r, 1500))
+      sres = await probe()
+    }
     if (sres.status === 403) {
       salesMessage = SALES_FORBIDDEN
     } else if (sres.status === 401) {

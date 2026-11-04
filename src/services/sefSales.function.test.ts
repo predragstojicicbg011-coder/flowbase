@@ -4,6 +4,7 @@ import {
   PULLED_STATUSES, VOIDED_STATUSES, MAX_NEW_PER_PASS, isVoided, idsUrl, readIds, readStatus, readChanges,
   headerFromUbl, slimXml, ublPdfAttachments, salesPdfPath, salesAttachmentPath, refreshTargets,
   SALES_FORBIDDEN, salesRefusal, mergeStatusUpdates, pickAskAgain, choosePdf,
+  MIN_GAP_MS, MAX_RATE_RETRIES, paceWaitMs, nextDelayMs, retryPlan, RATE_LIMITED,
 } from '../../supabase/functions/sef-pull-sales/salesInvoice'
 
 // Issued invoices as SEF gives them, read by the sef-pull-sales function. The
@@ -173,5 +174,44 @@ describe('which PDF is kept', () => {
     const r = choosePdf(enc('<html>'), slimXml(fiktura))
     expect(r.bytes).toBeNull()
     expect(r.note).toContain('PDF')
+  })
+})
+
+describe('pacing and rate limit', () => {
+  it('keeps at least 400 ms between two requests', () => {
+    expect(MIN_GAP_MS).toBe(400)
+    expect(paceWaitMs(null, 1000)).toBe(0)
+    expect(paceWaitMs(1000, 1100)).toBe(300)
+    expect(paceWaitMs(1000, 1400)).toBe(0)
+    expect(paceWaitMs(1000, 5000)).toBe(0)
+  })
+  it('waits longer after every 429 and gives up after three retries', () => {
+    expect(MAX_RATE_RETRIES).toBe(3)
+    expect(nextDelayMs(0, 429)).toBe(1000)
+    expect(nextDelayMs(1, 429)).toBe(2000)
+    expect(nextDelayMs(2, 429)).toBe(4000)
+    expect(nextDelayMs(3, 429)).toBeNull()
+  })
+  it('does not retry anything but 429', () => {
+    for (const s of [200, 400, 401, 403, 404, 500, 503]) expect(nextDelayMs(0, s)).toBeNull()
+  })
+  it('plans a retry, a final answer, a stop for the budget or a rate limit error', () => {
+    expect(retryPlan(0, 200, 0, 110000)).toEqual({ action: 'done' })
+    expect(retryPlan(0, 500, 0, 110000)).toEqual({ action: 'done' })
+    expect(retryPlan(0, 429, 5000, 110000)).toEqual({ action: 'retry', waitMs: 1000 })
+    expect(retryPlan(2, 429, 5000, 110000)).toEqual({ action: 'retry', waitMs: 4000 })
+    expect(retryPlan(3, 429, 5000, 110000)).toEqual({ action: 'rate_limited', message: RATE_LIMITED })
+    expect(RATE_LIMITED).toMatch(/rate limit/i)
+    expect(RATE_LIMITED).toContain('429')
+    // a wait that would pass the budget is not started
+    expect(retryPlan(2, 429, 107000, 110000)).toEqual({ action: 'out_of_time' })
+    expect(retryPlan(0, 429, 109500, 110000)).toEqual({ action: 'out_of_time' })
+  })
+  it('leaves 401 and 403 to salesRefusal', () => {
+    expect(retryPlan(0, 401, 0, 110000)).toEqual({ action: 'done' })
+    expect(retryPlan(0, 403, 0, 110000)).toEqual({ action: 'done' })
+    expect(salesRefusal(403)).toBe(SALES_FORBIDDEN)
+    expect(salesRefusal(401)).toContain('odbio')
+    expect(salesRefusal(429)).toBeNull()
   })
 })

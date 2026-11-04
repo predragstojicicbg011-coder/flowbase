@@ -340,3 +340,48 @@ export function salesRefusal(httpStatus: number): string | null {
   if (httpStatus === 403) return SALES_FORBIDDEN
   return null
 }
+
+// ── Pacing and the rate limit ──────────────────────────────────────────────
+//
+// SEF allows about three requests a second per key, and the purchase pull
+// (`sef-pull`) may be running at the same time on the same key. So every call
+// here keeps a gap from the one before, and a 429 is waited out, not failed.
+
+export const MIN_GAP_MS = 400
+export const MAX_RATE_RETRIES = 3
+
+export const RATE_LIMITED =
+  'SEF je ograničio broj zahteva (429, rate limit) i nije popustio ni posle tri pokušaja; sledeći prolaz nastavlja.'
+  + ' SEF answered 429 (rate limit exceeded) after 3 retries.'
+
+/** How long to wait before the next request starts; `lastStartedAt` is null before the first. */
+export function paceWaitMs(lastStartedAt: number | null, now: number, gapMs = MIN_GAP_MS): number {
+  if (lastStartedAt === null) return 0
+  return Math.max(0, lastStartedAt + gapMs - now)
+}
+
+/** The wait before retry number `attempt + 1` (1 s, 2 s, 4 s), or null when it is not to be retried. */
+export function nextDelayMs(attempt: number, httpStatus: number): number | null {
+  if (httpStatus !== 429) return null
+  if (attempt >= MAX_RATE_RETRIES) return null
+  return 1000 * 2 ** attempt
+}
+
+export type RetryPlan =
+  | { action: 'done' }
+  | { action: 'retry'; waitMs: number }
+  | { action: 'out_of_time' }
+  | { action: 'rate_limited'; message: string }
+
+/**
+ * What to do with an answer: take it (`done`, whatever its status), wait and
+ * ask again, stop because the wait would pass the pass's time budget (the pass
+ * ends with `more: true`), or fail because SEF kept saying 429.
+ */
+export function retryPlan(attempt: number, httpStatus: number, elapsedMs: number, budgetMs: number): RetryPlan {
+  if (httpStatus !== 429) return { action: 'done' }
+  const waitMs = nextDelayMs(attempt, httpStatus)
+  if (waitMs === null) return { action: 'rate_limited', message: RATE_LIMITED }
+  if (elapsedMs + waitMs >= budgetMs) return { action: 'out_of_time' }
+  return { action: 'retry', waitMs }
+}
