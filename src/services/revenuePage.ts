@@ -35,6 +35,7 @@ export interface RevenueListRow extends RevenueInvoiceRow {
   lease_id?: string | null
   service_month?: string | null
   company_id?: string | null
+  document_type?: string | null
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
