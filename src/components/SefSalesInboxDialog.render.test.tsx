@@ -197,12 +197,12 @@ describe('the sales inbox', () => {
     expect(mockState.updates[0]).toMatchObject({ state: 'dismissed', dismiss_reason: 'Pogresan kupac' })
   })
 
-  it('says why an advance document waits', async () => {
+  it('opens an advance invoice in the dialog with no P&L', async () => {
     mockState.rows = [row({ ubl_xml: mockXml.replace('<cbc:InvoiceTypeCode>380<', '<cbc:InvoiceTypeCode>386<') })]
     await show()
     fireEvent.click(screen.getByText('Proknjiži'))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Avansni račun/)
-    expect(mockState.invoiceProps).toBeNull()
+    await waitFor(() => expect(mockState.invoiceProps).not.toBeNull())
+    expect(mockState.invoiceProps.invoice).toMatchObject({ type: 'revenue', document_type: 'advance_invoice', pl_impact: false })
   })
 
   it('shows Paid on SEF as information only', async () => {

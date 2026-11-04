@@ -90,6 +90,7 @@ describe('telling the person a supplier has open advances', () => {
       .toBe('Dobavljač ima otvorene avanse: 2 avansna računa, ukupno 335.000,00 RSD')
     expect(openAdvancesNotice([adv({ open: 1 })])).toBe('Dobavljač ima otvorene avanse: 1 avansni račun, ukupno 1,00 RSD')
     expect(openAdvancesNotice([adv({ open: 0 })])).toBe('')
+    expect(openAdvancesNotice([adv({ open: 120000 })], 'revenue')).toBe('Kupac ima otvorene avanse: 1 avansni račun, ukupno 120.000,00 RSD')
   })
 })
 

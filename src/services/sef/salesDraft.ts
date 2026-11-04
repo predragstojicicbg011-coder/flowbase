@@ -1,5 +1,6 @@
 import type { UblInvoice } from './ublInvoice'
 import { bookedDateOf } from './draftFromUbl'
+import { proformaNumbersIn } from '../advances'
 
 // The sales-side counterpart of `draftFromUbl`: the shape `InvoiceDialog`
 // reads on open for a REVENUE invoice, drafted from a document we ISSUED.
@@ -62,6 +63,17 @@ export function salesDraftFromUbl(
     note: noteOf(ubl),
     document_type: documentTypeOf(ubl),
     billing_reference: ubl.billingReference,
+    // An advance invoice names its proforma only in words; the dialog
+    // proposes the customer's paid proforma with that number.
+    ...(ubl.isAdvanceInvoice ? { proforma_hints: proformaNumbersIn(ubl.advanceText) } : {}),
+    // A FINAL INVOICE: the revenue is the full amount, not what is left to
+    // collect after the advance; the dialog links the advances it names
+    // before it can be posted.
+    ...(ubl.advanceUsed > 0 && (ubl.grossTotal ?? ubl.total) !== null ? {
+      amount: ubl.grossTotal ?? ubl.total,
+      advance_refs: ubl.billingReferences,
+      advance_used: ubl.advanceUsed,
+    } : {}),
   }
 }
 
@@ -75,10 +87,6 @@ export function salesBookingRefusal(
   }
   if ((ubl.grossTotal ?? ubl.total) === null || !bookedDateOf(ubl)) {
     return 'Dokument ne može da se pročita kao faktura.'
-  }
-  // DO TASK 10: lifted once customer advances exist.
-  if (ubl.isAdvanceInvoice || ubl.advanceUsed > 0) {
-    return 'Avansni račun i konačna faktura sa avansom knjiže se kad avansi kupaca budu uključeni.'
   }
   return null
 }
@@ -109,6 +117,10 @@ export function salesReviewNotes(
     notes.push(`Knjiži se na datum prometa (${ubl.deliveryDate}), po kom se uzima i kurs. Faktura je izdata ${ubl.issueDate}.`)
   } else if (!ubl.deliveryDate && ubl.issueDate) {
     notes.push(`Faktura ne navodi datum prometa, pa se knjiži na datum izdavanja (${ubl.issueDate}).`)
+  }
+
+  if (ubl.advanceUsed > 0 && ubl.grossTotal !== null) {
+    notes.push(`Konačna faktura: pun iznos ${ubl.grossTotal.toFixed(2)} ide u prihod, avans ${ubl.advanceUsed.toFixed(2)} je već primljen, za naplatu ${(ubl.total ?? 0).toFixed(2)}.`)
   }
 
   return notes

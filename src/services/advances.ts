@@ -104,15 +104,15 @@ export function proformaNumbersIn(text: string): string[] {
   return out
 }
 
-/** „Dobavljač ima otvorene avanse: 2 avansna računa, ukupno 335.000,00 RSD“, or ''. */
-export function openAdvancesNotice(advances: OpenAdvance[]): string {
+/** „Dobavljač ima otvorene avanse: 2 avansna računa, ukupno 335.000,00 RSD“ (a customer: „Kupac ima …“), or ''. */
+export function openAdvancesNotice(advances: OpenAdvance[], side: 'expense' | 'revenue' = 'expense'): string {
   const open = advances.filter(a => a.open > 0.005)
   if (open.length === 0) return ''
   const n = open.length, m10 = n % 10, m100 = n % 100
   const word = m10 === 1 && m100 !== 11 ? 'avansni račun'
     : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'avansna računa' : 'avansnih računa'
   const total = cents(open.reduce((s, a) => s + a.open, 0))
-  return `Dobavljač ima otvorene avanse: ${n} ${word}, ukupno ${fmtMoney(total, open[0].currency || 'RSD')}`
+  return `${side === 'revenue' ? 'Kupac' : 'Dobavljač'} ima otvorene avanse: ${n} ${word}, ukupno ${fmtMoney(total, open[0].currency || 'RSD')}`
 }
 
 /**

@@ -37,6 +37,27 @@ describe('salesDraftFromUbl', () => {
   })
 })
 
+describe('a final invoice', () => {
+  const finalXml = fs.readFileSync(path.join(__dirname, 'fixtures', 'sales-final-invoice-sample.xml'), 'utf8')
+
+  it('drafts a final invoice at its full amount with the advances it names', () => {
+    const d = salesDraftFromUbl(parseUbl(finalXml), row, 'k1', 'c1', null, null)
+    expect(d).toMatchObject({ document_type: 'invoice', pl_impact: true, amount: 300000, advance_used: 120000 })
+    expect((d.advance_refs as any[])[0]).toMatchObject({ number: 'AV-7/2026', date: '2026-09-15', amount: 120000 })
+  })
+
+  it('says what goes to revenue, what was received and what is left to collect', () => {
+    const notes = salesReviewNotes(parseUbl(finalXml), { matchedBy: 'pib', company: { by: 'pib', name: 'Primer Gradnja d.o.o.' } })
+    expect(notes).toContain('Konačna faktura: pun iznos 300000.00 ide u prihod, avans 120000.00 je već primljen, za naplatu 180000.00.')
+  })
+
+  it('hints the proforma an advance invoice names', () => {
+    const adv = parseUbl(xml.replace('<cbc:InvoiceTypeCode>380<', '<cbc:InvoiceTypeCode>386<')
+      .replace('<cac:AccountingSupplierParty>', '<cbc:Note>Avans po predračunu br. 177/2026</cbc:Note><cac:AccountingSupplierParty>'))
+    expect(salesDraftFromUbl(adv, row, 'k1', 'c1', null, null).proforma_hints).toEqual(['177/2026'])
+  })
+})
+
 describe('salesBookingRefusal', () => {
   it('refuses a voided or unreadable document', () => {
     expect(salesBookingRefusal(base(), { sef_status: 'Approved' })).toBeNull()
@@ -60,10 +81,9 @@ describe('salesBookingRefusal', () => {
     expect(voidedLabel('Paid')).toBeNull()
   })
 
-  it('holds advance documents until customer advances exist', () => {
-    const msg = 'Avansni račun i konačna faktura sa avansom knjiže se kad avansi kupaca budu uključeni.'
-    expect(salesBookingRefusal({ ...base(), isAdvanceInvoice: true }, { sef_status: 'Approved' })).toBe(msg)
-    expect(salesBookingRefusal({ ...base(), advanceUsed: 5000 }, { sef_status: 'Approved' })).toBe(msg)
+  it('books advance documents', () => {
+    expect(salesBookingRefusal({ ...base(), isAdvanceInvoice: true }, { sef_status: 'Approved' })).toBeNull()
+    expect(salesBookingRefusal({ ...base(), advanceUsed: 5000 }, { sef_status: 'Approved' })).toBeNull()
   })
 })
 
