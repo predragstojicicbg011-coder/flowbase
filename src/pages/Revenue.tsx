@@ -22,6 +22,9 @@ import { supabase } from '../supabase'
 import { PageHeader } from '../components/PageHeader'
 import { SkeletonRows } from '../components/motion'
 import InvoiceDialog from '../components/InvoiceDialog'
+import SefSalesInboxDialog from '../components/SefSalesInboxDialog'
+import { useAuth } from '../contexts/AuthContext'
+import { plural } from '../utils/plural'
 import ProjectRevenueTable from '../components/revenue/ProjectRevenueTable'
 import ReceivablesAgingPanel from '../components/revenue/ReceivablesAgingPanel'
 import RevenueInvoiceList from '../components/revenue/RevenueInvoiceList'
@@ -59,6 +62,7 @@ function normaliseLease(r: any): RentalLease {
 
 export default function Revenue() {
   const { defaultCompany } = useCompanies()
+  const { canEdit } = useAuth()
   const { projects } = useProjects()
   const { currency, format } = useDisplayCurrency()
   const companyId = defaultCompany?.id ?? null
@@ -77,6 +81,10 @@ export default function Revenue() {
   const [rates, setRates] = useState<BookRates | null>(null)
   const [rateError, setRateError] = useState('')
   const [editInvoice, setEditInvoice] = useState<any | null>(null)
+  const [newInvoice, setNewInvoice] = useState(false)
+  const [salesInbox, setSalesInbox] = useState(false)
+  const [pulling, setPulling] = useState(false)
+  const [pullNotice, setPullNotice] = useState<{ text: string; bad: boolean } | null>(null)
 
   const scoped = (q: any) => (companyId ? q.eq('company_id', companyId) : q)
 
@@ -171,6 +179,30 @@ export default function Revenue() {
     setEditInvoice(data)
   }
 
+  // Pulls the invoices we issued from SEF. A failed call's real reason is in
+  // the response body, not in the client's `message`.
+  const pullFromSef = async () => {
+    setPulling(true); setPullNotice(null)
+    try {
+      const { data, error: err } = await supabase.functions.invoke('sef-pull-sales', { body: {} })
+      let reason = ''
+      if (err) {
+        try { const b = await (err as any).context?.json?.(); reason = String(b?.error || b?.message || '') } catch { /* not JSON */ }
+        reason = reason || (err as any).message || 'Poziv nije uspeo.'
+      } else if (data?.error) reason = String(data.error)
+      if (reason) { setPullNotice({ text: `Preuzimanje sa SEF-a nije uspelo: ${reason}`, bad: true }); return }
+      const n = Number(data?.inserted) || 0
+      setPullNotice({
+        text: n > 0
+          ? `Preuzeto ${n} ${plural(n, 'nova izlazna faktura', 'nove izlazne fakture', 'novih izlaznih faktura')} sa SEF-a. Pogledajte ih u „SEF izlazne“.`
+          : 'Nema novih izlaznih faktura na SEF-u.',
+        bad: false,
+      })
+    } catch (e: any) {
+      setPullNotice({ text: `Preuzimanje sa SEF-a nije uspelo: ${e?.message || e}`, bad: true })
+    } finally { setPulling(false) }
+  }
+
   const nothingYet = !loading && rows.length === 0 && advances.length === 0 && plan.length === 0 && leases.length === 0
 
   return (
@@ -224,6 +256,16 @@ export default function Revenue() {
         )}
 
         <div style={{ ...rs.sectionTitle, ...rs.section }}>Izlazne fakture</div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
+          {canEdit && <button style={rs.newBtn} onClick={() => setNewInvoice(true)}>Nova izlazna faktura</button>}
+          {canEdit && <button style={rs.ghostBtn} onClick={() => setSalesInbox(true)}>SEF izlazne</button>}
+          <button style={{ ...rs.ghostBtn, opacity: pulling ? 0.5 : 1 }} disabled={pulling} onClick={pullFromSef}>
+            {pulling ? 'Preuzimam…' : 'Preuzmi sa SEF-a'}
+          </button>
+        </div>
+        {pullNotice && (
+          <div style={pullNotice.bad ? rs.error : rs.info} role={pullNotice.bad ? 'alert' : 'status'}>{pullNotice.text}</div>
+        )}
         <RevenueInvoiceList rows={rows} loading={loading} projects={companyProjects} projectName={projectName}
           currency={currency} format={format} from={from} to={to}
           onPeriod={(f, t) => { setFrom(f); setTo(t) }} onOpen={openInvoice} />
@@ -243,6 +285,13 @@ export default function Revenue() {
         )}
       </div>
 
+      {salesInbox && (
+        <SefSalesInboxDialog onClose={() => { setSalesInbox(false); loadAll() }} onImported={() => { guard('Fakture', loadInvoices) }} />
+      )}
+      {newInvoice && (
+        <InvoiceDialog invoice={{ type: 'revenue', company_id: companyId }}
+          onClose={() => { setNewInvoice(false); loadAll() }} />
+      )}
       {editInvoice && (
         <InvoiceDialog invoice={editInvoice} onClose={() => { setEditInvoice(null); loadAll() }} />
       )}

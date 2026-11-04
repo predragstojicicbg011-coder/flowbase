@@ -21,11 +21,16 @@ jest.mock('../supabase', () => {
     })
     return b
   }
-  return { supabase: { from: (t: string) => builder(t) } }
+  return { supabase: { from: (t: string) => builder(t), functions: { invoke: (...a: any[]) => (global as any).__revenueInvoke(...a) } } }
 })
 
-jest.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: null }) }))
-jest.mock('../components/InvoiceDialog', () => ({ __esModule: true, default: () => null }))
+;(global as any).__revenueInvoke = jest.fn()
+jest.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: null, canEdit: true }) }))
+jest.mock('../components/InvoiceDialog', () => ({
+  __esModule: true,
+  default: (p: any) => <div data-testid="invoice-dialog" data-type={p.invoice?.type} />,
+}))
+jest.mock('../components/SefSalesInboxDialog', () => ({ __esModule: true, default: () => <div data-testid="sales-inbox" /> }))
 jest.mock('../services/currencyService', () => ({
   ...jest.requireActual('../services/currencyService'),
   getRatesForDate: (date: string) => Promise.resolve({ date, eurRsdRate: 117.2, usdRsdRate: 100, source: 'NBS', isFallback: false }),
@@ -139,5 +144,31 @@ describe('Prihodi page — populated', () => {
     const dialog = screen.getByRole('dialog', { name: 'Predlog faktura za zakup' })
     expect(within(dialog).getByText(`ZAK-ABCD1234-${today.slice(0, 7)}`)).toBeInTheDocument()
     expect(within(dialog).getByText('1.000,00 EUR')).toBeInTheDocument()
+  })
+})
+
+describe('Prihodi page — SEF izlazne', () => {
+  beforeEach(() => {
+    empty()
+    ;(global as any).__revenueInvoke = jest.fn(async () => ({ data: { provider: 'sef-sales', status: 'complete', listed: 3, inserted: 2, refreshed: 1, more: false }, error: null }))
+  })
+
+  it('pulls sales invoices from SEF on request', async () => {
+    show()
+    fireEvent.click(await screen.findByRole('button', { name: 'Preuzmi sa SEF-a' }))
+    await waitFor(() => expect((global as any).__revenueInvoke).toHaveBeenCalledWith('sef-pull-sales', { body: {} }))
+    expect(await screen.findByText(/Preuzeto 2 nove/)).toBeInTheDocument()
+  })
+
+  it('opens a new revenue invoice', async () => {
+    show()
+    fireEvent.click(await screen.findByRole('button', { name: 'Nova izlazna faktura' }))
+    expect(screen.getByTestId('invoice-dialog')).toHaveAttribute('data-type', 'revenue')
+  })
+
+  it('opens the sales inbox', async () => {
+    show()
+    fireEvent.click(await screen.findByRole('button', { name: 'SEF izlazne' }))
+    expect(screen.getByTestId('sales-inbox')).toBeInTheDocument()
   })
 })
