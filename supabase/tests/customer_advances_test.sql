@@ -11,7 +11,7 @@
 do $$
 declare
   v_co uuid; v_c1 uuid; v_c2 uuid; v_pf uuid; v_tx uuid; v_av uuid; v_fin uuid; v_ef uuid; v_epf uuid;
-  v_av2 uuid; v_av3 uuid; v_f1 uuid; v_f2 uuid; v_f3 uuid; v_pf2 uuid; v_pf3 uuid; v_d1 uuid; v_prj uuid; v_d2 uuid; v_av4 uuid; r record; n numeric;
+  v_av2 uuid; v_av3 uuid; v_f1 uuid; v_f2 uuid; v_f3 uuid; v_pf2 uuid; v_pf3 uuid; v_d1 uuid; v_prj uuid; v_d2 uuid; v_av4 uuid; v_f9 uuid; v_msg text; r record; n numeric;
 begin
   insert into public.companies (name, country, currency) values ('Test avansi kupaca (TEST-AK)', 'Srbija', 'RSD') returning id into v_co;
   insert into public.partners (name) values ('Test kupac A (TEST-AK)') returning id into v_c1;
@@ -124,6 +124,30 @@ begin
   exception when check_violation then null;
   end;
     raise notice '8 ok';
+
+  -- 9. A customer's chain speaks of the customer, never of a supplier.
+  insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate)
+  values (v_co, v_c1, 'IF-9', current_date, 'revenue', 'RSD', 5000, 5000, 1) returning id into v_f9;
+  begin
+    insert into public.advance_usage (final_invoice_id, advance_invoice_id, amount) values (v_f9, v_av4, 1000);
+    raise exception 'FAIL: an advance of another customer used';
+  exception when check_violation then get stacked diagnostics v_msg = message_text;
+  end;
+  assert v_msg = 'Avansni račun IAV-4 nije istog kupca, firme i valute kao konačni račun.', format('usage message: %s', v_msg);
+  begin
+    insert into public.advance_coverage (advance_invoice_id, proforma_id, amount) values (v_av3, v_pf3, 1);
+    raise exception 'FAIL: a proforma of another customer covered';
+  exception when check_violation then get stacked diagnostics v_msg = message_text;
+  end;
+  assert v_msg = 'Predračun IPR-77 nije istog kupca, firme i valute kao avansni račun.', format('coverage message: %s', v_msg);
+  begin
+    insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, document_type)
+    values (v_co, v_c1, 'IPR-N', current_date, null, 'RSD', 1000, 1000, 1, 'proforma');
+    raise exception 'FAIL: a proforma with no direction';
+  exception when check_violation then get stacked diagnostics v_msg = message_text;
+  end;
+  assert v_msg = 'Predračun mora biti ulazni (od dobavljača) ili izlazni (kupcu).', format('direction message: %s', v_msg);
+  raise notice '9 ok';
 
   raise notice 'ALL TESTS PASSED';
 end $$;

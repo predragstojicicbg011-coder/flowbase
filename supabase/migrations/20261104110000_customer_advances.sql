@@ -28,7 +28,7 @@ begin
     -- Never in the P&L, whatever the caller sent.
     new.pl_impact := false;
     if new.type is null or new.type not in ('expense', 'revenue') then
-      raise exception '% je dokument dobavljača (ulazni).',
+      raise exception '% mora biti ulazni (od dobavljača) ili izlazni (kupcu).',
         case new.document_type when 'proforma' then 'Predračun' else 'Avansni račun' end using errcode = 'check_violation';
     end if;
     if coalesce(new.amount, 0) <= 0 then
@@ -64,7 +64,8 @@ begin
   end if;
   if v_av.company_id is distinct from v_pf.company_id or v_av.partner_id is distinct from v_pf.partner_id
      or v_av.currency is distinct from v_pf.currency then
-    raise exception 'Predračun % nije istog dobavljača, firme i valute kao avansni račun.', v_pf.invoice_number
+    raise exception 'Predračun % nije istog %, firme i valute kao avansni račun.', v_pf.invoice_number,
+      case v_av.type when 'revenue' then 'kupca' else 'dobavljača' end
       using errcode = 'check_violation';
   end if;
   select coalesce(sum(l.allocated_amount), 0) into v_paid
@@ -105,7 +106,8 @@ begin
   end if;
   if v_fin.company_id is distinct from v_av.company_id or v_fin.partner_id is distinct from v_av.partner_id
      or v_fin.currency is distinct from v_av.currency then
-    raise exception 'Avansni račun % nije istog dobavljača, firme i valute kao konačni račun.', v_av.invoice_number
+    raise exception 'Avansni račun % nije istog %, firme i valute kao konačni račun.', v_av.invoice_number,
+      case v_av.type when 'revenue' then 'kupca' else 'dobavljača' end
       using errcode = 'check_violation';
   end if;
   if coalesce(v_fin.advance_deducted, 0) > 0 then
