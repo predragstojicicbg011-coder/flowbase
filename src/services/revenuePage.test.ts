@@ -61,6 +61,14 @@ describe('revenueTotals', () => {
     expect(t.outstanding).toBe(650000)
     expect(t.advancesRemaining).toBe(170000)
   })
+  it('does not count a proforma or an advance invoice as billed', () => {
+    const t = revenueTotals([
+      inv(),
+      inv({ id: 'pf', document_type: 'proforma', amount_rsd: 70000, remaining_rsd: 70000, paid_amount_rsd: 70000 }),
+      inv({ id: 'av', document_type: 'advance_invoice', amount_rsd: 80000, remaining_rsd: 80000, paid_amount_rsd: 80000 }),
+    ], [], '2026-01-01', '2026-12-31', 'RSD')
+    expect(t).toMatchObject({ billed: 300000, collected: 100000, outstanding: 150000 })
+  })
   it('counts rows with no figure in the currency', () => {
     const t = revenueTotals([inv({ amount_eur: null })], [], '', '', 'EUR')
     expect(t.billed).toBe(0)

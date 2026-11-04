@@ -50,6 +50,15 @@ export function effectiveAdvance(type: string | null | undefined, subtype: strin
   return !!flag && type === 'direct' && subtype === 'revenue'
 }
 
+/**
+ * Whether the old project advance („Avans — primljen od investitora“) is
+ * offered: only for a receipt already stored with it. A new receipt is never
+ * flagged; a customer's advance goes through a proforma and an advance invoice.
+ */
+export function showsLegacyAdvance(stored: { is_advance?: boolean | null } | null | undefined): boolean {
+  return !!stored?.is_advance
+}
+
 export interface AdvanceCheck {
   type: string | null | undefined
   subtype: string | null | undefined

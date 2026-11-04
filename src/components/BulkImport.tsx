@@ -2732,17 +2732,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
 
                           {row.override_tx_type === 'direct' && row.override_tx_subtype === 'revenue' && (
                             <div style={{ marginTop: '8px' }}>
-                              <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer', fontSize: '12px', marginBottom: '8px' }}>
-                                <input type="checkbox" checked={!!row.override_is_advance}
-                                  onChange={e => updateRow(p.id, { override_is_advance: e.target.checked })}
-                                  style={{ accentColor: DIALOG.accent, cursor: 'pointer', marginTop: '2px' }} />
-                                <span>
-                                  <strong>{ADVANCE_LABEL}</strong> — primljen od investitora
-                                  <span style={{ display: 'block', fontSize: '10.5px', color: DIALOG.dim, lineHeight: 1.4 }}>
-                                    Obaveza, ne prihod: bez uticaja na bilans uspeha, obavezno na projektu, bez podele i bez povezivanja sa fakturom.
-                                  </span>
-                                </span>
-                              </label>
+                              {/* No old project-advance flag on a new receipt: a customer's advance goes through a proforma. */}
                               {effectiveAdvance(row.override_tx_type, row.override_tx_subtype, row.override_is_advance) && !projectIdFromInput(row.override_project_id) && (
                                 <div style={{ fontSize: '11px', color: DIALOG.red, marginBottom: '8px' }}>
                                   Avans mora biti na projektu — izaberite projekat ispod.

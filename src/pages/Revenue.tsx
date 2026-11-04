@@ -15,6 +15,7 @@
 //   Starost potraživanja revenue.receivablesAging
 //   Plan prihoda         revenue_plan per project × 12 months, with the rent forecast
 //   Zakup                rental_leases per rental building, and rent invoices
+//   Avansi kupaca        v_customer_advances: proformas, advance invoices, what is open
 //
 // The arithmetic is in services/revenue.ts, revenuePlan.ts and revenuePage.ts.
 
@@ -31,6 +32,7 @@ import ReceivablesAgingPanel from '../components/revenue/ReceivablesAgingPanel'
 import RevenueInvoiceList from '../components/revenue/RevenueInvoiceList'
 import RevenuePlanGrid from '../components/revenue/RevenuePlanGrid'
 import LeasesSection from '../components/revenue/LeasesSection'
+import CustomerAdvancesSection from '../components/revenue/CustomerAdvancesSection'
 import ReceivablesCards from '../components/revenue/ReceivablesCards'
 import LatePayersTable from '../components/revenue/LatePayersTable'
 import { rs } from '../components/revenue/styles'
@@ -287,6 +289,9 @@ export default function Revenue() {
             companyId={companyId} today={today}
             onChanged={() => { guard('Zakupi', loadLeases); guard('Fakture', loadInvoices) }} />
         )}
+
+        <div style={{ ...rs.sectionTitle, ...rs.section }}>Avansi kupaca</div>
+        {!loading && <CustomerAdvancesSection companyId={companyId} format={format} />}
       </div>
 
       {salesInbox && (

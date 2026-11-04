@@ -76,16 +76,16 @@ const statement = [
   line({ 1: '10.10.2026', 2: '41', 3: 'RSD', 5: '100,00', 11: 'Nepoznat doo', 12: 'Nesto' }),
 ].join('\n')
 
-const importIt = async () => {
+const importIt = async (text = statement) => {
   render(<BulkImport onClose={() => {}} onImported={() => {}} />)
   const bankSelect = await screen.findByDisplayValue('Izaberite banku…')
   await screen.findByText('Raiffeisen RSD')
   fireEvent.change(bankSelect, { target: { value: 'b1' } })
-  const file = new File([statement], 'izvod.txt', { type: 'text/plain' })
-  ;(file as any).arrayBuffer = async () => new TextEncoder().encode(statement).buffer
+  const file = new File([text], 'izvod.txt', { type: 'text/plain' })
+  ;(file as any).arrayBuffer = async () => new TextEncoder().encode(text).buffer
   const input = document.querySelector('input[type="file"]') as HTMLInputElement
   fireEvent.change(input, { target: { files: [file] } })
-  await screen.findByText('Spremno stavki: 3')
+  await screen.findByText(/Spremno stavki: \d/)
   fireEvent.click(screen.getByText('🔎 Prepoznaj i pregledaj'))
   await screen.findByText(/Samo za proveru/)
 }
@@ -153,5 +153,18 @@ describe('after review', () => {
     fireEvent.click(await screen.findByText('🔎 Prepoznaj i pregledaj'))
     await screen.findByText(/Samo za proveru/)
     expect(screen.getByText('Prihvaćeno').previousSibling?.textContent).toBe('0')
+  })
+})
+
+describe('a receipt from a customer', () => {
+  it('offers no advance flag on a new receipt', async () => {
+    const receipt = [
+      'Br. racuna#Datum#Izvod#Valuta#x#Duguje#Potrazuje',
+      line({ 1: '10.10.2026', 2: '41', 3: 'RSD', 6: '90.000,00', 11: 'Kupac Nepoznat doo', 12: 'Uplata' }),
+    ].join('\n')
+    await importIt(receipt)
+    fireEvent.click(await screen.findByText('Kupac Nepoznat doo'))
+    expect(await screen.findByText('Vrsta prihoda')).toBeInTheDocument()
+    expect(screen.queryByText(/primljen od investitora/)).not.toBeInTheDocument()
   })
 })

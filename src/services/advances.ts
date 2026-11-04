@@ -127,9 +127,12 @@ export function proformaFromPayment(p: {
   eurRate: number | null
   /** The advance invoice this payment pays, when it is paid straight from the statement. */
   forAdvance?: string | null
+  /** `revenue`: a customer's proforma from a receipt (an inflow); default `expense`. */
+  side?: 'expense' | 'revenue'
 }): { ok: true; row: Record<string, unknown> } | { ok: false; why: string } {
-  if (!p.partnerId) return { ok: false, why: 'Prvo izaberite dobavljača.' }
-  if (!(p.amount > 0)) return { ok: false, why: 'Predračun se pravi samo iz isplate.' }
+  const revenue = p.side === 'revenue'
+  if (!p.partnerId) return { ok: false, why: revenue ? 'Prvo izaberite kupca.' : 'Prvo izaberite dobavljača.' }
+  if (!(p.amount > 0)) return { ok: false, why: revenue ? 'Predračun se pravi samo iz uplate kupca.' : 'Predračun se pravi samo iz isplate.' }
   if ((p.currency || 'RSD') !== 'RSD') return { ok: false, why: 'Iz uplate se pravi samo dinarski predračun; devizni unesite kao predračun.' }
   if (!(p.eurRate && p.eurRate > 0)) return { ok: false, why: 'Nema EUR kursa za dan uplate; unesite predračun ručno.' }
   const amount = cents(p.amount)
@@ -138,10 +141,10 @@ export function proformaFromPayment(p: {
     ok: true,
     row: {
       company_id: p.companyId, partner_id: p.partnerId, invoice_number: null, invoice_date: p.date, due_date: p.date,
-      type: 'expense', currency: 'RSD', amount, amount_rsd: amount, exchange_rate: 1,
+      type: revenue ? 'revenue' : 'expense', currency: 'RSD', amount, amount_rsd: amount, exchange_rate: 1,
       eur_rate: p.eurRate, amount_eur: cents(amount / p.eurRate),
       document_type: 'proforma', pl_impact: false, status: 'unpaid', account_number: p.accountNumber || null,
-      note: `Predračun napravljen iz uplate od ${when}` + (p.forAdvance ? ` za avansni račun ${p.forAdvance}` : '')
+      note: `Predračun napravljen iz uplate${revenue ? ' kupca' : ''} od ${when}` + (p.forAdvance ? ` za avansni račun ${p.forAdvance}` : '')
         + (p.description ? `: ${p.description}` : ''),
     },
   }

@@ -22,7 +22,7 @@ import {
 } from '../services/invoiceClaims'
 import { differenceFor, entryNote, isBookable } from '../services/currencyDifference'
 import {
-  ADVANCE_BADGE_STYLE, ADVANCE_LABEL, doubleCountHint, effectiveAdvance, receiptShape, whyAdvanceNotSavable,
+  ADVANCE_BADGE_STYLE, ADVANCE_LABEL, doubleCountHint, effectiveAdvance, receiptShape, showsLegacyAdvance, whyAdvanceNotSavable,
 } from '../services/advanceReceipt'
 import {
   describeMismatches, mismatches, type Expectation, type Settlement,
@@ -117,6 +117,8 @@ interface StatementRow {
    * one would count the cost twice.
    */
   stored_split: boolean
+  /** The stored receipt was saved as an old project advance (is_advance): only then is that flag offered. */
+  stored_advance: boolean
   /** Book the leftover against this invoice as a currency difference. */
   fx_book: boolean
   /** Which quick-fill template classifies it. Empty means the default one. */
@@ -160,7 +162,7 @@ function makeRow(defaultCurrency = 'RSD', date = ''): StatementRow {
     tx_type: 'direct', tx_subtype: 'expense',
     pt_direction: 'out', pt_period: new Date().toISOString().slice(0, 7),
     linked_invoice_id: '', fx_book: false, fx_script_id: '',
-    pl_splits: [], stored_split: false,
+    pl_splits: [], stored_split: false, stored_advance: false,
     pl_category_id: '', pl_category_name: '',
     pl_subcategory_id: '', pl_subcategory_name: '',
     department_id: '', department_name: '',
@@ -672,6 +674,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
           ...txToSeed(t, nameOf(t.partner_id)),
           linked_invoice_id: linkByTx[t.id] || '',
           stored_split: splitTx.has(t.id),
+          stored_advance: showsLegacyAdvance(t),
         })),
         ...ptRows.map(p => passthroughToSeed(p, nameOf(p.partner_id))),
       ]
@@ -910,9 +913,12 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
     }
     let eurRate: number | null = null
     try { eurRate = (await getBookRates(row.date)).eurRate } catch { eurRate = null }
+    // A receipt (credit) makes the customer's proforma, a payment out the supplier's.
+    const incoming = !advance && parseFloat(row.credit) > 0
     const made = proformaFromPayment({
       companyId: company || null, partnerId: advance?.partner_id || row.partner_id, date: row.date,
-      amount: parseFloat(row.debit) || 0, currency: row.currency || defaultCurrency,
+      side: incoming ? 'revenue' : 'expense',
+      amount: (incoming ? parseFloat(row.credit) : parseFloat(row.debit)) || 0, currency: row.currency || defaultCurrency,
       accountNumber: row.account_number || null, description: row.description || null, eurRate,
       forAdvance: advance ? (advance.invoice_number || 'bez broja') : null,
     })
@@ -2054,7 +2060,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                         {row.tx_type === 'invoice_payment' && (
                           <>
                             <div style={s.classTitle}>Poveži sa otvorenom fakturom</div>
-                            {parseFloat(row.debit) > 0 && !row.linked_invoice_id && !editing && (
+                            {(parseFloat(row.debit) > 0 || parseFloat(row.credit) > 0) && !row.linked_invoice_id && !editing && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                                 <button type="button"
                                   style={{ background: 'transparent', border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', color: DIALOG.accent, fontSize: '11.5px', padding: '4px 10px', cursor: 'pointer' }}
@@ -2062,7 +2068,9 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                   Nov predračun iz ove uplate
                                 </button>
                                 <span style={{ fontSize: '11px', color: proformaWhy[row.id] ? DIALOG.red : DIALOG.faint }}>
-                                  {proformaWhy[row.id] || 'Kad je novac pušten bez predračuna: pravi predračun i zatvara ga ovom uplatom, bez P&L.'}
+                                  {proformaWhy[row.id] || (parseFloat(row.credit) > 0
+                                    ? 'Kad je kupac uplatio bez predračuna: pravi predračun kupcu i zatvara ga ovom uplatom, bez P&L.'
+                                    : 'Kad je novac pušten bez predračuna: pravi predračun i zatvara ga ovom uplatom, bez P&L.')}
                                 </span>
                               </div>
                             )}
@@ -2514,7 +2522,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                             {/* Revenue */}
                             {row.tx_subtype === 'revenue' && (
                               <>
-                                <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer', fontSize: '12px', marginBottom: '8px' }}>
+                                {row.stored_advance && <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer', fontSize: '12px', marginBottom: '8px' }}>
                                   <input type="checkbox" checked={!!row.is_advance}
                                     disabled={row.pl_splits.length > 0 || row.stored_split}
                                     onChange={e => updateRow(row.id, { is_advance: e.target.checked })}
@@ -2525,7 +2533,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                       Obaveza, ne prihod: bez uticaja na bilans uspeha, obavezno na projektu, bez podele i bez povezivanja sa fakturom.
                                     </span>
                                   </span>
-                                </label>
+                                </label>}
                                 {effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance) && !projectIdFromInput(row.project_id) && (
                                   <div style={{ fontSize: '11px', color: DIALOG.red, marginBottom: '8px' }}>
                                     Avans mora biti na projektu — izaberite projekat ispod.

@@ -117,6 +117,22 @@ describe('a proforma made from a payment', () => {
   })
 })
 
+describe('a customer proforma from a receipt', () => {
+  const pay = { companyId: 'co1', partnerId: 'k1', date: '2026-10-12', amount: 120000, currency: 'RSD', accountNumber: '160-2-22', description: null, eurRate: 120, side: 'revenue' as const }
+
+  it('makes a customer proforma from a receipt', () => {
+    const made = proformaFromPayment(pay)
+    expect(made.ok && made.row).toMatchObject({
+      type: 'revenue', partner_id: 'k1', amount: 120000, amount_rsd: 120000, amount_eur: 1000,
+      document_type: 'proforma', pl_impact: false, note: 'Predračun napravljen iz uplate kupca od 12.10.2026',
+    })
+  })
+
+  it('needs the customer first', () => {
+    expect(proformaFromPayment({ ...pay, partnerId: null })).toEqual({ ok: false, why: 'Prvo izaberite kupca.' })
+  })
+})
+
 describe('paying an advance invoice from the bank statement', () => {
   const pay = { companyId: 'co1', partnerId: 'p1', date: '2026-10-12', amount: 18144, currency: 'RSD', accountNumber: '160-1-11', description: 'Uplata', eurRate: 117.2 }
 

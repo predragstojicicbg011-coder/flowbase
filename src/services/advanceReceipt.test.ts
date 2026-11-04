@@ -1,5 +1,5 @@
 import {
-  doubleCountHint, effectiveAdvance, openRevenueInvoicesOf, paymentSubtypeFor, whyAdvanceNotSavable,
+  doubleCountHint, effectiveAdvance, openRevenueInvoicesOf, paymentSubtypeFor, showsLegacyAdvance, whyAdvanceNotSavable,
 } from './advanceReceipt'
 
 describe('effectiveAdvance', () => {
@@ -88,5 +88,15 @@ describe('receiptShape', () => {
   })
   it('a credit payment has no P&L of its own here', () => {
     expect(receiptShape({ type: 'credit_payment', subtype: 'expense' })).toEqual({ tx_subtype: 'expense', is_advance: false, pl_impact: false })
+  })
+})
+
+describe('showsLegacyAdvance', () => {
+  it('only for a stored receipt flagged as an advance', () => {
+    expect(showsLegacyAdvance(null)).toBe(false)
+    expect(showsLegacyAdvance(undefined)).toBe(false)
+    expect(showsLegacyAdvance({})).toBe(false)
+    expect(showsLegacyAdvance({ is_advance: false })).toBe(false)
+    expect(showsLegacyAdvance({ is_advance: true })).toBe(true)
   })
 })

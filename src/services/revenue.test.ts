@@ -181,6 +181,14 @@ describe('receivablesAging', () => {
     expect(agingBucket(91)).toBe('d90plus')
   })
 
+  it('does not count a proforma or an advance invoice as billed', () => {
+    const project = { id: 'p1', contract_value: 200000, contract_currency: 'EUR' as const, contract_value_rsd: 23440000, contract_value_eur: 200000 }
+    const rows = [inv({ id: 'f' }), inv({ id: 'pf', document_type: 'proforma' }), inv({ id: 'av', document_type: 'advance_invoice' })]
+    expect(projectRevenueSummary(project, rows, [], 'EUR').billedToDate).toBe(50000)
+    const a = receivablesAging(rows.map(r => ({ ...r, due_date: '2026-10-20' })), '2026-10-08', 'EUR')
+    expect(a.items.map(i => i.id)).toEqual(['f'])
+  })
+
   it('reads only open revenue invoices, at their remaining figure', () => {
     const a = receivablesAging([
       inv({ id: 'a', due_date: '2026-10-20', remaining_eur: 100 }),                      // not due

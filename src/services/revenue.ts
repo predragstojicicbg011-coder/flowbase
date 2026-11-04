@@ -209,9 +209,13 @@ export function validateAdvanceDeduction(req: AdvanceDeductionRequest): string |
 // ── Per project ─────────────────────────────────────────────────────────────
 
 /** The part of a v_invoice_status row the revenue figures read. */
+/** Documents that are not yet a billing: a proforma, an advance invoice. */
+export const NOT_BOOKED: ReadonlySet<string> = new Set(['proforma', 'advance_invoice'])
+
 export interface RevenueInvoiceRow {
   id: string
   type: string | null
+  document_type?: string | null
   project_id: string | null
   partner_name?: string | null
   invoice_number?: string | null
@@ -285,7 +289,7 @@ export function projectRevenueSummary(
   currency: DisplayCurrency,
   opts: { plan?: readonly PlanAmountRow[]; fromMonth?: string } = {},
 ): RevenueSummary {
-  const rows = invoices.filter(i => i.project_id === project.id && i.type === 'revenue' && !i.deleted_at)
+  const rows = invoices.filter(i => i.project_id === project.id && i.type === 'revenue' && !i.deleted_at && !NOT_BOOKED.has(i.document_type || ''))
   let unconverted = 0
   const pick = (row: object, base = 'amount'): number => {
     const v = pickAmount(row, currency, base)
@@ -400,7 +404,7 @@ export function receivablesAging(
   const items: AgingItem[] = []
   let unconverted = 0
   for (const r of rows) {
-    if (r.type !== 'revenue' || r.deleted_at) continue
+    if (r.type !== 'revenue' || r.deleted_at || NOT_BOOKED.has(r.document_type || '')) continue
     if (r.calculated_status !== 'unpaid' && r.calculated_status !== 'partial') continue
     const remaining = pickAmount(r, currency, 'remaining')
     if (remaining === null) { unconverted++; continue }

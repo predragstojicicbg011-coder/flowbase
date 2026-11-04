@@ -47,7 +47,7 @@ import {
 } from '../services/bookAmounts'
 import { fmtMoney, fmtNum } from '../utils/formatters'
 import {
-  ADVANCE_BADGE_STYLE, ADVANCE_LABEL, doubleCountHint, effectiveAdvance, paymentSubtypeFor, whyAdvanceNotSavable,
+  ADVANCE_BADGE_STYLE, ADVANCE_LABEL, doubleCountHint, effectiveAdvance, paymentSubtypeFor, showsLegacyAdvance, whyAdvanceNotSavable,
 } from '../services/advanceReceipt'
 import { countOf } from '../utils/plural'
 
@@ -793,7 +793,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
    * leaves nothing payable behind). Until then it stands in the list of open
    * documents under a placeholder id.
    */
-  const makeProformaFrom = async (advance?: any) => {
+  const makeProformaFrom = async (advance?: any, side: 'expense' | 'revenue' = 'expense') => {
     if (linkedInvoices.some(l => l.invoice_id === 'pending-proforma')) return
     const left = Math.max(0, (parseFloat(amount) || 0) - totalAllocatedOwn)
     if (advance) {
@@ -804,7 +804,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     try { eurRate = (await getBookRates(txDate)).eurRate } catch { eurRate = null }
     const made = proformaFromPayment({
       companyId: companyId || null, partnerId: advance?.partner_id || partnerId || null, date: txDate,
-      amount: left, currency: currency || 'RSD',
+      side, amount: left, currency: currency || 'RSD',
       accountNumber: accNum || null, description: note || null, eurRate,
       forAdvance: advance ? (advance.invoice_number || 'bez broja') : null,
     })
@@ -1956,6 +1956,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                     <button type="button" style={s.linkBtn} onClick={() => makeProformaFrom()}>Nov predračun iz ove uplate</button>
+                    <button type="button" style={s.linkBtn} onClick={() => makeProformaFrom(undefined, 'revenue')}>Nov predračun iz ove uplate kupca</button>
                     {proformaWhy && <span style={{ fontSize: '11px', color: DIALOG.red }}>{proformaWhy}</span>}
                   </div>
                   {!transaction?.id && unlinkedAdvances.filter(a => !partnerId || a.partner_id === partnerId).map(a => (
@@ -2351,7 +2352,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
                   {directSubtype === 'revenue' && (
                     <>
-                    <div style={s.section}>
+                    {showsLegacyAdvance(transaction) && <div style={s.section}>
                       <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer', fontSize: '12.5px' }}>
                         <input type="checkbox" checked={isAdvanceFlag}
                           onChange={e => { setIsAdvanceFlag(e.target.checked); touch('advance') }}
@@ -2365,7 +2366,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                         </span>
                       </label>
                       {fieldErr('advance') && <span style={s.errorMsg}>{fieldErr('advance')}</span>}
-                    </div>
+                    </div>}
                     {(() => {
                       const hint = doubleCountHint(
                         { type: txType, subtype: directSubtype, isAdvance: advance }, partnerId, openInvoices)

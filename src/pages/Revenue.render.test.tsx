@@ -258,6 +258,9 @@ describe('Prihodi — receivables first', () => {
       expect(els[i - 1].compareDocumentPosition(els[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     }
     expect(screen.getByText(/do kraja godine/)).toBeInTheDocument()
+    const last = await screen.findByText('Avansi kupaca', { selector: 'div' })
+    const zakup = screen.getAllByText('Zakup', { selector: 'div' })[0]
+    expect(zakup.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('shows what is left to bill and leaves the rented building out', async () => {

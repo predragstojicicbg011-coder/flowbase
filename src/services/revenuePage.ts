@@ -13,7 +13,7 @@
 import { round2, type BookAmounts } from './bookAmounts'
 import { revenueKindOf, type RevenueKind } from './revenueClassification'
 import {
-  projectRevenueSummary, type AdvanceReceipt, type RevenueInvoiceRow, type RevenueSummary,
+  projectRevenueSummary, NOT_BOOKED, type AdvanceReceipt, type RevenueInvoiceRow, type RevenueSummary,
 } from './revenue'
 import {
   firstOfMonth, monthKey, type LeaseCurrency, type RentalLease, type RentForecastLine,
@@ -111,6 +111,8 @@ export interface RevenueTotals {
 }
 
 const live = (r: RevenueListRow) => r.type === 'revenue' && !r.deleted_at
+/** What the totals count: a proforma or an advance invoice is neither billed nor collected nor owed. */
+const counted = (r: RevenueListRow) => live(r) && !NOT_BOOKED.has(r.document_type || '')
 const inPeriod = (d: string, from: string, to: string) => (!from || d >= from) && (!to || d <= to)
 
 /**
@@ -132,7 +134,7 @@ export function revenueTotals(
   let collected = 0
   let outstanding = 0
   for (const r of rows) {
-    if (!live(r)) continue
+    if (!counted(r)) continue
     if (inPeriod((r.invoice_date || '').slice(0, 10), from, to)) {
       billed += pick(r)
       collected += pick(r, 'paid_amount')
@@ -197,7 +199,7 @@ export function projectRevenueRows(
     projects = projects.filter(p => p.kind !== 'rental')
     rows = rows.filter(r => !r.lease_id)
   }
-  const live_ = rows.filter(live)
+  const live_ = rows.filter(counted)
   const out: ProjectRevenueRow[] = []
   const seen = new Set<string>()
   const consider = (p: Project) => {
