@@ -8,6 +8,8 @@ export interface DeletePreview {
   advance_links_removed: number
   finals_reopened: string[]
   notes_deleted: string[]
+  /** Those of notes_deleted that are debit notes (knjižno zaduženje). */
+  debit_notes_deleted: string[]
   uploads_removed: number
   sef_row: 'pending' | 'dismissed' | null
 }
@@ -27,7 +29,8 @@ export function deleteConsequences(p: DeletePreview): string[] {
   if (p.payments_unlinked > 0) out.push(paymentsSentence(p.payments_unlinked))
   if (p.advance_links_removed > 0) out.push(`Veze sa avansima se brišu (${p.advance_links_removed}).`)
   for (const n of p.finals_reopened) out.push(`Konačna faktura ${n} ponovo potražuje deo koji je pokrivao ovaj avans.`)
-  for (const n of p.notes_deleted) out.push(`Briše se i knjižno odobrenje ${n}.`)
+  const debits = new Set(p.debit_notes_deleted)
+  for (const n of p.notes_deleted) out.push(`Briše se i ${debits.has(n) ? 'knjižno zaduženje' : 'knjižno odobrenje'} ${n}.`)
   if (p.uploads_removed > 0) out.push(`Ručno otpremljeni PDF-ovi se sklanjaju (${p.uploads_removed}).`)
   if (p.sef_row === 'pending') out.push('SEF red se vraća u red „čeka“.')
   if (p.sef_row === 'dismissed') out.push('SEF red ostaje odbijen (faktura je stornirana na SEF-u).')
@@ -45,6 +48,7 @@ async function call(client: { rpc: Function }, invoiceId: string, dry: boolean):
     advance_links_removed: d.advance_links_removed ?? 0,
     finals_reopened: d.finals_reopened ?? [],
     notes_deleted: d.notes_deleted ?? [],
+    debit_notes_deleted: d.debit_notes_deleted ?? [],
     uploads_removed: d.uploads_removed ?? 0,
     sef_row: d.sef_row ?? null,
   }

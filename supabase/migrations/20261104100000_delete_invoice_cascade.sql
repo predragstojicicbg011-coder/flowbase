@@ -34,6 +34,7 @@ declare
   v_adv int;
   v_finals text[];
   v_notes text[];
+  v_debits text[];
   v_uploads int;
   v_sef text;
 begin
@@ -52,8 +53,10 @@ begin
   end if;
 
   select coalesce(array_agg(a.id order by a.invoice_date, a.invoice_number), '{}'),
-         coalesce(array_agg(coalesce(a.invoice_number, a.id::text) order by a.invoice_date, a.invoice_number), '{}')
-    into v_note_ids, v_notes
+         coalesce(array_agg(coalesce(a.invoice_number, a.id::text) order by a.invoice_date, a.invoice_number), '{}'),
+         coalesce(array_agg(coalesce(a.invoice_number, a.id::text) order by a.invoice_date, a.invoice_number)
+                    filter (where a.document_type = 'debit_note'), '{}')
+    into v_note_ids, v_notes, v_debits
     from public.invoices a
    where a.adjusts_invoice_id = p_invoice and a.deleted_at is null
      and a.document_type in ('credit_note', 'debit_note');
@@ -122,6 +125,7 @@ begin
     'advance_links_removed', v_adv,
     'finals_reopened', to_jsonb(v_finals),
     'notes_deleted', to_jsonb(v_notes),
+    'debit_notes_deleted', to_jsonb(v_debits),
     'uploads_removed', v_uploads,
     'sef_row', to_jsonb(v_sef));
 end $$;

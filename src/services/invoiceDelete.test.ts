@@ -2,7 +2,7 @@ import { deleteConsequences, deleteInvoiceCascade, previewDelete, type DeletePre
 
 const empty: DeletePreview = {
   invoice_number: 'IF-1/2026', payments_unlinked: 0, advance_links_removed: 0,
-  finals_reopened: [], notes_deleted: [], uploads_removed: 0, sef_row: null,
+  finals_reopened: [], notes_deleted: [], debit_notes_deleted: [], uploads_removed: 0, sef_row: null,
 }
 
 describe('deleteConsequences', () => {
@@ -17,6 +17,13 @@ describe('deleteConsequences', () => {
       'Briše se i knjižno odobrenje KO-1/2026.',
       'Ručno otpremljeni PDF-ovi se sklanjaju (1).',
       'SEF red se vraća u red „čeka“.',
+    ])
+  })
+
+  it('names a debit note a debit note', () => {
+    expect(deleteConsequences({ ...empty, notes_deleted: ['KO-1', 'KZ-1'], debit_notes_deleted: ['KZ-1'] })).toEqual([
+      'Briše se i knjižno odobrenje KO-1.',
+      'Briše se i knjižno zaduženje KZ-1.',
     ])
   })
 
@@ -42,6 +49,7 @@ describe('the database calls', () => {
     const p = await previewDelete({ rpc }, 'inv1')
     expect(rpc).toHaveBeenCalledWith('delete_invoice_cascade', { p_invoice: 'inv1', p_dry_run: true })
     expect(p.payments_unlinked).toBe(1)
+    expect(p.debit_notes_deleted).toEqual([])
   })
 
   it('deletes with a real call', async () => {

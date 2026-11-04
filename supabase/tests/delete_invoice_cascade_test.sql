@@ -40,6 +40,8 @@ begin
   values (v_co, 'IF-1/2026', current_date, 'revenue', 'RSD', 120000, 120000, 1, 'partial') returning id into v_rev;
   insert into public.invoices (company_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, document_type, adjusts_invoice_id)
   values (v_co, 'KO-1', current_date, 'revenue', 'RSD', -10000, -10000, 1, 'credit_note', v_rev) returning id into v_ko;
+  insert into public.invoices (company_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, document_type, adjusts_invoice_id)
+  values (v_co, 'KZ-1', current_date, 'revenue', 'RSD', 5000, 5000, 1, 'debit_note', v_rev);
   insert into public.transactions (company_id, transaction_date, type, currency, amount, amount_rsd, pl_impact, status)
   values (v_co, current_date, 'invoice_payment', 'RSD', 50000, 50000, false, 'posted') returning id into v_tx;
   insert into public.invoice_transaction_links (invoice_id, transaction_id, allocated_amount, allocated_amount_rsd)
@@ -66,7 +68,8 @@ begin
   r := public.delete_invoice_cascade(current_setting('dt.rev')::uuid, true);
   assert r ->> 'invoice_number' = 'IF-1/2026' and r ->> 'type' = 'revenue', 'dry: ' || r::text;
   assert (r ->> 'payments_unlinked')::int = 1, 'dry payments: ' || r::text;
-  assert r -> 'notes_deleted' = '["KO-1"]'::jsonb, 'dry notes: ' || r::text;
+  assert r -> 'notes_deleted' = '["KO-1", "KZ-1"]'::jsonb, 'dry notes: ' || r::text;
+  assert r -> 'debit_notes_deleted' = '["KZ-1"]'::jsonb, 'dry debit notes: ' || r::text;
   assert (r ->> 'uploads_removed')::int = 1, 'dry uploads: ' || r::text;
   assert r ->> 'sef_row' = 'pending', 'dry sef: ' || r::text;
   assert (r ->> 'advance_links_removed')::int = 0 and r -> 'finals_reopened' = '[]'::jsonb, 'dry advance';
