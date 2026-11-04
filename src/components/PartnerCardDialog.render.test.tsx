@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import PartnerCardDialog from './PartnerCardDialog'
 
 // The partner's card on screen: the running balance, the verdict, the two
@@ -123,7 +123,7 @@ describe('the IOS', () => {
     await open()
     fireEvent.change(screen.getByLabelText('Do'), { target: { value: '2026-10-31' } })
     fireEvent.click(screen.getByText('IOS'))
-    await new Promise(r => setTimeout(r, 20))
+    await act(async () => { await new Promise(r => setTimeout(r, 20)) })
     const frame = document.querySelector('iframe[title="IOS za štampu"]') as HTMLIFrameElement
     expect(frame).not.toBeNull()
     expect(frame.srcdoc).toContain('IZVOD OTVORENIH STAVKI')
@@ -154,7 +154,7 @@ describe('an invoice stornoed on SEF', () => {
     await open()
     fireEvent.change(screen.getByLabelText('Do'), { target: { value: '2026-10-31' } })
     fireEvent.click(screen.getByText('IOS'))
-    await new Promise(r => setTimeout(r, 20))
+    await act(async () => { await new Promise(r => setTimeout(r, 20)) })
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('stornirana na SEF-u (IF-9/26)'))
     expect(document.querySelector('iframe[title="IOS za štampu"]')).toBeNull()
   })
@@ -164,7 +164,7 @@ describe('an invoice stornoed on SEF', () => {
     await open()
     fireEvent.change(screen.getByLabelText('Do'), { target: { value: '2026-10-31' } })
     fireEvent.click(screen.getByText('IOS'))
-    await new Promise(r => setTimeout(r, 20))
+    await act(async () => { await new Promise(r => setTimeout(r, 20)) })
     const frame = document.querySelector('iframe[title="IOS za štampu"]') as HTMLIFrameElement
     expect(frame.srcdoc).toContain('<div class="void">Stornirana na SEF-u</div>')
   })
