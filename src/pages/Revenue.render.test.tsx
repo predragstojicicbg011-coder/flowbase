@@ -30,6 +30,8 @@ jest.mock('../components/InvoiceDialog', () => ({
   __esModule: true,
   default: (p: any) => <div data-testid="invoice-dialog" data-type={p.invoice?.type} />,
 }))
+jest.mock('../components/PartnerCardDialog', () => ({ __esModule: true, default: (p: any) => <div data-testid="partner-card">{p.partner.name}</div> }))
+jest.mock('../components/DocumentViewerDialog', () => ({ __esModule: true, default: (p: any) => <div data-testid="document-viewer" data-invoice={p.invoiceId} /> }))
 jest.mock('../components/SefSalesInboxDialog', () => ({ __esModule: true, default: () => <div data-testid="sales-inbox" /> }))
 jest.mock('../services/currencyService', () => ({
   ...jest.requireActual('../services/currencyService'),
@@ -57,7 +59,7 @@ describe('Prihodi page — empty', () => {
     expect(screen.getByText('Nema aktivnih projekata')).toBeInTheDocument()
     expect(screen.getByText('Nema objekata u zakupu')).toBeInTheDocument()
     expect(screen.getByText('Još nema izlaznih faktura ni projekata')).toBeInTheDocument()
-    expect(screen.getByText('Fakturisano u periodu · RSD')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Ukupna potraživanja/ })).toBeInTheDocument()
   })
 })
 
@@ -178,5 +180,121 @@ describe('Prihodi page — SEF izlazne', () => {
     await screen.findByText(/Još nema izlaznih faktura, avansa/)
     fireEvent.click(await screen.findByRole('button', { name: 'SEF izlazne' }))
     expect(screen.getByTestId('sales-inbox')).toBeInTheDocument()
+  })
+})
+
+describe('Prihodi — receivables first', () => {
+  // Let the page's own follow-up updates land inside act.
+  afterEach(async () => { await act(async () => { await new Promise(r => setTimeout(r, 0)) }) })
+  const inDays = (n: number) => iso(new Date(Date.now() + n * 86400000))
+  const sale = (o: any) => ({
+    type: 'revenue', company_id: 'c1', currency: 'RSD', invoice_date: daysAgo(60), calculated_status: 'unpaid',
+    document_type: 'invoice', paid_amount_rsd: '0', paid_amount_eur: '0',
+    amount_eur: '0', remaining_eur: '0', ...o,
+  })
+  beforeEach(() => {
+    empty()
+    mockDb.projects = [
+      { id: 'a', company_id: 'c1', name: 'Novi Beograd A1', code: 'NB-01', kind: 'construction',
+        contract_value: '1000000', contract_currency: 'RSD', contract_value_rsd: '1000000', contract_value_eur: '8532.42',
+        payment_days: 45, active: true },
+      { id: 'b', company_id: 'c1', name: 'Poslovna zgrada Zemun', kind: 'rental', payment_days: 15, active: true },
+    ]
+    mockDb.v_invoice_status = [
+      sale({ id: 'late', invoice_number: 'ALFA-1', partner_id: 'p1', partner_name: 'Kupac Alfa', project_id: 'a',
+        due_date: daysAgo(10), amount: '300000', amount_rsd: '300000', remaining_rsd: '125000' }),
+      sale({ id: 'soon', invoice_number: 'BETA-1', partner_id: 'p2', partner_name: 'Kupac Beta', project_id: null,
+        due_date: inDays(3), amount: '60000', amount_rsd: '60000', remaining_rsd: '60000' }),
+      sale({ id: 'later', invoice_number: 'GAMA-1', partner_id: 'p3', partner_name: 'Kupac Gama', project_id: null,
+        due_date: inDays(30), amount: '25000', amount_rsd: '25000', remaining_rsd: '25000' }),
+      sale({ id: 'pro', invoice_number: 'PRED-1', partner_id: 'p4', partner_name: 'Kupac Delta', project_id: null,
+        document_type: 'proforma', due_date: daysAgo(5), amount: '40000', amount_rsd: '40000', remaining_rsd: '40000' }),
+      sale({ id: 'rent', invoice_number: 'ZAK-1', partner_id: 'p5', partner_name: 'Zakupac Market', project_id: 'b',
+        lease_id: 'l1', invoice_date: daysAgo(3), due_date: inDays(20),
+        amount: '0', amount_rsd: '0', remaining_rsd: '0', calculated_status: 'paid' }),
+    ]
+  })
+
+  it('opens with three cards in full figures and the proformas waiting', async () => {
+    show()
+    const total = await screen.findByRole('button', { name: /Ukupna potraživanja/ })
+    expect(within(total).getByText('210.000 RSD')).toBeInTheDocument()
+    expect(within(screen.getByRole('button', { name: /Dospeva u narednih 7 dana/ })).getByText('60.000 RSD')).toBeInTheDocument()
+    expect(within(screen.getByRole('button', { name: /^Kasni/ })).getByText('125.000 RSD')).toBeInTheDocument()
+    expect(screen.getByText(/Predračuni koji čekaju uplatu: 1 · 40\.000 RSD/)).toBeInTheDocument()
+  })
+
+  it('opens only the late invoices from the Kasni card', async () => {
+    show()
+    fireEvent.click(await screen.findByRole('button', { name: /^Kasni/ }))
+    const t = screen.getByRole('table', { name: /Potraživanja: Kasni/ })
+    expect(within(t).getByText('ALFA-1')).toBeInTheDocument()
+    expect(within(t).queryByText('BETA-1')).not.toBeInTheDocument()
+  })
+
+  it('lists who is late with the amount owed', async () => {
+    show()
+    const t = await screen.findByRole('table', { name: 'Ko kasni' })
+    const row = within(t).getByText('Kupac Alfa').closest('tr')!
+    expect(within(row).getByText('125.000 RSD')).toBeInTheDocument()
+    expect(within(row).getByText('10')).toBeInTheDocument()
+    expect(within(t).queryByText('Kupac Beta')).not.toBeInTheDocument()
+  })
+
+  it('opens the customer card and the oldest invoice PDF from the late list', async () => {
+    show()
+    fireEvent.click(await screen.findByRole('button', { name: 'Kartica Kupac Alfa' }))
+    expect(screen.getByTestId('partner-card')).toHaveTextContent('Kupac Alfa')
+    fireEvent.click(screen.getByRole('button', { name: 'PDF najstarije fakture Kupac Alfa' }))
+    expect(screen.getByTestId('document-viewer')).toHaveAttribute('data-invoice', 'late')
+  })
+
+  it('keeps the sections in the new order', async () => {
+    show()
+    await screen.findByRole('table', { name: 'Ko kasni' })
+    const order = ['Ko kasni', 'Po projektima', 'Izlazne fakture', 'Starost potraživanja', 'Plan prihoda', 'Zakup']
+    const els = order.map(t => screen.getAllByText(t, { selector: 'div' })[0])
+    for (let i = 1; i < els.length; i++) {
+      expect(els[i - 1].compareDocumentPosition(els[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    expect(screen.getByText(/do kraja godine/)).toBeInTheDocument()
+  })
+
+  it('shows what is left to bill and leaves the rented building out', async () => {
+    show()
+    const t = await screen.findByRole('table', { name: 'Prihodi po projektima' })
+    expect(within(t).getByText('Preostalo za fakturisanje')).toBeInTheDocument()
+    expect(within(t).getAllByText('700.000 RSD').length).toBeGreaterThan(0)
+    expect(within(t).queryByText(/Zemun/)).not.toBeInTheDocument()
+  })
+
+  it('filters the list by kind and has a PDF button per row', async () => {
+    show()
+    const list = await screen.findByRole('table', { name: 'Izlazne fakture' })
+    fireEvent.click(within(within(list).getByText('ALFA-1').closest('tr')!).getByRole('button', { name: /PDF fakture ALFA-1/ }))
+    expect(screen.getByTestId('document-viewer')).toHaveAttribute('data-invoice', 'late')
+    expect(screen.queryByTestId('invoice-dialog')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Razvrstavanje'), { target: { value: 'lease' } })
+    const only = screen.getByRole('table', { name: 'Izlazne fakture' })
+    expect(within(only).getByText('ZAK-1')).toBeInTheDocument()
+    expect(within(only).queryByText('ALFA-1')).not.toBeInTheDocument()
+  })
+
+  it('warns in red about an invoice voided on SEF', async () => {
+    mockDb.sef_inbox = [
+      { imported_invoice_id: 'late', sef_status: 'Cancelled' },
+      { imported_invoice_id: 'soon', sef_status: 'Paid' },
+    ]
+    show()
+    const list = await screen.findByRole('table', { name: 'Izlazne fakture' })
+    await waitFor(() => expect(within(within(list).getByText('ALFA-1').closest('tr')!).getByText('Stornirana na SEF-u')).toBeInTheDocument())
+    expect(within(within(list).getByText('BETA-1').closest('tr')!).getByText('SEF: plaćena, izvod ne')).toBeInTheDocument()
+    // Still counted in the receivables, and flagged wherever it is listed.
+    expect(within(screen.getByRole('button', { name: /^Kasni/ })).getByText('125.000 RSD')).toBeInTheDocument()
+    const late = screen.getByRole('table', { name: 'Ko kasni' })
+    expect(within(late).getByText('Stornirana na SEF-u')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Kasni/ }))
+    const t = screen.getByRole('table', { name: /Potraživanja: Kasni/ })
+    expect(within(t).getByText('Stornirana na SEF-u')).toBeInTheDocument()
   })
 })

@@ -11,6 +11,7 @@
 // plannedRevenueByMonth, planBookFigures). This module only arranges them.
 
 import { round2, type BookAmounts } from './bookAmounts'
+import { revenueKindOf, type RevenueKind } from './revenueClassification'
 import {
   projectRevenueSummary, type AdvanceReceipt, type RevenueInvoiceRow, type RevenueSummary,
 } from './revenue'
@@ -163,6 +164,8 @@ export interface ProjectRevenueRow {
   collected: number
   outstanding: number
   unconverted: number
+  /** Contract minus billed; null without a contract. */
+  remainingToBill: number | null
 }
 
 function fromSummary(p: Project, s: RevenueSummary): ProjectRevenueRow {
@@ -171,6 +174,7 @@ function fromSummary(p: Project, s: RevenueSummary): ProjectRevenueRow {
     contractValue: s.contractValue, billed: s.billedToDate, billedPct: s.billedPct,
     advanceReceived: s.advanceReceived, advanceDeducted: s.advanceDeducted, advanceRemaining: s.advanceRemaining,
     collected: s.collected, outstanding: s.outstanding, unconverted: s.unconverted,
+    remainingToBill: s.contractValue === null ? null : round2(s.contractValue - s.billedToDate),
   }
 }
 
@@ -186,7 +190,13 @@ export function projectRevenueRows(
   rows: readonly RevenueListRow[],
   advances: readonly AdvanceReceipt[],
   currency: DisplayCurrency,
+  opts?: { constructionOnly?: boolean },
 ): { projects: ProjectRevenueRow[]; overhead: ProjectRevenueRow | null; total: ProjectRevenueRow } {
+  const constructionOnly = !!opts?.constructionOnly
+  if (constructionOnly) {
+    projects = projects.filter(p => p.kind !== 'rental')
+    rows = rows.filter(r => !r.lease_id)
+  }
   const live_ = rows.filter(live)
   const out: ProjectRevenueRow[] = []
   const seen = new Set<string>()
@@ -227,7 +237,7 @@ export function projectRevenueRows(
       advanceReceived: 0, advanceDeducted: 0, advanceRemaining: 0,
       collected: round2(none.reduce((s, r) => s + pick(r, 'paid_amount'), 0)),
       outstanding: round2(none.reduce((s, r) => s + pick(r, 'remaining'), 0)),
-      unconverted,
+      unconverted, remainingToBill: null,
     }
   }
 
@@ -250,6 +260,7 @@ export function projectRevenueRows(
     collected: sum(r => r.collected),
     outstanding: sum(r => r.outstanding),
     unconverted: all.reduce((s, r) => s + r.unconverted, 0),
+    remainingToBill: contractTotal === null ? null : round2(contractTotal - billedOnContracts),
   }
   return { projects: out, overhead, total }
 }
@@ -263,6 +274,8 @@ export interface InvoiceFilter {
   stream: string
   /** '' all; otherwise a RevenueStatus. */
   status: '' | RevenueStatus
+  /** '' all; otherwise project, lease or services. */
+  kind?: '' | RevenueKind
   from: string
   to: string
   search?: string
@@ -278,6 +291,7 @@ export function filterRevenueInvoices(rows: readonly RevenueListRow[], f: Invoic
     .filter(live)
     .filter(r => !f.projectId || (f.projectId === OVERHEAD_FILTER ? !r.project_id : r.project_id === f.projectId))
     .filter(r => !f.stream || (r.revenue_stream || '') === f.stream)
+    .filter(r => !f.kind || revenueKindOf(r) === f.kind)
     .filter(r => !f.status || revenueStatus(r.calculated_status) === f.status)
     .filter(r => inPeriod((r.invoice_date || '').slice(0, 10), f.from, f.to))
     .filter(r => !q

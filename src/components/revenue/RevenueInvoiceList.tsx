@@ -11,6 +11,10 @@ import {
   OVERHEAD_FILTER, STATUS_LABEL, filterRevenueInvoices, invoiceCount, revenueStatus, srDateShort,
   type InvoiceFilter, type RevenueListRow, type RevenueStatus,
 } from '../../services/revenuePage'
+import { revenueKindOf, REVENUE_KIND_LABEL } from '../../services/revenueClassification'
+import type { RevenueKind } from '../../services/revenueClassification'
+import type { SefFlag } from '../../services/receivables'
+import DocumentViewerDialog from '../DocumentViewerDialog'
 import { fmtMoney } from '../../utils/formatters'
 import { pickAmount, type DisplayCurrency } from '../../contexts/DisplayCurrencyContext'
 
@@ -20,8 +24,16 @@ const STATUS_STYLE: Record<RevenueStatus, React.CSSProperties> = {
   paid: rs.badgePaid, partial: rs.badgePartial, unpaid: rs.badgeUnpaid,
 }
 
+/** What SEF says that the books do not: the warning beside an invoice number. */
+export function SefFlagBadge({ flag }: { flag: SefFlag | undefined }) {
+  if (!flag) return null
+  return flag === 'voided'
+    ? <span style={{ ...rs.badge, ...rs.badgeUnpaid, fontWeight: 600 }} title="Stornirana na SEF-u, a još stoji u knjigama. Ispravite je knjižnim odobrenjem ili je obrišite.">Stornirana na SEF-u</span>
+    : <span style={{ ...rs.badge, ...rs.badgePartial }} title="SEF vodi fakturu kao plaćenu, a uplata nije u izvodu.">SEF: plaćena, izvod ne</span>
+}
+
 export default function RevenueInvoiceList({
-  rows, loading, projects, projectName, currency, format, from, to, onPeriod, onOpen,
+  rows, loading, projects, projectName, currency, format, from, to, onPeriod, onOpen, flags,
 }: {
   rows: RevenueListRow[]
   loading: boolean
@@ -33,14 +45,17 @@ export default function RevenueInvoiceList({
   to: string
   onPeriod: (from: string, to: string) => void
   onOpen: (row: RevenueListRow) => void
+  flags?: ReadonlyMap<string, SefFlag>
 }) {
   const [projectId, setProjectId] = useState('')
   const [stream, setStream] = useState('')
   const [status, setStatus] = useState<'' | RevenueStatus>('')
+  const [kind, setKind] = useState<'' | RevenueKind>('')
   const [search, setSearch] = useState('')
+  const [pdfFor, setPdfFor] = useState<RevenueListRow | null>(null)
 
-  const filter: InvoiceFilter = { projectId, stream, status, from, to, search }
-  const listed = useMemo(() => filterRevenueInvoices(rows, filter), [rows, projectId, stream, status, from, to, search]) // eslint-disable-line react-hooks/exhaustive-deps
+  const filter: InvoiceFilter = { projectId, stream, status, kind, from, to, search }
+  const listed = useMemo(() => filterRevenueInvoices(rows, filter), [rows, projectId, stream, status, kind, from, to, search]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const projectOptions = useMemo(() => [
     { value: OVERHEAD_FILTER, label: OVERHEAD_OPTION_LABEL },
@@ -57,6 +72,10 @@ export default function RevenueInvoiceList({
         <SearchableSelect value={projectId} onChange={setProjectId} options={projectOptions}
           allLabel="Svi projekti" searchPlaceholder="Pretraži projekte…" emptyMessage="Nema takvog projekta"
           style={{ minWidth: '200px' }} title="Projekat" />
+        <select style={rs.filterInput} value={kind} onChange={e => setKind(e.target.value as '' | RevenueKind)} aria-label="Razvrstavanje">
+          <option value="">Sva razvrstavanja</option>
+          {(['project', 'lease', 'services'] as RevenueKind[]).map(k => <option key={k} value={k}>{REVENUE_KIND_LABEL[k]}</option>)}
+        </select>
         <select style={rs.filterInput} value={stream} onChange={e => setStream(e.target.value)} aria-label="Vrsta prihoda">
           <option value="">Sve vrste prihoda</option>
           {REVENUE_STREAMS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -92,12 +111,14 @@ export default function RevenueInvoiceList({
                 <th style={rs.th}>Datum</th>
                 <th style={rs.th}>Investitor / zakupac</th>
                 <th style={rs.th}>Projekat</th>
+                <th style={rs.th}>Razvrstavanje</th>
                 <th style={rs.th}>Vrsta prihoda</th>
                 <th style={rs.thNum}>Iznos</th>
                 <th style={rs.thNum}>Avans odbijen</th>
                 <th style={rs.thNum}>Za naplatu</th>
                 <th style={rs.thNum}>Naplaćeno</th>
                 <th style={rs.th}>Status</th>
+                <th style={rs.th} />
               </tr>
             </thead>
             <tbody>
@@ -108,10 +129,14 @@ export default function RevenueInvoiceList({
                 return (
                   <tr key={r.id} style={{ ...rs.tr, ...(i % 2 ? rs.rowStripe1 : rs.rowStripe0), cursor: 'pointer' }}
                     onClick={() => onOpen(r)} title="Otvori fakturu">
-                    <td style={{ ...rs.td, fontFamily: 'monospace', fontSize: '12px' }}>{r.invoice_number || '—'}</td>
+                    <td style={{ ...rs.td, fontFamily: 'monospace', fontSize: '12px' }}>
+                      {r.invoice_number || '—'}
+                      {flags?.get(r.id) && <div style={{ marginTop: '3px' }}><SefFlagBadge flag={flags.get(r.id)} /></div>}
+                    </td>
                     <td style={{ ...rs.td, whiteSpace: 'nowrap' }}>{srDateShort(r.invoice_date)}</td>
                     <td style={rs.td}>{r.partner_name || '—'}</td>
                     <td style={rs.td}><span style={rs.smallCell}>{projectName(r.project_id, r.project_name)}</span></td>
+                    <td style={rs.td}><span style={rs.smallCell}>{REVENUE_KIND_LABEL[revenueKindOf(r)]}</span></td>
                     <td style={rs.td}>
                       <span style={{ ...rs.badge, ...(r.lease_id ? rs.badgeRent : rs.badgeMuted) }}>{r.revenue_stream || '—'}</span>
                     </td>
@@ -123,21 +148,27 @@ export default function RevenueInvoiceList({
                     <td style={{ ...rs.td, ...rs.num }}>{format(pickAmount(r, currency, 'remaining'))}</td>
                     <td style={{ ...rs.td, ...rs.num, color: '#00D47E' }}>{format(pickAmount(r, currency, 'paid_amount'))}</td>
                     <td style={rs.td}><span style={{ ...rs.badge, ...STATUS_STYLE[st] }}>{STATUS_LABEL[st]}</span></td>
+                    <td style={rs.td}>
+                      <button type="button" style={rs.ghostBtn} aria-label={`PDF fakture ${r.invoice_number || ''}`.trim()}
+                        onClick={e => { e.stopPropagation(); setPdfFor(r) }}>PDF</button>
+                    </td>
                   </tr>
                 )
               })}
               <tr style={{ ...rs.tr, ...rs.rowTotal }}>
-                <td style={{ ...rs.td, fontWeight: 600 }} colSpan={5}>Ukupno</td>
+                <td style={{ ...rs.td, fontWeight: 600 }} colSpan={6}>Ukupno</td>
                 <td style={{ ...rs.td, ...rs.num, fontWeight: 600 }}>{format(sum('amount'))}</td>
                 <td style={{ ...rs.td, ...rs.num, fontWeight: 600 }}>{format(sum('advance_deducted'))}</td>
                 <td style={{ ...rs.td, ...rs.num, fontWeight: 600 }}>{format(sum('remaining'))}</td>
                 <td style={{ ...rs.td, ...rs.num, fontWeight: 600 }}>{format(sum('paid_amount'))}</td>
+                <td style={rs.td} />
                 <td style={rs.td} />
               </tr>
             </tbody>
           </table>
         )}
       </div>
+      {pdfFor && <DocumentViewerDialog invoiceId={pdfFor.id} title={pdfFor.invoice_number || undefined} onClose={() => setPdfFor(null)} />}
       <div style={rs.note}>Klik na fakturu otvara je za izmenu. „Za naplatu" je ono što je preostalo posle odbijenog avansa i uplata.</div>
     </>
   )

@@ -37,6 +37,7 @@ export default function ProjectRevenueTable({ rows, overhead, total, format, cur
               <th style={rs.thNum}>Ugovorena vrednost</th>
               <th style={rs.thNum}>Fakturisano</th>
               <th style={rs.thNum}>% fakturisano</th>
+              <th style={rs.thNum}>Preostalo za fakturisanje</th>
               <th style={rs.thNum}>Avans primljen</th>
               <th style={rs.thNum}>Avans odbijen</th>
               <th style={rs.thNum}>Avans preostao</th>
@@ -74,6 +75,7 @@ function Row({ r, format, striped }: { r: ProjectRevenueRow; format: Fmt; stripe
       <td style={{ ...rs.td, ...rs.num }}>{f(r.contractValue)}</td>
       <td style={{ ...rs.td, ...rs.num, fontWeight: 600 }}>{f(r.billed)}</td>
       <td style={{ ...rs.td, ...rs.num, color: '#7A9BB8' }}>{pct(r.billedPct)}</td>
+      <td style={{ ...rs.td, ...rs.num }}>{f(r.remainingToBill)}</td>
       <td style={{ ...rs.td, ...rs.num }}>{muted ? '—' : f(r.advanceReceived)}</td>
       <td style={{ ...rs.td, ...rs.num }}>{muted ? '—' : f(r.advanceDeducted)}</td>
       <td style={{ ...rs.td, ...rs.num, color: r.advanceRemaining > 0 ? '#F5A623' : undefined }}>{muted ? '—' : f(r.advanceRemaining)}</td>

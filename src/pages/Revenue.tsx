@@ -7,11 +7,12 @@
 // is still to be billed.
 //
 // Sections, top to bottom:
-//   summary cards        billed and collected in the period, owed today,
-//                        advance not yet deducted, planned to year end
+//   three cards          receivables, due within a week, late (receivables.ts)
+//   Ko kasni             customers with overdue invoices, card and PDF
 //   Po projektima        revenuePage.projectRevenueRows (projectRevenueSummary)
+//   Izlazne fakture      v_invoice_status, opening InvoiceDialog for edit,
+//                        SEF warnings from sef_inbox
 //   Starost potraživanja revenue.receivablesAging
-//   Izlazne fakture      v_invoice_status, opening InvoiceDialog for edit
 //   Plan prihoda         revenue_plan per project × 12 months, with the rent forecast
 //   Zakup                rental_leases per rental building, and rent invoices
 //
@@ -30,6 +31,8 @@ import ReceivablesAgingPanel from '../components/revenue/ReceivablesAgingPanel'
 import RevenueInvoiceList from '../components/revenue/RevenueInvoiceList'
 import RevenuePlanGrid from '../components/revenue/RevenuePlanGrid'
 import LeasesSection from '../components/revenue/LeasesSection'
+import ReceivablesCards from '../components/revenue/ReceivablesCards'
+import LatePayersTable from '../components/revenue/LatePayersTable'
 import { rs } from '../components/revenue/styles'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { useProjects } from '../contexts/ProjectsContext'
@@ -43,8 +46,9 @@ import {
   plannedRevenueByMonth, type RentalLease, type RevenuePlanRow,
 } from '../services/revenuePlan'
 import {
-  monthsToYearEnd, nextMonths, projectRevenueRows, revenueTotals, srDateShort, type RevenueListRow,
+  monthsToYearEnd, nextMonths, projectRevenueRows, type RevenueListRow,
 } from '../services/revenuePage'
+import { latePayers, receivableTotals, sefFlags } from '../services/receivables'
 
 const isoToday = () => new Date().toISOString().slice(0, 10)
 const yearStart = () => `${new Date().getFullYear()}-01-01`
@@ -72,6 +76,7 @@ export default function Revenue() {
   const [to, setTo] = useState(today)
 
   const [rows, setRows] = useState<RevenueListRow[]>([])
+  const [sefRows, setSefRows] = useState<{ imported_invoice_id: string | null; sef_status: string | null }[]>([])
   const [advances, setAdvances] = useState<AdvanceReceipt[]>([])
   const [plan, setPlan] = useState<RevenuePlanRow[]>([])
   const [leases, setLeases] = useState<RentalLease[]>([])
@@ -93,6 +98,14 @@ export default function Revenue() {
       scoped(supabase.from('v_invoice_status').select('*').eq('type', 'revenue'))
         .order('invoice_date').order('id').range(a, b))
     setRows(data)
+  }, [companyId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Only the warnings depend on this; a failure leaves the page without them.
+  const loadSefStatus = useCallback(async () => {
+    const data = await fetchAllPages<{ imported_invoice_id: string | null; sef_status: string | null }>((a, b) =>
+      scoped(supabase.from('sef_inbox').select('imported_invoice_id, sef_status').eq('direction', 'sales'))
+        .not('imported_invoice_id', 'is', null).order('id').range(a, b))
+    setSefRows(data)
   }, [companyId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadPlan = useCallback(async () => {
@@ -124,12 +137,13 @@ export default function Revenue() {
     setError('')
     await Promise.all([
       guard('Fakture', loadInvoices),
+      guard('SEF status', loadSefStatus),
       guard('Avansi', loadAdvances),
       guard('Planovi', loadPlan),
       guard('Zakupi', loadLeases),
     ])
     setLoading(false)
-  }, [guard, loadInvoices, loadAdvances, loadPlan, loadLeases])
+  }, [guard, loadInvoices, loadSefStatus, loadAdvances, loadPlan, loadLeases])
 
   useEffect(() => { loadAll() }, [loadAll])
 
@@ -159,10 +173,11 @@ export default function Revenue() {
     [companyProjects])
 
   const byProject = useMemo(
-    () => projectRevenueRows(companyProjects, rows, advances, currency), [companyProjects, rows, advances, currency])
-  const totals = useMemo(
-    () => revenueTotals(rows, byProject.projects.map(r => r.advanceRemaining), from, to, currency),
-    [rows, byProject, from, to, currency])
+    () => projectRevenueRows(companyProjects, rows, advances, currency, { constructionOnly: true }),
+    [companyProjects, rows, advances, currency])
+  const receivables = useMemo(() => receivableTotals(rows, today, currency), [rows, today, currency])
+  const late = useMemo(() => latePayers(rows, today, currency), [rows, today, currency])
+  const flags = useMemo(() => sefFlags(rows, sefRows), [rows, sefRows])
   const aging = useMemo(() => receivablesAging(rows, today, currency), [rows, today, currency])
 
   const planMonths = useMemo(() => nextMonths(today, 12), [today])
@@ -224,36 +239,17 @@ export default function Revenue() {
             <SkeletonRows rows={3} height={18} gap={14} widths={[60, 80, 70]} />
           </div>
         ) : (
-          <div style={rs.summaryRow}>
-            <Card label={`Fakturisano u periodu · ${currency}`} value={format(totals.billed, 0)}
-              sub={`${srDateShort(from)} – ${srDateShort(to)}`} />
-            <Card label="Naplaćeno" value={format(totals.collected, 0)} color="#00D47E"
-              sub="na fakturama iz perioda" />
-            <Card label="Nenaplaćeno" value={format(totals.outstanding, 0)}
-              color={totals.outstanding > 0 ? '#FF5B5A' : undefined} sub="ukupno otvoreno danas" />
-            <Card label="Primljeni avansi neodbijeni" value={format(totals.advancesRemaining, 0)}
-              color={totals.advancesRemaining > 0 ? '#F5A623' : undefined} sub="obaveza prema investitorima" />
-            <Card label="Planirano do kraja godine" value={format(yearEnd, 0)} color="#4EA8FF"
-              sub="plan i zakup, bez već fakturisanog" />
-          </div>
-        )}
-        {totals.unconverted > 0 && (
-          <div style={{ ...rs.note, marginTop: '-1rem', marginBottom: '1rem' }}>
-            {totals.unconverted} iznosa nemaju vrednost u {currency} i računata su kao 0.
-          </div>
+          <ReceivablesCards totals={receivables} rows={rows} today={today} currency={currency} format={format} flags={flags} />
         )}
 
-        <div style={rs.sectionTitle}>Po projektima</div>
+        <div style={rs.sectionTitle}>Ko kasni</div>
+        {!loading && <LatePayersTable payers={late} rows={rows} today={today} flags={flags} format={format} />}
+
+        <div style={{ ...rs.sectionTitle, ...rs.section }}>Po projektima</div>
         {loading
           ? <div style={{ ...rs.tableWrap, padding: '18px 16px' }}><SkeletonRows rows={4} height={15} gap={14} /></div>
           : <ProjectRevenueTable rows={byProject.projects} overhead={byProject.overhead} total={byProject.total}
               format={format} currency={currency} />}
-
-        <div style={{ ...rs.sectionTitle, ...rs.section }}>Starost potraživanja</div>
-        {!loading && (
-          <ReceivablesAgingPanel aging={aging} format={format} currency={currency}
-            projectName={id => projectName(id)} />
-        )}
 
         <div style={{ ...rs.sectionTitle, ...rs.section }}>Izlazne fakture</div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
@@ -268,9 +264,17 @@ export default function Revenue() {
         )}
         <RevenueInvoiceList rows={rows} loading={loading} projects={companyProjects} projectName={projectName}
           currency={currency} format={format} from={from} to={to}
-          onPeriod={(f, t) => { setFrom(f); setTo(t) }} onOpen={openInvoice} />
+          onPeriod={(f, t) => { setFrom(f); setTo(t) }} onOpen={openInvoice} flags={flags} />
 
-        <div style={{ ...rs.sectionTitle, ...rs.section }}>Plan prihoda</div>
+        <div style={{ ...rs.sectionTitle, ...rs.section }}>Starost potraživanja</div>
+        {!loading && (
+          <ReceivablesAgingPanel aging={aging} format={format} currency={currency}
+            projectName={id => projectName(id)} />
+        )}
+
+        <div style={{ ...rs.sectionTitle, ...rs.section }}>
+          Plan prihoda<span> · do kraja godine {format(yearEnd, 0)}</span>
+        </div>
         {!loading && (
           <RevenuePlanGrid projects={activeProjects} months={planMonths} plan={plan} leases={leases} invoices={rows}
             currency={currency} format={format} rates={rates} rateError={rateError} companyId={companyId} today={today}
@@ -295,16 +299,6 @@ export default function Revenue() {
       {editInvoice && (
         <InvoiceDialog invoice={editInvoice} onClose={() => { setEditInvoice(null); loadAll() }} />
       )}
-    </div>
-  )
-}
-
-function Card({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
-  return (
-    <div style={rs.summaryCard}>
-      <div style={rs.summaryLabel}>{label}</div>
-      <div style={{ ...rs.summaryVal, ...(color ? { color } : {}) }}>{value}</div>
-      {sub && <div style={rs.summarySub}>{sub}</div>}
     </div>
   )
 }

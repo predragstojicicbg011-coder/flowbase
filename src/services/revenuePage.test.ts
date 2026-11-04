@@ -99,6 +99,24 @@ describe('projectRevenueRows', () => {
   })
 })
 
+describe('projectRevenueRows — construction only', () => {
+  it('leaves rental buildings out of the project table', () => {
+    const rental = project({ id: 'r1', name: 'Zgrada Zemun', code: null, kind: 'rental' })
+    const rent = inv({ id: 'rent', project_id: 'r1', lease_id: 'l1' })
+    const all = projectRevenueRows([project(), rental], [inv(), rent], [], 'RSD', { constructionOnly: true })
+    expect(all.projects.map(r => r.projectId)).toEqual(['p1'])
+    expect(all.total.billed).toBe(300000)
+    const withRent = projectRevenueRows([project(), rental], [inv(), rent], [], 'RSD')
+    expect(withRent.projects.map(r => r.projectId)).toEqual(['p1', 'r1'])
+  })
+  it('says what is left to bill on a contract', () => {
+    const r = projectRevenueRows([project({ contract_value: 1000000, contract_value_rsd: 1000000 })], [inv()], [], 'RSD')
+    expect(r.projects[0].remainingToBill).toBe(700000)
+    const none = projectRevenueRows([project({ contract_value: null, contract_value_rsd: null, contract_value_eur: null })], [inv()], [], 'RSD')
+    expect(none.projects[0].remainingToBill).toBeNull()
+  })
+})
+
 describe('filterRevenueInvoices', () => {
   const rows = [
     inv({ id: 'a', invoice_date: '2026-01-15', calculated_status: 'paid' }),
@@ -109,6 +127,12 @@ describe('filterRevenueInvoices', () => {
   const none = { projectId: '', stream: '', status: '' as const, from: '', to: '' }
   it('returns revenue invoices, newest first', () => {
     expect(filterRevenueInvoices(rows, none).map(r => r.id)).toEqual(['c', 'b', 'a'])
+  })
+  it('filters by the kind of revenue', () => {
+    const k = [inv({ id: 'p' }), inv({ id: 'l', lease_id: 'l1' }), inv({ id: 's', project_id: null })]
+    expect(filterRevenueInvoices(k, { ...none, kind: 'lease' }).map(r => r.id)).toEqual(['l'])
+    expect(filterRevenueInvoices(k, { ...none, kind: 'services' }).map(r => r.id)).toEqual(['s'])
+    expect(filterRevenueInvoices(k, { ...none, kind: 'project' }).map(r => r.id)).toEqual(['p'])
   })
   it('filters by project, overhead, stream, status, period and search', () => {
     expect(filterRevenueInvoices(rows, { ...none, projectId: OVERHEAD_FILTER }).map(r => r.id)).toEqual(['b'])
