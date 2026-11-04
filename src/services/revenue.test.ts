@@ -157,6 +157,19 @@ describe('projectRevenueSummary', () => {
     expect(s.contractValue).toBeNull()
   })
 
+  it('counts what the advance chain collected on a final invoice as collected', () => {
+    // Final 300,000: 120,000 closed by an advance invoice, 180,000 paid.
+    const fin = inv({ id: 'fin', currency: 'RSD', amount: 300000, amount_rsd: 300000, amount_eur: 2560,
+      paid_amount_rsd: 180000, paid_amount_eur: 1536, remaining_rsd: 0, remaining_eur: 0,
+      advance_used_rsd: 120000, advance_used_eur: 1024, calculated_status: 'paid' })
+    const s = projectRevenueSummary(project, [fin, inv({ id: 'n', advance_used_rsd: null, advance_used_eur: null, remaining_rsd: 5860000 })], [], 'RSD')
+    expect(s.billedToDate).toBe(6160000)
+    expect(s.collected).toBe(300000)
+    expect(s.outstanding).toBe(5860000)
+    expect(s.unconverted).toBe(0)
+    expect(s.advanceDeducted + s.collected + s.outstanding).toBe(s.billedToDate)
+  })
+
   it('sums the plan from a month on, and counts rows it cannot read', () => {
     const plan = [
       { project_id: 'p1', month: '2026-09-01', amount_rsd: 1, amount_eur: 1 },

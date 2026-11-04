@@ -13,7 +13,7 @@
 import { round2, type BookAmounts } from './bookAmounts'
 import { revenueKindOf, type RevenueKind } from './revenueClassification'
 import {
-  projectRevenueSummary, NOT_BOOKED, type AdvanceReceipt, type RevenueInvoiceRow, type RevenueSummary,
+  advanceUsedOf, projectRevenueSummary, NOT_BOOKED, type AdvanceReceipt, type RevenueInvoiceRow, type RevenueSummary,
 } from './revenue'
 import {
   firstOfMonth, monthKey, type LeaseCurrency, type RentalLease, type RentForecastLine,
@@ -137,7 +137,7 @@ export function revenueTotals(
     if (!counted(r)) continue
     if (inPeriod((r.invoice_date || '').slice(0, 10), from, to)) {
       billed += pick(r)
-      collected += pick(r, 'paid_amount')
+      collected += pick(r, 'paid_amount') + advanceUsedOf(r, currency)
     }
     outstanding += pick(r, 'remaining')
   }
@@ -237,7 +237,7 @@ export function projectRevenueRows(
       projectId: null, label: OVERHEAD_LABEL, kind: 'overhead', contractValue: null,
       billed: round2(none.reduce((s, r) => s + pick(r), 0)), billedPct: null,
       advanceReceived: 0, advanceDeducted: 0, advanceRemaining: 0,
-      collected: round2(none.reduce((s, r) => s + pick(r, 'paid_amount'), 0)),
+      collected: round2(none.reduce((s, r) => s + pick(r, 'paid_amount') + advanceUsedOf(r, currency), 0)),
       outstanding: round2(none.reduce((s, r) => s + pick(r, 'remaining'), 0)),
       unconverted, remainingToBill: null,
     }

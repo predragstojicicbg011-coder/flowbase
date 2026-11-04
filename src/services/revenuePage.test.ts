@@ -69,6 +69,11 @@ describe('revenueTotals', () => {
     ], [], '2026-01-01', '2026-12-31', 'RSD')
     expect(t).toMatchObject({ billed: 300000, collected: 100000, outstanding: 150000 })
   })
+  it('counts what the advance chain collected on a final invoice as collected', () => {
+    const fin = inv({ id: 'fin', advance_deducted: 0, advance_deducted_rsd: 0, paid_amount_rsd: 180000, remaining_rsd: 0, advance_used_rsd: 120000, calculated_status: 'paid' })
+    const t = revenueTotals([fin], [], '2026-01-01', '2026-12-31', 'RSD')
+    expect(t).toMatchObject({ billed: 300000, collected: 300000, outstanding: 0, unconverted: 0 })
+  })
   it('counts rows with no figure in the currency', () => {
     const t = revenueTotals([inv({ amount_eur: null })], [], '', '', 'EUR')
     expect(t.billed).toBe(0)
@@ -98,6 +103,13 @@ describe('projectRevenueRows', () => {
     // % of contracts counts only the projects with a contract.
     expect(r.total.billedPct).toBe(30)
     expect(r.total.contractValue).toBe(1000000)
+  })
+  it('counts what the advance chain collected, on a project and on overhead', () => {
+    const fin = { advance_deducted: 0, advance_deducted_rsd: 0, paid_amount_rsd: 180000, remaining_rsd: 0, advance_used_rsd: 120000, calculated_status: 'paid' }
+    const r = projectRevenueRows([project()], [inv({ id: 'f1', ...fin }), inv({ id: 'f2', project_id: null, ...fin })], [], 'RSD')
+    expect(r.projects[0]).toMatchObject({ billed: 300000, collected: 300000, outstanding: 0 })
+    expect(r.overhead).toMatchObject({ billed: 300000, collected: 300000, outstanding: 0, unconverted: 0 })
+    expect(r.total.collected).toBe(600000)
   })
   it('has no overhead row without overhead revenue, and labels a stray project from the view', () => {
     const r = projectRevenueRows([], [inv({ project_id: 'gone', project_name: 'Stari objekat' })], [], 'RSD')

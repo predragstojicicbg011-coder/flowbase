@@ -239,8 +239,20 @@ export interface RevenueInvoiceRow {
   advance_deducted?: number | string | null
   advance_deducted_rsd?: number | string | null
   advance_deducted_eur?: number | string | null
+  /** What advance invoices closed on this final invoice (the advance chain). */
+  advance_used_rsd?: number | string | null
+  advance_used_eur?: number | string | null
   calculated_status?: string | null
   deleted_at?: string | null
+}
+
+/**
+ * What advance invoices closed on a final invoice, in `currency`: money the
+ * customer paid earlier against the advance invoice, so it is collected.
+ * None is 0 (the view leaves it empty on an invoice with no advance).
+ */
+export function advanceUsedOf(row: object, currency: DisplayCurrency): number {
+  return pickAmount(row, currency, 'advance_used') ?? 0
 }
 
 /** A revenue_plan row, as far as the summary reads it. */
@@ -264,7 +276,8 @@ export interface RevenueSummary {
   advanceReceived: number
   advanceDeducted: number
   advanceRemaining: number
-  /** Cash received against the billings (allocations), not counting the advance. */
+  /** Cash received against the billings (allocations) and through advance invoices
+   *  they used; not the old project advance (advanceDeducted). */
   collected: number
   /** What the investor still owes on the billings: amount − advance − collected. */
   outstanding: number
@@ -305,7 +318,8 @@ export function projectRevenueSummary(
   }
 
   const billedToDate = round2(rows.reduce((s, r) => s + pick(r), 0))
-  const collected = round2(rows.reduce((s, r) => s + pick(r, 'paid_amount'), 0))
+  // Collected: paid on the billing, and what advance invoices closed on it.
+  const collected = round2(rows.reduce((s, r) => s + pick(r, 'paid_amount') + advanceUsedOf(r, currency), 0))
   const outstanding = round2(rows.reduce((s, r) => s + pick(r, 'remaining'), 0))
 
   const balance = projectAdvanceBalance(project.id, advances, rows)
