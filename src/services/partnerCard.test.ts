@@ -170,3 +170,18 @@ describe('a customer final invoice closed by an advance invoice', () => {
     expect(c.verdict).toBe('Nema duga')
   })
 })
+
+describe('an invoice stornoed on SEF', () => {
+  it('is marked on its own row, still in the balance', () => {
+    const c = buildPartnerCard({
+      documents: [doc({ id: 'r', invoice_number: 'IF-9/26', type: 'revenue', amount: 50000, amount_rsd: 50000, voided: 'Stornirana na SEF-u' })],
+      payments: [pay({ invoice_id: 'r', amount_rsd: 10000, date: '2026-10-05' })],
+      usage: [], direct: [], coverage: [],
+    }, { from: null, to: null })
+    expect(c.rows.map(r => [r.label, r.voided ?? null])).toEqual([
+      ['Izlazni račun IF-9/26', 'Stornirana na SEF-u'],
+      ['Uplata — Banca Intesa', null],
+    ])
+    expect(c.closing).toBe(-40000)
+  })
+})

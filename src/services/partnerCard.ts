@@ -39,6 +39,8 @@ export interface CardDocument {
   advance_open: number | null
   /** An investor advance deducted on our invoice, in dinars. */
   advance_deducted_rsd: number | null
+  /** What SEF says of our invoice that the books do not: „Stornirana na SEF-u“. */
+  voided?: string | null
 }
 
 export interface CardPayment {
@@ -67,6 +69,8 @@ export interface CardRow {
   debit: number
   credit: number
   balance: number
+  /** On the document's own row: voided on SEF and still in the books. */
+  voided?: string | null
 }
 
 export interface PartnerCard {
@@ -85,7 +89,7 @@ export interface PartnerCard {
 const r2 = (n: number) => Math.round(n * 100) / 100
 const num = (n: unknown) => { const v = Number(n); return Number.isFinite(v) ? v : 0 }
 
-interface Change { date: string; order: number; label: string; documentId: string | null; refers: string | null; owe: number }
+interface Change { date: string; order: number; label: string; documentId: string | null; refers: string | null; owe: number; voided?: string | null }
 
 export function buildPartnerCard(
   input: { documents: CardDocument[]; payments: CardPayment[]; usage: CardUsage[]; direct: CardDirect[]; coverage: CardCoverage[] },
@@ -107,7 +111,10 @@ export function buildPartnerCard(
       : `${revenue ? 'Izlazni račun' : 'Račun'} ${d.invoice_number || ''}`.trim()
     // A supplier's document adds to what we owe by its signed amount; ours to
     // a customer takes from it.
-    changes.push({ date, order: kind === 'invoice' ? 0 : 1, label, documentId: d.id, refers: base?.invoice_number ?? null, owe: revenue ? -amt : amt })
+    changes.push({
+      date, order: kind === 'invoice' ? 0 : 1, label, documentId: d.id, refers: base?.invoice_number ?? null, owe: revenue ? -amt : amt,
+      ...(d.voided ? { voided: d.voided } : {}),
+    })
     if (revenue && num(d.advance_deducted_rsd) > 0) {
       changes.push({ date, order: 2, label: `Odbijen avans po ${d.invoice_number || ''}`.trim(), documentId: d.id, refers: d.invoice_number, owe: num(d.advance_deducted_rsd) })
     }
@@ -156,6 +163,7 @@ export function buildPartnerCard(
     rows.push({
       date: c.date, label: c.label, documentId: c.documentId, refers: c.refers,
       debit: c.owe < 0 ? r2(-c.owe) : 0, credit: c.owe > 0 ? r2(c.owe) : 0, balance,
+      ...(c.voided ? { voided: c.voided } : {}),
     })
   }
   const closing = rows.length ? rows[rows.length - 1].balance : opening

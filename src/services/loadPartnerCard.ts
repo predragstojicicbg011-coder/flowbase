@@ -12,6 +12,8 @@
 //   coverage    advance_coverage of the proformas
 //   direct      direct transactions with the partner (no bill)
 //   withDocs    which documents have a PDF (SEF or uploaded)
+//   voided      our invoices SEF holds as stornoed, cancelled or rejected
+//               (sef_inbox, direction 'sales'), marked on the document
 //
 // IN DINARS OR IN EUROS, as booked: every amount the card adds up is read from
 // the `_rsd` or the `_eur` column. The card's fields keep the `_rsd` names and
@@ -19,6 +21,7 @@
 
 import { fetchAllPages, fetchByIds } from '../utils/fetchAllPages'
 import { invoicesWithDocuments } from './sef/invoiceDocuments'
+import { voidedLabel } from './sef/salesDraft'
 import type { CardCoverage, CardDirect, CardDocument, CardPayment, CardUsage } from './partnerCard'
 
 export interface PartnerCardData {
@@ -44,7 +47,9 @@ export async function loadPartnerCard(client: any, partnerId: string, companyId:
   const ids = documents.map(d => d.id)
   const proformaIds = documents.filter(d => d.document_type === 'proforma').map(d => d.id)
 
-  const [links, usage, coverage, direct, withDocs] = await Promise.all([
+  const revenueIds = documents.filter(d => d.type === 'revenue').map(d => d.id)
+
+  const [links, usage, coverage, direct, withDocs, sales] = await Promise.all([
     fetchByIds<any>(ids, chunk => client.from('invoice_transaction_links')
       .select(`invoice_id, transaction_id, allocated_amount_${c}, transactions(transaction_date, deleted_at, type, tx_subtype, note, banks!transactions_bank_id_fkey(name))`)
       .in('invoice_id', chunk)),
@@ -56,7 +61,14 @@ export async function loadPartnerCard(client: any, partnerId: string, companyId:
         .eq('partner_id', partnerId).eq('type', 'direct').is('deleted_at', null))
         .order('transaction_date', { ascending: true }).order('id').range(from, to)),
     invoicesWithDocuments(client, ids),
+    fetchByIds<any>(revenueIds, chunk => client.from('sef_inbox').select('imported_invoice_id, sef_status')
+      .eq('direction', 'sales').in('imported_invoice_id', chunk)),
   ])
+  const voided = new Map<string, string>()
+  for (const r of sales || []) {
+    const label = voidedLabel(r.sef_status)
+    if (r.imported_invoice_id && label) voided.set(r.imported_invoice_id, label)
+  }
 
   // A direct transaction linked to a bill (a reconciled direct payment, a
   // currency difference) is in the balance through its link: not "no bill".
@@ -67,6 +79,7 @@ export async function loadPartnerCard(client: any, partnerId: string, companyId:
       ...d, amount: Number(d.amount) || 0, amount_rsd: Number(d[`amount_${c}`]) || 0,
       advance_open: d.advance_open == null ? null : Number(d.advance_open),
       advance_deducted_rsd: Number(d[`advance_deducted_${c}`]) || 0,
+      ...(voided.has(d.id) ? { voided: voided.get(d.id) } : {}),
     })),
     payments: (links || [])
       .filter((l: any) => l.transactions && !l.transactions.deleted_at)

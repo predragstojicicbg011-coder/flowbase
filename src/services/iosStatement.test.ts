@@ -1,4 +1,4 @@
-import { openItemsAsOf, iosPrintHtml, iosNumber } from './iosStatement'
+import { openItemsAsOf, iosPrintHtml, iosNumber, iosVoidedWarning } from './iosStatement'
 import { buildPartnerCard, type CardDocument, type CardPayment } from './partnerCard'
 
 // IOS (izvod otvorenih stavki): the documents still open with a supplier on a
@@ -134,5 +134,41 @@ describe('a customer final invoice closed by an advance invoice', () => {
       usage: [{ final_invoice_id: 'fin', advance_invoice_id: 'av', amount_rsd: 120000 }],
     }, '2026-10-31')
     expect(r.items.map(i => [i.number, i.amount, i.open])).toEqual([['IF-7/26', -300000, -180000]])
+  })
+})
+
+describe('an invoice stornoed on SEF', () => {
+  const voided = openItemsAsOf({
+    documents: [
+      doc({ id: 'r', invoice_number: 'IF-9/26', type: 'revenue', amount: 50000, amount_rsd: 50000, voided: 'Stornirana na SEF-u' }),
+      doc({ id: 'k', invoice_number: 'IF-10/26', type: 'revenue', amount: 20000, amount_rsd: 20000 }),
+    ],
+    payments: [], usage: [],
+  }, '2026-10-31')
+
+  it('stays an open item, marked', () => {
+    expect(voided.items.map(i => [i.number, i.voided ?? null])).toEqual([['IF-10/26', null], ['IF-9/26', 'Stornirana na SEF-u']])
+  })
+
+  it('is warned about before printing', () => {
+    expect(iosVoidedWarning(voided.items)).toBe(
+      'Na IOS-u je 1 faktura stornirana na SEF-u (IF-9/26), a još stoji u knjigama. '
+      + 'IOS će je prikazati sa napomenom; pre slanja je ispravite knjižnim odobrenjem ili obrišite. Štampati ipak?')
+    expect(iosVoidedWarning(voided.items.filter(i => !i.voided))).toBeNull()
+  })
+
+  it('prints a clear note on its line and under the table', () => {
+    const html = iosPrintHtml({
+      company: { name: 'Firma doo' }, partner: { name: 'Kupac doo' }, asOf: '2026-10-31',
+      statement: voided, advancesOpen: 0, number: 'IOS-1', generatedOn: '2026-11-01',
+    })
+    expect(html).toContain('IF-9/26<div class="void">Stornirana na SEF-u</div>')
+    expect(html).toContain('Stavke označene kao stornirane na SEF-u još stoje u našim knjigama i biće ispravljene.')
+    const clean = iosPrintHtml({
+      company: { name: 'Firma doo' }, partner: { name: 'Kupac doo' }, asOf: '2026-10-31',
+      statement: { items: voided.items.filter(i => !i.voided), total: -20000 }, advancesOpen: 0, number: 'IOS-1', generatedOn: '2026-11-01',
+    })
+    expect(clean).not.toContain('class="void"')
+    expect(clean).not.toContain('Stavke označene kao stornirane')
   })
 })

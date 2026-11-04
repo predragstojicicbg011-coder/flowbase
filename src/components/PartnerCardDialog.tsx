@@ -7,7 +7,7 @@ import { buildPartnerCard } from '../services/partnerCard'
 import { loadPartnerCard, type CardCurrency, type PartnerCardData } from '../services/loadPartnerCard'
 import DocumentViewerDialog from './DocumentViewerDialog'
 import { partnerCardPrintHtml } from '../services/partnerCardPrint'
-import { iosNumber, iosPrintHtml, openItemsAsOf } from '../services/iosStatement'
+import { iosNumber, iosPrintHtml, iosVoidedWarning, openItemsAsOf } from '../services/iosStatement'
 
 // ─── Kartica partnera ───────────────────────────────────────────────────────
 //
@@ -102,9 +102,14 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
       const { company, who, today } = await parties()
       const asOf = to || today
       const onDay = buildPartnerCard(data, { from: null, to: asOf })
+      const statement = openItemsAsOf(data, asOf)
+      // An invoice stornoed on SEF still stands in the books: the IOS would
+      // say it is owed. Printed only when asked again, with a note on it.
+      const warning = iosVoidedWarning(statement.items)
+      if (warning && !window.confirm(warning)) return
       const html = iosPrintHtml({
         company, partner: who, asOf,
-        statement: openItemsAsOf(data, asOf),
+        statement,
         advancesOpen: onDay.advances.invoices.reduce((sum, a) => sum + a.open, 0),
         number: iosNumber((who as any).tax_id, asOf),
         generatedOn: today,
@@ -197,6 +202,12 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
                       <td style={td}>
                         {r.label}
                         {r.refers && !r.label.endsWith(r.refers) && <span style={{ marginLeft: '6px', fontSize: '10.5px', color: DIALOG.dim }}>· {r.refers}</span>}
+                        {r.voided && (
+                          <span title="SEF je vodi kao storniranu, a još stoji u knjigama. Ispravite je knjižnim odobrenjem ili je obrišite."
+                            style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: 600, color: DIALOG.red, background: DIALOG.redFill, padding: '1px 6px', borderRadius: '8px' }}>
+                            {r.voided}
+                          </span>
+                        )}
                       </td>
                       <td style={td}>{clip(r.documentId)}</td>
                       <td style={num}>{r.debit ? money(r.debit) : ''}</td>

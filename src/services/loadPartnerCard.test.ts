@@ -66,4 +66,19 @@ describe('loading a partner card', () => {
     expect(d.payments[0].amount_rsd).toBe(50)
     expect(d.direct[0].amount_rsd).toBe(20)
   })
+
+  it('marks our invoice that SEF holds as stornoed, and nothing else', async () => {
+    const client = fakeClient({
+      v_invoice_status: [
+        { ...docs(1)[0], id: 'r1', invoice_number: 'IF-1', type: 'revenue' },
+        { ...docs(1)[0], id: 'r2', invoice_number: 'IF-2', type: 'revenue' },
+      ],
+      sef_inbox: [
+        { imported_invoice_id: 'r1', sef_status: 'Storno' },
+        { imported_invoice_id: 'r2', sef_status: 'Approved' },
+      ],
+    }, [])
+    const d = await loadPartnerCard(client, 'p1', 'co')
+    expect(d.documents.map(x => [x.id, x.voided ?? null])).toEqual([['r1', 'Stornirana na SEF-u'], ['r2', null]])
+  })
 })

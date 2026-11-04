@@ -25,6 +25,8 @@ export interface OpenItem {
   /** The document with its linked notes, as of the day. */
   amount: number
   open: number
+  /** Voided on SEF and still in the books: „Stornirana na SEF-u“. */
+  voided?: string | null
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -68,10 +70,30 @@ export function openItemsAsOf(
   lines.forEach(({ head, amount, settled }) => {
     const open = r2(amount - settled)
     if (Math.abs(open) < 0.005) return
-    items.push({ documentId: head.id, number: head.invoice_number, date: head.invoice_date, due: head.due_date ?? null, amount, open })
+    items.push({
+      documentId: head.id, number: head.invoice_number, date: head.invoice_date, due: head.due_date ?? null, amount, open,
+      ...(head.voided ? { voided: head.voided } : {}),
+    })
   })
   items.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.number || '').localeCompare(b.number || ''))
   return { items, total: r2(items.reduce((s, i) => s + i.open, 0)) }
+}
+
+/**
+ * The question asked before printing an IOS that carries an invoice voided on
+ * SEF (it still stands in the books, so the IOS would assert it is owed), or
+ * null when there is none.
+ */
+export function iosVoidedWarning(items: readonly OpenItem[]): string | null {
+  const voided = items.filter(i => i.voided)
+  if (voided.length === 0) return null
+  const n = voided.length
+  const one = n % 10 === 1 && n % 100 !== 11
+  const few = !one && n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)
+  const words = one ? 'faktura stornirana' : few ? 'fakture stornirane' : 'faktura storniranih'
+  const numbers = voided.map(i => i.number || 'bez broja').join(', ')
+  return `Na IOS-u ${one ? 'je' : 'su'} ${n} ${words} na SEF-u (${numbers}), a još ${one ? 'stoji' : 'stoje'} u knjigama. `
+    + `IOS će ${one ? 'je' : 'ih'} prikazati sa napomenom; pre slanja ${one ? 'je' : 'ih'} ispravite knjižnim odobrenjem ili obrišite. Štampati ipak?`
 }
 
 /** „IOS-100000004-20261031“: the partner's tax id and the day. */
@@ -108,7 +130,7 @@ export function iosPrintHtml(p: {
   const day = dateSr(p.asOf)
   const { items, total } = p.statement
   const rows = items.length
-    ? items.map((i, n) => `<tr><td>${n + 1}</td><td>${esc(i.number || 'bez broja')}</td><td>${dateSr(i.date)}</td><td>${dateSr(i.due)}</td>`
+    ? items.map((i, n) => `<tr><td>${n + 1}</td><td>${esc(i.number || 'bez broja')}${i.voided ? `<div class="void">${esc(i.voided)}</div>` : ''}</td><td>${dateSr(i.date)}</td><td>${dateSr(i.due)}</td>`
       + `<td class="n">${esc(fmtNum(i.amount))}</td><td class="n">${esc(fmtNum(i.open))}</td></tr>`).join('\n')
     : '<tr><td colspan="6">Nema otvorenih stavki na ovaj dan.</td></tr>'
   const verdict = total > 0.005 ? `Stanje Vašeg potraživanja prema nama na dan ${day}`
@@ -138,6 +160,8 @@ export function iosPrintHtml(p: {
   tr { page-break-inside: avoid; }
   .total { display: flex; justify-content: space-between; font-weight: 700; font-size: 11.5pt; margin-top: 4mm; padding: 3mm; border: 1.5px solid #111; }
   .adv { margin-top: 2mm; font-size: 9.5pt; color: #444; }
+  .void { font-size: 8.5pt; font-weight: 700; color: #b00020; }
+  .voidnote { margin-top: 2mm; font-size: 9.5pt; font-weight: 600; color: #b00020; }
   .answer { margin-top: 7mm; border: 1px solid #888; padding: 4mm; page-break-inside: avoid; }
   .answer h2 { font-size: 11pt; margin: 0 0 3mm; }
   .box { display: inline-block; width: 4mm; height: 4mm; border: 1px solid #111; margin-right: 2mm; vertical-align: -0.6mm; }
@@ -163,6 +187,7 @@ ${rows}
 </tbody>
 </table>
 <div class="total"><span>${esc(verdict)}</span><span>${esc(fmtMoney(Math.abs(total), currency))}</span></div>
+${items.some(i => i.voided) ? '<div class="voidnote">Stavke označene kao stornirane na SEF-u još stoje u našim knjigama i biće ispravljene.</div>' : ''}
 ${p.advancesOpen > 0.005 ? `<div class="adv">Dati avansi (ne ulaze u stanje): ${esc(fmtMoney(p.advancesOpen, currency))}</div>` : ''}
 <div class="answer">
   <h2>Odgovor partnera</h2>

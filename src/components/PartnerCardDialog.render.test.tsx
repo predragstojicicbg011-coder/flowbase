@@ -133,3 +133,39 @@ describe('the IOS', () => {
     expect(frame.srcdoc).toContain('60.000,00 RSD')
   })
 })
+
+describe('an invoice stornoed on SEF', () => {
+  beforeEach(() => {
+    mockData.documents = [
+      ...mockData.documents,
+      doc({ id: 'r9', invoice_number: 'IF-9/26', invoice_date: '2026-10-20', type: 'revenue', amount: 50000, amount_rsd: 50000, voided: 'Stornirana na SEF-u' }),
+    ]
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  it('is marked on the card', async () => {
+    await open()
+    expect(screen.getByText('Stornirana na SEF-u')).toBeInTheDocument()
+  })
+
+  it('asks before printing the IOS, and prints nothing when declined', async () => {
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false)
+    document.querySelectorAll('iframe').forEach(f => f.remove())
+    await open()
+    fireEvent.change(screen.getByLabelText('Do'), { target: { value: '2026-10-31' } })
+    fireEvent.click(screen.getByText('IOS'))
+    await new Promise(r => setTimeout(r, 20))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('stornirana na SEF-u (IF-9/26)'))
+    expect(document.querySelector('iframe[title="IOS za štampu"]')).toBeNull()
+  })
+
+  it('prints the IOS with the note when confirmed', async () => {
+    jest.spyOn(window, 'confirm').mockReturnValue(true)
+    await open()
+    fireEvent.change(screen.getByLabelText('Do'), { target: { value: '2026-10-31' } })
+    fireEvent.click(screen.getByText('IOS'))
+    await new Promise(r => setTimeout(r, 20))
+    const frame = document.querySelector('iframe[title="IOS za štampu"]') as HTMLIFrameElement
+    expect(frame.srcdoc).toContain('<div class="void">Stornirana na SEF-u</div>')
+  })
+})
