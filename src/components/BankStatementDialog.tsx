@@ -1,4 +1,4 @@
-import { advancePaymentProblem, proformaFromPayment } from '../services/advances'
+import { advancePaymentProblem, advanceProformaSide, advancesPayableBy, proformaFromPayment, type PaymentSide } from '../services/advances'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabase'
 import { PAYABLE_TYPES } from '../services/documentType'
@@ -899,6 +899,13 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
    * side, so the cash line reads a receipt as an inflow. See
    * services/advanceReceipt.ts.
    */
+  /** Which way a statement row's money went: debit out (expense), credit in (revenue). */
+  const rowSide = (row: StatementRow): PaymentSide | null =>
+    parseFloat(row.debit) > 0 ? 'expense' : parseFloat(row.credit) > 0 ? 'revenue' : null
+  /** The row's amount on that side. */
+  const rowMoney = (row: StatementRow, side: PaymentSide): number =>
+    (side === 'revenue' ? parseFloat(row.credit) : parseFloat(row.debit)) || 0
+
   /**
    * Money released to a supplier with no proforma: the proforma is PROPOSED
    * here and written only when the payment is saved (a cancelled payment
@@ -906,19 +913,23 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
    * documents under a placeholder id.
    */
   const makeProformaFrom = async (row: StatementRow, advance?: any) => {
+    // A receipt (credit) makes the customer's proforma, a payment out the
+    // supplier's; an advance invoice paid from the row must be on that side.
+    let side: PaymentSide = rowSide(row) || 'expense'
     if (advance) {
-      const why = advancePaymentProblem(parseFloat(row.debit) || 0,
+      const decided = advanceProformaSide(advance, rowSide(row))
+      if (!decided.ok) { setProformaWhy(prev => ({ ...prev, [row.id]: decided.why })); return }
+      side = decided.side
+      const why = advancePaymentProblem(rowMoney(row, side),
         { invoice_number: advance.invoice_number, amount: Number(advance.amount) || 0, currency: advance.currency }, row.currency || defaultCurrency)
       if (why) { setProformaWhy(prev => ({ ...prev, [row.id]: why })); return }
     }
     let eurRate: number | null = null
     try { eurRate = (await getBookRates(row.date)).eurRate } catch { eurRate = null }
-    // A receipt (credit) makes the customer's proforma, a payment out the supplier's.
-    const incoming = !advance && parseFloat(row.credit) > 0
     const made = proformaFromPayment({
       companyId: company || null, partnerId: advance?.partner_id || row.partner_id, date: row.date,
-      side: incoming ? 'revenue' : 'expense',
-      amount: (incoming ? parseFloat(row.credit) : parseFloat(row.debit)) || 0, currency: row.currency || defaultCurrency,
+      side,
+      amount: rowMoney(row, side), currency: row.currency || defaultCurrency,
       accountNumber: row.account_number || null, description: row.description || null, eurRate,
       forAdvance: advance ? (advance.invoice_number || 'bez broja') : null,
     })
@@ -993,7 +1004,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
     for (const row of validRows) {
       const adv = row.linked_invoice_id.startsWith('pending-') ? pendingAdvance[row.id] : undefined
       if (!adv) continue
-      const why = advancePaymentProblem(parseFloat(row.debit) || 0, { ...adv, currency: row.currency || defaultCurrency }, row.currency || defaultCurrency)
+      const why = advancePaymentProblem(rowMoney(row, rowSide(row) || 'expense'), { ...adv, currency: row.currency || defaultCurrency }, row.currency || defaultCurrency)
       if (why) { setError(`Stavka ${row.date}: ${why} Ništa nije sačuvano.`); setPosting(false); return }
     }
 
@@ -2170,8 +2181,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                     })}
                                     {/* Not while editing a saved statement: the proposed proforma is
                                         written by the first posting only. */}
-                                    {!editing && parseFloat(row.debit) > 0 && unlinkedAdvances
-                                      .filter(a => !row.partner_id || a.partner_id === row.partner_id)
+                                    {!editing && rowSide(row) && advancesPayableBy(unlinkedAdvances, rowSide(row), row.partner_id)
                                       .map(a => {
                                         const selected = pendingAdvance[row.id]?.id === a.id && row.linked_invoice_id.startsWith('pending-')
                                         return (

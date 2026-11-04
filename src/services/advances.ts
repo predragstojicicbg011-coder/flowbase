@@ -165,3 +165,69 @@ export function advancePaymentProblem(
     return `Uplata (${fmtNum(paymentAmount)}) je manja od avansnog računa ${advance.invoice_number || ''} (${fmtNum(advance.amount)}): avansni račun ne može biti veći od plaćenog.`
   return null
 }
+
+// ── Paying an advance invoice with a payment ────────────────────────────────
+//
+// A receipt (money in) pays a customer's advance invoice and makes the
+// customer's proforma; a payment out pays a supplier's and makes the
+// supplier's. The side is never assumed: it is the advance invoice's own
+// type, and it must agree with the way the money went when that is known.
+
+export type PaymentSide = 'expense' | 'revenue'
+
+const asSide = (t: string | null | undefined): PaymentSide | null => (t === 'expense' || t === 'revenue' ? t : null)
+
+/**
+ * Which way a payment's money went, where something says it: the statement
+ * row's side (debit = expense), else the invoices it already settles (when
+ * they agree), else the side it was saved with. null: nothing says it.
+ */
+export function paymentSide(p: {
+  bankSide?: PaymentSide | null
+  linkedTypes?: readonly (string | null | undefined)[]
+  storedSubtype?: string | null
+}): PaymentSide | null {
+  if (p.bankSide) return p.bankSide
+  const linked = new Set((p.linkedTypes || []).map(asSide).filter((t): t is PaymentSide => !!t))
+  if (linked.size === 1) return Array.from(linked)[0]
+  if (linked.size > 1) return null
+  return asSide(p.storedSubtype)
+}
+
+/**
+ * The advance invoices with no proforma this payment can pay: those on its
+ * side (all of them while the side is unknown), of its partner when chosen.
+ */
+export function advancesPayableBy<T extends { type?: string | null; partner_id?: string | null }>(
+  advances: readonly T[], side: PaymentSide | null, partnerId: string | null | undefined,
+): T[] {
+  return advances.filter(a => {
+    const t = asSide(a.type)
+    if (!t) return false
+    if (side && t !== side) return false
+    return !partnerId || a.partner_id === partnerId
+  })
+}
+
+/** The side of the proforma that pays `advance` with this payment, or why it cannot. */
+export function advanceProformaSide(
+  advance: { type?: string | null; invoice_number?: string | null }, side: PaymentSide | null,
+): { ok: true; side: PaymentSide } | { ok: false; why: string } {
+  const number = advance.invoice_number || 'bez broja'
+  const t = asSide(advance.type)
+  if (!t) return { ok: false, why: `Avansni račun ${number} nema smer (ulazni ili izlazni); otvorite ga i proverite.` }
+  if (side && side !== t) {
+    return {
+      ok: false,
+      why: t === 'revenue'
+        ? `Avansni račun ${number} je izdat kupcu: plaća se uplatom kupca, ne isplatom.`
+        : `Avansni račun ${number} je dobavljačev: plaća se isplatom, ne uplatom.`,
+    }
+  }
+  return { ok: true, side: t }
+}
+
+/** The „new proforma from this payment“ sides to offer: the payment's, or both while it is unknown. */
+export function proformaSidesOffered(side: PaymentSide | null): PaymentSide[] {
+  return side ? [side] : ['expense', 'revenue']
+}

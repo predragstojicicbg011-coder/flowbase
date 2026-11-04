@@ -1,4 +1,4 @@
-import { advancePaymentProblem, proformaFromPayment } from '../services/advances'
+import { advancePaymentProblem, advanceProformaSide, advancesPayableBy, paymentSide, proformaFromPayment, proformaSidesOffered } from '../services/advances'
 import { isPayable } from '../services/documentType'
 import React, { useState, useMemo, useEffect } from 'react'
 import { supabase } from '../supabase'
@@ -786,6 +786,11 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   /** Advance invoices with no proforma yet, and the one this payment pays. */
   const [unlinkedAdvances, setUnlinkedAdvances] = useState<any[]>([])
   const [paysAdvance, setPaysAdvance] = useState<{ id: string; amount: number; invoice_number: string | null } | null>(null)
+  /** Which way this payment's money went, where its invoices or its saved side say it. */
+  const txSide = paymentSide({
+    linkedTypes: linkedInvoices.map(l => l.type),
+    storedSubtype: transaction?.type === 'invoice_payment' ? transaction?.tx_subtype : null,
+  })
 
   /**
    * Money released to a supplier with no proforma: the proforma is PROPOSED
@@ -793,9 +798,17 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
    * leaves nothing payable behind). Until then it stands in the list of open
    * documents under a placeholder id.
    */
-  const makeProformaFrom = async (advance?: any, side: 'expense' | 'revenue' = 'expense') => {
+  const makeProformaFrom = async (advance?: any, chosenSide: 'expense' | 'revenue' = 'expense') => {
     if (linkedInvoices.some(l => l.invoice_id === 'pending-proforma')) return
     const left = Math.max(0, (parseFloat(amount) || 0) - totalAllocatedOwn)
+    // Paying an advance invoice: the proforma is on its side (a customer's
+    // from a receipt, a supplier's from a payment out), never assumed.
+    let side = chosenSide
+    if (advance) {
+      const decided = advanceProformaSide(advance, txSide)
+      if (!decided.ok) { setProformaWhy(decided.why); return }
+      side = decided.side
+    }
     if (advance) {
       const why = advancePaymentProblem(left, { invoice_number: advance.invoice_number, amount: Number(advance.amount) || 0, currency: advance.currency }, currency || 'RSD')
       if (why) { setProformaWhy(why); return }
@@ -1955,11 +1968,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                     </div>
                   )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                    <button type="button" style={s.linkBtn} onClick={() => makeProformaFrom()}>Nov predračun iz ove uplate</button>
-                    <button type="button" style={s.linkBtn} onClick={() => makeProformaFrom(undefined, 'revenue')}>Nov predračun iz ove uplate kupca</button>
+                    {proformaSidesOffered(txSide).map(side => (
+                      <button key={side} type="button" style={s.linkBtn} onClick={() => makeProformaFrom(undefined, side)}>
+                        {side === 'revenue' ? 'Nov predračun iz ove uplate kupca' : 'Nov predračun iz ove uplate'}
+                      </button>
+                    ))}
                     {proformaWhy && <span style={{ fontSize: '11px', color: DIALOG.red }}>{proformaWhy}</span>}
                   </div>
-                  {!transaction?.id && unlinkedAdvances.filter(a => !partnerId || a.partner_id === partnerId).map(a => (
+                  {!transaction?.id && advancesPayableBy(unlinkedAdvances, txSide, partnerId).map(a => (
                     <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontSize: '12px', color: DIALOG.text }}>
                       <span style={{ flex: 1 }}>{a.partner_name || '—'} · {a.invoice_number || 'bez broja'} · {formatMoney(Number(a.amount) || 0, a.currency || 'RSD')} · <span style={{ color: DIALOG.amber }}>avansni račun bez predračuna</span></span>
                       <button type="button" style={s.linkBtn} onClick={() => makeProformaFrom(a)}>

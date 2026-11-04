@@ -1,5 +1,5 @@
 import {
-  advancePaymentProblem, coverageProblem, openAdvancesNotice, proformaFromPayment, proformaNumbersIn, proposeCoverage, proposeUsage, usageProblem,
+  advancePaymentProblem, advanceProformaSide, advancesPayableBy, coverageProblem, paymentSide, proformaSidesOffered, openAdvancesNotice, proformaFromPayment, proformaNumbersIn, proposeCoverage, proposeUsage, usageProblem,
   type OpenAdvance, type PaidProforma,
 } from './advances'
 
@@ -151,5 +151,49 @@ describe('paying an advance invoice from the bank statement', () => {
   it('only in the same currency', () => {
     expect(advancePaymentProblem(200, { invoice_number: 'A-1', amount: 100, currency: 'EUR' }, 'RSD'))
       .toBe('Avansni račun A-1 je u EUR, a uplata u RSD.')
+  })
+})
+
+describe('which way a payment went', () => {
+  it('is the statement row side first, then the invoices it settles, then the side it was saved with', () => {
+    expect(paymentSide({ bankSide: 'revenue', linkedTypes: ['expense'], storedSubtype: 'expense' })).toBe('revenue')
+    expect(paymentSide({ linkedTypes: ['revenue', 'revenue'], storedSubtype: 'expense' })).toBe('revenue')
+    expect(paymentSide({ linkedTypes: [], storedSubtype: 'expense' })).toBe('expense')
+  })
+
+  it('is unknown when nothing says it, or the invoices disagree', () => {
+    expect(paymentSide({})).toBeNull()
+    expect(paymentSide({ linkedTypes: ['expense', 'revenue'] })).toBeNull()
+    expect(paymentSide({ storedSubtype: 'direct' })).toBeNull()
+  })
+})
+
+describe('paying an advance invoice with a payment', () => {
+  const supplierAdv = { id: 's', type: 'expense', partner_id: 'p1', invoice_number: 'AV-S' }
+  const customerAdv = { id: 'c', type: 'revenue', partner_id: 'p2', invoice_number: 'AV-K' }
+
+  it('lists a customer advance invoice for a receipt and a supplier one for a payment out', () => {
+    expect(advancesPayableBy([supplierAdv, customerAdv], 'revenue', null).map(a => a.id)).toEqual(['c'])
+    expect(advancesPayableBy([supplierAdv, customerAdv], 'expense', null).map(a => a.id)).toEqual(['s'])
+    expect(advancesPayableBy([supplierAdv, customerAdv], null, null).map(a => a.id)).toEqual(['s', 'c'])
+    expect(advancesPayableBy([supplierAdv, customerAdv], null, 'p2').map(a => a.id)).toEqual(['c'])
+  })
+
+  it('makes the proforma on the advance invoice side', () => {
+    expect(advanceProformaSide(customerAdv, 'revenue')).toEqual({ ok: true, side: 'revenue' })
+    expect(advanceProformaSide(supplierAdv, 'expense')).toEqual({ ok: true, side: 'expense' })
+    expect(advanceProformaSide(customerAdv, null)).toEqual({ ok: true, side: 'revenue' })
+  })
+
+  it('refuses when the money went the other way', () => {
+    expect(advanceProformaSide(customerAdv, 'expense')).toEqual({ ok: false, why: 'Avansni račun AV-K je izdat kupcu: plaća se uplatom kupca, ne isplatom.' })
+    expect(advanceProformaSide(supplierAdv, 'revenue')).toEqual({ ok: false, why: 'Avansni račun AV-S je dobavljačev: plaća se isplatom, ne uplatom.' })
+    expect(advanceProformaSide({ type: null, invoice_number: 'AV-X' }, 'expense')).toEqual({ ok: false, why: 'Avansni račun AV-X nema smer (ulazni ili izlazni); otvorite ga i proverite.' })
+  })
+
+  it('offers only the proforma of the payment side, both while it is unknown', () => {
+    expect(proformaSidesOffered('revenue')).toEqual(['revenue'])
+    expect(proformaSidesOffered('expense')).toEqual(['expense'])
+    expect(proformaSidesOffered(null)).toEqual(['expense', 'revenue'])
   })
 })
