@@ -37,6 +37,7 @@
 import { fmtMoney } from '../utils/formatters'
 import { monthLongLabel, srDate } from '../utils/months'
 import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
+import { isReceivable } from './revenue'
 
 export type MonthKey = string
 
@@ -352,6 +353,7 @@ export interface DatedInflow {
 /** The part of a v_invoice_status row the receivables inflow reads. */
 export interface ReceivableRow {
   type?: string | null
+  document_type?: string | null
   calculated_status?: string | null
   partner_name?: string | null
   invoice_number?: string | null
@@ -379,7 +381,9 @@ export function receivableInflows(
   let overdue = 0
   const start = `${currentMonth}-01`
   for (const r of rows) {
-    if (r.type !== 'revenue') continue
+    // A proforma or an advance invoice awaiting payment is not owed yet: the
+    // plan still carries that money.
+    if (!isReceivable({ type: r.type ?? null, document_type: r.document_type })) continue
     if (r.calculated_status !== 'unpaid' && r.calculated_status !== 'partial') continue
     const remaining = pickAmount(r, currency, 'remaining')
     if (remaining === null) { unconverted++; continue }

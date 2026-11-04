@@ -109,4 +109,24 @@ describe('loadCashTimeline — the inflow ahead', () => {
     expect(datedIn['2026-10']).toBeUndefined()
     expect(timeline.problems.join(' ')).not.toMatch(/nothing yet/)
   })
+  it('counts no proforma or advance invoice as owed, and lets them leave the plan whole', async () => {
+    mockedBudget.mockResolvedValue(budget('RSD', null))
+    const c = tableClient({
+      v_invoice_status: [
+        { type: 'revenue', document_type: 'proforma', calculated_status: 'unpaid', partner_name: 'Investitor', due_date: '2026-11-10',
+          invoice_date: '2026-10-05', project_id: 'p1', remaining_rsd: 120, remaining_eur: 1, amount_rsd: 120, amount_eur: 1 },
+        { type: 'revenue', document_type: 'advance_invoice', calculated_status: 'unpaid', partner_name: 'Investitor', due_date: '2026-11-10',
+          invoice_date: '2026-10-06', project_id: 'p1', remaining_rsd: 120, remaining_eur: 1, amount_rsd: 120, amount_eur: 1 },
+      ],
+      projects: [{ id: 'p1', name: 'Zgrada A', payment_days: 0, company_id: 'c1' }],
+      revenue_plan: [
+        { project_id: 'p1', month: '2026-10-01', amount: 1000, currency: 'RSD', amount_rsd: 1000, amount_eur: 8.5 },
+        { project_id: 'p1', month: '2026-11-01', amount: 2000, currency: 'RSD', amount_rsd: 2000, amount_eur: 17 },
+      ],
+    })
+    const { datedIn } = await loadCashTimeline(c, req('RSD'))
+    expect(datedIn['2026-10'].total).toBe(1000)
+    expect(datedIn['2026-11'].items.map(i => i.kind)).toEqual(['plan'])
+    expect(datedIn['2026-11'].total).toBe(2000)
+  })
 })

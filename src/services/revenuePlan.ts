@@ -43,6 +43,7 @@
 import { bookAmounts, getBookRates, round2, type BookRates } from './bookAmounts'
 import { DEFAULT_PAYMENT_DAYS, type Project } from './projects'
 import { REVENUE_STREAM } from './revenueStreams'
+import { NOT_BOOKED } from './revenue'
 import { countOf, plural } from '../utils/plural'
 import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
@@ -84,6 +85,8 @@ export interface RevenuePlanRow {
 export interface PlanInvoice {
   project_id: string | null
   type: string | null
+  /** A proforma or an advance invoice is not a billing (revenue.NOT_BOOKED). */
+  document_type?: string | null
   invoice_date: string
   amount_rsd?: number | string | null
   amount_eur?: number | string | null
@@ -164,6 +167,9 @@ export function rentInvoiceDate(lease: RentalLease, month: string): string {
 const hasRentInvoice = (invoices: readonly PlanInvoice[], leaseId: string, month: string) =>
   invoices.some(i => !i.deleted_at && i.lease_id === leaseId && monthKey(i.service_month || '') === monthKey(month))
 
+/** A billing: a proforma or an advance invoice is not one yet. */
+const isBilling = (i: PlanInvoice) => !NOT_BOOKED.has(i.document_type || '')
+
 /** A rent invoice the app proposes, ready for toBookAmounts and an insert. */
 export interface RentInvoiceProposal {
   lease_id: string
@@ -230,10 +236,12 @@ export function rentForecast(
   leases: readonly RentalLease[], months: readonly string[], existingInvoices: readonly PlanInvoice[] = [],
 ): RentForecastLine[] {
   const out: RentForecastLine[] = []
+  // A proforma or an advance invoice for the month does not bill the rent.
+  const billings = existingInvoices.filter(isBilling)
   for (const m of months.map(monthKey)) {
     for (const lease of leases) {
       const amount = leaseMonthRent(lease, m)
-      if (!(amount > 0) || hasRentInvoice(existingInvoices, lease.id, m)) continue
+      if (!(amount > 0) || hasRentInvoice(billings, lease.id, m)) continue
       out.push({
         lease_id: lease.id, project_id: lease.project_id, month: m, amount,
         currency: lease.currency === 'EUR' ? 'EUR' : 'RSD',
@@ -295,7 +303,7 @@ export function plannedRevenueByMonth(
   const cur = opts.currency
   const keys = months.map(monthKey)
   const horizon = new Set(keys)
-  const invoices = (opts.invoices || []).filter(i => i.type === 'revenue' && !i.deleted_at)
+  const invoices = (opts.invoices || []).filter(i => i.type === 'revenue' && !i.deleted_at && isBilling(i))
   const paymentDays = new Map(projects.map(p => [p.id, p.payment_days ?? DEFAULT_PAYMENT_DAYS]))
   const notes: string[] = []
   const lines: PlannedRevenue[] = []

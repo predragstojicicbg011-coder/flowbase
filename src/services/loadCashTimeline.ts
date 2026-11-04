@@ -140,7 +140,7 @@ export async function loadCashTimeline(
 
       fetchAllPages<any>((lo, hi) => scoped(
         client.from('v_invoice_status')
-          .select('id, partner_name, invoice_number, invoice_date, due_date, remaining_rsd, remaining_eur, type, calculated_status, company_id')
+          .select('id, partner_name, invoice_number, invoice_date, due_date, remaining_rsd, remaining_eur, type, document_type, calculated_status, company_id')
           .in('calculated_status', ['unpaid', 'partial'])
           .lte('due_date', lastDayOf(last)))
         .order('due_date').order('id').range(lo, hi)),
@@ -156,7 +156,7 @@ export async function loadCashTimeline(
       // Revenue invoices issued over the window: they take their month's plan
       // down, and a rent invoice drops its lease-month.
       scoped(client.from('v_invoice_status')
-        .select('project_id, type, invoice_date, amount_rsd, amount_eur, lease_id, service_month')
+        .select('project_id, type, document_type, invoice_date, amount_rsd, amount_eur, lease_id, service_month')
         .eq('type', 'revenue')
         .gte('invoice_date', `${first}-01`)),
       scoped(client.from('projects').select('id, name, payment_days, company_id')),

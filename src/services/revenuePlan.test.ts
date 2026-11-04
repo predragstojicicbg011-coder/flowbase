@@ -77,6 +77,14 @@ describe('rentForecast', () => {
     expect(lines[0]).toMatchObject({ invoice_date: '2026-11-05', payment_days: 15, currency: 'EUR' })
   })
 
+  it('still forecasts a lease-month that has only a proforma or an advance invoice', () => {
+    const lines = rentForecast([lease()], ['2026-10', '2026-11'], [
+      rentInvoice('2026-10', { document_type: 'proforma' }),
+      rentInvoice('2026-11', { document_type: 'advance_invoice' }),
+    ])
+    expect(lines.map(l => l.month)).toEqual(['2026-10', '2026-11'])
+  })
+
   it('runs an open-ended lease through the horizon', () => {
     expect(rentForecast([lease()], ['2026-10', '2026-11', '2026-12'])).toHaveLength(3)
   })
@@ -105,6 +113,16 @@ describe('plannedRevenueByMonth', () => {
       currency: 'RSD', invoices: [{ ...billed[0], amount_rsd: 1500000 }],
     })
     expect(over.lines).toEqual([])
+  })
+
+  it('does not take a proforma or an advance invoice off the plan, only the final invoice', () => {
+    const billed: PlanInvoice[] = [
+      { project_id: 'c1', type: 'revenue', document_type: 'proforma', invoice_date: '2026-11-02', amount_rsd: 120000, amount_eur: 1 },
+      { project_id: 'c1', type: 'revenue', document_type: 'advance_invoice', invoice_date: '2026-11-05', amount_rsd: 120000, amount_eur: 1 },
+      { project_id: 'c1', type: 'revenue', document_type: 'invoice', invoice_date: '2026-11-20', amount_rsd: 300000, amount_eur: 1 },
+    ]
+    const r = plannedRevenueByMonth(projects, [planRow()], [], months, { currency: 'RSD', invoices: billed })
+    expect(r.byMonth['2026-11']).toBe(700000)
   })
 
   it('forecasts rent, converting the other currency at the rate given', () => {
