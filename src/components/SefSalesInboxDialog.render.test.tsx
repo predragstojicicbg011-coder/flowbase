@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import SefSalesInboxDialog from './SefSalesInboxDialog'
 
 // The inbox of invoices we issued: reading, booking through the invoice
@@ -86,6 +86,8 @@ beforeEach(() => {
 })
 
 describe('the sales inbox', () => {
+  // Let the page's own follow-up updates (busy flags, reloads) land inside act.
+  afterEach(async () => { await act(async () => { await new Promise(r => setTimeout(r, 0)) }) })
   it('reads only sales rows', async () => {
     await show()
     expect(eqCalls.filter(c => c[0] === 'sef_inbox').map(c => [c[1], c[2]])).toContainEqual(['direction', 'sales'])
@@ -106,7 +108,7 @@ describe('the sales inbox', () => {
     await show()
     fireEvent.click(screen.getByText('Proknjiži'))
     await screen.findByTestId('booking')
-    await mockState.invoiceProps.onSaved('inv9')
+    await act(async () => { await mockState.invoiceProps.onSaved('inv9') })
     await waitFor(() => expect(mockState.rpc).toHaveBeenCalledWith('sef_inbox_mark_imported', { p_id: 'r1', p_invoice_id: 'inv9' }))
   })
 

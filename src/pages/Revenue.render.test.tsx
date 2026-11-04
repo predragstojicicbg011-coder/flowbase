@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, within, fireEvent, act } from '@testing-library/react'
 import Revenue from './Revenue'
 import { DisplayCurrencyProvider } from '../contexts/DisplayCurrencyContext'
 
@@ -148,6 +148,8 @@ describe('Prihodi page — populated', () => {
 })
 
 describe('Prihodi page — SEF izlazne', () => {
+  // Let the page's own follow-up updates (busy flags, reloads) land inside act.
+  afterEach(async () => { await act(async () => { await new Promise(r => setTimeout(r, 0)) }) })
   beforeEach(() => {
     empty()
     ;(global as any).__revenueInvoke = jest.fn(async () => ({ data: { provider: 'sef-sales', status: 'complete', listed: 3, inserted: 2, refreshed: 1, more: false }, error: null }))
@@ -155,6 +157,7 @@ describe('Prihodi page — SEF izlazne', () => {
 
   it('pulls sales invoices from SEF on request', async () => {
     show()
+    await screen.findByText(/Još nema izlaznih faktura, avansa/)
     fireEvent.click(await screen.findByRole('button', { name: 'Preuzmi sa SEF-a' }))
     await waitFor(() => expect((global as any).__revenueInvoke).toHaveBeenCalledWith('sef-pull-sales', { body: {} }))
     expect(await screen.findByText(/Preuzeto 2 nove/)).toBeInTheDocument()
@@ -162,12 +165,14 @@ describe('Prihodi page — SEF izlazne', () => {
 
   it('opens a new revenue invoice', async () => {
     show()
+    await screen.findByText(/Još nema izlaznih faktura, avansa/)
     fireEvent.click(await screen.findByRole('button', { name: 'Nova izlazna faktura' }))
     expect(screen.getByTestId('invoice-dialog')).toHaveAttribute('data-type', 'revenue')
   })
 
   it('opens the sales inbox', async () => {
     show()
+    await screen.findByText(/Još nema izlaznih faktura, avansa/)
     fireEvent.click(await screen.findByRole('button', { name: 'SEF izlazne' }))
     expect(screen.getByTestId('sales-inbox')).toBeInTheDocument()
   })
