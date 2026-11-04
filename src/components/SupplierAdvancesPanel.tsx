@@ -38,7 +38,7 @@ export default function SupplierAdvancesPanel({ onClose }: { onClose: () => void
         supabase.from('v_supplier_advances').select('*').eq('company_id', defaultCompany.id).order('partner_name'),
         supabase.from('v_invoice_status')
           .select('id, invoice_number, partner_name, document_type, amount, currency, unlinked, advance_open')
-          .eq('company_id', defaultCompany.id).eq('document_type', 'advance_invoice'),
+          .eq('company_id', defaultCompany.id).eq('type', 'expense').eq('document_type', 'advance_invoice'),
       ])
       if (cancelled) return
       setRows(((sup.data || []) as any[]).map(r => ({
