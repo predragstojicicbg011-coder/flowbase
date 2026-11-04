@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   PULLED_STATUSES, MAX_NEW_PER_PASS, isVoided, idsUrl, readIds, readStatus, readChanges,
   headerFromUbl, slimXml, ublPdfAttachments, salesPdfPath, salesAttachmentPath,
-  refreshTargets, salesRefusal,
+  pickAskAgain, mergeStatusUpdates, choosePdf, salesRefusal, type StatusUpdate, type SalesChange,
 } from './salesInvoice.ts'
 
 // ─── Reading what the company issued ────────────────────────────────────────
@@ -262,22 +262,29 @@ Deno.serve(async (req) => {
       const problems: string[] = []
       let saved: Record<string, unknown> | undefined
       try {
-        const pres = await sef('GET', `/sales-invoice/pdf?invoiceId=${sefId}`)
-        if (!pres.ok) {
-          problems.push(`PDF računa nije preuzet (SEF ${pres.status}).`)
+        // The pdf endpoint's answer, whatever it is; `choosePdf` takes raw PDF
+        // bytes or base64 text from it, else SEF's rendering inside the document.
+        let body: Uint8Array | null = null
+        let httpProblem: string | undefined
+        try {
+          const pres = await sef('GET', `/sales-invoice/pdf?invoiceId=${sefId}`)
+          if (pres.ok) body = new Uint8Array(await pres.arrayBuffer())
+          else httpProblem = `SEF ${pres.status}`
+        } catch (e) {
+          if (e instanceof Refused) throw e
+          httpProblem = e instanceof Error ? e.message : String(e)
+        }
+        const chosen = choosePdf(body, xml, httpProblem)
+        if (!chosen.bytes) {
+          problems.push(chosen.note)
         } else {
-          const bytes = new Uint8Array(await pres.arrayBuffer())
-          if (!isPdf(bytes)) {
-            problems.push('PDF računa nije preuzet (odgovor nije PDF).')
-          } else {
-            const path = salesPdfPath(companyId, sefId)
-            const { error } = await supabase.storage.from('sef-pdf')
-              .upload(path, bytes, { contentType: 'application/pdf', upsert: true })
-            if (error) problems.push(`PDF računa nije sačuvan: ${error.message}`)
-            else saved = {
-              pdf_path: path, pdf_sha256: await sha256Hex(bytes), pdf_bytes: bytes.length,
-              pdf_kind: 'sef_rendering', pdf_saved_at: new Date().toISOString(),
-            }
+          const path = salesPdfPath(companyId, sefId)
+          const { error } = await supabase.storage.from('sef-pdf')
+            .upload(path, chosen.bytes, { contentType: 'application/pdf', upsert: true })
+          if (error) problems.push(`PDF računa nije sačuvan: ${error.message}`)
+          else saved = {
+            pdf_path: path, pdf_sha256: await sha256Hex(chosen.bytes), pdf_bytes: chosen.bytes.length,
+            pdf_kind: 'sef_rendering', pdf_saved_at: new Date().toISOString(),
           }
         }
 
@@ -306,68 +313,69 @@ Deno.serve(async (req) => {
     }
 
     // ── 4. WHAT CHANGED ON ROWS ALREADY PULLED ────────────────────────────
-    // (a) a listed row whose status differs from the one stored;
-    // (b) a known row in the window that no list carries any more (it was
-    //     stornoed, cancelled or rejected) — asked about one by one;
-    // (c) today's and yesterday's status changes, as SEF reports them.
-    // All of it goes through `sef_sales_status`, which touches only existing
-    // sales rows and never invents one.
-    const updates = new Map<number, { sefInvoiceId: number; status: string | null; comment: string | null }>()
+    // `live` is what SEF said about an invoice in THIS pass (a list, or a call
+    // about that invoice); it wins over a change, which is only news from the
+    // last two days. Everything goes through `sef_sales_status`, which touches
+    // only existing sales rows and never invents one.
+    const live = new Map<number, StatusUpdate>()
     for (const [id, k] of knownById) {
       const nowStatus = listedStatus.get(id)
-      if (nowStatus && nowStatus !== k.sef_status) updates.set(id, { sefInvoiceId: id, status: nowStatus, comment: null })
+      if (nowStatus && nowStatus !== k.sef_status) live.set(id, { sefInvoiceId: id, status: nowStatus, comment: null })
     }
 
-    const { data: inWindow, error: winRowsErr } = await supabase.from('sef_inbox')
-      .select('sef_invoice_id, sef_status')
-      .eq('company_id', companyId).eq('direction', 'sales')
-      .gte('issue_date', w.date_from).lte('issue_date', w.date_to)
-      .limit(2000)
-    if (winRowsErr) return await fail(`Could not read the inbox: ${winRowsErr.message}`)
-    const askAgain = new Set(refreshTargets(
-      ((inWindow || []) as { sef_invoice_id: number; sef_status: string | null }[])
-        .map(r => ({ sefInvoiceId: Number(r.sef_invoice_id), sefStatus: r.sef_status })),
-      listed,
-    ))
-
-    // Today and yesterday, Belgrade. A status that became a voided one is
-    // asked about too, for the comment SEF keeps with it.
+    // Today's and yesterday's changes, Belgrade. A change to a voided status
+    // is not applied but asked about, for the comment SEF keeps with it.
     const day = (offset: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Belgrade' })
       .format(new Date(Date.now() - offset * 86_400_000))
-    for (const date of [day(0), day(1)]) {
+    const changes: SalesChange[] = []
+    for (const date of [day(1), day(0)]) {
       if (Date.now() - startedAt > PASS_BUDGET_MS) break
       try {
         const cres = await sef('POST', `/sales-invoice/changes?date=${date}`)
         if (!cres.ok) { problems.push(`changes ${date}: SEF answered ${cres.status}`); continue }
-        for (const c of readChanges(await cres.json().catch(() => null))) {
-          if (isVoided(c.status)) askAgain.add(c.invoiceId)
-          else updates.set(c.invoiceId, { sefInvoiceId: c.invoiceId, status: c.status, comment: null })
-        }
+        for (const c of readChanges(await cres.json().catch(() => null))) changes.push({ ...c, date: c.date ?? date })
       } catch (e) {
         if (e instanceof Refused) throw e
         problems.push(`changes ${date}: ${e instanceof Error ? e.message : String(e)}`)
       }
     }
+    const voidedByChange = changes.filter(c => isVoided(c.status)).map(c => c.invoiceId)
 
-    let asked = 0
+    const { data: inWindow, error: winRowsErr } = await supabase.from('sef_inbox')
+      .select('sef_invoice_id, sef_status, last_seen_at')
+      .eq('company_id', companyId).eq('direction', 'sales')
+      .gte('issue_date', w.date_from).lte('issue_date', w.date_to)
+      .limit(2000)
+    if (winRowsErr) return await fail(`Could not read the inbox: ${winRowsErr.message}`)
+
+    // The ids a change made void come first; then the window rows that left
+    // the lists, longest-unasked first. Whatever does not fit waits for the
+    // next pass without asking for one (`more` is for new invoices only): a row
+    // asked about is stamped by the status write, so the queue goes round.
+    const askAgain = pickAskAgain(
+      voidedByChange,
+      ((inWindow || []) as { sef_invoice_id: number; sef_status: string | null; last_seen_at: string | null }[])
+        .map(r => ({ sefInvoiceId: Number(r.sef_invoice_id), sefStatus: r.sef_status, lastSeenAt: r.last_seen_at })),
+      listed, MAX_NEW_PER_PASS,
+    )
     for (const id of askAgain) {
-      if (asked >= MAX_NEW_PER_PASS || Date.now() - startedAt > PASS_BUDGET_MS) { more = true; break }
-      asked++
+      if (Date.now() - startedAt > PASS_BUDGET_MS) break
       try {
         const sres = await sef('GET', `/sales-invoice?invoiceId=${id}`)
         if (!sres.ok) { problems.push(`${id}: status: SEF answered ${sres.status}`); continue }
         const st = readStatus(await sres.json().catch(() => null))
-        if (st?.status) updates.set(id, { sefInvoiceId: id, status: st.status, comment: st.comment })
+        if (st?.status) live.set(id, { sefInvoiceId: id, status: st.status, comment: st.comment })
       } catch (e) {
         if (e instanceof Refused) throw e
         problems.push(`${id}: ${e instanceof Error ? e.message : String(e)}`)
       }
     }
 
+    const updates = mergeStatusUpdates(changes, [...live.values()])
     let refreshed = 0
-    if (updates.size > 0) {
+    if (updates.length > 0) {
       const { data: n, error: stErr } = await supabase
-        .rpc('sef_sales_status', { p_company_id: companyId, p_updates: [...updates.values()] })
+        .rpc('sef_sales_status', { p_company_id: companyId, p_updates: updates })
       if (stErr) return await fail(`The inbox refused the status changes: ${stErr.message}`)
       refreshed = Number(n ?? 0)
     }
@@ -394,9 +402,6 @@ Deno.serve(async (req) => {
 })
 
 // ─── Bytes ──────────────────────────────────────────────────────────────────
-
-const isPdf = (b: Uint8Array) =>
-  b.length > 5 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46 && b[4] === 0x2d
 
 function toBytes(b64: string): Uint8Array {
   const bin = atob(b64)

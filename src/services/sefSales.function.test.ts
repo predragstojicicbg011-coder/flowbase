@@ -3,7 +3,7 @@ import path from 'path'
 import {
   PULLED_STATUSES, VOIDED_STATUSES, MAX_NEW_PER_PASS, isVoided, idsUrl, readIds, readStatus, readChanges,
   headerFromUbl, slimXml, ublPdfAttachments, salesPdfPath, salesAttachmentPath, refreshTargets,
-  SALES_FORBIDDEN, salesRefusal,
+  SALES_FORBIDDEN, salesRefusal, mergeStatusUpdates, pickAskAgain, choosePdf,
 } from '../../supabase/functions/sef-pull-sales/salesInvoice'
 
 // Issued invoices as SEF gives them, read by the sef-pull-sales function. The
@@ -44,7 +44,7 @@ describe('reading SEF answers', () => {
   })
   it('reads the status changes', () => {
     expect(readChanges([{ SalesInvoiceId: 4, NewInvoiceStatus: 'Paid', Date: '2026-11-04' }, { nothing: 1 }]))
-      .toEqual([{ invoiceId: 4, status: 'Paid' }])
+      .toEqual([{ invoiceId: 4, status: 'Paid', date: '2026-11-04' }])
     expect(readChanges({})).toEqual([])
   })
 })
@@ -61,6 +61,13 @@ describe('the header off the document', () => {
     expect(headerFromUbl(fiktura.replace('>380<', '>381<')).documentType).toBe('CreditNote')
     expect(headerFromUbl(fiktura.replace('>380<', '>383<')).documentType).toBe('DebitNote')
     expect(headerFromUbl(fiktura.replace('>380<', '>999<')).documentType).toBeNull()
+  })
+  it('reads a credit note with no due date', () => {
+    const note = fiktura
+      .replace('<Invoice ', '<CreditNote ').replace('</Invoice>', '</CreditNote>')
+      .replace('<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>', '<cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>')
+      .replace('      <cbc:DueDate>2026-11-15</cbc:DueDate>' + String.fromCharCode(10), '')
+    expect(headerFromUbl(note)).toMatchObject({ documentType: 'CreditNote', dueDate: null, amount: 120000, documentNumber: 'IF-12/2026' })
   })
   it('leaves what is missing empty', () => {
     expect(headerFromUbl('<Invoice></Invoice>')).toMatchObject({ documentNumber: null, amount: null, customerName: null })
@@ -96,5 +103,75 @@ describe('what to ask again', () => {
     expect(salesRefusal(403)).toBe(SALES_FORBIDDEN)
     expect(salesRefusal(401)).toContain('odbio ključ')
     expect(salesRefusal(200)).toBeNull()
+  })
+})
+
+describe('statuses after a pass', () => {
+  it('keeps the newest status when yesterday and today both changed it', () => {
+    const out = mergeStatusUpdates([
+      { invoiceId: 7, status: 'Paid', date: '2026-11-04' },
+      { invoiceId: 7, status: 'Approved', date: '2026-11-03' },
+    ], [])
+    expect(out).toEqual([{ sefInvoiceId: 7, status: 'Paid', comment: null }])
+  })
+  it('lets a status read in this pass win over any change', () => {
+    const out = mergeStatusUpdates(
+      [{ invoiceId: 7, status: 'Approved', date: '2026-11-04' }, { invoiceId: 8, status: 'Paid', date: '2026-11-04' }],
+      [{ sefInvoiceId: 7, status: 'Paid', comment: null }],
+    )
+    expect(out).toContainEqual({ sefInvoiceId: 7, status: 'Paid', comment: null })
+    expect(out).toContainEqual({ sefInvoiceId: 8, status: 'Paid', comment: null })
+    expect(out).toHaveLength(2)
+  })
+  it('leaves voided changes to be asked about', () => {
+    expect(mergeStatusUpdates([{ invoiceId: 9, status: 'Storno', date: '2026-11-04' }], [])).toEqual([])
+  })
+})
+
+describe('whom to ask about again', () => {
+  const rows = (...r: [number, string | null, string | null][]) =>
+    r.map(([sefInvoiceId, sefStatus, lastSeenAt]) => ({ sefInvoiceId, sefStatus, lastSeenAt }))
+  it('asks about the changes first, then the rows that left the list', () => {
+    const ids = pickAskAgain([50], rows([1, 'Sent', null], [2, 'Sent', null]), new Set(), 2)
+    expect(ids).toEqual([50, 1])
+  })
+  it('stops asking about rows whose status is neither issued nor voided', () => {
+    expect(refreshTargets([{ sefInvoiceId: 1, sefStatus: 'Mistake' }, { sefInvoiceId: 2, sefStatus: 'Deleted' }, { sefInvoiceId: 3, sefStatus: null }], new Set()))
+      .toEqual([3])
+  })
+  it('goes round: the row seen longest ago comes first', () => {
+    const ids = pickAskAgain([], rows([1, 'Sent', '2026-11-04T10:00:00Z'], [2, 'Sent', '2026-11-01T10:00:00Z'], [3, 'Sent', null]), new Set(), 3)
+    expect(ids).toEqual([3, 2, 1])
+  })
+  it('does not repeat an id and skips the listed', () => {
+    expect(pickAskAgain([1, 1], rows([1, 'Sent', null], [2, 'Sent', null]), new Set([2]), 10)).toEqual([1])
+  })
+})
+
+describe('which PDF is kept', () => {
+  const enc = (t: string) => new TextEncoder().encode(t)
+  const withDocPdf = fiktura
+  it('takes raw PDF bytes from the pdf endpoint', () => {
+    const r = choosePdf(enc('%PDF-1.4 body'), withDocPdf)
+    expect(r.bytes && Array.from(r.bytes.slice(0, 5))).toEqual(Array.from(enc('%PDF-')))
+    expect(r.source).toBe('endpoint')
+  })
+  it('takes a base64 body', () => {
+    const r = choosePdf(enc('JVBERi0xLjQKYm9keQ=='), withDocPdf)
+    expect(r.source).toBe('endpoint')
+    expect(r.bytes && String.fromCharCode(...Array.from(r.bytes.slice(0, 5)))).toBe('%PDF-')
+  })
+  it('falls back to the PDF inside the document when the body is JSON', () => {
+    const r = choosePdf(enc('{"Pdf":"x"}'), withDocPdf)
+    expect(r.source).toBe('document')
+    expect(r.bytes && String.fromCharCode(...Array.from(r.bytes.slice(0, 5)))).toBe('%PDF-')
+  })
+  it('falls back to the document when the endpoint failed', () => {
+    expect(choosePdf(null, withDocPdf, 'SEF 500').source).toBe('document')
+  })
+  it('says why when nothing is usable', () => {
+    const r = choosePdf(enc('<html>'), slimXml(fiktura))
+    expect(r.bytes).toBeNull()
+    expect(r.note).toContain('PDF')
   })
 })

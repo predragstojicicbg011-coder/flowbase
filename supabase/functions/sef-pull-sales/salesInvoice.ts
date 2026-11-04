@@ -85,13 +85,15 @@ export function readStatus(body: unknown): SalesStatus | null {
   }
 }
 
-export function readChanges(body: unknown): { invoiceId: number; status: string }[] {
+export interface SalesChange { invoiceId: number; status: string; date: string | null }
+
+export function readChanges(body: unknown): SalesChange[] {
   if (!Array.isArray(body)) return []
-  const out: { invoiceId: number; status: string }[] = []
+  const out: SalesChange[] = []
   for (const r of body) {
     const invoiceId = asId(pick(r, 'SalesInvoiceId'))
     const status = asText(pick(r, 'NewInvoiceStatus'))
-    if (invoiceId !== null && status) out.push({ invoiceId, status })
+    if (invoiceId !== null && status) out.push({ invoiceId, status, date: asText(pick(r, 'Date')) })
   }
   return out
 }
@@ -222,18 +224,107 @@ export const salesAttachmentPath = (companyId: string, id: number | string, n: n
 
 // ── What to ask about again ────────────────────────────────────────────────
 
+const isPulled = (status: string | null | undefined) => {
+  const s = String(status ?? '').trim().toLowerCase()
+  return PULLED_STATUSES.some(p => p.toLowerCase() === s)
+}
+
 /**
- * Rows already pulled that this pass's lists no longer carry, and that are not
- * already voided: an invoice that left every list was stornoed, cancelled or
- * rejected, and only asking about it says which.
+ * Rows already pulled that this pass's lists no longer carry: an invoice that
+ * left every list was stornoed, cancelled or rejected, and only asking about
+ * it says which. A row whose stored status is neither an issued one nor a
+ * voided one (Mistake, Deleted ...) has been asked about already and is not
+ * asked about again; a voided one is settled.
  */
 export function refreshTargets(
   known: { sefInvoiceId: number; sefStatus: string | null }[],
   listed: ReadonlySet<number>,
 ): number[] {
   return known
-    .filter(k => !listed.has(k.sefInvoiceId) && !isVoided(k.sefStatus))
+    .filter(k => !listed.has(k.sefInvoiceId) && (k.sefStatus === null || String(k.sefStatus).trim() === '' || isPulled(k.sefStatus)))
     .map(k => k.sefInvoiceId)
+}
+
+/**
+ * Whom to ask SEF about one by one: first the ids today's and yesterday's
+ * changes turned into a voided status (the point of asking), then the window
+ * rows that left the lists, the one seen longest ago first so that a row SEF
+ * keeps answering the same for does not starve the others. At most `limit`.
+ */
+export function pickAskAgain(
+  fromChanges: number[],
+  windowRows: { sefInvoiceId: number; sefStatus: string | null; lastSeenAt?: string | null }[],
+  listed: ReadonlySet<number>,
+  limit: number,
+): number[] {
+  const oldestFirst = [...windowRows].sort((a, b) => {
+    const x = a.lastSeenAt ? Date.parse(a.lastSeenAt) : -Infinity
+    const y = b.lastSeenAt ? Date.parse(b.lastSeenAt) : -Infinity
+    return x === y ? 0 : x < y ? -1 : 1
+  })
+  const out: number[] = []
+  for (const id of [...fromChanges.filter(id => !listed.has(id)), ...refreshTargets(oldestFirst, listed)]) {
+    if (!out.includes(id)) out.push(id)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+export interface StatusUpdate { sefInvoiceId: number; status: string | null; comment: string | null }
+
+/**
+ * The status updates of a pass. Changes are applied oldest first (by their
+ * date), so the newest one stands; a voided one is not applied here, it is
+ * asked about, and the answer arrives as a live status. A status read live in
+ * this pass (a list, or a call about the invoice) wins over any change.
+ */
+export function mergeStatusUpdates(changes: SalesChange[], live: StatusUpdate[]): StatusUpdate[] {
+  const out = new Map<number, StatusUpdate>()
+  const oldestFirst = changes
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => (a.c.date ?? '') < (b.c.date ?? '') ? -1 : (a.c.date ?? '') > (b.c.date ?? '') ? 1 : a.i - b.i)
+  for (const { c } of oldestFirst) {
+    if (isVoided(c.status)) continue
+    out.set(c.invoiceId, { sefInvoiceId: c.invoiceId, status: c.status, comment: null })
+  }
+  for (const u of live) out.set(u.sefInvoiceId, u)
+  return [...out.values()]
+}
+
+// ── Which PDF is kept ──────────────────────────────────────────────────────
+
+const isPdfBytes = (b: Uint8Array) =>
+  b.length > 5 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46 && b[4] === 0x2d
+
+function fromBase64(text: string): Uint8Array | null {
+  const t = text.replace(/\s+/g, '')
+  if (!t.startsWith('JVBERi0') || !/^[A-Za-z0-9+/]+=*$/.test(t)) return null
+  try {
+    const bin = atob(t)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return isPdfBytes(bytes) ? bytes : null
+  } catch { return null }
+}
+
+/**
+ * The invoice's PDF: what the pdf endpoint sent if that is a PDF (raw, or
+ * base64 text), else SEF's rendering inside the document just fetched
+ * (`env:DocumentPdf`), else nothing and a note that says so.
+ */
+export function choosePdf(
+  endpointBody: Uint8Array | null, xml: string, endpointProblem?: string,
+): { bytes: Uint8Array; source: 'endpoint' | 'document'; note?: undefined }
+ | { bytes: null; source?: undefined; note: string } {
+  if (endpointBody && isPdfBytes(endpointBody)) return { bytes: endpointBody, source: 'endpoint' }
+  if (endpointBody) {
+    const decoded = fromBase64(new TextDecoder().decode(endpointBody))
+    if (decoded) return { bytes: decoded, source: 'endpoint' }
+  }
+  const inside = /<env:DocumentPdf[^>]*>([^<]*)<\/env:DocumentPdf>/.exec(xml)
+  const fromDocument = inside ? fromBase64(inside[1]) : null
+  if (fromDocument) return { bytes: fromDocument, source: 'document' }
+  return { bytes: null, note: `PDF računa nije preuzet (${endpointProblem ?? 'odgovor nije PDF'}), a dokument ga ne sadrži.` }
 }
 
 // ── What SEF said about the key ────────────────────────────────────────────
