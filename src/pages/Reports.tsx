@@ -22,6 +22,7 @@ import {
   type PaymentLine, type PayableBill, type BankBatch,
 } from '../services/payments/paymentLines'
 import { UnpaidPanelExtensionContext } from '../services/payments/unpaidPanelExtension'
+import { isReceivable } from '../services/revenue'
 
 // ── Payment orders: one Halcom file per bank (services/payments) ──────────
 //
@@ -823,7 +824,7 @@ export default function Reports() {
       // this page are headline numbers, so a silent truncation showed the
       // business as smaller and tidier than it is — unmatched pass-throughs
       // read 1000 while the real figure was near 4000.
-      const [plData, invData, unmatchedPassthrough] = await Promise.all([
+      const [plData, invRows, unmatchedPassthrough] = await Promise.all([
         fetchAllPages<any>((from, to) => {
           let q = supabase.from('v_pl_entries').select('tx_type,amount_rsd,amount_eur')
             .gte('pl_date', ytdStart).lte('pl_date', today)
@@ -832,7 +833,7 @@ export default function Reports() {
         }),
         fetchAllPages<any>((from, to) => {
           let q = supabase.from('v_invoice_status')
-            .select('type,calculated_status,remaining_rsd,remaining_eur,due_date')
+            .select('type,document_type,calculated_status,remaining_rsd,remaining_eur,due_date')
             .in('calculated_status', ['unpaid', 'partial'])
             .eq('type', 'revenue')
           if (companyId !== 'all') q = q.eq('company_id', companyId)
@@ -849,6 +850,8 @@ export default function Reports() {
       ])
       const revenue = plData.filter(e => e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue').reduce((s, e) => s + (pick(e) ?? 0), 0)
       const expenses = plData.filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').reduce((s, e) => s + (pick(e) ?? 0), 0)
+      // A proforma or an advance invoice awaiting payment is not yet owed.
+      const invData = invRows.filter(isReceivable)
       const openAmt = invData.reduce((s, i) => s + (pick(i, 'remaining') ?? 0), 0)
       const overdue = invData.filter(i => i.due_date && i.due_date < today).length
       setKpis({ netProfit: revenue - expenses, totalRevenue: revenue, totalExpenses: expenses, expenseRatio: revenue > 0 ? (expenses / revenue * 100) : 0, openInvoicesCount: invData.length, openInvoicesAmount: openAmt, unmatchedPassthrough, overdueCount: overdue })

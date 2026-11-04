@@ -208,9 +208,16 @@ export function validateAdvanceDeduction(req: AdvanceDeductionRequest): string |
 
 // ── Per project ─────────────────────────────────────────────────────────────
 
-/** The part of a v_invoice_status row the revenue figures read. */
 /** Documents that are not yet a billing: a proforma, an advance invoice. */
 export const NOT_BOOKED: ReadonlySet<string> = new Set(['proforma', 'advance_invoice'])
+
+/** What a customer owes us: our invoices and notes, never a proforma or an
+ *  advance invoice awaiting payment. */
+export function isReceivable(row: { type: string | null; document_type?: string | null }): boolean {
+  return row.type === 'revenue' && !NOT_BOOKED.has(row.document_type || '')
+}
+
+/** The part of a v_invoice_status row the revenue figures read. */
 
 export interface RevenueInvoiceRow {
   id: string

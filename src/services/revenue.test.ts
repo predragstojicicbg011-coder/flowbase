@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import {
-  advanceDeductionBook, agingBucket, daysBetween, projectAdvanceBalance, projectRevenueSummary,
+  advanceDeductionBook, agingBucket, daysBetween, isReceivable, projectAdvanceBalance, projectRevenueSummary,
   receivablesAging, validateAdvanceDeduction,
   type AdvanceReceipt, type RevenueInvoiceRow,
 } from './revenue'
@@ -206,6 +206,25 @@ describe('receivablesAging', () => {
     expect(a.total).toBe(1000)
     expect(a.unconverted).toBe(1)
     expect(a.items.map(i => i.id)).toEqual(['d', 'c', 'b', 'a'])
+  })
+})
+
+describe('isReceivable', () => {
+  it('counts our invoices and notes, never a proforma, an advance invoice or a supplier bill', () => {
+    expect(isReceivable({ type: 'revenue', document_type: 'invoice' })).toBe(true)
+    expect(isReceivable({ type: 'revenue', document_type: null })).toBe(true)
+    expect(isReceivable({ type: 'revenue', document_type: 'debit_note' })).toBe(true)
+    expect(isReceivable({ type: 'revenue', document_type: 'proforma' })).toBe(false)
+    expect(isReceivable({ type: 'revenue', document_type: 'advance_invoice' })).toBe(false)
+    expect(isReceivable({ type: 'expense', document_type: 'invoice' })).toBe(false)
+  })
+
+  it('is what the Dashboard and Reports KPIs count as receivables', () => {
+    for (const page of ['Dashboard.tsx', 'Reports.tsx']) {
+      const src = fs.readFileSync(path.join(__dirname, '..', 'pages', page), 'utf8')
+      expect(src).toMatch(/isReceivable/)
+      expect(src).toMatch(/select\('type,document_type,calculated_status/)
+    }
   })
 })
 

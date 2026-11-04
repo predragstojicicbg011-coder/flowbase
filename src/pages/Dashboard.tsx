@@ -14,6 +14,7 @@ import { SkeletonRows, Rise, useDrawLength } from '../components/motion'
 import { fetchAllPages, countRows } from '../utils/fetchAllPages'
 import { MONTHS_SHORT_SR } from '../utils/months'
 import { countOf } from '../utils/plural'
+import { isReceivable } from '../services/revenue'
 
 /** How a partner's type reads on screen; the stored value stays English. */
 const PARTNER_TYPE_LABEL: Record<string, string> = {
@@ -305,14 +306,15 @@ export default function Dashboard() {
       // ── Open invoices ──
       const openInv = await fetchAllPages<any>((from, to) => {
         let q = supabase.from('v_invoice_status')
-          .select('type,calculated_status,remaining_rsd,remaining_eur,due_date,partner_name,amount_rsd,amount_eur')
+          .select('type,document_type,calculated_status,remaining_rsd,remaining_eur,due_date,partner_name,amount_rsd,amount_eur')
           .in('calculated_status', ['unpaid', 'partial'])
         if (companyId) q = q.eq('company_id', companyId)
         return q.order('due_date', { nullsFirst: false }).order('id').range(from, to)
       })
       // What investors owe us and what we owe suppliers are kept apart: added
-      // together they make a number that is neither.
-      const receivables = openInv.filter(i => i.type === 'revenue')
+      // together they make a number that is neither. A customer proforma or
+      // advance invoice awaiting payment is not yet owed.
+      const receivables = openInv.filter(isReceivable)
       const payables = openInv.filter(i => i.type !== 'revenue')
       const unpaidTotal = receivables.reduce((s, i) => s + (pick(i, 'remaining') ?? 0), 0)
       const payablesTotal = payables.reduce((s, i) => s + (pick(i, 'remaining') ?? 0), 0)
