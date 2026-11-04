@@ -1,8 +1,8 @@
 import React, { useState, useMemo, createContext, useContext } from 'react'
-import { fmtMoney } from '../utils/formatters'
+import { fmtMoney, fmtNum } from '../utils/formatters'
 import { countOf, plural } from '../utils/plural'
 import { C, deck, useWidth, Empty, TipHead, TipRow, type Tip } from './chartChrome'
-import { niceMax, axisTicks, shortMoney, monthLabel } from '../services/expenseCharts'
+import { niceMax, axisTicks, monthLabel } from '../services/expenseCharts'
 import {
   monthlyDue, balanceSeries, debtFigures, byCredit,
   type DueInstalment, type DueRow, type BalancePoint,
@@ -56,7 +56,8 @@ function useMoney() {
   return {
     money: (n: number) => fmtMoney(Math.abs(n), currency, 0),
     money2: (n: number) => fmtMoney(Math.abs(n), currency, 2),
-    short: (n: number) => shortMoney(n, currency),
+    // The axis: the whole figure, no unit word and no code — the legend names the currency.
+    axis: (n: number) => fmtNum(n, 0),
   }
 }
 
@@ -179,6 +180,7 @@ export default function DebtPanels(p: DebtPanelsProps) {
               <i style={{ ...deck.swatch, background: colour }} />{label}
             </span>
           ))}
+          <span style={deck.legendItem}>iznosi u {p.currency || 'RSD'}</span>
           {p.unpriced > 0 && (
             <span style={{ fontSize: '10.5px', color: '#F5A623' }}>
               {countOf(p.unpriced, 'revolving kredit', 'revolving kredita', 'revolving kredita')} još {plural(p.unpriced, 'nema', 'nemaju', 'nema')} kamatnu stopu, pa {plural(p.unpriced, 'njegova', 'njihova', 'njihova')} kamata nije u ovim grafikonima
@@ -235,7 +237,7 @@ function Figures({ f, balance, unpriced, span }: {
       {cards.map(c => (
         <div key={c.label} style={{ background: C.bg, border: `1px solid ${C.line}`, borderTop: `2.5px solid ${c.accent}`, borderRadius: '12px', padding: '14px 16px' }}>
           <div style={{ fontSize: '9.5px', color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase', letterSpacing: '0.11em', marginBottom: '8px' }}>{c.label}</div>
-          <div style={{ fontFamily: "'DM Mono','Fira Mono',monospace", fontSize: '21px', color: c.accent, lineHeight: 1 }}>{c.value}</div>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '21px', color: c.accent, lineHeight: 1 }}>{c.value}</div>
           <div style={{ fontSize: '10.5px', color: 'rgba(255,255,255,0.28)', marginTop: '7px' }}>{c.sub}</div>
         </div>
       ))}
@@ -254,7 +256,7 @@ function Figures({ f, balance, unpriced, span }: {
 function DueChart({ rows, w, onTip }: {
   rows: DueRow[]; w: number; onTip: (t: Tip) => void
 }) {
-  const { money2, short } = useMoney()
+  const { money2, axis } = useMoney()
   const H = 290
   const PAD = { l: 58, r: 18, t: 16, b: 38 }
   const iw = Math.max(w - PAD.l - PAD.r, 10)
@@ -278,7 +280,7 @@ function DueChart({ rows, w, onTip }: {
         <g key={t}>
           <line x1={PAD.l} x2={w - PAD.r} y1={y(t)} y2={y(t)} stroke={C.grid} strokeWidth="1" />
           <text x={PAD.l - 9} y={y(t) + 3.5} textAnchor="end" fontSize="10" fill={C.faint}>
-            {short(t)}
+            {axis(t)}
           </text>
         </g>
       ))}
@@ -332,7 +334,7 @@ function DueChart({ rows, w, onTip }: {
 function BalanceChart({ points, w, onTip }: {
   points: BalancePoint[]; w: number; onTip: (t: Tip) => void
 }) {
-  const { money2, short } = useMoney()
+  const { money2, axis } = useMoney()
   const H = 290
   const PAD = { l: 58, r: 18, t: 16, b: 38 }
   const iw = Math.max(w - PAD.l - PAD.r, 10)
@@ -365,7 +367,7 @@ function BalanceChart({ points, w, onTip }: {
         <g key={t}>
           <line x1={PAD.l} x2={w - PAD.r} y1={y(t)} y2={y(t)} stroke={C.grid} strokeWidth="1" />
           <text x={PAD.l - 9} y={y(t) + 3.5} textAnchor="end" fontSize="10" fill={C.faint}>
-            {short(t)}
+            {axis(t)}
           </text>
         </g>
       ))}
@@ -465,7 +467,7 @@ function CreditsChart({ rows, w, onTip }: {
             )}
 
             <text x={x0 + pw + iw2 + 8} y={yTop + BAR - 3.5} fontSize="10.5"
-              fill={C.text} fontFamily="'DM Mono', monospace">
+              fill={C.text} fontFamily="'Inter', sans-serif" style={{ fontVariantNumeric: 'tabular-nums' }}>
               {money(r.total)}{r.interest === null ? ' +' : ''}
             </text>
           </g>

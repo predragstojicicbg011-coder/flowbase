@@ -237,3 +237,11 @@ describe('reaching the credit from its row', () => {
     expect(screen.getByText(/u redu menja samo jednu ratu/)).toBeTruthy()
   })
 })
+
+describe('the figures on a credit row', () => {
+  it('are written out in full, with no thousands or millions in words', () => {
+    render(<CreditRow credit={loan({ principal_amount: 157734.56 })} installments={[]} onRefresh={() => {}} onEdit={() => {}} />)
+    expect(screen.getAllByText('157.734,56 EUR').length).toBeGreaterThan(0)
+    expect(document.body.textContent).not.toMatch(/hilj\.|mil\./)
+  })
+})

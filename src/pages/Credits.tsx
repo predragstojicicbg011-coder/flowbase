@@ -10,7 +10,7 @@ import DebtPanels from '../components/DebtPanels'
 import { defaultMaturity, revolvingSchedule } from '../services/revolvingCredit'
 import { earliestDue, overdueCount, type DueInstalment } from '../services/debtSchedule'
 import { supabase as db } from '../supabase'
-import { fmtMoney, fmtMoneyCompact, fmtNum } from '../utils/formatters'
+import { fmtMoney, fmtNum } from '../utils/formatters'
 import { countOf, plural } from '../utils/plural'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { getBookRates, bookAmounts, type BookRates } from '../services/bookAmounts'
@@ -70,9 +70,6 @@ interface Installment {
 function fmtIn(n: number, currency: string): string {
   if (n === 0) return '—'
   return fmtMoney(n, currency || 'RSD')
-}
-function fmtInCompact(n: number, currency: string): string {
-  return fmtMoneyCompact(n, currency || 'RSD')
 }
 /** 'YYYY-MM-DD' → '08.10.2026.', read from the string so no time zone can move the day. */
 function fmtDate(iso: string | null | undefined): string {
@@ -448,7 +445,7 @@ function EditInstallmentDialog({ installment, currency, onClose, onSaved }: {
               value={principal}
               onChange={e => setPrincipal(e.target.value)}
               onKeyDown={e => { if (e.key === 'Escape') onClose() }}
-              style={{ width: '100%', boxSizing: 'border-box' as const, fontFamily: "'DM Mono',monospace", fontSize: '18px', padding: '10px 12px', border: '1.5px solid #4EA8FF', borderRadius: '8px', background: '#0A1525', color: '#4EA8FF', outline: 'none' }}
+              style={{ width: '100%', boxSizing: 'border-box' as const, fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '18px', padding: '10px 12px', border: '1.5px solid #4EA8FF', borderRadius: '8px', background: '#0A1525', color: '#4EA8FF', outline: 'none' }}
             />
           </div>
           <div>
@@ -458,14 +455,14 @@ function EditInstallmentDialog({ installment, currency, onClose, onSaved }: {
               value={interest}
               onChange={e => setInterest(e.target.value)}
               onKeyDown={e => { if (e.key === 'Escape') onClose() }}
-              style={{ width: '100%', boxSizing: 'border-box' as const, fontFamily: "'DM Mono',monospace", fontSize: '18px', padding: '10px 12px', border: '1.5px solid #F5A623', borderRadius: '8px', background: '#0A1525', color: '#F5A623', outline: 'none' }}
+              style={{ width: '100%', boxSizing: 'border-box' as const, fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '18px', padding: '10px 12px', border: '1.5px solid #F5A623', borderRadius: '8px', background: '#0A1525', color: '#F5A623', outline: 'none' }}
             />
           </div>
         </div>
 
         <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '12px 14px', marginBottom: '20px', fontSize: '12px', color: '#7A9BB8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Novi anuitet</span>
-          <span style={{ fontFamily: "'DM Mono',monospace", fontSize: '16px', fontWeight: '600', color: '#E8F1FB' }}>{fmtIn(newTotal, currency)}</span>
+          <span style={{ fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '16px', fontWeight: '600', color: '#E8F1FB' }}>{fmtIn(newTotal, currency)}</span>
         </div>
 
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
@@ -536,7 +533,7 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
 
           {/* Name + bank */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: "'DM Serif Display',Georgia,serif", fontSize: '16px', color: '#E8F1FB', fontWeight: '400', letterSpacing: '-0.01em', marginBottom: '3px' }}>
+            <div style={{ fontSize: '14.5px', color: '#E8F1FB', fontWeight: 600, marginBottom: '3px' }}>
               {credit.name}
             </div>
             <div style={{ fontSize: '12px', color: '#7A9BB8' }}>
@@ -552,16 +549,16 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
           {/* Remaining principal */}
           <div style={{ textAlign: 'right', minWidth: '130px' }}>
             <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.28)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: '4px' }}>Preostala glavnica</div>
-            <div style={{ fontFamily: "'DM Mono',monospace", fontSize: '16px', fontWeight: '500', color: accentColor }}>
-              {fmtInCompact(outstandingPrincipal || credit.principal_amount, credit.currency)}
+            <div style={{ fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '16px', fontWeight: '500', color: accentColor }}>
+              {fmtIn(outstandingPrincipal || credit.principal_amount, credit.currency)}
             </div>
           </div>
 
           {/* Outstanding total */}
           <div style={{ textAlign: 'right', minWidth: '130px' }}>
             <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.28)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: '4px' }}>Ukupno preostalo</div>
-            <div style={{ fontFamily: "'DM Mono',monospace", fontSize: '16px', fontWeight: '500', color: '#E8F1FB' }}>
-              {fmtInCompact(outstandingTotal, credit.currency)}
+            <div style={{ fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '16px', fontWeight: '500', color: '#E8F1FB' }}>
+              {fmtIn(outstandingTotal, credit.currency)}
             </div>
           </div>
 
@@ -643,18 +640,18 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
                   const overdue = inst.status === 'outstanding' && isOverdue(inst.due_date)
                   return (
                     <tr key={inst.id} style={{ borderBottom: '0.5px solid rgba(255,255,255,0.03)', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
-                      <td style={{ padding: '9px 16px', fontSize: '12px', color: 'rgba(255,255,255,0.35)', fontFamily: "'DM Mono',monospace" }}>{inst.installment_no}</td>
+                      <td style={{ padding: '9px 16px', fontSize: '12px', color: 'rgba(255,255,255,0.35)', fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums' }}>{inst.installment_no}</td>
                       <td style={{ padding: '9px 16px', fontSize: '12px', color: overdue ? '#FF5B5A' : '#DCE9F6', fontWeight: overdue ? '600' : '400' }}>
                         {fmtDate(inst.due_date)}
                         {overdue && <span style={{ marginLeft: '6px', fontSize: '10px', color: '#FF5B5A', background: 'rgba(255,91,90,0.12)', padding: '1px 5px', borderRadius: '10px' }}>u kašnjenju</span>}
                       </td>
-                      <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '12px', color: inst.principal_amount > 0 ? '#4EA8FF' : 'rgba(255,255,255,0.20)' }}>
+                      <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '12px', color: inst.principal_amount > 0 ? '#4EA8FF' : 'rgba(255,255,255,0.20)' }}>
                         {inst.principal_amount > 0 ? fmtNum(inst.principal_amount) : '—'}
                       </td>
-                      <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '12px', color: '#F5A623' }}>
+                      <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '12px', color: '#F5A623' }}>
                         {fmtNum(inst.interest_amount)}
                       </td>
-                      <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '13px', fontWeight: '500', color: '#E8F1FB' }}>
+                      <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '13px', fontWeight: '500', color: '#E8F1FB' }}>
                         {fmtNum(inst.total_amount)}
                       </td>
                       <td style={{ padding: '9px 16px' }}>
@@ -673,7 +670,7 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
                                   <div style={{ height: '3px', background: 'rgba(255,255,255,0.08)', borderRadius: '2px', overflow: 'hidden' }}>
                                     <div style={{ height: '100%', width: `${paidPct}%`, background: '#F5A623', borderRadius: '2px' }} />
                                   </div>
-                                  <div style={{ fontSize: '9px', color: '#F5A623', marginTop: '2px', fontFamily: "'DM Mono',monospace" }}>
+                                  <div style={{ fontSize: '9px', color: '#F5A623', marginTop: '2px', fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums' }}>
                                     {fmtMoney(inst.paid_amount!, credit.currency)} / {fmtMoney(inst.total_amount, credit.currency)}
                                   </div>
                                 </div>
@@ -701,13 +698,13 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
                     <td colSpan={2} style={{ padding: '10px 16px', fontSize: '10px', fontWeight: '700', color: 'rgba(255,255,255,0.30)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                       Ukupno ({countOf(filteredInst.length, 'rata', 'rate', 'rata')}, {credit.currency})
                     </td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '13px', fontWeight: '600', color: '#4EA8FF' }}>
+                    <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '13px', fontWeight: '600', color: '#4EA8FF' }}>
                       {fmtNum(filteredInst.reduce((s, i) => s + i.principal_amount, 0))}
                     </td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '13px', fontWeight: '600', color: '#F5A623' }}>
+                    <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '13px', fontWeight: '600', color: '#F5A623' }}>
                       {fmtNum(filteredInst.reduce((s, i) => s + i.interest_amount, 0))}
                     </td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontSize: '14px', fontWeight: '700', color: '#E8F1FB' }}>
+                    <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '14px', fontWeight: '700', color: '#E8F1FB' }}>
                       {fmtNum(filteredInst.reduce((s, i) => s + i.total_amount, 0))}
                     </td>
                     <td colSpan={2} />
@@ -1062,10 +1059,10 @@ export default function Credits() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '10px', marginBottom: '28px' }}>
         {[
           { label: 'Aktivni krediti', value: loading ? '—' : String(credits.filter(c => c.status === 'active').length), accent: '#4EA8FF', sub: `${filtered.length} ${plural(filtered.length, 'anuitetni', 'anuitetna', 'anuitetnih')} · ${revolving.length} revolving` },
-          { label: 'Preostala glavnica', value: loading ? '—' : fmtMoneyCompact(totalPrincipal, shown), accent: '#4EA8FF', sub: unconvertedNote || `anuitetni + revolving, u ${shown} po današnjem kursu NBS` },
+          { label: 'Preostala glavnica', value: loading ? '—' : fmtMoney(totalPrincipal, shown, 0), accent: '#4EA8FF', sub: unconvertedNote || `anuitetni + revolving, u ${shown} po današnjem kursu NBS` },
           {
             label: 'Ukupna obaveza',
-            value: loading ? '—' : (rev.unpriced > 0 || unconverted.size > 0 ? '≥ ' : '') + fmtMoneyCompact(totalObligation, shown),
+            value: loading ? '—' : (rev.unpriced > 0 || unconverted.size > 0 ? '≥ ' : '') + fmtMoney(totalObligation, shown, 0),
             accent: '#F5A623',
             sub: rev.unpriced > 0
               ? `${countOf(rev.unpriced, 'revolving kredit', 'revolving kredita', 'revolving kredita')} još bez kamatne stope`
@@ -1075,7 +1072,7 @@ export default function Credits() {
         ].map(k => (
           <div key={k.label} style={{ background: '#0D1B2C', border: '1px solid rgba(255,255,255,0.06)', borderTop: `2.5px solid ${k.accent}`, borderRadius: '12px', padding: '18px 20px' }}>
             <div style={{ fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase', letterSpacing: '0.11em', marginBottom: '10px' }}>{k.label}</div>
-            <div style={{ fontFamily: "'DM Mono','Fira Mono',monospace", fontSize: '24px', fontWeight: '500', color: k.accent, letterSpacing: '-0.02em', lineHeight: 1 }}>{k.value}</div>
+            <div style={{ fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '24px', fontWeight: '500', color: k.accent, letterSpacing: '-0.02em', lineHeight: 1 }}>{k.value}</div>
             <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)', marginTop: '8px' }}>{k.sub}</div>
           </div>
         ))}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabase'
-import { fmtMoney, fmtMoneyCompact } from '../utils/formatters'
+import { fmtMoney } from '../utils/formatters'
 import { runWrite } from '../services/writeOrder'
 import { countOf, plural } from '../utils/plural'
 import {
@@ -53,7 +53,7 @@ const fmtIn = (n: number | null, currency: string) =>
   n === null ? '—' : fmtMoney(n, currency || 'RSD')
 
 const fmtInCompact = (n: number | null, currency: string) =>
-  n === null ? '—' : fmtMoneyCompact(n, currency || 'RSD')
+  n === null ? '—' : fmtMoney(n, currency || 'RSD')
 
 /** 'YYYY-MM-DD' → '08.10.2026.', read from the string so no time zone can move the day. */
 const fmtDate = (iso: string | null | undefined) =>
@@ -402,7 +402,7 @@ const Cell = ({ label, value, sub, warn }: {
 }) => (
   <div>
     <div style={{ fontSize: '9.5px', color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '4px' }}>{label}</div>
-    <div style={{ fontFamily: "'DM Mono','Fira Mono',monospace", fontSize: '13.5px', color: warn ? '#F5A623' : '#DCE9F6' }}>{value}</div>
+    <div style={{ fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums', fontSize: '13.5px', color: warn ? '#F5A623' : '#DCE9F6' }}>{value}</div>
     {sub && <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.25)', marginTop: '2px' }}>{sub}</div>}
   </div>
 )
