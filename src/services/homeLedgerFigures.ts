@@ -74,6 +74,13 @@ export interface HomeLedgerFigures {
   expenseByCategory: { label: string; value: number }[]
   /** Companies whose principal could not be told apart: no mapping. In first-seen order. */
   unmappedCompanies: string[]
+  /**
+   * Companies whose principal and interest headings cannot be told apart —
+   * principal mapped to a whole category that also holds the interest, or the
+   * two mapped alike. Read as unmapped (expenses whole), named separately
+   * because the fix is a subcategory, not a mapping.
+   */
+  ambiguousCompanies: string[]
 }
 
 const filled = (v: string | null | undefined): v is string => !!(v && v.trim())
@@ -86,7 +93,14 @@ const filled = (v: string | null | undefined): v is string => !!(v && v.trim())
  * and that is all a reader needs to recognise it.
  */
 export function principalHeadingOf(map: SystemCategoryMap | null | undefined): PrincipalHeading | null {
-  const c = map?.credit_principal
+  return roleHeadingOf(map, 'credit_principal')
+}
+
+/** The same for any role — the home page also reads `credit_interest`. */
+export function roleHeadingOf(
+  map: SystemCategoryMap | null | undefined, role: 'credit_principal' | 'credit_interest',
+): PrincipalHeading | null {
+  const c = map?.[role]
   if (!c || !filled(c.pl_category)) return null
   return {
     pl_category: c.pl_category.trim(),
@@ -97,6 +111,13 @@ export function principalHeadingOf(map: SystemCategoryMap | null | undefined): P
 const isPrincipal = (row: PlRow, h: PrincipalHeading): boolean =>
   (row.pl_category ?? '').trim() === h.pl_category
   && (h.pl_subcategory === null || (row.pl_subcategory ?? '').trim() === h.pl_subcategory)
+
+/** Whether every row under `interest` would also match `principal`, or the reverse. */
+function overlaps(principal: PrincipalHeading, interest: PrincipalHeading | null | undefined): boolean {
+  if (!interest || interest.pl_category !== principal.pl_category) return false
+  return principal.pl_subcategory === null || interest.pl_subcategory === null
+    || principal.pl_subcategory === interest.pl_subcategory
+}
 
 const isRevenue = (t: string | null) => t === 'revenue' || t === 'invoice_revenue'
 const isExpense = (t: string | null) => t === 'expense' || t === 'invoice_expense'
@@ -113,6 +134,8 @@ export function homeLedgerFigures(rows: readonly PlRow[], opts: {
   months: readonly string[]
   currency: DisplayCurrency
   principalByCompany: Readonly<Record<string, PrincipalHeading | null>>
+  /** Each company's `credit_interest` heading: a row under it is never principal. */
+  interestByCompany?: Readonly<Record<string, PrincipalHeading | null>>
 }): HomeLedgerFigures {
   const byMonth = new Map<string, HomeLedgerMonth>()
   for (const month of opts.months) byMonth.set(month, { month, revenue: 0, expenses: 0, net: 0 })
@@ -123,9 +146,21 @@ export function homeLedgerFigures(rows: readonly PlRow[], opts: {
   let principalRepaid = 0
   const categories = new Map<string, number>()
   const unmapped: string[] = []
+  const ambiguous: string[] = []
+  const interestOf = (id: string) => opts.interestByCompany?.[id] ?? null
 
+  /** The heading to take principal out by, or null when there is none to trust. */
+  const usable = new Map<string, PrincipalHeading | null>()
   for (const [id, h] of Object.entries(opts.principalByCompany)) {
-    if (h === null && !unmapped.includes(id)) unmapped.push(id)
+    if (h === null) {
+      if (!unmapped.includes(id)) unmapped.push(id)
+      usable.set(id, null)
+    } else if (overlaps(h, interestOf(id))) {
+      ambiguous.push(id)
+      usable.set(id, null)
+    } else {
+      usable.set(id, h)
+    }
   }
 
   for (const row of rows) {
@@ -145,11 +180,12 @@ export function homeLedgerFigures(rows: readonly PlRow[], opts: {
     if (!isExpense(row.tx_type)) continue
 
     const company = row.company_id ?? ''
-    const heading = Object.prototype.hasOwnProperty.call(opts.principalByCompany, company)
-      ? opts.principalByCompany[company] : null
-    if (heading === null && company && !unmapped.includes(company)) unmapped.push(company)
+    const known = usable.has(company)
+    const heading = known ? usable.get(company)! : null
+    if (!known && company && !unmapped.includes(company)) unmapped.push(company)
 
-    if (heading && isPrincipal(row, heading)) {
+    const interest = interestOf(company)
+    if (heading && isPrincipal(row, heading) && !(interest && isPrincipal(row, interest))) {
       principalRepaid += amount
       continue
     }
@@ -175,5 +211,6 @@ export function homeLedgerFigures(rows: readonly PlRow[], opts: {
       .map(([label, value]) => ({ label, value: round2(value) }))
       .sort((a, b) => b.value - a.value),
     unmappedCompanies: unmapped,
+    ambiguousCompanies: ambiguous,
   }
 }

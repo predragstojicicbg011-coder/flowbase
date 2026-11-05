@@ -172,3 +172,51 @@ describe('the principal heading of a mapping', () => {
     })).toEqual({ pl_category: 'Finansiranje', pl_subcategory: null })
   })
 })
+
+describe('principal and interest told apart', () => {
+  const opts = (principal: PrincipalHeading | null, interest: PrincipalHeading | null) => ({
+    months: MONTHS, currency: 'RSD' as const,
+    principalByCompany: { [A]: principal }, interestByCompany: { [A]: interest },
+  })
+  const rows = [
+    row({ tx_type: 'expense', amount_rsd: 300, pl_category: 'Finansiranje', pl_subcategory: 'Glavnica' }),
+    row({ tx_type: 'expense', amount_rsd: 40, pl_category: 'Finansiranje', pl_subcategory: 'Kamata' }),
+  ]
+
+  it('never takes a row under the interest heading as principal', () => {
+    const f = homeLedgerFigures(rows, opts(PRINCIPAL_A, { pl_category: 'Finansiranje', pl_subcategory: 'Kamata' }))
+    expect(f.principalRepaid).toBe(300)
+    expect(f.expenses).toBe(40)
+    expect(f.ambiguousCompanies).toEqual([])
+  })
+
+  it('treats a company as unmapped when principal has no subcategory and interest is in the same category', () => {
+    const f = homeLedgerFigures(rows, opts(
+      { pl_category: 'Finansiranje', pl_subcategory: null },
+      { pl_category: 'Finansiranje', pl_subcategory: 'Kamata' }))
+    expect(f.principalRepaid).toBe(0)
+    expect(f.expenses).toBe(340)
+    expect(f.ambiguousCompanies).toEqual([A])
+    expect(f.unmappedCompanies).toEqual([])
+  })
+
+  it('treats identical principal and interest headings as unmapped too', () => {
+    const f = homeLedgerFigures(rows, opts(PRINCIPAL_A, PRINCIPAL_A))
+    expect(f.principalRepaid).toBe(0)
+    expect(f.ambiguousCompanies).toEqual([A])
+  })
+
+  it('treats interest mapped to the whole principal category as unmapped', () => {
+    const f = homeLedgerFigures(rows, opts(PRINCIPAL_A, { pl_category: 'Finansiranje', pl_subcategory: null }))
+    expect(f.principalRepaid).toBe(0)
+    expect(f.ambiguousCompanies).toEqual([A])
+  })
+
+  it('keeps a category-only principal heading when interest is elsewhere', () => {
+    const f = homeLedgerFigures(rows, opts(
+      { pl_category: 'Finansiranje', pl_subcategory: null },
+      { pl_category: 'Kamate', pl_subcategory: 'Bankarske' }))
+    expect(f.principalRepaid).toBe(340)
+    expect(f.ambiguousCompanies).toEqual([])
+  })
+})

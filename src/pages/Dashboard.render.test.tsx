@@ -178,6 +178,9 @@ describe('loans are not revenue, principal is not cost', () => {
 
   it('names a company whose principal heading is not mapped, and does not guess', async () => {
     ;(global as any).__db.system_categories = []
+    // It has a credit, so its principal is something to tell apart.
+    ;(global as any).__db.credits = [{ id: 'k9', company_id: 'comp-1', name: 'Kredit Primer', kind: 'annuity',
+      currency: 'RSD', principal_amount: 1000000, disbursement_date: '2026-01-05', maturity_date: null, rate_margin: null, status: 'active' }]
     await show()
     await cardSays('Ukupni troškovi', rsd(570000))
     await cardSays('Ukupni troškovi', 'Glavnica nije izdvojena za Gradnja Primer doo')
@@ -407,5 +410,38 @@ describe('review fixes: the credits card', () => {
     const section = screen.getByText('Zaduženost').parentElement!.parentElement!.parentElement as HTMLElement
     expect(section).toHaveTextContent('Krediti nisu preračunati: nema kursa NBS za danas (EUR).')
     expect(screen.queryByLabelText(/dug na kraju meseca/)).toBeNull()
+  })
+})
+
+describe('review fixes: the principal heading', () => {
+  const interestRole = (company: string, cat: string, sub: string | null) => ({
+    id: `si-${company}`, company_id: company, role: 'credit_interest', pl_category: cat,
+    pl_subcategory: sub, department: 'Uprava', dept_subcategory: 'Krediti', expense_description: 'Kamata',
+  })
+
+  it('does not ask a company with no credits to map its principal', async () => {
+    ;(global as any).__db.system_categories = []
+    await show()
+    await cardSays('Ukupni troškovi', rsd(570000))
+    expect(card('Ukupni troškovi')).not.toHaveTextContent('Glavnica nije izdvojena')
+  })
+
+  it('keeps the interest when principal is mapped to the whole category that holds it, and says why', async () => {
+    ;(global as any).__db.system_categories = [
+      { ...principalRole('comp-1', 'Finansiranje', 'Glavnica'), pl_subcategory: null },
+      interestRole('comp-1', 'Finansiranje', 'Kamata'),
+    ]
+    await show()
+    await cardSays('Ukupni troškovi', rsd(570000))
+    await cardSays('Ukupni troškovi', 'Glavnica i kamata za Gradnja Primer doo su u istoj kategoriji — podesite potkategoriju za „Otplata glavnice kredita“')
+  })
+
+  it('takes out only the principal when interest has its own subcategory', async () => {
+    ;(global as any).__db.system_categories = [
+      principalRole('comp-1', 'Finansiranje', 'Glavnica'),
+      interestRole('comp-1', 'Finansiranje', 'Kamata'),
+    ]
+    await show()
+    await cardSays('Ukupni troškovi', rsd(420000))
   })
 })

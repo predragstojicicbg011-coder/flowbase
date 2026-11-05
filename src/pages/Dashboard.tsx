@@ -16,7 +16,7 @@ import { MONTHS_SHORT_SR } from '../utils/months'
 import { countOf } from '../utils/plural'
 import { isReceivable } from '../services/revenue'
 import { receivableTotals } from '../services/receivables'
-import { homeLedgerFigures, principalHeadingOf, type PrincipalHeading } from '../services/homeLedgerFigures'
+import { homeLedgerFigures, roleHeadingOf, type PrincipalHeading } from '../services/homeLedgerFigures'
 import { rowsToMap, roleDef, SETTINGS_PATH, type SystemCategoryRow } from '../services/systemCategories'
 import {
   HOME_SHORTCUTS, ledgerRange, monthsOf, shortcutOf, windowLabel, withFrom, withTo, type MonthWindow,
@@ -284,8 +284,14 @@ export default function Dashboard() {
    * companies whose principal could not be told apart because nobody has
    * mapped it. Printed under the cards; see homeLedgerFigures.
    */
-  const [basis, setBasis] = useState<{ loansDrawn: number; principalRepaid: number; unmapped: string[] }>(
-    { loansDrawn: 0, principalRepaid: 0, unmapped: [] })
+  const [basis, setBasis] = useState<{ loansDrawn: number; principalRepaid: number; unmapped: string[]; ambiguous: string[] }>(
+    { loansDrawn: 0, principalRepaid: 0, unmapped: [], ambiguous: [] })
+  /**
+   * The companies that have credits in the book, or null when the book could
+   * not be read. Only these are asked to map their principal: a company that
+   * never borrowed has none to tell apart.
+   */
+  const [creditCompanies, setCreditCompanies] = useState<Set<string> | null>(null)
   /** The credit book over the period, or why it could not be read. */
   const [debt, setDebt] = useState<HomeDebt | null>(null)
   const [debtError, setDebtError] = useState<string | null>(null)
@@ -346,21 +352,27 @@ export default function Dashboard() {
       // its expenses whole and named under the card — never guessed.
       const { data: roleRows } = await supabase.from('system_categories')
         .select('company_id,role,pl_category,pl_subcategory,department,dept_subcategory,expense_description')
-        .eq('role', 'credit_principal')
+        .in('role', ['credit_principal', 'credit_interest'])
       const inScope = companyId ? [companyId] : companies.map(c => c.id)
       const principalByCompany: Record<string, PrincipalHeading | null> = {}
+      const interestByCompany: Record<string, PrincipalHeading | null> = {}
       for (const id of inScope) {
-        principalByCompany[id] = principalHeadingOf(rowsToMap((roleRows || []) as SystemCategoryRow[], id))
+        const map = rowsToMap((roleRows || []) as SystemCategoryRow[], id)
+        principalByCompany[id] = roleHeadingOf(map, 'credit_principal')
+        interestByCompany[id] = roleHeadingOf(map, 'credit_interest')
       }
 
       // ── The period on the home page's basis ──
       // Loans are not revenue and principal is not cost; interest is. Every
       // figure below — cards, chart, donut, sparklines — reads this one result.
       const monthKeys = monthsOf(win)
-      const ledger = homeLedgerFigures(plEntries || [], { months: monthKeys, currency, principalByCompany })
+      const ledger = homeLedgerFigures(plEntries || [], { months: monthKeys, currency, principalByCompany, interestByCompany })
       const revenue = ledger.revenue
       const expenses = ledger.expenses
-      setBasis({ loansDrawn: ledger.loansDrawn, principalRepaid: ledger.principalRepaid, unmapped: ledger.unmappedCompanies })
+      setBasis({
+        loansDrawn: ledger.loansDrawn, principalRepaid: ledger.principalRepaid,
+        unmapped: ledger.unmappedCompanies, ambiguous: ledger.ambiguousCompanies,
+      })
 
       // ── Monthly breakdown ──
       setMonthlyData(ledger.months.map(m => ({
@@ -456,6 +468,7 @@ export default function Dashboard() {
     // off the page with a reason, and nothing else with them.
     try {
       const book = await fetchCreditBook()
+      setCreditCompanies(new Set(book.credits.map(c => c.company_id || '')))
       const rates = await getBookRates(todayISO()).catch(() => null)
       setDebt(homeDebt({
         ...book, months: monthsOf(win), today: todayISO(), companyId,
@@ -463,6 +476,7 @@ export default function Dashboard() {
       }))
       setDebtError(null)
     } catch (err: any) {
+      setCreditCompanies(null)
       setDebt(null)
       setDebtError(err?.message || String(err))
     }
@@ -482,12 +496,19 @@ export default function Dashboard() {
   // What the cards' basis left out, said under the figure it changes.
   const revenueNotes = !loading && basis.loansDrawn !== 0
     ? [`Bez povučenih kredita: ${money(basis.loansDrawn)}`] : []
-  const unmappedNames = basis.unmapped.map(id => companies.find(c => c.id === id)?.name || id)
+  const nameOf = (id: string) => companies.find(c => c.id === id)?.name || id
+  const unmappedNames = basis.unmapped
+    .filter(id => creditCompanies === null || creditCompanies.has(id))
+    .map(nameOf)
+  const ambiguousNames = basis.ambiguous.map(nameOf)
   const expenseNotes = loading ? [] : [
     ...(basis.principalRepaid !== 0
       ? [`Bez otplate glavnice: ${money(basis.principalRepaid)}; kamata je u troškovima`] : []),
     ...(unmappedNames.length > 0
       ? [`Glavnica nije izdvojena za ${unmappedNames.join(', ')} — podesite „${roleDef('credit_principal').label}“ u ${SETTINGS_PATH}`]
+      : []),
+    ...(ambiguousNames.length > 0
+      ? [`Glavnica i kamata za ${ambiguousNames.join(', ')} su u istoj kategoriji — podesite potkategoriju za „${roleDef('credit_principal').label}“ u ${SETTINGS_PATH}`]
       : []),
   ]
 
