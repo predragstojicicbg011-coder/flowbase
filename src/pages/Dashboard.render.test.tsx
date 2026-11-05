@@ -30,6 +30,8 @@ beforeAll(() => {
   // The cards count to a new figure over animation frames, unless the reader
   // asked for reduced motion — then the figure is simply the figure, which is
   // what an assertion needs.
+  // jsdom has no layout and so no ResizeObserver; the charts measure with one.
+  ;(global as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
   ;(window as any).matchMedia = (q: string) => ({
     matches: q.includes('reduce'), addEventListener: () => {}, removeEventListener: () => {},
   })
@@ -328,5 +330,55 @@ describe('the credits card', () => {
     ;(global as any).__fail.credits = 'veza je prekinuta'
     await show()
     await cardSays('Krediti u periodu', 'Krediti nisu učitani: veza je prekinuta')
+  })
+})
+
+describe('the indebtedness chart', () => {
+  const section = () => screen.getByText('Zaduženost').parentElement!.parentElement!.parentElement as HTMLElement
+
+  it('draws each month: drawn, principal and interest due and paid, and the balance', async () => {
+    ;(global as any).__db.credits = [loan()]
+    ;(global as any).__db.credit_installments = instalments('2026-10-10')
+    // Interest is never a drawdown: no transaction is needed for any of this.
+    ;(global as any).__db.v_pl_entries = []
+    await show()
+    await waitFor(() => expect(screen.getByLabelText(
+      `feb ’26: povučeno ${rsd(1170000)}, glavnica ${rsd(0)} (plaćeno ${rsd(0)}), kamata ${rsd(0)} (plaćeno ${rsd(0)})`,
+    )).toBeInTheDocument())
+    expect(screen.getByLabelText(
+      `nov ’26: povučeno ${rsd(0)}, glavnica ${rsd(117000)} (plaćeno ${rsd(0)}), kamata ${rsd(4680)} (plaćeno ${rsd(0)})`,
+    )).toBeInTheDocument()
+    expect(screen.getByLabelText(`jan ’26: dug na kraju meseca ${rsd(0)}`)).toBeInTheDocument()
+    expect(screen.getByLabelText(`feb ’26: dug na kraju meseca ${rsd(1170000)}`)).toBeInTheDocument()
+    expect(screen.getByLabelText(`okt ’26: dug na kraju meseca ${rsd(234000)}`)).toBeInTheDocument()
+    expect(section()).toHaveTextContent('iznosi u RSD')
+    expect(section()).toHaveTextContent('po današnjem kursu NBS')
+  })
+
+  it('names a revolving line with no rate and one with no maturity', async () => {
+    ;(global as any).__db.credits = [
+      loan({ id: 'r1', kind: 'revolving', name: 'Revolving bez stope', currency: 'RSD', principal_amount: 900000,
+        disbursement_date: '2026-03-01', maturity_date: '2027-03-01', rate_margin: 2.5 }),
+      loan({ id: 'r2', kind: 'revolving', name: 'Revolving bez roka', currency: 'RSD', principal_amount: 300000,
+        disbursement_date: '2026-03-01', maturity_date: null, rate_margin: 2.5 }),
+    ]
+    await show()
+    await waitFor(() => expect(section()).toHaveTextContent('Kamata za Revolving bez stope nije u grafikonu'))
+    expect(section()).toHaveTextContent('Revolving bez roka nema datum dospeća')
+    expect(screen.getByLabelText(`okt ’26: dug na kraju meseca ${rsd(1200000)}`)).toBeInTheDocument()
+  })
+
+  it('says there are no credits instead of drawing a flat line at zero', async () => {
+    await show()
+    await waitFor(() => expect(section()).toHaveTextContent('Nema kredita u evidenciji'))
+    expect(screen.queryByLabelText(/dug na kraju meseca/)).toBeNull()
+  })
+
+  it('draws nothing and gives the reason when the book cannot be read', async () => {
+    ;(global as any).__fail.credit_installments = 'istek vremena'
+    ;(global as any).__db.credits = [loan()]
+    await show()
+    await waitFor(() => expect(section()).toHaveTextContent('Krediti nisu učitani: istek vremena'))
+    expect(screen.queryByLabelText(/dug na kraju meseca/)).toBeNull()
   })
 })

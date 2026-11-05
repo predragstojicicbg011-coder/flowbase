@@ -9,6 +9,7 @@ import type { Page } from '../navigation'
 import { fmtMoney, fmtNum } from '../utils/formatters'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import MetricCard from '../components/MetricCard'
+import DebtFlowsChart from '../components/DebtFlowsChart'
 import { SkeletonRows, Rise, useDrawLength } from '../components/motion'
 import { fetchAllPages, countRows } from '../utils/fetchAllPages'
 import { MONTHS_SHORT_SR } from '../utils/months'
@@ -660,6 +661,34 @@ export default function Dashboard() {
                     revenues={monthlyData.map(m => m.revenue)}
                     expenses={monthlyData.map(m => m.expenses)}
                   />
+                </div>
+              )}
+            </div>
+
+            {/* Indebtedness, from the credit book: drawn against what fell due,
+                and the principal still owed at each month end. Works for a
+                company that has entered its credits and booked nothing yet. */}
+            <div style={s.card}>
+              <div style={s.cardHeader}>
+                <div>
+                  <div style={s.cardTitle}>Zaduženost</div>
+                  <div style={{ fontSize: '10.5px', color: 'rgba(255,255,255,0.36)', marginTop: '2px' }}>iz kreditne evidencije: povučeno, dospelo i preostala glavnica</div>
+                </div>
+              </div>
+              {loading ? (
+                <SkeletonRows rows={5} height={16} gap={14} widths={[64, 88, 52, 76, 90]} />
+              ) : debtError ? (
+                <div style={s.emptyBox}>Krediti nisu učitani: {debtError}</div>
+              ) : !debt || !debt.hasBook ? (
+                <div style={s.emptyBox}>Nema kredita u evidenciji{activeEntity.id !== 'all' ? ` za ${activeEntity.name}` : ''}.</div>
+              ) : (
+                <DebtFlowsChart months={debt.months} currency={currency} />
+              )}
+              {!loading && debt && debt.notes.length > 0 && (
+                <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column' as const, gap: '4px' }}>
+                  {debt.notes.map(n => (
+                    <div key={n} style={{ fontSize: '11px', lineHeight: 1.45, color: '#C9A15A' }}>{n}</div>
+                  ))}
                 </div>
               )}
             </div>
