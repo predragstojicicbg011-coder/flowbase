@@ -87,10 +87,23 @@ export interface HomeDebt {
   interestDue: number
   principalPaid: number
   interestPaid: number
+  /**
+   * Principal repaid in the period, by the day the money left (paid_date, or
+   * the due date when none was recorded). Unlike `principalPaid`, which splits
+   * what fell due in a month, this is the figure that agrees with the balance:
+   * drawn − repaid = the change in what is owed.
+   */
+  principalRepaidInPeriod: number
   /** The balance of the last month: owed at the end of the period. */
   owedAtEnd: number
-  /** False when no credit in scope can be drawn: no book, not a debt of zero. */
+  /** False when there is no credit in scope at all: no book, not a debt of zero. */
   hasBook: boolean
+  /**
+   * Why no figure can be given although there is a book: nothing in it could
+   * be converted to the display currency. Null otherwise. When set, the
+   * figures above are not a debt of zero and must not be shown as one.
+   */
+  notConverted: string | null
   notes: string[]
 }
 
@@ -152,13 +165,36 @@ export function homeDebt(input: {
   const unpriced: string[] = []
   const noMaturity: string[] = []
   const pastMaturity: string[] = []
+  /** Credits no longer active that were treated as settled, with the word for why. */
+  const settledNames: { name: string; word: string }[] = []
   let converted = false
+  let repaidInPeriod = 0
+  const periodFrom = months.length > 0 ? `${months[0]}-01` : ''
+  const periodTo = months.length > 0 ? pointOf(months[months.length - 1], today) : ''
 
   for (const c of convertible) {
     const principal = num(c.principal_amount)
     const own = byCredit.get(c.id) || []
     const revolving = c.kind === 'revolving'
     if (curOf(c) !== input.currency.toUpperCase()) converted = true
+
+    // ── A credit no longer active ──
+    // Closed or restructured: it owes nothing from its last recorded payment
+    // on — a restructured loan's remaining instalments are the new loan's
+    // business, and counting both doubles the debt. With no payment recorded
+    // at all it owes nothing at any point. Either way it was still drawn.
+    const active = !c.status || c.status === 'active'
+    const lastPaid = own.filter(isPaid).map(paidOn).sort().pop() || ''
+    const settledFrom: string | null = active ? null : lastPaid
+    const isSettledAt = (point: string) => settledFrom !== null && point >= settledFrom
+    const afterSettled = (date: string) => settledFrom !== null && date > settledFrom
+    let settledMattered = false
+
+    for (const i of own) {
+      if (!isPaid(i)) continue
+      const when = paidOn(i)
+      if (when >= periodFrom && when <= periodTo) repaidInPeriod += shown(c, num(i.principal_amount))
+    }
 
     // ── Drawn ──
     const disbursed = c.disbursement_date || ''
@@ -178,15 +214,16 @@ export function homeDebt(input: {
 
     // ── Due ──
     if (!revolving) {
-      if (own.length === 0 && principal > 0) noSchedule.push(c.name)
+      if (own.length === 0 && principal > 0 && active) noSchedule.push(c.name)
       for (const i of own) {
+        if (!isPaid(i) && afterSettled(i.due_date)) continue
         const m = at.get(i.due_date.slice(0, 7))
         if (!m) continue
         m.principalDue += shown(c, num(i.principal_amount))
         m.interestDue += shown(c, num(i.interest_amount))
       }
     } else if (!c.maturity_date) {
-      noMaturity.push(c.name)
+      if (active) noMaturity.push(c.name)
     } else {
       const fromMonth = disbursed ? addMonths(disbursed.slice(0, 7), 1) : (months[0] || today.slice(0, 7))
       const margin = c.rate_margin === null || c.rate_margin === undefined ? null : num(c.rate_margin)
@@ -198,9 +235,10 @@ export function homeDebt(input: {
       const due = rows.length > 0
         ? rows
         : [{ due_date: c.maturity_date, principal_amount: principal, interest_amount: 0 }]
-      if (rows.length === 0 && fromMonth <= c.maturity_date.slice(0, 7)
+      if (active && rows.length === 0 && fromMonth <= c.maturity_date.slice(0, 7)
         && rateOn(margin, resets, dueDateIn(fromMonth, 28)) === null) unpriced.push(c.name)
       for (const r of due) {
+        if (afterSettled(r.due_date)) continue
         const m = at.get(r.due_date.slice(0, 7))
         if (!m) continue
         m.principalDue += shown(c, r.principal_amount)
@@ -222,12 +260,18 @@ export function homeDebt(input: {
         const matured = !!c.maturity_date && c.maturity_date <= point
         if (repaid) owed = 0
         else if (matured && c.status !== 'active') owed = 0
-        else {
-          owed = principal
-          if (matured) pastMaturity.push(c.name)
-        }
+        else owed = principal
+      }
+      if (owed > 0 && isSettledAt(point)) {
+        owed = 0
+        settledMattered = true
+      } else if (revolving && owed > 0 && active && !!c.maturity_date && c.maturity_date <= point) {
+        pastMaturity.push(c.name)
       }
       m.balance += shown(c, Math.max(owed, 0))
+    }
+    if (settledMattered) {
+      settledNames.push({ name: c.name, word: c.status === 'restructured' ? 'restrukturisan' : 'zatvoren' })
     }
   }
 
@@ -258,6 +302,9 @@ export function homeDebt(input: {
     pastMaturity.length > 0
       ? `${names(pastMaturity)} ${one(pastMaturity) ? 'je prošao' : 'su prošli'} rok dospeća, a i dalje ${one(pastMaturity) ? 'je aktivan' : 'su aktivni'}; glavnica se vodi kao dug.`
       : null,
+    ...settledNames
+      .sort((a, b) => a.name.localeCompare(b.name, 'sr'))
+      .map(x => `${x.name} je ${x.word}; ne računa se u dug.`),
     converted
       ? `Krediti u drugoj valuti preračunati su u ${input.currency} po današnjem kursu NBS, pa se iznos menja i sa kursom.`
       : null,
@@ -270,8 +317,12 @@ export function homeDebt(input: {
     interestDue: sum('interestDue'),
     principalPaid: sum('principalPaid'),
     interestPaid: sum('interestPaid'),
+    principalRepaidInPeriod: round2(repaidInPeriod),
     owedAtEnd: out.length > 0 ? out[out.length - 1].balance : 0,
-    hasBook: convertible.length > 0,
+    hasBook: inScope.length > 0,
+    notConverted: inScope.length > 0 && convertible.length === 0
+      ? `Krediti nisu preračunati: nema kursa NBS za danas (${names(unconverted.map(curOf))}).`
+      : null,
     notes,
   }
 }

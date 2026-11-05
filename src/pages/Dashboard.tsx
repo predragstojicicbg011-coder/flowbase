@@ -608,16 +608,18 @@ export default function Dashboard() {
               principal paid back in it, and what is still owed at its end. */}
           <MetricCard
             label="Krediti u periodu"
-            value={loading ? '—' : debt ? money(debt.owedAtEnd) : debtError ? 'nije učitano' : money(0)}
-            amount={loading || !debt ? undefined : debt.owedAtEnd}
+            value={loading ? '—' : debtError ? 'nije učitano' : debt?.notConverted ? 'nije preračunato' : debt ? money(debt.owedAtEnd) : money(0)}
+            amount={loading || !debt || debt.notConverted ? undefined : debt.owedAtEnd}
             format={money}
-            sub={debtError ? `Krediti nisu učitani: ${debtError}` : debt && !debt.hasBook ? 'nema kredita u evidenciji' : 'duguje se na kraju perioda'}
+            sub={debtError ? `Krediti nisu učitani: ${debtError}`
+              : debt?.notConverted ? debt.notConverted
+              : debt && !debt.hasBook ? 'nema kredita u evidenciji' : 'duguje se na kraju perioda'}
             color="#4EA8FF"
             darkColor="#4EA8FF"
-            sparklineData={debt ? debt.months.map(m => m.balance) : []}
-            notes={loading || !debt || !debt.hasBook ? [] : [
+            sparklineData={debt && !debt.notConverted ? debt.months.map(m => m.balance) : []}
+            notes={loading || !debt || !debt.hasBook || debt.notConverted ? [] : [
               `Povučeno: ${money(debt.drawn)}`,
-              `Otplaćena glavnica: ${money(debt.principalPaid)}`,
+              `Otplaćena glavnica (po planu otplate): ${money(debt.principalRepaidInPeriod)}`,
             ]}
           />
           </Rise>
@@ -679,6 +681,8 @@ export default function Dashboard() {
                 <SkeletonRows rows={5} height={16} gap={14} widths={[64, 88, 52, 76, 90]} />
               ) : debtError ? (
                 <div style={s.emptyBox}>Krediti nisu učitani: {debtError}</div>
+              ) : debt?.notConverted ? (
+                <div style={s.emptyBox}>{debt.notConverted}</div>
               ) : !debt || !debt.hasBook ? (
                 <div style={s.emptyBox}>Nema kredita u evidenciji{activeEntity.id !== 'all' ? ` za ${activeEntity.name}` : ''}.</div>
               ) : (

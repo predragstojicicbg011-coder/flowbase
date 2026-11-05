@@ -57,7 +57,9 @@ jest.mock('../contexts/CompaniesContext', () => {
 // than jest.fn: CRA resets mock implementations between tests.
 jest.mock('../services/bookAmounts', () => ({
   ...jest.requireActual('../services/bookAmounts'),
-  getBookRates: () => Promise.resolve({ date: '2026-11-05', eurRate: 117, usdRate: 110, source: 'test' }),
+  getBookRates: () => (global as any).__noRates
+    ? Promise.reject(new Error('Nema kursa NBS'))
+    : Promise.resolve({ date: '2026-11-05', eurRate: 117, usdRate: 110, source: 'test' }),
 }))
 
 jest.mock('../contexts/ProjectsContext', () => {
@@ -123,6 +125,7 @@ beforeEach(() => {
     companies: [COMPANY], defaultCompany: COMPANY, showPicker: false, loading: false,
   }
   ;(global as any).__fail = {}
+  ;(global as any).__noRates = false
   ;(global as any).__db = {
     v_pl_entries: [
       pl({ amount_rsd: 1000000, revenue_stream: 'Građevinske situacije' }),
@@ -297,7 +300,7 @@ describe('the credits card', () => {
     await cardSays('Krediti u periodu', rsd(234000))
     await cardSays('Krediti u periodu', `Povučeno: ${rsd(1170000)}`)
     // March to October paid: 8.000 EUR.
-    await cardSays('Krediti u periodu', `Otplaćena glavnica: ${rsd(936000)}`)
+    await cardSays('Krediti u periodu', `Otplaćena glavnica (po planu otplate): ${rsd(936000)}`)
   })
 
   it('follows the period: last month ends with October', async () => {
@@ -305,7 +308,7 @@ describe('the credits card', () => {
     ;(global as any).__db.credit_installments = instalments('2026-10-10')
     await show()
     fireEvent.click(screen.getByText('Prošli mesec'))
-    await cardSays('Krediti u periodu', `Otplaćena glavnica: ${rsd(117000)}`)
+    await cardSays('Krediti u periodu', `Otplaćena glavnica (po planu otplate): ${rsd(117000)}`)
     await cardSays('Krediti u periodu', `Povučeno: ${rsd(0)}`)
     await cardSays('Krediti u periodu', rsd(234000))
   })
@@ -379,6 +382,30 @@ describe('the indebtedness chart', () => {
     ;(global as any).__db.credits = [loan()]
     await show()
     await waitFor(() => expect(section()).toHaveTextContent('Krediti nisu učitani: istek vremena'))
+    expect(screen.queryByLabelText(/dug na kraju meseca/)).toBeNull()
+  })
+})
+
+describe('review fixes: the credits card', () => {
+  it('counts principal repaid by the day the money left: due in September, paid in October, is October', async () => {
+    ;(global as any).__db.credits = [loan()]
+    ;(global as any).__db.credit_installments = instalments('2026-08-10').map(i =>
+      i.due_date === '2026-09-10' ? { ...i, status: 'paid', paid_date: '2026-10-03' } : i)
+    await show()
+    fireEvent.click(screen.getByText('Prošli mesec'))
+    await cardSays('Krediti u periodu', `Otplaćena glavnica (po planu otplate): ${rsd(117000)}`)
+  })
+
+  it('says the book could not be converted instead of showing zero', async () => {
+    ;(global as any).__noRates = true
+    ;(global as any).__db.credits = [loan()]
+    ;(global as any).__db.credit_installments = instalments('2026-10-10')
+    await show()
+    await cardSays('Krediti u periodu', 'Krediti nisu preračunati: nema kursa NBS za danas (EUR).')
+    expect(card('Krediti u periodu')).not.toHaveTextContent(rsd(0))
+    expect(card('Krediti u periodu')).not.toHaveTextContent('nema kredita u evidenciji')
+    const section = screen.getByText('Zaduženost').parentElement!.parentElement!.parentElement as HTMLElement
+    expect(section).toHaveTextContent('Krediti nisu preračunati: nema kursa NBS za danas (EUR).')
     expect(screen.queryByLabelText(/dug na kraju meseca/)).toBeNull()
   })
 })

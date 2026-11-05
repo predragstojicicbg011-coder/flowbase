@@ -86,20 +86,24 @@ describe('a revolving line', () => {
   })
   const resets = { r1: [{ effective_from: '2025-12-01', reference_rate: 3 }] }
 
-  it('owes its whole principal until maturity and nothing after', () => {
-    const d = run({ credits: [line({ status: 'closed' })], resets, months: ['2026-01', '2026-02', '2026-03', '2026-04'] })
+  it('owes its whole principal until it is repaid at maturity and nothing after', () => {
+    const repaid: HomeInstalment[] = [{
+      credit_id: 'r1', due_date: '2026-03-10', principal_amount: 600000, interest_amount: 3000,
+      status: 'paid', paid_date: '2026-03-10',
+    }]
+    const d = run({ credits: [line({ status: 'closed' })], instalments: repaid, resets, months: ['2026-01', '2026-02', '2026-03', '2026-04'] })
     expect(d.months.map(m => m.balance)).toEqual([600000, 600000, 0, 0])
   })
 
   it('has interest every month at the margin plus the benchmark, and the principal at maturity', () => {
-    const d = run({ credits: [line({ status: 'closed' })], resets })
+    const d = run({ credits: [line()], resets })
     // 600.000 at 6% a year is 3.000 a month.
     expect(d.months.map(m => m.interestDue)).toEqual([0, 3000, 3000])
     expect(d.months.map(m => m.principalDue)).toEqual([0, 0, 600000])
   })
 
   it('says when there is no rate, and still shows the principal at maturity', () => {
-    const d = run({ credits: [line({ status: 'closed' })] })
+    const d = run({ credits: [line()] })
     expect(d.months.map(m => m.interestDue)).toEqual([0, 0, 0])
     expect(d.months[2].principalDue).toBe(600000)
     expect(d.notes.join(' ')).toContain('Kamata za Revolving Primer nije u grafikonu')
@@ -161,5 +165,83 @@ describe('the window', () => {
   it('draws no month after the current one', () => {
     const d = run({ credits: [credit({})], months: ['2026-11', '2026-12'] })
     expect(d.months.map(m => m.month)).toEqual(['2026-11'])
+  })
+})
+
+describe('a credit that is no longer active', () => {
+  it('owes nothing after its last recorded payment, so a restructured loan is not counted twice', () => {
+    const old = credit({ id: 'old', name: 'Stari kredit', status: 'restructured' })
+    const fresh = credit({ id: 'new', name: 'Novi kredit', disbursement_date: '2026-05-20', principal_amount: 500000 })
+    // The old loan paid February to April, then was replaced; its later instalments stay outstanding.
+    const d = run({
+      credits: [old, fresh], instalments: schedule('old', '2026-04-15'),
+      months: ['2026-03', '2026-04', '2026-05'],
+    })
+    expect(d.months.map(m => m.balance)).toEqual([1000000, 0, 500000])
+    expect(d.notes.join(' ')).toContain('Stari kredit je restrukturisan; ne računa se u dug.')
+  })
+
+  it('leaves out what falls due after it was settled', () => {
+    const old = credit({ id: 'old', name: 'Stari kredit', status: 'restructured' })
+    const d = run({ credits: [old], instalments: schedule('old', '2026-04-15'), months: ['2026-04', '2026-05'] })
+    expect(d.months.map(m => m.principalDue)).toEqual([100000, 0])
+  })
+
+  it('owes nothing at any point when no payment was ever recorded, yet still counts as drawn', () => {
+    const d = run({ credits: [credit({ name: 'Zatvoren bez plana', status: 'closed' })] })
+    expect(d.months.map(m => m.balance)).toEqual([0, 0, 0])
+    expect(d.months[0].drawn).toBe(1200000)
+    expect(d.notes.join(' ')).toContain('Zatvoren bez plana je zatvoren; ne računa se u dug.')
+    expect(d.notes.join(' ')).not.toContain('nema unet plan otplate')
+  })
+
+  it('ends a revolving line closed early on its last payment, not at maturity', () => {
+    const early: HomeInstalment[] = [{
+      credit_id: 'r1', due_date: '2026-02-10', principal_amount: 0, interest_amount: 3000,
+      status: 'paid', paid_date: '2026-02-10',
+    }]
+    const d = run({
+      credits: [credit({ id: 'r1', name: 'Revolving Primer', kind: 'revolving', principal_amount: 600000,
+        disbursement_date: '2026-01-10', maturity_date: '2026-12-10', rate_margin: 3, status: 'closed' })],
+      instalments: early, months: ['2026-01', '2026-02', '2026-03'],
+    })
+    expect(d.months.map(m => m.balance)).toEqual([600000, 0, 0])
+  })
+
+  it('says nothing about a closed loan that was paid off in full', () => {
+    const d = run({ credits: [credit({ status: 'closed' })], instalments: schedule('k1', '2027-01-15'), months: ['2026-03'] })
+    expect(d.notes.join(' ')).not.toContain('ne računa se u dug')
+  })
+})
+
+describe('principal repaid in the period, by the day the money left', () => {
+  it('counts an instalment due in September and paid in October in October', () => {
+    const ins = schedule('k1', '2026-08-15').map(i =>
+      i.due_date === '2026-09-15' ? { ...i, status: 'paid', paid_date: '2026-10-03' } : i)
+    const october = run({ credits: [credit({})], instalments: ins, months: ['2026-10'] })
+    expect(october.principalRepaidInPeriod).toBe(100000)
+    const september = run({ credits: [credit({})], instalments: ins, months: ['2026-09'] })
+    expect(september.principalRepaidInPeriod).toBe(0)
+    // The chart still splits what fell due in September by whether it is paid.
+    expect(september.months[0].principalPaid).toBe(100000)
+  })
+
+  it('agrees with the balance: drawn less repaid is the change in what is owed', () => {
+    const ins = schedule('k1', '2026-06-15').map(i =>
+      i.due_date === '2026-06-15' ? { ...i, paid_date: '2026-07-02' } : i)
+    const d = run({ credits: [credit({})], instalments: ins, months: ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'] })
+    expect(d.drawn - d.principalRepaidInPeriod).toBe(d.owedAtEnd)
+  })
+})
+
+describe('a book that cannot be converted', () => {
+  it('is still a book, and says why there is no figure', () => {
+    const d = run({ credits: [credit({ currency: 'USD', name: 'Dolarski kredit' })] })
+    expect(d.hasBook).toBe(true)
+    expect(d.notConverted).toBe('Krediti nisu preračunati: nema kursa NBS za danas (USD).')
+  })
+
+  it('has no such reason when something could be converted', () => {
+    expect(run({ credits: [credit({})] }).notConverted).toBeNull()
   })
 })
