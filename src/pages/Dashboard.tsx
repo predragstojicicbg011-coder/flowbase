@@ -16,6 +16,12 @@ import { countOf } from '../utils/plural'
 import { isReceivable } from '../services/revenue'
 import { homeLedgerFigures, principalHeadingOf, type PrincipalHeading } from '../services/homeLedgerFigures'
 import { rowsToMap, roleDef, SETTINGS_PATH, type SystemCategoryRow } from '../services/systemCategories'
+import {
+  HOME_SHORTCUTS, ledgerRange, monthsOf, shortcutOf, windowLabel, withFrom, withTo, type MonthWindow,
+} from '../services/dashboardWindow'
+
+/** Today as 'YYYY-MM-DD', read the way the rest of the app reads it. */
+const todayISO = () => new Date().toISOString().slice(0, 10)
 
 /** How a partner's type reads on screen; the stored value stays English. */
 const PARTNER_TYPE_LABEL: Record<string, string> = {
@@ -203,9 +209,13 @@ export default function Dashboard() {
   const money = (n: number) => format(n, 0)
   const amt = (row: any): number => pick(row) ?? 0
   const [entity, setEntity] = useState<Entity>('all')
-  const [dateFrom, setDateFrom] = useState(() => `${new Date().getFullYear()}-01-01`)
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0])
-  const [activeShortcut, setActiveShortcut] = useState('Od početka godine')
+  // The period is whole months, never past the current month; the ledger is
+  // read from the 1st of the first to the last day of the last (or today).
+  const today = todayISO()
+  const thisMonth = today.slice(0, 7)
+  const [win, setWin] = useState<MonthWindow>(() => HOME_SHORTCUTS[2].of(todayISO()))
+  const { dateFrom, dateTo } = ledgerRange(win, today)
+  const activeShortcut = shortcutOf(win, today)
   const { companies, defaultCompany, showPicker, loading: companiesLoading } = useCompanies()
   const [loading, setLoading] = useState(true)
 
@@ -251,12 +261,6 @@ export default function Dashboard() {
     }),
   ]
 
-  const shortcuts = [
-    { label: 'Ovaj mesec', from: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })(), to: new Date().toISOString().split('T')[0] },
-    { label: 'Ovaj kvartal', from: (() => { const d = new Date(); const q = Math.floor(d.getMonth() / 3); return `${d.getFullYear()}-${String(q * 3 + 1).padStart(2, '0')}-01` })(), to: new Date().toISOString().split('T')[0] },
-    { label: 'Od početka godine', from: `${new Date().getFullYear()}-01-01`, to: new Date().toISOString().split('T')[0] },
-    { label: 'Prošli mesec', from: (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })(), to: (() => { const d = new Date(); d.setDate(0); return d.toISOString().split('T')[0] })() },
-  ]
 
   const CATEGORY_COLORS = ['#1D9E75', '#185FA5', '#BA7517', '#D4537E', '#7C3AED', '#0891B2', '#DC2626', '#059669']
 
@@ -296,12 +300,7 @@ export default function Dashboard() {
       // ── The period on the home page's basis ──
       // Loans are not revenue and principal is not cost; interest is. Every
       // figure below — cards, chart, donut, sparklines — reads this one result.
-      const monthKeys: string[] = []
-      for (let m = dateFrom.slice(0, 7); m <= dateTo.slice(0, 7); ) {
-        monthKeys.push(m)
-        const [y, mo] = m.split('-').map(Number)
-        m = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`
-      }
+      const monthKeys = monthsOf(win)
       const ledger = homeLedgerFigures(plEntries || [], { months: monthKeys, currency, principalByCompany })
       const revenue = ledger.revenue
       const expenses = ledger.expenses
@@ -393,7 +392,7 @@ export default function Dashboard() {
       setAlerts(newAlerts)
     } catch (err) { console.error('Dashboard error:', err) }
     setLoading(false)
-  }, [dateFrom, dateTo, getCompanyId, currency, companies]) // eslint-disable-line
+  }, [win.from, win.to, getCompanyId, currency, companies]) // eslint-disable-line
 
   useEffect(() => {
     if (!companiesLoading) fetchAll()
@@ -440,17 +439,20 @@ export default function Dashboard() {
           {/* Period bar inline */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' as const }}>
             <div style={s.segmented}>
-              {shortcuts.map(sc => (
+              {HOME_SHORTCUTS.map(sc => (
                 <button key={sc.label}
                   style={activeShortcut === sc.label ? { ...s.shortcutBtn, ...s.shortcutActive } : s.shortcutBtn}
-                  onClick={() => { setDateFrom(sc.from); setDateTo(sc.to); setActiveShortcut(sc.label) }}>
+                  onClick={() => setWin(sc.of(todayISO()))}>
                   {sc.label}
                 </button>
               ))}
             </div>
-            <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setActiveShortcut('') }} style={s.dateInput} />
+            {/* Whole months, both ends inclusive; neither end past this month. */}
+            <input type="month" aria-label="Od meseca" value={win.from} max={thisMonth}
+              onChange={e => setWin(w => withFrom(w, e.target.value, todayISO()))} style={s.dateInput} />
             <span style={{ color: 'rgba(255,255,255,0.30)', fontSize: '12px' }}>→</span>
-            <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setActiveShortcut('') }} style={s.dateInput} />
+            <input type="month" aria-label="Do meseca" value={win.to} max={thisMonth}
+              onChange={e => setWin(w => withTo(w, e.target.value, todayISO()))} style={s.dateInput} />
           </div>
         </div>
 
@@ -482,7 +484,7 @@ export default function Dashboard() {
             value={loading ? '—' : money(metrics.totalRevenue)}
             amount={loading ? undefined : metrics.totalRevenue}
             format={money}
-            sub={`Od početka godine · ${activeEntity.name}`}
+            sub={`${windowLabel(win)} · ${activeEntity.name}`}
             color="#00D47E"
             darkColor="#00D47E"
             sparklineData={sparkRevenue}

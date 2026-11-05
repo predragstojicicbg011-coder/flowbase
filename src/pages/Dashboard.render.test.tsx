@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import Dashboard from './Dashboard'
 import { fmtMoney } from '../utils/formatters'
 
@@ -189,5 +189,49 @@ describe('profit after the bank', () => {
     await show()
     await cardSays('Neto dobit / gubitak', rsd(580000))
     expect(card('Neto dobit / gubitak')).not.toHaveTextContent('Otplaćena glavnica')
+  })
+})
+
+describe('the period is whole months', () => {
+  const october = () => (global as any).__db.v_pl_entries.push(
+    pl({ amount_rsd: 70000, pl_date: '2026-10-20', revenue_stream: 'Zakup' }),
+    pl({ amount_rsd: 5000, pl_date: '2026-11-03', revenue_stream: 'Zakup' }),
+  )
+
+  it('opens on the year to date, by month, and neither end can pass this month', async () => {
+    await show()
+    const from = screen.getByLabelText('Od meseca') as HTMLInputElement
+    const to = screen.getByLabelText('Do meseca') as HTMLInputElement
+    expect(from.type).toBe('month')
+    expect(from.value).toBe('2026-01')
+    expect(to.value).toBe('2026-11')
+    expect(from.max).toBe('2026-11')
+    expect(to.max).toBe('2026-11')
+    await cardSays('Ukupni prihodi', 'jan – nov 2026 · Gradnja Primer doo')
+  })
+
+  it('last month is the whole of October and nothing of November', async () => {
+    october()
+    await show()
+    fireEvent.click(screen.getByText('Prošli mesec'))
+    await cardSays('Ukupni prihodi', rsd(70000))
+    await cardSays('Ukupni prihodi', 'okt 2026')
+    expect((screen.getByLabelText('Od meseca') as HTMLInputElement).value).toBe('2026-10')
+    expect((screen.getByLabelText('Do meseca') as HTMLInputElement).value).toBe('2026-10')
+  })
+
+  it('this quarter runs from October to today', async () => {
+    october()
+    await show()
+    fireEvent.click(screen.getByText('Ovaj kvartal'))
+    await cardSays('Ukupni prihodi', rsd(75000))
+  })
+
+  it('pulls a month typed past the current one back to it', async () => {
+    october()
+    await show()
+    fireEvent.change(screen.getByLabelText('Od meseca'), { target: { value: '2027-02' } })
+    await waitFor(() => expect((screen.getByLabelText('Od meseca') as HTMLInputElement).value).toBe('2026-11'))
+    await cardSays('Ukupni prihodi', rsd(5000))
   })
 })
