@@ -6,8 +6,7 @@ import { useCompanies } from '../contexts/CompaniesContext'
 import { supabase } from '../supabase'
 import { useNav } from '../navigation'
 import type { Page } from '../navigation'
-import { fmtMoney } from '../utils/formatters'
-import { shortMoney } from '../services/expenseCharts'
+import { fmtMoney, fmtNum } from '../utils/formatters'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import MetricCard from '../components/MetricCard'
 import { SkeletonRows, Rise, useDrawLength } from '../components/motion'
@@ -15,6 +14,8 @@ import { fetchAllPages, countRows } from '../utils/fetchAllPages'
 import { MONTHS_SHORT_SR } from '../utils/months'
 import { countOf } from '../utils/plural'
 import { isReceivable } from '../services/revenue'
+import { homeLedgerFigures, principalHeadingOf, type PrincipalHeading } from '../services/homeLedgerFigures'
+import { rowsToMap, roleDef, SETTINGS_PATH, type SystemCategoryRow } from '../services/systemCategories'
 
 /** How a partner's type reads on screen; the stored value stays English. */
 const PARTNER_TYPE_LABEL: Record<string, string> = {
@@ -58,8 +59,9 @@ function AreaChart({ months, revenues, expenses }: { months: string[]; revenues:
   // Y-axis ticks
   const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => ({ v: max * f, y: padT + (1 - f) * chartH }))
 
-  // Axis ticks carry the scale only; the card above names the currency.
-  const fmt = (v: number) => shortMoney(v)
+  // Whole figures, never "mil." or "hilj.": the axis carries the number
+  // only, and the card above names the currency.
+  const fmt = (v: number) => fmtNum(v, 0)
 
   return (
     <div style={{ position: 'relative' }}>
@@ -108,10 +110,10 @@ function AreaChart({ months, revenues, expenses }: { months: string[]; revenues:
                 <circle cx={xPos(i)} cy={yPos(revenues[i])} r="4" fill="#00D47E" stroke="#0D1B2C" strokeWidth="2" />
                 <circle cx={xPos(i)} cy={yPos(expenses[i])} r="4" fill="#FF5B5A" stroke="#0D1B2C" strokeWidth="2" />
                 {/* Tooltip */}
-                <rect x={Math.min(xPos(i) - 45, W - padR - 95)} y={padT + 4} width="90" height="42" rx="6" fill="#0D1B2A" opacity="0.88" />
-                <text x={Math.min(xPos(i), W - padR - 50)} y={padT + 17} textAnchor="middle" fontSize="9.5" fill="#5DCAA5" fontFamily="system-ui" fontWeight="600">{m}</text>
-                <text x={Math.min(xPos(i), W - padR - 50)} y={padT + 29} textAnchor="middle" fontSize="8.5" fill="#9FE1CB" fontFamily="system-ui">Prihodi: {fmt(revenues[i])}</text>
-                <text x={Math.min(xPos(i), W - padR - 50)} y={padT + 40} textAnchor="middle" fontSize="8.5" fill="#F5A9A9" fontFamily="system-ui">Troškovi: {fmt(expenses[i])}</text>
+                <rect x={Math.max(Math.min(xPos(i) - 70, W - padR - 140), padL)} y={padT + 4} width="140" height="42" rx="6" fill="#0D1B2A" opacity="0.88" />
+                <text x={Math.max(Math.min(xPos(i), W - padR - 70), padL + 70)} y={padT + 17} textAnchor="middle" fontSize="9.5" fill="#5DCAA5" fontFamily="system-ui" fontWeight="600">{m}</text>
+                <text x={Math.max(Math.min(xPos(i), W - padR - 70), padL + 70)} y={padT + 29} textAnchor="middle" fontSize="8.5" fill="#9FE1CB" fontFamily="system-ui">Prihodi: {fmt(revenues[i])}</text>
+                <text x={Math.max(Math.min(xPos(i), W - padR - 70), padL + 70)} y={padT + 40} textAnchor="middle" fontSize="8.5" fill="#F5A9A9" fontFamily="system-ui">Troškovi: {fmt(expenses[i])}</text>
               </>
             )}
             <rect
@@ -213,6 +215,14 @@ export default function Dashboard() {
     overdueCount: 0, unmatchedPassthrough: 0,
     prevRevenue: 0, prevExpenses: 0,
   })
+  /**
+   * What the home page's basis left out of the ledger's figures: loan
+   * drawdowns out of revenue, loan principal out of expenses — and the
+   * companies whose principal could not be told apart because nobody has
+   * mapped it. Printed under the cards; see homeLedgerFigures.
+   */
+  const [basis, setBasis] = useState<{ loansDrawn: number; principalRepaid: number; unmapped: string[] }>(
+    { loansDrawn: 0, principalRepaid: 0, unmapped: [] })
   const [monthlyData, setMonthlyData] = useState<{ month: string; revenue: number; expenses: number }[]>([])
   const [expenseByCategory, setExpenseByCategory] = useState<{ label: string; value: number; color: string }[]>([])
   const [topPartners, setTopPartners] = useState<{ name: string; amount: number; type: string }[]>([])
@@ -261,7 +271,7 @@ export default function Dashboard() {
       // ── P&L entries for period ──
       const plEntries = await fetchAllPages<any>((from, to) => {
         let q = supabase.from('v_pl_entries')
-          .select('tx_type,amount_rsd,amount_eur,pl_date,pl_category,partner_id,project_id,project_name')
+          .select('company_id,tx_type,amount_rsd,amount_eur,pl_date,pl_category,pl_subcategory,revenue_stream,partner_id,project_id,project_name')
           .gte('pl_date', dateFrom).lte('pl_date', dateTo)
         if (companyId) q = q.eq('company_id', companyId)
         return q.order('pl_date').order('id').range(from, to)
@@ -269,36 +279,42 @@ export default function Dashboard() {
 
       setProjectRows(plEntries || [])
 
-      const revenue = (plEntries || []).filter(e => e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue').reduce((s, e) => s + amt(e), 0)
-      const expenses = (plEntries || []).filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').reduce((s, e) => s + amt(e), 0)
+      // ── Where each company books loan principal ──
+      // Read per company: the shared SystemCategories context folds every
+      // company into one map, and two companies may book principal under two
+      // different headings. A failed read leaves every company unmapped —
+      // its expenses whole and named under the card — never guessed.
+      const { data: roleRows } = await supabase.from('system_categories')
+        .select('company_id,role,pl_category,pl_subcategory,department,dept_subcategory,expense_description')
+        .eq('role', 'credit_principal')
+      const inScope = companyId ? [companyId] : companies.map(c => c.id)
+      const principalByCompany: Record<string, PrincipalHeading | null> = {}
+      for (const id of inScope) {
+        principalByCompany[id] = principalHeadingOf(rowsToMap((roleRows || []) as SystemCategoryRow[], id))
+      }
+
+      // ── The period on the home page's basis ──
+      // Loans are not revenue and principal is not cost; interest is. Every
+      // figure below — cards, chart, donut, sparklines — reads this one result.
+      const monthKeys: string[] = []
+      for (let m = dateFrom.slice(0, 7); m <= dateTo.slice(0, 7); ) {
+        monthKeys.push(m)
+        const [y, mo] = m.split('-').map(Number)
+        m = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`
+      }
+      const ledger = homeLedgerFigures(plEntries || [], { months: monthKeys, currency, principalByCompany })
+      const revenue = ledger.revenue
+      const expenses = ledger.expenses
+      setBasis({ loansDrawn: ledger.loansDrawn, principalRepaid: ledger.principalRepaid, unmapped: ledger.unmappedCompanies })
 
       // ── Monthly breakdown ──
-      const monthMap: Record<string, { revenue: number; expenses: number }> = {}
-      const start = new Date(dateFrom)
-      const end = new Date(dateTo)
-      for (let d = new Date(start.getFullYear(), start.getMonth(), 1); d <= end; d.setMonth(d.getMonth() + 1)) {
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-        monthMap[key] = { revenue: 0, expenses: 0 }
-      }
-      ;(plEntries || []).forEach(e => {
-        const key = (e.pl_date || '').slice(0, 7)
-        if (!monthMap[key]) monthMap[key] = { revenue: 0, expenses: 0 }
-        if (e.tx_type === 'revenue' || e.tx_type === 'invoice_revenue') monthMap[key].revenue += amt(e)
-        if (e.tx_type === 'expense' || e.tx_type === 'invoice_expense') monthMap[key].expenses += amt(e)
-      })
-      const monthly = Object.entries(monthMap).sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => ({
-        month: MONTHS_SHORT_SR[Number(key.slice(5, 7)) - 1] ?? key,
-        ...v,
-      }))
-      setMonthlyData(monthly)
+      setMonthlyData(ledger.months.map(m => ({
+        month: MONTHS_SHORT_SR[Number(m.month.slice(5, 7)) - 1] ?? m.month,
+        revenue: m.revenue, expenses: m.expenses,
+      })))
 
       // ── Expense by category ──
-      const catMap: Record<string, number> = {}
-      ;(plEntries || []).filter(e => e.tx_type === 'expense' || e.tx_type === 'invoice_expense').forEach(e => {
-        const cat = e.pl_category || 'Ostalo'
-        catMap[cat] = (catMap[cat] || 0) + amt(e)
-      })
-      const cats = Object.entries(catMap).sort(([, a], [, b]) => b - a).slice(0, 6).map(([label, value], i) => ({
+      const cats = ledger.expenseByCategory.slice(0, 6).map(({ label, value }, i) => ({
         label, value, color: CATEGORY_COLORS[i % CATEGORY_COLORS.length]
       }))
       setExpenseByCategory(cats)
@@ -377,7 +393,7 @@ export default function Dashboard() {
       setAlerts(newAlerts)
     } catch (err) { console.error('Dashboard error:', err) }
     setLoading(false)
-  }, [dateFrom, dateTo, getCompanyId, currency]) // eslint-disable-line
+  }, [dateFrom, dateTo, getCompanyId, currency, companies]) // eslint-disable-line
 
   useEffect(() => {
     if (!companiesLoading) fetchAll()
@@ -388,6 +404,18 @@ export default function Dashboard() {
   const username = user?.email?.split('@')[0] ?? 'admin'
   const margin = metrics.totalRevenue > 0 ? (metrics.netProfit / metrics.totalRevenue * 100) : 0
   const activeEntity = entities.find(e => e.id === entity) || entities[0]
+
+  // What the cards' basis left out, said under the figure it changes.
+  const revenueNotes = !loading && basis.loansDrawn !== 0
+    ? [`Bez povučenih kredita: ${money(basis.loansDrawn)}`] : []
+  const unmappedNames = basis.unmapped.map(id => companies.find(c => c.id === id)?.name || id)
+  const expenseNotes = loading ? [] : [
+    ...(basis.principalRepaid !== 0
+      ? [`Bez otplate glavnice: ${money(basis.principalRepaid)}; kamata je u troškovima`] : []),
+    ...(unmappedNames.length > 0
+      ? [`Glavnica nije izdvojena za ${unmappedNames.join(', ')} — podesite „${roleDef('credit_principal').label}“ u ${SETTINGS_PATH}`]
+      : []),
+  ]
 
   const sparkRevenue = monthlyData.map(m => m.revenue)
   const sparkExpenses = monthlyData.map(m => m.expenses)
@@ -452,6 +480,7 @@ export default function Dashboard() {
             color="#00D47E"
             darkColor="#00D47E"
             sparklineData={sparkRevenue}
+            notes={revenueNotes}
           />
           </Rise>
           <Rise delay={55}>
@@ -464,6 +493,7 @@ export default function Dashboard() {
             color="#FF5B5A"
             darkColor="#FF5B5A"
             sparklineData={sparkExpenses}
+            notes={expenseNotes}
           />
           </Rise>
           <Rise delay={110}>
@@ -499,7 +529,10 @@ export default function Dashboard() {
             {/* Revenue vs Expenses Bar Chart */}
             <div style={s.card}>
               <div style={s.cardHeader}>
-                <div style={s.cardTitle}>Prihodi i troškovi</div>
+                <div>
+                  <div style={s.cardTitle}>Prihodi i troškovi</div>
+                  <div style={{ fontSize: '10.5px', color: 'rgba(255,255,255,0.36)', marginTop: '2px' }}>bez povučenih kredita i otplate glavnice; kamata je u troškovima</div>
+                </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                     <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#1D9E75', opacity: 0.85 }} />

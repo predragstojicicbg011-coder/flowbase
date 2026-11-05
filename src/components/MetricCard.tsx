@@ -63,10 +63,15 @@ interface MetricCardProps {
   sparklineData: number[]  // raw numbers for sparkline
   trendPct?: number        // e.g. 12.4
   trendUp?: boolean        // true = up arrow (green-ish), false = down (red-ish)
+  /**
+   * Short lines under the card saying what the figure leaves out or adds,
+   * one per line. Said where the figure is, not in a tooltip.
+   */
+  notes?: string[]
 }
 
 export default function MetricCard({
-  label, value, sub, color, darkColor, sparklineData, trendPct, trendUp, amount, format,
+  label, value, sub, color, darkColor, sparklineData, trendPct, trendUp, amount, format, notes,
 }: MetricCardProps) {
   const [hovered, setHovered] = React.useState(false)
   // Counts only when the figure CHANGES — never on arrival, where counting up
@@ -115,6 +120,13 @@ export default function MetricCard({
         </div>
         <Sparkline data={sparklineData} color={color}/>
       </div>
+      {notes && notes.length > 0 && (
+        <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+          {notes.map(n => (
+            <div key={n} style={{ fontSize: '10.5px', lineHeight: 1.4, color: 'rgba(255,255,255,0.42)', fontVariantNumeric: 'tabular-nums' }}>{n}</div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
