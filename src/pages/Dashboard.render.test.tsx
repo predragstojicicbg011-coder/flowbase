@@ -19,10 +19,10 @@ const FIXED_NOW = Date.UTC(2026, 10, 5, 12, 0, 0)
 const RealDate = Date
 class FixedDate extends RealDate {
   constructor(...args: any[]) {
-    if (args.length === 0) super(FIXED_NOW)
+    if (args.length === 0) super((global as any).__now ?? FIXED_NOW)
     else super(...(args as [any]))
   }
-  static now() { return FIXED_NOW }
+  static now() { return (global as any).__now ?? FIXED_NOW }
 }
 
 beforeAll(() => {
@@ -126,6 +126,7 @@ beforeEach(() => {
   }
   ;(global as any).__fail = {}
   ;(global as any).__noRates = false
+  ;(global as any).__now = undefined
   ;(global as any).__db = {
     v_pl_entries: [
       pl({ amount_rsd: 1000000, revenue_stream: 'Građevinske situacije' }),
@@ -198,7 +199,7 @@ describe('loans are not revenue, principal is not cost', () => {
 describe('profit after the bank', () => {
   it('puts the principal repaid and the profit left after it under net profit', async () => {
     await show()
-    await cardSays('Neto dobit / gubitak', `Otplaćena glavnica ${rsd(150000)} · dobit posle otplate ${rsd(430000)}`)
+    await cardSays('Neto dobit / gubitak', `Otplaćena glavnica (po izvodima) ${rsd(150000)} · dobit posle otplate ${rsd(430000)}`)
   })
 
   it('says nothing about it when no principal was repaid in the period', async () => {
@@ -443,5 +444,21 @@ describe('review fixes: the principal heading', () => {
     ]
     await show()
     await cardSays('Ukupni troškovi', rsd(420000))
+  })
+})
+
+describe('review fixes: the date and the labels', () => {
+  it('opens on the new month just after midnight in Belgrade on the 1st', async () => {
+    // 31 October 23:30 UTC is 1 November 00:30 in Belgrade.
+    ;(global as any).__now = Date.UTC(2026, 9, 31, 23, 30)
+    await show()
+    fireEvent.click(screen.getByText('Ovaj mesec'))
+    await waitFor(() => expect((screen.getByLabelText('Od meseca') as HTMLInputElement).value).toBe('2026-11'))
+    expect((screen.getByLabelText('Do meseca') as HTMLInputElement).max).toBe('2026-11')
+  })
+
+  it('names where each repaid principal comes from', async () => {
+    await show()
+    await cardSays('Neto dobit / gubitak', 'Otplaćena glavnica (po izvodima)')
   })
 })

@@ -1,5 +1,5 @@
 import {
-  HOME_SHORTCUTS, ledgerRange, monthsOf, withFrom, withTo, shortcutOf, windowLabel,
+  belgradeToday, HOME_SHORTCUTS, ledgerRange, monthsOf, withFrom, withTo, shortcutOf, windowLabel,
 } from './dashboardWindow'
 
 // `today` is always a 'YYYY-MM-DD' string; nothing here builds a Date, so no
@@ -114,5 +114,19 @@ describe('the label of a window', () => {
   it('names the first and last month', () => {
     expect(windowLabel({ from: '2026-01', to: '2026-11' })).toBe('jan – nov 2026')
     expect(windowLabel({ from: '2025-11', to: '2026-02' })).toBe('nov 2025 – feb 2026')
+  })
+})
+
+describe('today, in Belgrade', () => {
+  it('is already the 1st after midnight in Belgrade, while it is still the 31st in UTC', () => {
+    expect(belgradeToday(new Date(Date.UTC(2026, 9, 31, 23, 30)))).toBe('2026-11-01')
+  })
+
+  it('keeps summer time in mind: 22:30 UTC in July is past midnight in Belgrade', () => {
+    expect(belgradeToday(new Date(Date.UTC(2026, 6, 14, 22, 30)))).toBe('2026-07-15')
+  })
+
+  it('is the same day at noon', () => {
+    expect(belgradeToday(new Date(Date.UTC(2026, 10, 5, 12, 0)))).toBe('2026-11-05')
   })
 })

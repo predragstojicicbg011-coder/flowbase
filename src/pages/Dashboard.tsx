@@ -19,15 +19,15 @@ import { receivableTotals } from '../services/receivables'
 import { homeLedgerFigures, roleHeadingOf, type PrincipalHeading } from '../services/homeLedgerFigures'
 import { rowsToMap, roleDef, SETTINGS_PATH, type SystemCategoryRow } from '../services/systemCategories'
 import {
-  HOME_SHORTCUTS, ledgerRange, monthsOf, shortcutOf, windowLabel, withFrom, withTo, type MonthWindow,
+  belgradeToday, HOME_SHORTCUTS, ledgerRange, monthsOf, shortcutOf, windowLabel, withFrom, withTo, type MonthWindow,
 } from '../services/dashboardWindow'
 
 import { homeDebt, type HomeCredit, type HomeDebt, type HomeInstalment } from '../services/homeDebt'
 import { getBookRates, bookAmounts, type BookRates } from '../services/bookAmounts'
 import type { RateReset } from '../services/revolvingCredit'
 
-/** Today as 'YYYY-MM-DD', read the way the rest of the app reads it. */
-const todayISO = () => new Date().toISOString().slice(0, 10)
+/** Today as 'YYYY-MM-DD', in Belgrade — never the UTC date. */
+const todayISO = () => belgradeToday()
 
 /**
  * The credit book, whole: every credit, every instalment, and the benchmark
@@ -331,7 +331,7 @@ export default function Dashboard() {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     const companyId = getCompanyId()
-    const today = new Date().toISOString().split('T')[0]
+    const today = todayISO()
 
     try {
       // ── P&L entries for period ──
@@ -515,7 +515,7 @@ export default function Dashboard() {
   // Profit after the bank: what the period earned, less the principal that
   // went back to the bank out of it. Not a cost — but money that is gone.
   const netNotes = !loading && basis.principalRepaid !== 0
-    ? [`Otplaćena glavnica ${money(basis.principalRepaid)} · dobit posle otplate ${money(metrics.netProfit - basis.principalRepaid)}`]
+    ? [`Otplaćena glavnica (po izvodima) ${money(basis.principalRepaid)} · dobit posle otplate ${money(metrics.netProfit - basis.principalRepaid)}`]
     : []
 
   const sparkRevenue = monthlyData.map(m => m.revenue)
