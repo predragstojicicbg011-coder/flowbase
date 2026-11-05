@@ -176,3 +176,18 @@ describe('loans are not revenue, principal is not cost', () => {
     expect(d).not.toHaveTextContent(rsd(170000))
   })
 })
+
+describe('profit after the bank', () => {
+  it('puts the principal repaid and the profit left after it under net profit', async () => {
+    await show()
+    await cardSays('Neto dobit / gubitak', `Otplaćena glavnica ${rsd(150000)} · dobit posle otplate ${rsd(430000)}`)
+  })
+
+  it('says nothing about it when no principal was repaid in the period', async () => {
+    ;(global as any).__db.v_pl_entries = (global as any).__db.v_pl_entries
+      .filter((r: any) => r.pl_subcategory !== 'Glavnica')
+    await show()
+    await cardSays('Neto dobit / gubitak', rsd(580000))
+    expect(card('Neto dobit / gubitak')).not.toHaveTextContent('Otplaćena glavnica')
+  })
+})

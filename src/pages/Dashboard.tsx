@@ -417,6 +417,12 @@ export default function Dashboard() {
       : []),
   ]
 
+  // Profit after the bank: what the period earned, less the principal that
+  // went back to the bank out of it. Not a cost — but money that is gone.
+  const netNotes = !loading && basis.principalRepaid !== 0
+    ? [`Otplaćena glavnica ${money(basis.principalRepaid)} · dobit posle otplate ${money(metrics.netProfit - basis.principalRepaid)}`]
+    : []
+
   const sparkRevenue = monthlyData.map(m => m.revenue)
   const sparkExpenses = monthlyData.map(m => m.expenses)
   const maxPartner = topPartners[0]?.amount || 1
@@ -506,6 +512,7 @@ export default function Dashboard() {
             color={metrics.netProfit >= 0 ? '#00D47E' : '#FF5B5A'}
             darkColor={metrics.netProfit >= 0 ? '#00D47E' : '#FF5B5A'}
             sparklineData={monthlyData.map(m => m.revenue - m.expenses)}
+            notes={netNotes}
           />
           </Rise>
           <Rise delay={165}>
