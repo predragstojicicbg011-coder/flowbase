@@ -21,8 +21,58 @@ import {
   HOME_SHORTCUTS, ledgerRange, monthsOf, shortcutOf, windowLabel, withFrom, withTo, type MonthWindow,
 } from '../services/dashboardWindow'
 
+import { homeDebt, type HomeCredit, type HomeDebt, type HomeInstalment } from '../services/homeDebt'
+import { getBookRates, bookAmounts, type BookRates } from '../services/bookAmounts'
+import type { RateReset } from '../services/revolvingCredit'
+
 /** Today as 'YYYY-MM-DD', read the way the rest of the app reads it. */
 const todayISO = () => new Date().toISOString().slice(0, 10)
+
+/**
+ * The credit book, whole: every credit, every instalment, and the benchmark
+ * history of the revolving lines. No date range — a credit drawn years ago
+ * still owes principal in every month of the period. A failed read throws;
+ * the page says so instead of drawing a debt of zero.
+ */
+async function fetchCreditBook(): Promise<{
+  credits: HomeCredit[]; instalments: HomeInstalment[]; resets: Record<string, RateReset[]>
+}> {
+  const { data, error } = await supabase.from('credits')
+    .select('id,company_id,name,kind,currency,principal_amount,disbursement_date,maturity_date,rate_margin,status')
+  if (error) throw error
+  const credits = (data || []) as HomeCredit[]
+  const instalments = await fetchAllPages<HomeInstalment>((from, to) =>
+    supabase.from('credit_installments')
+      .select('credit_id,due_date,principal_amount,interest_amount,status,paid_date')
+      .order('credit_id').order('installment_no').order('id').range(from, to))
+  const revolvingIds = credits.filter(c => c.kind === 'revolving').map(c => c.id)
+  const resets: Record<string, RateReset[]> = {}
+  if (revolvingIds.length > 0) {
+    const { data: rows, error: resetError } = await supabase.from('credit_rate_resets')
+      .select('credit_id,effective_from,reference_rate').in('credit_id', revolvingIds).order('effective_from')
+    if (resetError) throw resetError
+    for (const r of (rows || []) as any[]) {
+      ;(resets[r.credit_id] ||= []).push({ effective_from: r.effective_from, reference_rate: Number(r.reference_rate) })
+    }
+  }
+  return { credits, instalments, resets }
+}
+
+/**
+ * A credit's amount in the display currency at today's NBS rate — the rule the
+ * Credits page uses. Null when it needs a rate there is none of.
+ */
+const toShownWith = (rates: BookRates | null, shown: string) => (amount: number, currency: string): number | null => {
+  const c = (currency || 'RSD').toUpperCase()
+  if (c === shown) return amount
+  if (!rates) return null
+  try {
+    const b = bookAmounts(amount, c, rates)
+    return shown === 'RSD' ? b.amount_rsd : b.amount_eur
+  } catch {
+    return null
+  }
+}
 
 /** How a partner's type reads on screen; the stored value stays English. */
 const PARTNER_TYPE_LABEL: Record<string, string> = {
@@ -235,6 +285,9 @@ export default function Dashboard() {
    */
   const [basis, setBasis] = useState<{ loansDrawn: number; principalRepaid: number; unmapped: string[] }>(
     { loansDrawn: 0, principalRepaid: 0, unmapped: [] })
+  /** The credit book over the period, or why it could not be read. */
+  const [debt, setDebt] = useState<HomeDebt | null>(null)
+  const [debtError, setDebtError] = useState<string | null>(null)
   const [monthlyData, setMonthlyData] = useState<{ month: string; revenue: number; expenses: number }[]>([])
   const [expenseByCategory, setExpenseByCategory] = useState<{ label: string; value: number; color: string }[]>([])
   const [topPartners, setTopPartners] = useState<{ name: string; amount: number; type: string }[]>([])
@@ -396,6 +449,22 @@ export default function Dashboard() {
       })
       setAlerts(newAlerts)
     } catch (err) { console.error('Dashboard error:', err) }
+
+    // ── The credit book ──
+    // Its own try: a credit book that cannot be read takes the debt figures
+    // off the page with a reason, and nothing else with them.
+    try {
+      const book = await fetchCreditBook()
+      const rates = await getBookRates(todayISO()).catch(() => null)
+      setDebt(homeDebt({
+        ...book, months: monthsOf(win), today: todayISO(), companyId,
+        toShown: toShownWith(rates, currency), currency,
+      }))
+      setDebtError(null)
+    } catch (err: any) {
+      setDebt(null)
+      setDebtError(err?.message || String(err))
+    }
     setLoading(false)
   }, [win.from, win.to, getCompanyId, currency, companies]) // eslint-disable-line
 
@@ -531,6 +600,24 @@ export default function Dashboard() {
             darkColor={metrics.overdueCount > 0 ? '#F5A623' : '#00D47E'}
             sparklineData={[]}
             notes={loading ? [] : [`kasni ${money(metrics.receivablesOverdue)} · dospeva u 7 dana ${money(metrics.receivablesDueSoon)}`]}
+          />
+          </Rise>
+          <Rise delay={220}>
+          {/* From the credit book: what the bank lent in the period, the
+              principal paid back in it, and what is still owed at its end. */}
+          <MetricCard
+            label="Krediti u periodu"
+            value={loading ? '—' : debt ? money(debt.owedAtEnd) : debtError ? 'nije učitano' : money(0)}
+            amount={loading || !debt ? undefined : debt.owedAtEnd}
+            format={money}
+            sub={debtError ? `Krediti nisu učitani: ${debtError}` : debt && !debt.hasBook ? 'nema kredita u evidenciji' : 'duguje se na kraju perioda'}
+            color="#4EA8FF"
+            darkColor="#4EA8FF"
+            sparklineData={debt ? debt.months.map(m => m.balance) : []}
+            notes={loading || !debt || !debt.hasBook ? [] : [
+              `Povučeno: ${money(debt.drawn)}`,
+              `Otplaćena glavnica: ${money(debt.principalPaid)}`,
+            ]}
           />
           </Rise>
         </div>
@@ -771,7 +858,7 @@ const s: Record<string, React.CSSProperties> = {
   entityChipActive: { border: '1.5px solid', boxShadow: '0 1px 4px rgba(0,0,0,0.3)' },
   entityDot: { width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0 },
   entityBadgePill: { marginLeft: 'auto', fontSize: '9px', fontWeight: '700', padding: '2px 7px', borderRadius: '20px', letterSpacing: '0.06em', flexShrink: 0 },
-  metricsRow: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '14px' },
+  metricsRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '14px' },
   mainGrid: { display: 'grid', gridTemplateColumns: '1fr 280px', gap: '12px' },
   card: { background: '#0D1B2C', borderRadius: '10px', padding: '1rem 1.2rem', boxShadow: '0 4px 20px rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.075)' },
   cardHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' },

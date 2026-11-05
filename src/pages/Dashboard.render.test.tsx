@@ -51,6 +51,13 @@ jest.mock('../contexts/CompaniesContext', () => {
   return { useCompanies: () => (global as any).__companies || state }
 })
 
+// Today's NBS rate, for converting a euro credit. A plain function rather
+// than jest.fn: CRA resets mock implementations between tests.
+jest.mock('../services/bookAmounts', () => ({
+  ...jest.requireActual('../services/bookAmounts'),
+  getBookRates: () => Promise.resolve({ date: '2026-11-05', eurRate: 117, usdRate: 110, source: 'test' }),
+}))
+
 jest.mock('../contexts/ProjectsContext', () => {
   const state = { projects: [], loading: false }
   return { useProjects: () => state }
@@ -128,6 +135,9 @@ beforeEach(() => {
     v_invoice_status: [],
     passthrough: [],
     transactions: [],
+    credits: [],
+    credit_installments: [],
+    credit_rate_resets: [],
   }
 })
 
@@ -254,5 +264,69 @@ describe('the receivables card', () => {
     await show()
     await cardSays('Potraživanja', rsd(470000))
     await cardSays('Potraživanja', `kasni ${rsd(300000)} · dospeva u 7 dana ${rsd(120000)}`)
+  })
+})
+
+// ─── The credit book ────────────────────────────────────────────────────────
+
+const loan = (o: Record<string, any> = {}) => ({
+  id: 'k1', company_id: 'comp-1', name: 'Kredit Banka Primer', bank: 'Banka Primer', kind: 'annuity',
+  currency: 'EUR', principal_amount: 10000, disbursement_date: '2026-02-10', maturity_date: null,
+  rate_margin: null, status: 'active', ...o,
+})
+
+/** Ten instalments of 1.000 EUR principal and 40 EUR interest, Mar – Dec 2026; paid through `paidThrough`. */
+const instalments = (paidThrough: string) => Array.from({ length: 10 }, (_, i) => {
+  const due = `2026-${String(i + 3).padStart(2, '0')}-10`
+  const paid = due <= paidThrough
+  return {
+    id: `ki${i}`, credit_id: 'k1', installment_no: i + 1, due_date: due,
+    principal_amount: 1000, interest_amount: 40, total_amount: 1040,
+    status: paid ? 'paid' : 'outstanding', paid_date: paid ? due : null,
+  }
+})
+
+describe('the credits card', () => {
+  it('says what was drawn, what principal was repaid and what is owed at the end of the period', async () => {
+    ;(global as any).__db.credits = [loan()]
+    ;(global as any).__db.credit_installments = instalments('2026-10-10')
+    await show()
+    // Owed on 5 November: November and December, 2.000 EUR at 117.
+    await cardSays('Krediti u periodu', rsd(234000))
+    await cardSays('Krediti u periodu', `Povučeno: ${rsd(1170000)}`)
+    // March to October paid: 8.000 EUR.
+    await cardSays('Krediti u periodu', `Otplaćena glavnica: ${rsd(936000)}`)
+  })
+
+  it('follows the period: last month ends with October', async () => {
+    ;(global as any).__db.credits = [loan()]
+    ;(global as any).__db.credit_installments = instalments('2026-10-10')
+    await show()
+    fireEvent.click(screen.getByText('Prošli mesec'))
+    await cardSays('Krediti u periodu', `Otplaćena glavnica: ${rsd(117000)}`)
+    await cardSays('Krediti u periodu', `Povučeno: ${rsd(0)}`)
+    await cardSays('Krediti u periodu', rsd(234000))
+  })
+
+  it('reads only the chosen company', async () => {
+    const other = { id: 'comp-2', name: 'Druga Firma doo', currency: 'RSD', currencies: ['RSD'] }
+    ;(global as any).__companies = {
+      companies: [COMPANY, other], defaultCompany: COMPANY, showPicker: true, loading: false,
+    }
+    ;(global as any).__db.credits = [loan(), loan({ id: 'k2', company_id: 'comp-2', name: 'Kredit druge firme', currency: 'RSD', principal_amount: 5000000 })]
+    await show()
+    fireEvent.click(screen.getByText('Druga Firma doo'))
+    await cardSays('Krediti u periodu', `Povučeno: ${rsd(5000000)}`)
+  })
+
+  it('says there are no credits rather than a debt of zero', async () => {
+    await show()
+    await cardSays('Krediti u periodu', 'nema kredita u evidenciji')
+  })
+
+  it('says the book could not be read instead of drawing zero', async () => {
+    ;(global as any).__fail.credits = 'veza je prekinuta'
+    await show()
+    await cardSays('Krediti u periodu', 'Krediti nisu učitani: veza je prekinuta')
   })
 })
