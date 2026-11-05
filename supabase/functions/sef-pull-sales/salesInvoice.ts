@@ -273,6 +273,21 @@ export function pickAskAgain(
 export interface StatusUpdate { sefInvoiceId: number; status: string | null; comment: string | null }
 
 /**
+ * The days whose status changes are asked about: the day before yesterday and
+ * yesterday, oldest first. SEF's `sales-invoice/changes` takes only a date in
+ * the past and answers 400 for today; today's changes are seen tomorrow, and a
+ * row that leaves today's lists is asked about directly in the meantime.
+ */
+export function changeDays(today: string): string[] {
+  const back = (n: number) => {
+    const d = new Date(`${today}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - n)
+    return d.toISOString().slice(0, 10)
+  }
+  return [back(2), back(1)]
+}
+
+/**
  * The status updates of a pass. Changes are applied oldest first (by their
  * date), so the newest one stands; a voided one is not applied here, it is
  * asked about, and the answer arrives as a live status. A status read live in

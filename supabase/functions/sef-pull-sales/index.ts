@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   PULLED_STATUSES, MAX_NEW_PER_PASS, isVoided, idsUrl, readIds, readStatus, readChanges,
   headerFromUbl, slimXml, ublPdfAttachments, salesPdfPath, salesAttachmentPath,
-  pickAskAgain, mergeStatusUpdates, choosePdf, salesRefusal, paceWaitMs, retryPlan, type StatusUpdate, type SalesChange,
+  pickAskAgain, mergeStatusUpdates, changeDays, choosePdf, salesRefusal, paceWaitMs, retryPlan, type StatusUpdate, type SalesChange,
 } from './salesInvoice.ts'
 
 // ─── Reading what the company issued ────────────────────────────────────────
@@ -358,12 +358,12 @@ Deno.serve(async (req) => {
       if (nowStatus && nowStatus !== k.sef_status) live.set(id, { sefInvoiceId: id, status: nowStatus, comment: null })
     }
 
-    // Today's and yesterday's changes, Belgrade. A change to a voided status
-    // is not applied but asked about, for the comment SEF keeps with it.
-    const day = (offset: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Belgrade' })
-      .format(new Date(Date.now() - offset * 86_400_000))
+    // The changes of the last two days already past, Belgrade (SEF refuses
+    // today). A change to a voided status is not applied but asked about, for
+    // the comment SEF keeps with it.
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Belgrade' }).format(new Date())
     const changes: SalesChange[] = []
-    for (const date of [day(1), day(0)]) {
+    for (const date of changeDays(today)) {
       if (Date.now() - startedAt > PASS_BUDGET_MS) break
       try {
         const cres = await sef('POST', `/sales-invoice/changes?date=${date}`)

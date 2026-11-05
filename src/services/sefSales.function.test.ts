@@ -5,6 +5,7 @@ import {
   headerFromUbl, slimXml, ublPdfAttachments, salesPdfPath, salesAttachmentPath, refreshTargets,
   SALES_FORBIDDEN, salesRefusal, mergeStatusUpdates, pickAskAgain, choosePdf,
   MIN_GAP_MS, MAX_RATE_RETRIES, paceWaitMs, nextDelayMs, retryPlan, RATE_LIMITED,
+  changeDays,
 } from '../../supabase/functions/sef-pull-sales/salesInvoice'
 
 // Issued invoices as SEF gives them, read by the sef-pull-sales function. The
@@ -213,5 +214,16 @@ describe('pacing and rate limit', () => {
     expect(salesRefusal(403)).toBe(SALES_FORBIDDEN)
     expect(salesRefusal(401)).toContain('odbio')
     expect(salesRefusal(429)).toBeNull()
+  })
+})
+
+describe('the days whose status changes are asked about', () => {
+  it('asks only about days already past: the day before yesterday and yesterday, oldest first', () => {
+    expect(changeDays('2026-11-05')).toEqual(['2026-11-03', '2026-11-04'])
+  })
+
+  it('crosses a month and a year end', () => {
+    expect(changeDays('2026-03-01')).toEqual(['2026-02-27', '2026-02-28'])
+    expect(changeDays('2027-01-01')).toEqual(['2026-12-30', '2026-12-31'])
   })
 })
