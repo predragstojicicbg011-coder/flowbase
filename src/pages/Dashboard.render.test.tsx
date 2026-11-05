@@ -235,3 +235,24 @@ describe('the period is whole months', () => {
     await cardSays('Ukupni prihodi', rsd(5000))
   })
 })
+
+describe('the receivables card', () => {
+  const inv = (o: Record<string, any>) => ({
+    id: Math.random().toString(36).slice(2), company_id: 'comp-1', type: 'revenue', document_type: 'invoice',
+    calculated_status: 'unpaid', remaining_rsd: 0, remaining_eur: 0, amount_rsd: 0, amount_eur: 0,
+    due_date: '2026-12-31', partner_name: 'Kupac Primer doo', ...o,
+  })
+
+  it('says how much is late and how much falls due in the next seven days', async () => {
+    ;(global as any).__db.v_invoice_status = [
+      inv({ remaining_rsd: 300000, due_date: '2026-10-01' }),
+      inv({ remaining_rsd: 120000, due_date: '2026-11-09' }),
+      inv({ remaining_rsd: 50000, due_date: '2026-12-20' }),
+      // What we owe a supplier is not a receivable.
+      inv({ type: 'expense', remaining_rsd: 999000, due_date: '2026-10-01', partner_name: 'Dobavljac Primer doo' }),
+    ]
+    await show()
+    await cardSays('Potraživanja', rsd(470000))
+    await cardSays('Potraživanja', `kasni ${rsd(300000)} · dospeva u 7 dana ${rsd(120000)}`)
+  })
+})

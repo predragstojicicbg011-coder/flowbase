@@ -14,6 +14,7 @@ import { fetchAllPages, countRows } from '../utils/fetchAllPages'
 import { MONTHS_SHORT_SR } from '../utils/months'
 import { countOf } from '../utils/plural'
 import { isReceivable } from '../services/revenue'
+import { receivableTotals } from '../services/receivables'
 import { homeLedgerFigures, principalHeadingOf, type PrincipalHeading } from '../services/homeLedgerFigures'
 import { rowsToMap, roleDef, SETTINGS_PATH, type SystemCategoryRow } from '../services/systemCategories'
 import {
@@ -224,6 +225,7 @@ export default function Dashboard() {
     unpaidInvoices: 0, openInvoicesCount: 0, payablesTotal: 0, openPayablesCount: 0,
     overdueCount: 0, unmatchedPassthrough: 0,
     prevRevenue: 0, prevExpenses: 0,
+    receivablesOverdue: 0, receivablesDueSoon: 0,
   })
   /**
    * What the home page's basis left out of the ledger's figures: loan
@@ -335,6 +337,8 @@ export default function Dashboard() {
       const payablesTotal = payables.reduce((s, i) => s + (pick(i, 'remaining') ?? 0), 0)
       const overdueCount = receivables.filter(i => i.due_date && i.due_date < today).length
       const overduePayables = payables.filter(i => i.due_date && i.due_date < today).length
+      // Late, and due within a week — the same buckets the Prihodi page uses.
+      const buckets = receivableTotals(openInv, today, currency)
 
       // ── Pass-through unmatched ──
       // Counted server-side: downloading the rows only to measure the array
@@ -388,6 +392,7 @@ export default function Dashboard() {
         payablesTotal, openPayablesCount: payables.length,
         overdueCount, unmatchedPassthrough: unmatchedPt,
         prevRevenue: 0, prevExpenses: 0,
+        receivablesOverdue: buckets.overdue, receivablesDueSoon: buckets.dueSoon,
       })
       setAlerts(newAlerts)
     } catch (err) { console.error('Dashboard error:', err) }
@@ -525,6 +530,7 @@ export default function Dashboard() {
             color={metrics.overdueCount > 0 ? '#F5A623' : '#00D47E'}
             darkColor={metrics.overdueCount > 0 ? '#F5A623' : '#00D47E'}
             sparklineData={[]}
+            notes={loading ? [] : [`kasni ${money(metrics.receivablesOverdue)} · dospeva u 7 dana ${money(metrics.receivablesDueSoon)}`]}
           />
           </Rise>
         </div>
