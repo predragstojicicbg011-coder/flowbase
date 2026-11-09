@@ -13,8 +13,6 @@ export interface PastInvoice {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
   cf_type?: string | null
 }
 
@@ -22,8 +20,6 @@ export interface Proposal {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
   /** `null` is "not known"; an empty string would read as "set to nothing". */
   cf_type: string | null
   /** Shown beside the figures. A proposal with no reason is a filled field. */
@@ -97,8 +93,6 @@ export function proposeClassification(
       pl_category: newest.pl_category,
       pl_subcategory: newest.pl_subcategory,
       department: newest.department,
-      dept_subcategory: newest.dept_subcategory,
-      expense_description: newest.expense_description,
       // Not part of `agreed` below: that comparison is about where a bill is
       // FILED, and two bills filed alike can differ in being capex.
       cf_type: cfToCarry(newest.cf_type),
@@ -128,8 +122,6 @@ export function proposeClassification(
       pl_category: hit.pl_category ?? null,
       pl_subcategory: hit.pl_subcategory ?? null,
       department: hit.department ?? null,
-      dept_subcategory: hit.dept_subcategory ?? null,
-      expense_description: hit.expense_description ?? null,
       cf_type: cfToCarry(hit.cf_type),
       basis: 'script',
       reason: `Iz šablona „${hit.name}“, prepoznatog po imenu dobavljača.`,

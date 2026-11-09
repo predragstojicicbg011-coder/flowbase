@@ -33,8 +33,7 @@ const ubl = (over: Partial<UblInvoice> = {}): UblInvoice => ({
 
 const proposal: Proposal = {
   pl_category: 'Operating expenses', pl_subcategory: 'Utilities',
-  department: 'Operations', dept_subcategory: 'Office',
-  expense_description: 'Telephone', cf_type: 'recurring',
+  department: 'Operations', cf_type: 'recurring',
   reason: 'r', basis: 'history',
 }
 
@@ -136,8 +135,8 @@ describe('the draft handed to the invoice dialog', () => {
     expect(d.pl_category).toBe('Operating expenses')
     expect(d.pl_subcategory).toBe('Utilities')
     expect(d.department).toBe('Operations')
-    expect(d.dept_subcategory).toBe('Office')
-    expect(d.expense_description).toBe('Telephone')
+    expect(d).not.toHaveProperty('dept_subcategory')
+    expect(d).not.toHaveProperty('expense_description')
   })
 
   /** Read from the draft by the dialog. A proposal that dropped it would

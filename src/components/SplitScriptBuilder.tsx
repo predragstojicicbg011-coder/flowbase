@@ -28,8 +28,6 @@ export interface ClassificationOptions {
   plCategories: { id: string; name: string; type?: string }[]
   plSubcategories: { id: string; name: string; category_id?: string }[]
   departments: { id: string; name: string }[]
-  deptSubcategories: { id: string; name: string; department_id?: string }[]
-  expenseDescriptions: { id: string; name: string; dept_subcategory_id?: string }[]
 }
 
 export interface SplitScriptBuilderProps {
@@ -50,8 +48,6 @@ export default function SplitScriptBuilder({
   const [plCat, setPlCat] = useState('')
   const [plSub, setPlSub] = useState('')
   const [dept, setDept] = useState('')
-  const [deptSub, setDeptSub] = useState('')
-  const [expDesc, setExpDesc] = useState('')
   const [cfType, setCfType] = useState('recurring')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -61,8 +57,6 @@ export default function SplitScriptBuilder({
   const [cats, setCats] = useState(options.plCategories)
   const [subs, setSubs] = useState(options.plSubcategories)
   const [depts, setDepts] = useState(options.departments)
-  const [deptSubs, setDeptSubs] = useState(options.deptSubcategories)
-  const [descs, setDescs] = useState(options.expenseDescriptions)
 
   const nameOf = (list: { id: string; name: string }[], id: string) =>
     list.find(x => x.id === id)?.name || ''
@@ -72,19 +66,12 @@ export default function SplitScriptBuilder({
   // one ends up filed under a parent it does not belong to.
   const subsHere = useMemo(
     () => subs.filter(x => !plCat || !x.category_id || x.category_id === plCat), [subs, plCat])
-  const deptSubsHere = useMemo(
-    () => deptSubs.filter(x => !dept || !x.department_id || x.department_id === dept), [deptSubs, dept])
-  const descsHere = useMemo(
-    () => descs.filter(x => !deptSub || !x.dept_subcategory_id || x.dept_subcategory_id === deptSub),
-    [descs, deptSub])
 
   const draft: ScriptDraft = {
     name: name.trim(), icon,
     pl_category: nameOf(cats, plCat),
     pl_subcategory: nameOf(subs, plSub),
     department: nameOf(depts, dept),
-    dept_subcategory: nameOf(deptSubs, deptSub),
-    expense_description: nameOf(descs, expDesc),
     cf_type: cfType,
   }
 
@@ -163,35 +150,11 @@ export default function SplitScriptBuilder({
         {field('Sektor', (
           <div style={s.withAdd}>
             <div style={s.grow}><SearchableSelect value={dept}
-              onChange={v => { setDept(v); setDeptSub(''); setExpDesc('') }}
+              onChange={setDept}
               options={depts.map(c => ({ value: c.id, label: c.name }))}
               allLabel="Izaberite…" style={s.input} /></div>
             <InlineCategoryAdd table="departments" currentCount={depts.length}
               onAdded={item => { setDepts(p => [...p, item]); setDept(item.id) }} />
-          </div>
-        ))}
-        {field('Podsektor', (
-          <div style={s.withAdd}>
-            <div style={s.grow}><SearchableSelect value={deptSub}
-              onChange={v => { setDeptSub(v); setExpDesc('') }}
-              options={deptSubsHere.map(c => ({ value: c.id, label: c.name }))}
-              allLabel="Izaberite…" disabled={!dept} style={s.input} /></div>
-            <InlineCategoryAdd table="dept_subcategories" parentId={dept} parentField="department_id"
-              currentCount={deptSubsHere.length} disabled={!dept}
-              onAdded={item => { setDeptSubs(p => [...p, { ...item, department_id: dept }]); setDeptSub(item.id) }} />
-          </div>
-        ))}
-      </div>
-
-      <div style={s.row}>
-        {field('Opis troška', (
-          <div style={s.withAdd}>
-            <div style={s.grow}><SearchableSelect value={expDesc} onChange={setExpDesc}
-              options={descsHere.map(c => ({ value: c.id, label: c.name }))}
-              allLabel="Izaberite…" disabled={!deptSub} style={s.input} /></div>
-            <InlineCategoryAdd table="expense_descriptions" parentId={deptSub}
-              parentField="dept_subcategory_id" currentCount={descsHere.length} disabled={!deptSub}
-              onAdded={item => { setDescs(p => [...p, { ...item, dept_subcategory_id: deptSub }]); setExpDesc(item.id) }} />
           </div>
         ))}
         {field('Novčani tok', (

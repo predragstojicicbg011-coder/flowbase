@@ -208,7 +208,17 @@ describe('the rows that get stored', () => {
       { ...emptyLine('b'), amount: 60000, pl_category: 'Y' },
     ])
     expect(rows[0].department).toBeNull()
-    expect(rows[0].expense_description).toBeNull()
+  })
+
+  it('writes no sub-sector and no cost description, so the stored line has none', () => {
+    const rows = rowsFor(parent, [
+      { ...emptyLine('a'), amount: 60000, pl_category: 'X', department: 'D' },
+      { ...emptyLine('b'), amount: 60000, pl_category: 'Y' },
+    ])
+    expect(rows[0]).not.toHaveProperty('dept_subcategory')
+    expect(rows[0]).not.toHaveProperty('expense_description')
+    expect(emptyLine('a')).not.toHaveProperty('dept_subcategory')
+    expect(emptyLine('a')).not.toHaveProperty('expense_description')
   })
 })
 
@@ -261,14 +271,15 @@ describe('a line filled from a script', () => {
   const script = {
     id: 's1', name: 'Figma', icon: '⚡',
     pl_category: 'General Business', pl_subcategory: 'Software subscriptions',
-    department: 'Admin', dept_subcategory: 'Tools', expense_description: 'Figma',
+    department: 'Admin',
     cf_type: 'recurring',
   }
 
-  it('takes all six fields off the script', () => {
+  it('takes the classification off the script', () => {
     const out = applyScript(emptyLine('a'), script)
     expect(out.pl_category).toBe('General Business')
-    expect(out.dept_subcategory).toBe('Tools')
+    expect(out.department).toBe('Admin')
+    expect(out).not.toHaveProperty('dept_subcategory')
     expect(out.cf_type).toBe('recurring')
   })
 

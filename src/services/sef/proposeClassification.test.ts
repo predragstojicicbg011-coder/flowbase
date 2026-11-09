@@ -3,8 +3,7 @@ import { proposeClassification, type PastInvoice } from './proposeClassification
 const past = (over: Partial<PastInvoice> = {}): PastInvoice => ({
   invoice_date: '2026-09-30',
   pl_category: 'Operating expenses', pl_subcategory: 'Utilities',
-  department: 'Operations', dept_subcategory: 'Office',
-  expense_description: 'Telephone', ...over,
+  department: 'Operations', ...over,
 })
 
 describe('what to propose for an incoming bill', () => {
@@ -24,10 +23,10 @@ describe('what to propose for an incoming bill', () => {
 
   it('takes the most recent when the history disagrees, and says it is mixed', () => {
     const p = proposeClassification('Telekom', [
-      past({ invoice_date: '2026-08-31', expense_description: 'Internet' }),
-      past({ invoice_date: '2026-09-30', expense_description: 'Telephone' }),
+      past({ invoice_date: '2026-08-31', department: 'Uprava' }),
+      past({ invoice_date: '2026-09-30', department: 'Operations' }),
     ], [])
-    expect(p?.expense_description).toBe('Telephone')
+    expect(p?.department).toBe('Operations')
     expect(p?.basis).toBe('mixed')
     expect(p?.reason).toMatch(/različito/i)
   })
@@ -40,6 +39,19 @@ describe('what to propose for an incoming bill', () => {
     ])
     expect(p?.basis).toBe('script')
     expect(p?.pl_category).toBe('Operating expenses')
+    // An old template that still carries them proposes neither.
+    expect(p).not.toHaveProperty('dept_subcategory')
+    expect(p).not.toHaveProperty('expense_description')
+  })
+
+  it('reads history that differs only in an old sub-sector or description as alike', () => {
+    const p = proposeClassification('Telekom', [
+      { ...past({ invoice_date: '2026-08-31' }), dept_subcategory: 'Field', expense_description: 'Internet' } as PastInvoice,
+      { ...past({ invoice_date: '2026-09-30' }), dept_subcategory: 'Office', expense_description: 'Telephone' } as PastInvoice,
+    ], [])
+    expect(p?.basis).toBe('history')
+    expect(p).not.toHaveProperty('dept_subcategory')
+    expect(p).not.toHaveProperty('expense_description')
   })
 
   /** A1: `''.includes` is true of everything. A bill with no supplier name
@@ -107,8 +119,7 @@ describe('what to propose for an incoming bill', () => {
 
   it('proposes nothing when the history carries no classification at all', () => {
     expect(proposeClassification('Telekom', [
-      past({ pl_category: null, pl_subcategory: null, department: null,
-             dept_subcategory: null, expense_description: null }),
+      past({ pl_category: null, pl_subcategory: null, department: null }),
     ], [])).toBeNull()
   })
 })

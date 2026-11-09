@@ -92,9 +92,7 @@ export interface FilterState {
   search: string
 
   // classification — invoices and transactions
-  expenseDescription: string
   department: string
-  deptSubcategory: string
   plCategory: string
   plSubcategory: string
   /** '' (all), PROJECT_FILTER_OVERHEAD (no project), or a project id. */
@@ -132,7 +130,7 @@ export function emptyFilters(): FilterState {
   return {
     companyId: '', datePreset: 'custom', dateFrom: '', dateTo: '',
     amountFrom: '', amountTo: '', currency: '', search: '',
-    expenseDescription: '', department: '', deptSubcategory: '',
+    department: '',
     plCategory: '', plSubcategory: '', projectId: '', direction: '',
     txType: '', unclassified: false,
     invoiceStatus: '', overdue: false, dueFrom: '', dueTo: '',
@@ -151,7 +149,7 @@ const SHARED: FilterField[] = [
 ]
 
 const CLASSIFICATION: FilterField[] = [
-  'expenseDescription', 'department', 'deptSubcategory', 'plCategory', 'plSubcategory',
+  'department', 'plCategory', 'plSubcategory',
   // A pass-through has no project (see the projects migration), so this sits
   // with the classification fields that only invoices and transactions own.
   'projectId',
@@ -196,12 +194,11 @@ export function directionColumn(tab: Tab): string | null {
  * embed and leaves the row (and the count) alone. Partner names are resolved
  * to ids first and joined on as `partner_id.in.(…)`.
  *
- * `expense_description` is left off pass-through on purpose: a pass-through is
- * a cash movement with no P&L classification and the table has no such column.
- * Naming a column that does not exist inside an `or=()` is not a no-op — it is
- * a 42703 that fails the whole query.
+ * The cost description (`expense_description`) is no longer searched: the app
+ * no longer shows or writes it.
  *
- * The same trap caught the invoice tab, which reads `v_invoice_status` rather
+ * Naming a column that does not exist inside an `or=()` is not a no-op — it is
+ * a 42703 that fails the whole query. That trap caught the invoice tab, which reads `v_invoice_status` rather
  * than `invoices`: the view carried neither `reference_number` nor
  * `account_number`, so every search on that tab failed — including a search by
  * partner, whose clause sits in the same `or=()` and went down with it.
@@ -210,9 +207,8 @@ export function directionColumn(tab: Tab): string | null {
  */
 export function searchColumns(tab: Tab): string[] {
   const base = ['note', 'reference_number', 'account_number']
-  if (tab === 'passthrough') return base
-  if (tab === 'invoices') return base.concat(['expense_description', 'invoice_number'])
-  return base.concat(['expense_description'])
+  if (tab === 'invoices') return base.concat(['invoice_number'])
+  return base
 }
 
 /**
@@ -348,14 +344,8 @@ export function buildPredicates(tab: Tab, f: FilterState, ctx: BuildContext): Pr
 
   if (on('txType') && isSet(f.txType)) out.push({ op: 'eq', column: 'type', value: f.txType })
 
-  if (on('expenseDescription') && isSet(f.expenseDescription)) {
-    out.push({ op: 'eq', column: 'expense_description', value: f.expenseDescription })
-  }
   if (on('department') && isSet(f.department)) {
     out.push({ op: 'eq', column: 'department', value: f.department })
-  }
-  if (on('deptSubcategory') && isSet(f.deptSubcategory)) {
-    out.push({ op: 'eq', column: 'dept_subcategory', value: f.deptSubcategory })
   }
   if (on('plCategory') && isSet(f.plCategory)) {
     out.push({ op: 'eq', column: plCategoryColumn(tab, f), value: f.plCategory })
@@ -375,7 +365,7 @@ export function buildPredicates(tab: Tab, f: FilterState, ctx: BuildContext): Pr
   }
 
   if (on('unclassified') && f.unclassified) {
-    out.push({ op: 'or', value: 'department.is.null,expense_description.is.null' })
+    out.push({ op: 'is', column: 'department', value: null })
   }
 
   if (on('invoiceStatus') && isSet(f.invoiceStatus)) {
@@ -492,14 +482,8 @@ export function activeChips(
     out.push({ id: 'txType', label: `Tip: ${pretty(f.txType)}`, clears: ['txType'] })
   }
 
-  if (on('expenseDescription') && isSet(f.expenseDescription)) {
-    out.push({ id: 'expenseDescription', label: `Opis troška: ${f.expenseDescription}`, clears: ['expenseDescription'] })
-  }
   if (on('department') && isSet(f.department)) {
-    out.push({ id: 'department', label: `Sektor: ${f.department}`, clears: ['department', 'deptSubcategory'] })
-  }
-  if (on('deptSubcategory') && isSet(f.deptSubcategory)) {
-    out.push({ id: 'deptSubcategory', label: `Podsektor: ${f.deptSubcategory}`, clears: ['deptSubcategory'] })
+    out.push({ id: 'department', label: `Sektor: ${f.department}`, clears: ['department'] })
   }
   if (on('plCategory') && isSet(f.plCategory)) {
     const prefix = plCategoryColumn(tab, f) === 'revenue_stream' ? 'Vrsta prihoda' : 'P&L'

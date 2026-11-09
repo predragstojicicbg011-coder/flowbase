@@ -129,9 +129,6 @@ interface StatementRow {
   pl_subcategory_name: string
   department_id: string
   department_name: string
-  dept_subcategory_id: string
-  dept_subcategory_name: string
-  expense_description: string
   revenue_stream: string
   /** The row's project: an id, or '' for company overhead. '' while split. */
   project_id: string
@@ -166,8 +163,7 @@ function makeRow(defaultCurrency = 'RSD', date = ''): StatementRow {
     pl_category_id: '', pl_category_name: '',
     pl_subcategory_id: '', pl_subcategory_name: '',
     department_id: '', department_name: '',
-    dept_subcategory_id: '', dept_subcategory_name: '',
-    expense_description: '', revenue_stream: '',
+    revenue_stream: '',
     project_id: '',
     cf_type: '', cf_frequency: 'monthly', cf_next_month_est: '',
     note: '',
@@ -221,8 +217,6 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   const [plCategories, setPlCategories] = useState<any[]>([])
   const [plSubcategories, setPlSubcategories] = useState<any[]>([])
   const [departments, setDepartments] = useState<any[]>([])
-  const [deptSubcategories, setDeptSubcategories] = useState<any[]>([])
-  const [expenseDescriptions, setExpenseDescriptions] = useState<any[]>([])
   const [rows, setRows] = useState<StatementRow[]>([makeRow(), makeRow(), makeRow()])
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
@@ -233,8 +227,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   interface QuickFillScript {
     id: string; name: string; icon: string
     pl_category: string; pl_subcategory: string
-    department: string; dept_subcategory: string
-    expense_description: string; cf_type: string
+    department: string; cf_type: string
   }
 
   const [qfSearch, setQfSearch] = useState<Record<string, string>>({})
@@ -265,7 +258,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   useEffect(() => { refreshQfScripts() }, [refreshQfScripts])
   const [qfDialogOpen, setQfDialogOpen] = useState(false)
   const [qfEditing, setQfEditing] = useState<QuickFillScript | null>(null)
-  const EMPTY_SCRIPT: QuickFillScript = { id: '', name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '', dept_subcategory: '', expense_description: '', cf_type: 'recurring' }
+  const EMPTY_SCRIPT: QuickFillScript = { id: '', name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '', cf_type: 'recurring' }
 
   // ── Posted statements ─────────────────────────────────────────────────────
   const [importHistory, setImportHistory] = useState<any[]>([])
@@ -322,7 +315,6 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
     const matchCat = plCategories.find(c => c.name === script.pl_category)
     const matchDept = departments.find(d => d.name === script.department)
     const matchSub = plSubcategories.find(s => s.name === script.pl_subcategory && s.category_id === matchCat?.id)
-    const matchDeptSub = deptSubcategories.find(s => s.name === script.dept_subcategory && s.department_id === matchDept?.id)
     updateRow(rowId, {
       pl_category_id: matchCat?.id || '',
       pl_category_name: matchCat?.name || script.pl_category,
@@ -330,9 +322,6 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       pl_subcategory_name: matchSub?.name || script.pl_subcategory,
       department_id: matchDept?.id || '',
       department_name: matchDept?.name || script.department,
-      dept_subcategory_id: matchDeptSub?.id || '',
-      dept_subcategory_name: matchDeptSub?.name || script.dept_subcategory,
-      expense_description: script.expense_description || '',
       cf_type: script.cf_type || '',
     })
   }
@@ -359,7 +348,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       const [
         { data: bnk }, part,
         { data: plCat }, { data: plSub },
-        { data: dept }, { data: deptSub }, { data: expDesc },
+        { data: dept },
         { data: pacc },
       ] = await Promise.all([
         supabase.from('banks').select('*').order('name'),
@@ -367,8 +356,6 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
         supabase.from('pl_categories').select('id,name,sort_order').order('sort_order'),
         supabase.from('pl_subcategories').select('id,name,category_id,sort_order').order('sort_order'),
         supabase.from('departments').select('id,name,sort_order').order('sort_order'),
-        supabase.from('dept_subcategories').select('id,name,department_id,sort_order').order('sort_order'),
-        supabase.from('expense_descriptions').select('id,name,dept_subcategory_id,sort_order').order('sort_order'),
         supabase.from('partner_accounts').select('id,partner_id,account_number,bank_name,currency,is_primary').order('is_primary', { ascending: false }),
       ])
       if (bnk) setAllBanks(bnk)
@@ -376,8 +363,6 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       if (plCat) setPlCategories(plCat)
       if (plSub) setPlSubcategories(plSub)
       if (dept) setDepartments(dept)
-      if (deptSub) setDeptSubcategories(deptSub)
-      if (expDesc) setExpenseDescriptions(expDesc)
       if (pacc) setAllPartnerAccounts(pacc)
       const { data: creds } = await supabase
         .from('credits').select('id,name,bank,rate_description,currency')
@@ -482,8 +467,6 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
   }, [company])
 
   const getPlSubs = (catId: string) => plSubcategories.filter(s => s.category_id === catId)
-  const getDeptSubs = (dId: string) => deptSubcategories.filter(s => s.department_id === dId)
-  const getExpDescs = (subId: string) => expenseDescriptions.filter(e => e.dept_subcategory_id === subId)
   const normalizeAccountNumber = (acc: string): string => {
     if (!acc) return ''
     const a = acc.trim().replace(/\s/g, '')
@@ -590,12 +573,10 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
     const cat = plCategories.find(c => c.name === seed.pl_category_name)
     const sub = plSubcategories.find(s => s.name === seed.pl_subcategory_name && s.category_id === cat?.id)
     const dept = departments.find(d => d.name === seed.department_name)
-    const dsub = deptSubcategories.find(s => s.name === seed.dept_subcategory_name && s.department_id === dept?.id)
     return {
       pl_category_id: cat?.id || '',
       pl_subcategory_id: sub?.id || '',
       department_id: dept?.id || '',
-      dept_subcategory_id: dsub?.id || '',
     }
   }
 
@@ -1094,8 +1075,10 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
           pl_category: isDirectWithPL ? (row.pl_category_name || null) : null,
           pl_subcategory: isDirectWithPL ? (row.pl_subcategory_name || null) : null,
           department: isDirectWithPL ? (row.department_name || null) : null,
-          dept_subcategory: isDirectWithPL ? (row.dept_subcategory_name || null) : null,
-          expense_description: isDirectWithPL ? (row.expense_description || null) : null,
+          // No longer part of a transaction: null, so an edited row never
+          // keeps an old value there.
+          dept_subcategory: null,
+          expense_description: null,
           revenue_stream: isDirectWithPL ? (row.revenue_stream || null) : null,
           project_id: rowProjectId,
           cf_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.cf_type || null) : null,
@@ -1336,8 +1319,6 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                 pl_category: fxScript.pl_category || null,
                 pl_subcategory: fxScript.pl_subcategory || null,
                 department: fxScript.department || null,
-                dept_subcategory: fxScript.dept_subcategory || null,
-                expense_description: fxScript.expense_description || null,
                 // On the bill's project: the difference is part of what that
                 // bill cost or earned.
                 project_id: inv.project_id ?? null,
@@ -1558,8 +1539,10 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
           pl_category: isDirectWithPL ? (row.pl_category_name || null) : null,
           pl_subcategory: isDirectWithPL ? (row.pl_subcategory_name || null) : null,
           department: isDirectWithPL ? (row.department_name || null) : null,
-          dept_subcategory: isDirectWithPL ? (row.dept_subcategory_name || null) : null,
-          expense_description: isDirectWithPL ? (row.expense_description || null) : null,
+          // No longer part of a transaction: null, so an edited row never
+          // keeps an old value there.
+          dept_subcategory: null,
+          expense_description: null,
           revenue_stream: isDirectWithPL ? (row.revenue_stream || null) : null,
           project_id: rowProjectId,
           cf_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.cf_type || null) : null,
@@ -1898,8 +1881,6 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                 const hasAmount = parseFloat(row.debit) > 0 || parseFloat(row.credit) > 0
                 const isValid = row.date && hasAmount
                 const plSubs = getPlSubs(row.pl_category_id)
-                const deptSubs = getDeptSubs(row.department_id)
-                const expDescs = getExpDescs(row.dept_subcategory_id)
                 const linkedInvoice = openInvoices.find(i => i.id === row.linked_invoice_id)
                 const rowPartnerAccounts = getPartnerAccounts(row.partner_id)
 
@@ -2164,7 +2145,6 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                                 <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px' }}>
                                                   {inv.invoice_date}{inv.due_date ? ` · Dospeće: ${inv.due_date}` : ''}
                                                 </div>
-                                                {inv.expense_description && <div style={{ fontSize: '10px', color: DIALOG.dim, fontStyle: 'italic', marginTop: '1px' }}>{inv.expense_description}</div>}
                                               </div>
                                               <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
                                                 <div style={{ fontSize: '12px', fontWeight: '600', color: DIALOG.text }}>{fmtMoney(inv.amount || 0, inv.currency || 'RSD')}</div>
@@ -2295,14 +2275,12 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                     pl_category_name: from.pl_category,
                                     pl_subcategory_name: from.pl_subcategory,
                                     department_name: from.department,
-                                    dept_subcategory_name: from.dept_subcategory,
-                                    expense_description: from.expense_description,
                                   } : {}),
                                 })
                               }}
                               companyId={company || null}
                               scripts={quickFillScripts as any}
-                              classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
+                              classification={{ plCategories, plSubcategories, departments }}
                               client={supabase}
                               onScriptsChanged={refreshQfScripts}
                               hint="Jedna stavka izvoda, dva ili više troškova — svaki sa svojom klasifikacijom."
@@ -2371,7 +2349,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                                     setQfOpen(null)
                                                   }}>
                                                   <span style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.accent }}>{sc.icon} {sc.name}</span>
-                                                  <span style={{ fontSize: '10px', color: DIALOG.dim }}>{sc.pl_category}{sc.dept_subcategory ? ` · ${sc.dept_subcategory}` : ''}</span>
+                                                  <span style={{ fontSize: '10px', color: DIALOG.dim }}>{sc.pl_category}{sc.department ? ` · ${sc.department}` : ''}</span>
                                                 </div>
                                               ))
                                         })()}
@@ -2425,47 +2403,13 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                     <label style={s.lbl}>Sektor</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                     <SearchableSelect value={row.department_id}
-                                      onChange={v => { const d = departments.find(x => x.id === v); updateRow(row.id, { department_id: v, department_name: d?.name || '', dept_subcategory_id: '', dept_subcategory_name: '', expense_description: '' }) }}
+                                      onChange={v => { const d = departments.find(x => x.id === v); updateRow(row.id, { department_id: v, department_name: d?.name || '' }) }}
                                       options={departments.map(d => ({ value: d.id, label: d.name }))}
                                       allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                                       style={{ ...pickerChrome, flex: 1 }} />
                                     <InlineCategoryAdd table="departments"
                                       currentCount={departments.length}
-                                      onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); updateRow(row.id, { department_id: item.id, department_name: item.name, dept_subcategory_id: '', dept_subcategory_name: '', expense_description: '' }) }} />
-                                    </div>
-                                  </div>
-                                  <div style={s.field}>
-                                    <label style={s.lbl}>Podsektor</label>
-                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                                    <SearchableSelect value={row.dept_subcategory_id}
-                                      onChange={v => { const sub = deptSubcategories.find(x => x.id === v); updateRow(row.id, { dept_subcategory_id: v, dept_subcategory_name: sub?.name || '', expense_description: '' }) }}
-                                      options={deptSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                                      allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
-                                      disabled={!row.department_id || deptSubs.length === 0}
-                                      style={{ ...pickerChrome, flex: 1 }} />
-                                    <InlineCategoryAdd table="dept_subcategories" parentId={row.department_id} parentField="department_id"
-                                      currentCount={deptSubs.length} disabled={!row.department_id}
-                                      onAdded={item => { setDeptSubcategories(prev => [...prev, { ...item, department_id: row.department_id, sort_order: prev.length + 1 }]); updateRow(row.id, { dept_subcategory_id: item.id, dept_subcategory_name: item.name, expense_description: '' }) }} />
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div style={{ marginBottom: '10px' }}>
-                                  <div style={s.field}>
-                                    <label style={s.lbl}>Opis troška</label>
-                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                                      {expDescs.length > 0 ? (
-                                        <SearchableSelect value={row.expense_description}
-                                          onChange={v => updateRow(row.id, { expense_description: v })}
-                                          options={expDescs.map(d => ({ value: d.name, label: d.name }))}
-                                          allLabel="Izaberite opis…" searchPlaceholder="Pretraga opisa…"
-                                          style={{ ...pickerChrome, flex: 1 }} />
-                                      ) : (
-                                        <input style={{ ...s.input, flex: 1 }} value={row.expense_description} onChange={e => updateRow(row.id, { expense_description: e.target.value })} placeholder="npr. AWS, Telekom, zakup…" />
-                                      )}
-                                      <InlineCategoryAdd table="expense_descriptions" parentId={row.dept_subcategory_id} parentField="dept_subcategory_id"
-                                        currentCount={expDescs.length} disabled={!row.dept_subcategory_id}
-                                        onAdded={item => { setExpenseDescriptions(prev => [...prev, { ...item, dept_subcategory_id: row.dept_subcategory_id, sort_order: prev.length + 1 }]); updateRow(row.id, { expense_description: item.name }) }} />
+                                      onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); updateRow(row.id, { department_id: item.id, department_name: item.name }) }} />
                                     </div>
                                   </div>
                                 </div>
@@ -2769,44 +2713,15 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                       </select>
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
                     <div>
                       <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Sektor</div>
                       <select style={s.select} value={qfEditing.department}
-                        onChange={e => setQfEditing({ ...qfEditing, department: e.target.value, dept_subcategory: '', expense_description: '' })}>
+                        onChange={e => setQfEditing({ ...qfEditing, department: e.target.value })}>
                         <option value="">Izaberite…</option>
                         {departments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Podsektor</div>
-                      <select style={s.select} value={qfEditing.dept_subcategory}
-                        onChange={e => setQfEditing({ ...qfEditing, dept_subcategory: e.target.value, expense_description: '' })}>
-                        <option value="">Izaberite…</option>
-                        {deptSubcategories.filter(sub => {
-                          const dept = departments.find(d => d.name === qfEditing.department)
-                          return dept && sub.department_id === dept.id
-                        }).map(sub => <option key={sub.id} value={sub.name}>{sub.name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Opis troška</div>
-                    {(() => {
-                      const parentDept = departments.find(d => d.name === qfEditing.department)
-                      const deptSub = deptSubcategories.find(sub =>
-                        sub.name === qfEditing.dept_subcategory && sub.department_id === parentDept?.id)
-                      const descs = deptSub ? expenseDescriptions.filter(ed => ed.dept_subcategory_id === deptSub.id) : []
-                      return descs.length > 0
-                        ? <select style={s.select} value={qfEditing.expense_description}
-                            onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })}>
-                            <option value="">Izaberite…</option>
-                            {descs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-                          </select>
-                        : <input style={s.input} value={qfEditing.expense_description}
-                            onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })}
-                            placeholder="npr. AWS, Telekom…" />
-                    })()}
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
                     <div>
@@ -2849,7 +2764,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                         <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.text }}>{sc.name}</div>
                         <div style={{ fontSize: '10px', color: DIALOG.dim, marginTop: '2px' }}>
                           {sc.pl_category}{sc.pl_subcategory ? ` › ${sc.pl_subcategory}` : ''}
-                          {sc.department ? ` · ${sc.department}` : ''}{sc.dept_subcategory ? ` › ${sc.dept_subcategory}` : ''}
+                          {sc.department ? ` · ${sc.department}` : ''}
                         </div>
                       </div>
                       <button style={{ fontFamily: 'system-ui,sans-serif', fontSize: '11px', padding: '4px 10px', border: '0.5px solid ' + DIALOG.border, borderRadius: '6px', background: 'transparent', color: DIALOG.dim, cursor: 'pointer' }}

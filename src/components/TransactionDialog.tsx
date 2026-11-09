@@ -148,8 +148,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const [plCategories, setPlCategories] = useState<any[]>([])
   const [plSubcategories, setPlSubcategories] = useState<any[]>([])
   const [departments, setDepartments] = useState<any[]>([])
-  const [deptSubcategories, setDeptSubcategories] = useState<any[]>([])
-  const [expenseDescriptions, setExpenseDescriptions] = useState<any[]>([])
 
   // Step 1
   const [companyId, setCompanyId] = useState('')
@@ -218,9 +216,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const [plSubName, setPlSubName] = useState('')
   const [deptId, setDeptId] = useState('')
   const [deptName, setDeptName] = useState('')
-  const [deptSubId, setDeptSubId] = useState('')
-  const [deptSubName, setDeptSubName] = useState('')
-  const [expDesc, setExpDesc] = useState('')
   const [revStream, setRevStream] = useState('')
   // The site or building this payment belongs to; null is company overhead.
   // Null while the payment is split — the lines carry the projects then.
@@ -242,8 +237,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   interface QuickFillScript {
     id: string; name: string; icon: string
     pl_category: string; pl_subcategory: string
-    department: string; dept_subcategory: string
-    expense_description: string; cf_type: string
+    department: string; cf_type: string
   }
   // Read from the shared table rather than from this browser — see
   // 20260922140000. Nothing is thrown when it cannot be read: a dialog whose
@@ -273,8 +267,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       pl_category: plCatName || '',
       pl_subcategory: plSubName || '',
       department: deptName || '',
-      dept_subcategory: deptSubName || '',
-      expense_description: expDesc || '',
       cf_type: cfType || '',
     }
     const why = whyNotSavable(draft, quickFillScripts)
@@ -292,12 +284,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     const matchCat = plCategories.find(c => c.name === script.pl_category)
     const matchDept = departments.find(d => d.name === script.department)
     const matchSub = plSubcategories.find(s => s.name === script.pl_subcategory && s.category_id === matchCat?.id)
-    const matchDeptSub = deptSubcategories.find(s => s.name === script.dept_subcategory && s.department_id === matchDept?.id)
     if (matchCat) { setPlCatId(matchCat.id); setPlCatName(matchCat.name) }
     if (matchSub) { setPlSubId(matchSub.id); setPlSubName(matchSub.name) }
     if (matchDept) { setDeptId(matchDept.id); setDeptName(matchDept.name) }
-    if (matchDeptSub) { setDeptSubId(matchDeptSub.id); setDeptSubName(matchDeptSub.name) }
-    setExpDesc(script.expense_description || '')
     setCfType(script.cf_type || '')
   }
 
@@ -391,13 +380,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     setPlCatName(from.pl_category)
     setPlSubName(from.pl_subcategory)
     setDeptName(from.department)
-    setDeptSubName(from.dept_subcategory)
-    setExpDesc(from.expense_description)
     setPlCatId(plCategories.find(c => c.name === from.pl_category)?.id || '')
     setPlSubId(plSubcategories.find(c => c.name === from.pl_subcategory)?.id || '')
     setDeptId(departments.find(c => c.name === from.department)?.id || '')
-    setDeptSubId(deptSubcategories.find(c => c.name === from.dept_subcategory)?.id || '')
-  }, [splitLines, txType, plCategories, plSubcategories, departments, deptSubcategories])
+  }, [splitLines, txType, plCategories, plSubcategories, departments])
 
   /** What is allocated, in RSD at each invoice's stored rate. */
   const totalAllocatedRsd = linkedInvoices.reduce((s, i) => s + (i.allocated_rsd || 0), 0)
@@ -410,12 +396,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
 
   const expenseCategories = plCategories.filter(c => c.type !== 'revenue')
   const getPlSubs = (catId: string) => plSubcategories.filter(s => s.category_id === catId)
-  const getDeptSubs = (dId: string) => deptSubcategories.filter(s => s.department_id === dId)
-  const getExpDescs = (subId: string) => expenseDescriptions.filter(e => e.dept_subcategory_id === subId)
 
   const currentPlSubs = getPlSubs(plCatId)
-  const currentDeptSubs = getDeptSubs(deptId)
-  const currentExpDescs = getExpDescs(deptSubId)
 
   const runValidation = () => {
     const e: ValidationErrors = {}
@@ -454,23 +436,19 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       const [
         { data: bnk }, part,
         { data: plCat }, { data: plSub },
-        { data: dept }, { data: deptSub }, { data: expD },
+        { data: dept },
       ] = await Promise.all([
         supabase.from('banks').select('*').order('name'),
         fetchAllPartners(supabase),
         supabase.from('pl_categories').select('id,name,type,sort_order').order('sort_order'),
         supabase.from('pl_subcategories').select('id,name,category_id,sort_order').order('sort_order'),
         supabase.from('departments').select('id,name,sort_order').order('sort_order'),
-        supabase.from('dept_subcategories').select('id,name,department_id,sort_order').order('sort_order'),
-        supabase.from('expense_descriptions').select('id,name,dept_subcategory_id,sort_order').order('sort_order'),
       ])
       if (bnk) setAllBanks(bnk)
       if (part) setPartners(part)
       if (plCat) setPlCategories(plCat)
       if (plSub) setPlSubcategories(plSub)
       if (dept) setDepartments(dept)
-      if (deptSub) setDeptSubcategories(deptSub)
-      if (expD) setExpenseDescriptions(expD)
     }
     load()
   }, [])
@@ -568,8 +546,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     setPlCatName(transaction.pl_category || '')
     setPlSubName(transaction.pl_subcategory || '')
     setDeptName(transaction.department || '')
-    setDeptSubName(transaction.dept_subcategory || '')
-    setExpDesc(transaction.expense_description || '')
     setRevStream(transaction.revenue_stream || '')
     setProjectId(transaction.project_id ?? null)
     setDeptSplit(transaction.dept_split_type || 'none')
@@ -604,12 +580,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       if (dept) setDeptId(dept.id)
     }
   }, [transaction, departments])
-  useEffect(() => {
-    if (transaction && deptSubcategories.length > 0 && deptId) {
-      const sub = deptSubcategories.find(s => s.name === transaction.dept_subcategory && s.department_id === deptId)
-      if (sub) setDeptSubId(sub.id)
-    }
-  }, [transaction, deptSubcategories, deptId])
 
   const filteredPartners = partners.filter(p =>
     !partnerSearch || p.name.toLowerCase().includes(partnerSearch.toLowerCase())
@@ -1035,8 +1005,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         pl_category: isDirectWithPL ? (plCatName || null) : null,
         pl_subcategory: isDirectWithPL ? (plSubName || null) : null,
         department: isDirectWithPL ? (deptName || null) : null,
-        dept_subcategory: isDirectWithPL ? (deptSubName || null) : null,
-        expense_description: isDirectWithPL ? (expDesc || null) : null,
+        // No longer part of a transaction: written null, so an edited row
+        // never keeps an old value there.
+        dept_subcategory: null,
+        expense_description: null,
         revenue_stream: isDirectWithPL ? (revStream || null) : null,
         // Only a direct row has a P&L of its own to put on a project (an
         // invoice payment's project is the invoice's), and a split row's
@@ -1399,8 +1371,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               pl_category: fxScript.pl_category || null,
               pl_subcategory: fxScript.pl_subcategory || null,
               department: fxScript.department || null,
-              dept_subcategory: fxScript.dept_subcategory || null,
-              expense_description: fxScript.expense_description || null,
               // On the bill's project: the difference is part of what that
               // bill cost or earned.
               project_id: fxInvoice.project_id ?? null,
@@ -1882,7 +1852,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   onChange={changeSplitLines}
                   companyId={companyId || null}
                   scripts={quickFillScripts as any}
-                  classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
+                  classification={{ plCategories, plSubcategories, departments }}
                   client={supabase}
                   onScriptsChanged={() => { fetchScripts(supabase).then(setQuickFillScripts as any) }}
                   hint="Jedno plaćanje, dva ili više troškova — svaki sa svojom klasifikacijom."
@@ -2008,9 +1978,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                               <div style={{ fontSize: '11px', color: DIALOG.dim, marginBottom: '2px' }}>
                                 {inv.invoice_date}{inv.due_date && ` · Dospeće: ${inv.due_date}`}
                               </div>
-                              {inv.expense_description && (
-                                <div style={{ fontSize: '11px', color: DIALOG.dim, fontStyle: 'italic' }}>{inv.expense_description}</div>
-                              )}
                             </div>
                             <div style={{ textAlign: 'right' as const, marginRight: '10px', flexShrink: 0 }}>
                               <div style={{ fontSize: '13px', fontWeight: '600', color: DIALOG.text }}>
@@ -2254,7 +2221,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                                           style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: '0.5px solid ' + DIALOG.borderSoft, display: 'flex', flexDirection: 'column' as const, gap: '2px' }}
                                           onMouseDown={e => { e.preventDefault(); applyQuickFill(sc.id); setQfSearch(''); setQfOpen(false) }}>
                                           <span style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.accent }}>{sc.icon} {sc.name}</span>
-                                          <span style={{ fontSize: '10px', color: DIALOG.dim }}>{sc.pl_category}{sc.dept_subcategory ? ` · ${sc.dept_subcategory}` : ''}</span>
+                                          <span style={{ fontSize: '10px', color: DIALOG.dim }}>{sc.pl_category}{sc.department ? ` · ${sc.department}` : ''}</span>
                                         </div>
                                       ))
                                 })()}
@@ -2315,45 +2282,15 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                             <label style={s.lbl}>Sektor <span style={s.req}>*</span></label>
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                             <SearchableSelect value={deptId}
-                              onChange={v => { const dept = departments.find(d => d.id === v); setDeptId(v); setDeptName(dept?.name || ''); setDeptSubId(''); setDeptSubName(''); setExpDesc(''); touch('dept') }}
+                              onChange={v => { const dept = departments.find(d => d.id === v); setDeptId(v); setDeptName(dept?.name || ''); touch('dept') }}
                               options={departments.map(d => ({ value: d.id, label: d.name }))}
                               allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                               style={{ ...pickerChrome, flex: 1, ...(fieldErr('dept') ? pickerError : {}) }} />
                             <InlineCategoryAdd table="departments"
                               currentCount={departments.length}
-                              onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); setDeptId(item.id); setDeptName(item.name); setDeptSubId(''); setDeptSubName(''); setExpDesc('') }} />
+                              onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); setDeptId(item.id); setDeptName(item.name) }} />
                             </div>
                             {fieldErr('dept') && <span style={s.errorMsg}>{fieldErr('dept')}</span>}
-                          </div>
-                          <div style={s.field}>
-                            <label style={s.lbl}>Podsektor</label>
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                            <SearchableSelect value={deptSubId}
-                              onChange={v => { const sub = deptSubcategories.find(s => s.id === v); setDeptSubId(v); setDeptSubName(sub?.name || ''); setExpDesc('') }}
-                              options={currentDeptSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                              allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
-                              disabled={!deptId || currentDeptSubs.length === 0}
-                              style={{ ...pickerChrome, flex: 1 }} />
-                            <InlineCategoryAdd table="dept_subcategories" parentId={deptId} parentField="department_id"
-                              currentCount={currentDeptSubs.length} disabled={!deptId}
-                              onAdded={item => { setDeptSubcategories(prev => [...prev, { ...item, department_id: deptId, sort_order: prev.length + 1 }]); setDeptSubId(item.id); setDeptSubName(item.name); setExpDesc('') }} />
-                            </div>
-                          </div>
-                        </div>
-                        <div style={s.field}>
-                          <label style={s.lbl}>Opis troška</label>
-                          <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                            {currentExpDescs.length > 0 ? (
-                              <SearchableSelect value={expDesc} onChange={setExpDesc}
-                                options={currentExpDescs.map(d => ({ value: d.name, label: d.name }))}
-                                allLabel="Izaberite opis…" searchPlaceholder="Pretraga opisa…"
-                                style={{ ...pickerChrome, flex: 1 }} />
-                            ) : (
-                              <input style={{ ...s.input, flex: 1 }} value={expDesc} onChange={e => setExpDesc(e.target.value)} placeholder="Unesite opis troška…" />
-                            )}
-                            <InlineCategoryAdd table="expense_descriptions" parentId={deptSubId} parentField="dept_subcategory_id"
-                              currentCount={currentExpDescs.length} disabled={!deptSubId}
-                              onAdded={item => { setExpenseDescriptions(prev => [...prev, { ...item, dept_subcategory_id: deptSubId, sort_order: prev.length + 1 }]); setExpDesc(item.name) }} />
                           </div>
                         </div>
                       </div>
@@ -2474,7 +2411,6 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                 ...(txType === 'direct' && directSubtype === 'expense' ? [{ title: 'P&L i vrsta troška', rows: [
                   ['P&L kategorija', plCatName || '—'],
                   ['Sektor', deptName || '—'],
-                  ['Opis', expDesc || '—'],
                   ['Projekat', splitActive ? 'Po stavkama podele' : projectLabelById(projects, projectId)],
                   ['Novčani tok', cfLabel()],
                 ]}] : []),

@@ -18,10 +18,10 @@ import { findExisting } from '../services/lookupNames'
 
 interface Props {
   // Which table to insert into
-  table: 'pl_categories' | 'pl_subcategories' | 'departments' | 'dept_subcategories' | 'expense_descriptions'
+  table: 'pl_categories' | 'pl_subcategories' | 'departments'
   // Parent ID required for subcategories
   parentId?: string
-  parentField?: string  // e.g. 'category_id', 'department_id', 'dept_subcategory_id'
+  parentField?: string  // e.g. 'category_id'
   // Current count for sort_order
   currentCount: number
   // Called after successful insert with new item {id, name}

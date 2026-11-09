@@ -14,13 +14,13 @@ const SCRIPTS: ScriptLike[] = [
   {
     id: 's1', name: 'Figma', icon: '⚡',
     pl_category: 'General Business', pl_subcategory: 'Software subscriptions',
-    department: 'Admin', dept_subcategory: 'Tools', expense_description: 'Figma',
+    department: 'Admin',
     cf_type: 'recurring',
   },
   {
     id: 's2', name: 'Laptops', icon: '💻',
     pl_category: 'Capital expenditures', pl_subcategory: 'Hardware',
-    department: 'Product', dept_subcategory: 'Equipment', expense_description: 'Laptop',
+    department: 'Product',
     cf_type: 'one_off',
   },
 ]
@@ -184,7 +184,7 @@ describe('a line is a template and a figure', () => {
     fireEvent.click(screen.getByText(/Podeli na više troškova/))
     fireEvent.click(screen.getAllByText(/izaberite namenu ovog dela/)[0])
     fireEvent.click(screen.getByText(/💻 Laptops/))
-    expect(screen.getByText(/Capital expenditures › Hardware › Product › Laptop/))
+    expect(screen.getByText(/^Capital expenditures › Hardware › Product$/))
       .toBeInTheDocument()
   })
 
@@ -279,8 +279,6 @@ describe('making a template from inside the split', () => {
     plCategories: [{ id: 'c1', name: 'General Business', type: 'expense' }],
     plSubcategories: [{ id: 'sc1', name: 'Rent and Mortgage', category_id: 'c1' }],
     departments: [{ id: 'd1', name: 'General Business Expenses' }],
-    deptSubcategories: [{ id: 'ds1', name: 'Rent', department_id: 'd1' }],
-    expenseDescriptions: [{ id: 'e1', name: 'Garage spaces', dept_subcategory_id: 'ds1' }],
   }
 
   function Full() {
@@ -312,6 +310,14 @@ describe('making a template from inside the split', () => {
     fireEvent.click(screen.getAllByTitle('Napravi šablon za ovaj trošak')[0])
     expect(screen.getByText('Novi šablon')).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/Zakup — garažna mesta/)).toBeInTheDocument()
+  })
+
+  it('asks the template for no sub-sector and no cost description', () => {
+    open()
+    fireEvent.click(screen.getAllByTitle('Napravi šablon za ovaj trošak')[0])
+    expect(screen.getByText('Sektor')).toBeInTheDocument()
+    expect(screen.queryByText('Podsektor')).not.toBeInTheDocument()
+    expect(screen.queryByText('Opis troška')).not.toBeInTheDocument()
   })
 
   /** Two half-filled template forms on one screen is two chances to save the

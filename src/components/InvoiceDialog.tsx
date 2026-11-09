@@ -117,8 +117,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [plCategories, setPlCategories] = useState<any[]>([])
   const [plSubcategories, setPlSubcategories] = useState<any[]>([])
   const [departments, setDepartments] = useState<any[]>([])
-  const [deptSubcategories, setDeptSubcategories] = useState<any[]>([])
-  const [expenseDescriptions, setExpenseDescriptions] = useState<any[]>([])
   const [directTransactions, setDirectTransactions] = useState<any[]>([])
   /** Direct transactions already in the books that this bill closes: one,
    *  or several (a bank's fees through the month). P&L stays on them. */
@@ -151,9 +149,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [plSubName, setPlSubName] = useState('')
   const [deptId, setDeptId] = useState('')
   const [deptName, setDeptName] = useState('')
-  const [deptSubId, setDeptSubId] = useState('')
-  const [deptSubName, setDeptSubName] = useState('')
-  const [expDesc, setExpDesc] = useState('')
   const [revStream, setRevStream] = useState('')
   // Whether the user picked the stream themselves. Until they do, a revenue
   // invoice's stream follows its project's kind (a site bills progress, a
@@ -252,8 +247,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   interface QuickFillScript {
     id: string; name: string; icon: string
     pl_category: string; pl_subcategory: string
-    department: string; dept_subcategory: string
-    expense_description: string; cf_type: string
+    department: string; cf_type: string
   }
   // Read from the shared table rather than from this browser — see
   // 20260922140000. Nothing is thrown when it cannot be read: a dialog whose
@@ -302,8 +296,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       pl_category: plCatName || '',
       pl_subcategory: plSubName || '',
       department: deptName || '',
-      dept_subcategory: deptSubName || '',
-      expense_description: expDesc || '',
       cf_type: cfType || '',
     }
     const why = whyNotSavable(draft, quickFillScripts)
@@ -321,12 +313,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     const matchCat = plCategories.find(c => c.name === script.pl_category)
     const matchDept = departments.find(d => d.name === script.department)
     const matchSub = plSubcategories.find(s => s.name === script.pl_subcategory && s.category_id === matchCat?.id)
-    const matchDeptSub = deptSubcategories.find(s => s.name === script.dept_subcategory && s.department_id === matchDept?.id)
     if (matchCat) { setPlCatId(matchCat.id); setPlCatName(matchCat.name) }
     if (matchSub) { setPlSubId(matchSub.id); setPlSubName(matchSub.name) }
     if (matchDept) { setDeptId(matchDept.id); setDeptName(matchDept.name) }
-    if (matchDeptSub) { setDeptSubId(matchDeptSub.id); setDeptSubName(matchDeptSub.name) }
-    setExpDesc(script.expense_description || '')
     setCfType(script.cf_type || '')
   }
 
@@ -395,19 +384,14 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setPlCatName(from.pl_category)
     setPlSubName(from.pl_subcategory)
     setDeptName(from.department)
-    setDeptSubName(from.dept_subcategory)
-    setExpDesc(from.expense_description)
     // The pickers are keyed by id, so the ids follow the names or the
     // controls would show nothing while the payload carried something.
     setPlCatId(plCategories.find(c => c.name === from.pl_category)?.id || '')
     setPlSubId(plSubcategories.find(c => c.name === from.pl_subcategory)?.id || '')
     setDeptId(departments.find(c => c.name === from.department)?.id || '')
-    setDeptSubId(deptSubcategories.find(c => c.name === from.dept_subcategory)?.id || '')
-  }, [splitLines, plCategories, plSubcategories, departments, deptSubcategories])
+  }, [splitLines, plCategories, plSubcategories, departments])
 
   const getPlSubs = (catId: string) => plSubcategories.filter(s => s.category_id === catId)
-  const getDeptSubs = (dId: string) => deptSubcategories.filter(s => s.department_id === dId)
-  const getExpDescs = (subId: string) => expenseDescriptions.filter(e => e.dept_subcategory_id === subId)
   const revenueStreams = REVENUE_STREAMS
 
   /** Whether this bill may deduct an advance at all. */
@@ -459,7 +443,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     if (!isNote || !companyId || !partnerId) { setBaseBills([]); return }
     let cancelled = false
     supabase.from('v_invoice_status')
-      .select('id, invoice_number, invoice_date, type, currency, amount, adjustments, paid_amount, amount_due, exchange_rate, eur_rate, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, project_id, pl_impact, cf_type')
+      .select('id, invoice_number, invoice_date, type, currency, amount, adjustments, paid_amount, amount_due, exchange_rate, eur_rate, pl_category, pl_subcategory, department, revenue_stream, project_id, pl_impact, cf_type')
       .eq('company_id', companyId).eq('partner_id', partnerId).eq('type', invType).eq('document_type', 'invoice')
       .order('invoice_date', { ascending: false }).limit(300)
       .then(({ data, error }: any) => {
@@ -491,8 +475,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setPlCatName(b.pl_category || ''); setPlCatId(plCategories.find(c => c.name === b.pl_category)?.id || '')
     setPlSubName(b.pl_subcategory || ''); setPlSubId(plSubcategories.find(c => c.name === b.pl_subcategory)?.id || '')
     setDeptName(b.department || ''); setDeptId(departments.find(c => c.name === b.department)?.id || '')
-    setDeptSubName(b.dept_subcategory || ''); setDeptSubId(deptSubcategories.find(c => c.name === b.dept_subcategory)?.id || '')
-    setExpDesc(b.expense_description || '')
     if (b.revenue_stream) { setRevStream(b.revenue_stream); setRevStreamChosen(true) }
     setProjectId(b.project_id ?? null)
     setPlImpact(b.pl_impact !== false)
@@ -711,21 +693,17 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       const [
         part,
         { data: plCat }, { data: plSub },
-        { data: dept }, { data: deptSub }, { data: expD },
+        { data: dept },
       ] = await Promise.all([
         fetchAllPartners(supabase),
         supabase.from('pl_categories').select('id,name,type,sort_order').order('sort_order'),
         supabase.from('pl_subcategories').select('id,name,category_id,sort_order').order('sort_order'),
         supabase.from('departments').select('id,name,sort_order').order('sort_order'),
-        supabase.from('dept_subcategories').select('id,name,department_id,sort_order').order('sort_order'),
-        supabase.from('expense_descriptions').select('id,name,dept_subcategory_id,sort_order').order('sort_order'),
       ])
       if (part) setPartners(part)
       if (plCat) setPlCategories(plCat)
       if (plSub) setPlSubcategories(plSub)
       if (dept) setDepartments(dept)
-      if (deptSub) setDeptSubcategories(deptSub)
-      if (expD) setExpenseDescriptions(expD)
     }
     load()
   }, [])
@@ -796,7 +774,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     const load = async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('id, transaction_date, is_advance, amount, amount_rsd, amount_eur, currency, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, project_id, dept_split_type, tags, note, exchange_rate, eur_rate, is_indexed, banks(id,name), partners(id,name)')
+        .select('id, transaction_date, is_advance, amount, amount_rsd, amount_eur, currency, pl_category, pl_subcategory, department, revenue_stream, project_id, dept_split_type, tags, note, exchange_rate, eur_rate, is_indexed, banks(id,name), partners(id,name)')
         .eq('company_id', companyId).eq('type', 'direct').eq('status', 'posted')
         .order('transaction_date', { ascending: false }).limit(150)
       if (error) console.error('transactions load error:', error)
@@ -905,8 +883,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     if (tx.pl_category) { const cat = plCategories.find(c => c.name === tx.pl_category); if (cat) { setPlCatId(cat.id); setPlCatName(cat.name) } }
     if (tx.pl_subcategory) { setPlSubName(tx.pl_subcategory); const sub = plSubcategories.find(s => s.name === tx.pl_subcategory); if (sub) setPlSubId(sub.id) }
     if (tx.department) { const dept = departments.find(d => d.name === tx.department); if (dept) { setDeptId(dept.id); setDeptName(dept.name) } }
-    if (tx.dept_subcategory) { setDeptSubName(tx.dept_subcategory); const sub = deptSubcategories.find(s => s.name === tx.dept_subcategory); if (sub) setDeptSubId(sub.id) }
-    if (tx.expense_description) setExpDesc(tx.expense_description)
     if (tx.revenue_stream) setRevStream(tx.revenue_stream)
     if (tx.project_id) setProjectId(tx.project_id)
     if (tx.dept_split_type) setDeptSplit(tx.dept_split_type)
@@ -940,7 +916,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setInvoiceDate(invoice.invoice_date || ''); setDueDate(invoice.due_date || '')
     setInvType(invoice.type || 'expense'); setPlCatName(invoice.pl_category || '')
     setPlSubName(invoice.pl_subcategory || ''); setDeptName(invoice.department || '')
-    setDeptSubName(invoice.dept_subcategory || ''); setExpDesc(invoice.expense_description || '')
     setRevStream(invoice.revenue_stream || ''); setProjectId(invoice.project_id ?? null)
     // The classification of a revenue invoice. A booked one is read from what
     // it is on; a draft says what it was drafted as, or leaves it to the person.
@@ -976,7 +951,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   useEffect(() => { if (invoice && plCategories.length > 0) { const cat = plCategories.find(c => c.name === invoice.pl_category); if (cat) setPlCatId(cat.id) } }, [invoice, plCategories])
   useEffect(() => { if (invoice && plSubcategories.length > 0 && plCatId) { const sub = plSubcategories.find(s => s.name === invoice.pl_subcategory && s.category_id === plCatId); if (sub) setPlSubId(sub.id) } }, [invoice, plSubcategories, plCatId])
   useEffect(() => { if (invoice && departments.length > 0) { const dept = departments.find(d => d.name === invoice.department); if (dept) setDeptId(dept.id) } }, [invoice, departments])
-  useEffect(() => { if (invoice && deptSubcategories.length > 0 && deptId) { const sub = deptSubcategories.find(s => s.name === invoice.dept_subcategory && s.department_id === deptId); if (sub) setDeptSubId(sub.id) } }, [invoice, deptSubcategories, deptId])
 
   const filteredPartners = partners.filter(p => !partnerSearch || p.name.toLowerCase().includes(partnerSearch.toLowerCase()))
   const filteredDirectTx = directTransactions.filter(tx => {
@@ -1097,8 +1071,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         invoice_number: invoiceNumber || null, invoice_date: invoiceDate,
         due_date: dueDate || null, type: invType,
         pl_category: plCatName || null, pl_subcategory: plSubName || null,
-        department: deptName || null, dept_subcategory: deptSubName || null,
-        expense_description: expDesc || null,
+        // Sub-sector and cost description are no longer part of a bill.
+        // Written null, so an edited bill never keeps an old value there.
+        department: deptName || null, dept_subcategory: null,
+        expense_description: null,
         // A proforma and an advance invoice are no revenue yet: no stream.
         revenue_stream: invType === 'revenue' && !noPl ? (revStream || null) : null,
         project_id: ownProjectId, dept_split_type: deptSplit,
@@ -1139,7 +1115,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           throw new Error(`Faktura ${invoice.id} nije izmenjena — ništa nije sačuvano.`)
         invoiceId = invoice.id
         if (linkedTxId && plCatName) {
-          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, revenue_stream: revStream || null, project_id: ownProjectId }).in('id', usedTxIds).select('id')
+          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: null, expense_description: null, revenue_stream: revStream || null, project_id: ownProjectId }).in('id', usedTxIds).select('id')
           if (txErr) throw txErr
           if (!tx || tx.length < usedTxIds.length)
             throw new Error(`Faktura je sačuvana, ali ${linkedTxIds.length > 1 ? 'neke povezane transakcije nisu izmenjene' : `transakcija ${linkedTxId} nije izmenjena`} — njihova P&L klasifikacija se sada ne slaže sa fakturom.`)
@@ -1159,7 +1135,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           try { await onSaved(newInv.id) } catch { /* the caller shows its own failure; see `onSaved` above */ }
         }
         if (linkedTxId && plCatName) {
-          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: deptSubName || null, expense_description: expDesc || null, project_id: ownProjectId }).in('id', usedTxIds).select('id')
+          const { data: tx, error: txErr } = await supabase.from('transactions').update({ pl_category: plCatName || null, pl_subcategory: plSubName || null, department: deptName || null, dept_subcategory: null, expense_description: null, project_id: ownProjectId }).in('id', usedTxIds).select('id')
           if (txErr) throw txErr
           if (!tx || tx.length < usedTxIds.length)
             throw new Error(`Faktura je sačuvana, ali ${linkedTxIds.length > 1 ? 'neke povezane transakcije nisu izmenjene' : `transakcija ${linkedTxId} nije izmenjena`} — njihova P&L klasifikacija se sada ne slaže sa fakturom.`)
@@ -1274,8 +1250,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
 
   const expenseCategories = plCategories.filter(c => c.type !== 'revenue')
   const currentPlSubs = getPlSubs(plCatId)
-  const currentDeptSubs = getDeptSubs(deptId)
-  const currentExpDescs = getExpDescs(deptSubId)
 
   // ── Project panel ────────────────────────────
   // One picker; null is company overhead. Hidden while the bill is split,
@@ -1938,7 +1912,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                 onChange={changeSplitLines}
                 companyId={companyId || null}
                 scripts={quickFillScripts as any}
-                classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
+                classification={{ plCategories, plSubcategories, departments }}
                 client={supabase}
                 onScriptsChanged={() => { fetchScripts(supabase).then(setQuickFillScripts as any) }}
                 hint="Jedna faktura, dva ili više troškova — npr. laptop i godinu dana podrške."
@@ -1995,7 +1969,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                                       style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: '0.5px solid ' + DIALOG.borderSoft, display: 'flex', flexDirection: 'column' as const, gap: '2px' }}
                                       onMouseDown={e => { e.preventDefault(); applyQuickFill(sc.id); setQfSearch(''); setQfOpen(false) }}>
                                       <span style={{ fontSize: '12px', fontWeight: '500', color: DIALOG.accent }}>{sc.icon} {sc.name}</span>
-                                      <span style={{ fontSize: '10px', color: DIALOG.dim }}>{sc.pl_category}{sc.dept_subcategory ? ` · ${sc.dept_subcategory}` : ''}</span>
+                                      <span style={{ fontSize: '10px', color: DIALOG.dim }}>{sc.pl_category}{sc.department ? ` · ${sc.department}` : ''}</span>
                                     </div>
                                   ))
                             })()}
@@ -2056,45 +2030,15 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                         <label style={s.lbl}>Sektor {!linkedTxId && <span style={s.req}>*</span>}</label>
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                         <SearchableSelect value={deptId}
-                          onChange={v => { const dept = departments.find(d => d.id === v); setDeptId(v); setDeptName(dept?.name || ''); setDeptSubId(''); setDeptSubName(''); setExpDesc(''); touch('dept') }}
+                          onChange={v => { const dept = departments.find(d => d.id === v); setDeptId(v); setDeptName(dept?.name || ''); touch('dept') }}
                           options={departments.map(d => ({ value: d.id, label: d.name }))}
                           allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                           style={{ ...pickerChrome, flex: 1, ...(fieldErr('dept') ? pickerError : {}) }} />
                         <InlineCategoryAdd table="departments"
                           currentCount={departments.length}
-                          onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); setDeptId(item.id); setDeptName(item.name); setDeptSubId(''); setDeptSubName(''); setExpDesc('') }} />
+                          onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); setDeptId(item.id); setDeptName(item.name) }} />
                         </div>
                         {fieldErr('dept') && <span style={s.errorMsg}>{fieldErr('dept')}</span>}
-                      </div>
-                      <div style={s.field}>
-                        <label style={s.lbl}>Podsektor</label>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                        <SearchableSelect value={deptSubId}
-                          onChange={v => { const sub = deptSubcategories.find(s => s.id === v); setDeptSubId(v); setDeptSubName(sub?.name || ''); setExpDesc('') }}
-                          options={currentDeptSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                          allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
-                          disabled={!deptId || currentDeptSubs.length === 0}
-                          style={{ ...pickerChrome, flex: 1 }} />
-                        <InlineCategoryAdd table="dept_subcategories" parentId={deptId} parentField="department_id"
-                          currentCount={currentDeptSubs.length} disabled={!deptId}
-                          onAdded={item => { setDeptSubcategories(prev => [...prev, { ...item, department_id: deptId, sort_order: prev.length + 1 }]); setDeptSubId(item.id); setDeptSubName(item.name); setExpDesc('') }} />
-                        </div>
-                      </div>
-                    </div>
-                    <div style={s.field}>
-                      <label style={s.lbl}>Opis troška</label>
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                        {currentExpDescs.length > 0 ? (
-                          <SearchableSelect value={expDesc} onChange={setExpDesc}
-                            options={currentExpDescs.map(d => ({ value: d.name, label: d.name }))}
-                            allLabel="Izaberite opis…" searchPlaceholder="Pretraga opisa…"
-                            style={{ ...pickerChrome, flex: 1 }} />
-                        ) : (
-                          <input style={{ ...s.input, flex: 1 }} value={expDesc} onChange={e => setExpDesc(e.target.value)} placeholder="Unesite opis troška…" />
-                        )}
-                        <InlineCategoryAdd table="expense_descriptions" parentId={deptSubId} parentField="dept_subcategory_id"
-                          currentCount={currentExpDescs.length} disabled={!deptSubId}
-                          onAdded={item => { setExpenseDescriptions(prev => [...prev, { ...item, dept_subcategory_id: deptSubId, sort_order: prev.length + 1 }]); setExpDesc(item.name) }} />
                       </div>
                     </div>
                   </div>
@@ -2205,7 +2149,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                   </div>
                   {splitLines.map((l, i) => (
                     <div key={l.key} style={{ fontSize: '11.5px', opacity: 0.9, lineHeight: 1.7 }}>
-                      {i + 1}. {[l.pl_category, l.pl_subcategory, l.department, l.expense_description]
+                      {i + 1}. {[l.pl_category, l.pl_subcategory, l.department]
                         .filter(Boolean).join(' › ') || 'ništa nije izabrano'}
                       {' · '}{projectLabelById(projects, l.project_id)}
                       {' — '}
@@ -2258,7 +2202,6 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                 { title: 'P&L i novčani tok', rows: [
                   ['P&L kategorija', plCatName || '—'],
                   ['Sektor', deptName || '—'],
-                  ['Opis', expDesc || '—'],
                   ['Projekat', splitActive ? 'Po stavkama podele' : projectLabelById(projects, projectId)],
                   ['Novčani tok', cfLabel()],
                 ]},

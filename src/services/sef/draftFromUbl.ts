@@ -136,8 +136,6 @@ export function draftFromUbl(
     pl_category: proposal?.pl_category ?? null,
     pl_subcategory: proposal?.pl_subcategory ?? null,
     department: proposal?.department ?? null,
-    dept_subcategory: proposal?.dept_subcategory ?? null,
-    expense_description: proposal?.expense_description ?? null,
     cf_type: proposal?.cf_type ?? null,
     note: ubl.isCreditNote ? 'Knjižno odobrenje sa SEF-a' : ubl.isDebitNote ? 'Knjižno zaduženje sa SEF-a' : null,
     // The dialog opens with this type and proposes the partner's bill whose
@@ -160,7 +158,7 @@ export function draftFromUbl(
 }
 
 const classificationOf = (p: Proposal): string =>
-  [p.pl_category, p.pl_subcategory, p.department, p.dept_subcategory, p.expense_description]
+  [p.pl_category, p.pl_subcategory, p.department]
     .filter(Boolean).join(' › ')
 
 /**

@@ -48,8 +48,9 @@ describe('txToSeed', () => {
     expect(seed.pl_category_name).toBe('Operating Expenses')
     expect(seed.pl_subcategory_name).toBe('Telecom')
     expect(seed.department_name).toBe('Administration')
-    expect(seed.dept_subcategory_name).toBe('Office')
-    expect(seed.expense_description).toBe('Telekom')
+    // Not carried: the row no longer has a sub-sector or a cost description.
+    expect(seed).not.toHaveProperty('dept_subcategory_name')
+    expect(seed).not.toHaveProperty('expense_description')
     expect(seed.cf_type).toBe('recurring')
     expect(seed.cf_next_month_est).toBe('12500')
   })
@@ -150,7 +151,7 @@ describe('passthroughToSeed', () => {
     const seed = passthroughToSeed(pt)
     expect(seed.pl_category_name).toBe('')
     expect(seed.department_name).toBe('')
-    expect(seed.expense_description).toBe('')
+    expect(seed).not.toHaveProperty('expense_description')
   })
 
   it('is never locked, and knows its own table', () => {

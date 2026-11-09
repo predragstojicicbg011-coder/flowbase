@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import InvoiceDialog from './InvoiceDialog'
 
 // The document type in the entry form: bill, credit note, debit note, and a
@@ -155,6 +155,26 @@ describe('document type in the entry form', () => {
     fireEvent.blur(amount)
     expect(await screen.findByText('Knjižno zaduženje mora imati pozitivan iznos')).toBeInTheDocument()
     expect(typeSelect().value).toBe('debit_note')
+  })
+})
+
+describe('no sub-sector and no cost description', () => {
+  it('asks for neither on any step, and writes neither from the bill it adjusts', async () => {
+    mockState.bases = [base({ dept_subcategory: 'Stari podsektor', expense_description: 'Stari opis' })]
+    render(<InvoiceDialog onClose={() => {}} creditNote invoice={draft()} />)
+    const pick = await screen.findByLabelText('Odnosi se na račun') as HTMLSelectElement
+    await waitFor(() => expect(within(pick).getAllByRole('option')).toHaveLength(2))
+    fireEvent.change(pick, { target: { value: 'b1' } })
+    for (let step = 0; step < 4; step++) {
+      expect(screen.queryByText('Podsektor')).not.toBeInTheDocument()
+      expect(screen.queryByText('Opis troška')).not.toBeInTheDocument()
+      if (step < 3) next()
+    }
+    fireEvent.click(screen.getByText(/Proknjiži fakturu|Sačuvaj izmene/))
+    await waitFor(() => expect(mockState.inserted).toHaveLength(1))
+    expect(mockState.inserted[0]).toMatchObject({
+      department: 'Gradilište', dept_subcategory: null, expense_description: null,
+    })
   })
 })
 

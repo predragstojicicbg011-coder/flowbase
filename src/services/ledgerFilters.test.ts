@@ -76,7 +76,7 @@ describe('which filters a tab owns', () => {
 
   it('gives pass-through no classification pickers at all', () => {
     const classification: FilterField[] = [
-      'expenseDescription', 'department', 'deptSubcategory', 'plCategory', 'plSubcategory',
+      'department', 'plCategory', 'plSubcategory',
     ]
     classification.forEach(field => {
       expect(appliesTo('invoices', field)).toBe(true)
@@ -246,22 +246,29 @@ describe('the direction filter', () => {
 })
 
 describe('the classification pickers', () => {
-  it('filters the five classification columns by name', () => {
+  it('filters the three classification columns by name', () => {
     const preds = build('transactions', {
-      expenseDescription: 'Figma', department: 'Engineering', deptSubcategory: 'Tools',
+      department: 'Engineering',
       plCategory: 'Operating Expenses', plSubcategory: 'Software',
     })
-    expect(on(preds, 'expense_description')).toEqual({ op: 'eq', column: 'expense_description', value: 'Figma' })
     expect(on(preds, 'department')).toEqual({ op: 'eq', column: 'department', value: 'Engineering' })
-    expect(on(preds, 'dept_subcategory')).toEqual({ op: 'eq', column: 'dept_subcategory', value: 'Tools' })
     expect(on(preds, 'pl_category')).toEqual({ op: 'eq', column: 'pl_category', value: 'Operating Expenses' })
     expect(on(preds, 'pl_subcategory')).toEqual({ op: 'eq', column: 'pl_subcategory', value: 'Software' })
   })
 
   it('applies the same pickers on the invoices tab', () => {
-    const preds = build('invoices', { expenseDescription: 'Figma', department: 'Engineering' })
-    expect(on(preds, 'expense_description')).toBeDefined()
+    const preds = build('invoices', { department: 'Engineering' })
     expect(on(preds, 'department')).toBeDefined()
+  })
+
+  it('has no sub-sector and no cost description filter', () => {
+    const fields = Object.keys(emptyFilters())
+    expect(fields).not.toContain('deptSubcategory')
+    expect(fields).not.toContain('expenseDescription')
+    TABS.forEach(tab => {
+      expect(FIELDS_BY_TAB[tab] as string[]).not.toContain('deptSubcategory')
+      expect(FIELDS_BY_TAB[tab] as string[]).not.toContain('expenseDescription')
+    })
   })
 
   it('reads revenue_stream instead of pl_category once direction is revenue', () => {
@@ -281,9 +288,10 @@ describe('the classification pickers', () => {
 })
 
 describe('the unclassified toggle', () => {
-  it('asks for rows missing a department or an expense description', () => {
+  it('asks for rows missing a department', () => {
     const preds = build('transactions', { unclassified: true })
-    expect(ors(preds)).toEqual(['department.is.null,expense_description.is.null'])
+    expect(preds).toEqual([{ op: 'is', column: 'department', value: null }])
+    expect(ors(preds)).toEqual([])
   })
 
   it('is off by default and adds nothing when off', () => {
@@ -291,12 +299,12 @@ describe('the unclassified toggle', () => {
     expect(build('transactions', { unclassified: false })).toEqual([])
   })
 
-  it('coexists with the free text as two separate or-clauses', () => {
+  it('coexists with the free text', () => {
     const preds = build('transactions', { unclassified: true, search: 'figma' }, ['p-1'])
     const clauses = ors(preds)
-    expect(clauses).toHaveLength(2)
-    expect(clauses[0]).toBe('department.is.null,expense_description.is.null')
-    expect(clauses[1]).toContain('note.ilike')
+    expect(clauses).toHaveLength(1)
+    expect(clauses[0]).toContain('note.ilike')
+    expect(on(preds, 'department')).toEqual({ op: 'is', column: 'department', value: null })
   })
 })
 
@@ -359,14 +367,10 @@ describe('the free text', () => {
     })
   })
 
-  it('adds the expense description where the table has one, and the invoice number on invoices', () => {
-    expect(searchColumns('transactions')).toContain('expense_description')
-    expect(searchColumns('invoices')).toContain('expense_description')
+  it('adds the invoice number on invoices, and never the cost description', () => {
     expect(searchColumns('invoices')).toContain('invoice_number')
     expect(searchColumns('transactions')).not.toContain('invoice_number')
-    // pass-through carries no P&L classification, so naming the column would
-    // be a 42703 that fails the query rather than a clause that matches less
-    expect(searchColumns('passthrough')).not.toContain('expense_description')
+    TABS.forEach(tab => expect(searchColumns(tab)).not.toContain('expense_description'))
   })
 
   it('joins partner ids in rather than filtering an embedded name', () => {
@@ -444,11 +448,11 @@ describe('the chips', () => {
   })
 
   it('clears a child picker along with its parent, so no orphan narrows the query', () => {
-    const state = f({ department: 'Engineering', deptSubcategory: 'Tools' })
-    const dept = activeChips('transactions', state).find(c => c.id === 'department')!
-    const cleared = clearFields(state, dept.clears)
-    expect(cleared.department).toBe('')
-    expect(cleared.deptSubcategory).toBe('')
+    const state = f({ plCategory: 'Operating Expenses', plSubcategory: 'Software' })
+    const cat = activeChips('transactions', state).find(c => c.id === 'plCategory')!
+    const cleared = clearFields(state, cat.clears)
+    expect(cleared.plCategory).toBe('')
+    expect(cleared.plSubcategory).toBe('')
     expect(buildPredicates('transactions', cleared, { today: TODAY, currency: 'RSD' })).toEqual([])
   })
 
@@ -466,7 +470,7 @@ describe('the chips', () => {
     const everything = f({
       companyId: 'c-1', datePreset: 'ytd', dateFrom: '2026-01-01', dateTo: TODAY,
       amountFrom: '10', amountTo: '99', currency: 'EUR', search: 'figma',
-      expenseDescription: 'Figma', department: 'Engineering', deptSubcategory: 'Tools',
+      department: 'Engineering',
       plCategory: 'Operating Expenses', plSubcategory: 'Software',
       direction: 'expense', txType: 'direct', unclassified: true,
       invoiceStatus: 'unpaid', overdue: true, dueFrom: '2026-02-01', dueTo: '2026-03-01',
@@ -490,7 +494,7 @@ describe('the chips', () => {
     const everything = f({
       companyId: 'c-1', dateFrom: '2026-01-01', dateTo: TODAY, amountFrom: '10',
       currency: 'EUR', search: 'figma', department: 'Engineering', txType: 'direct',
-      direction: 'expense', unclassified: true, expenseDescription: 'Figma',
+      direction: 'expense', unclassified: true,
     })
     let state = everything
     activeChips('transactions', state).forEach(chip => { state = clearFields(state, chip.clears) })

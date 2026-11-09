@@ -259,7 +259,7 @@ export default function SplitEditor({
                   not a classification, and the two can drift. */}
               <div style={s.filed}>
                 {line.pl_category
-                  ? [line.pl_category, line.pl_subcategory, line.department, line.expense_description]
+                  ? [line.pl_category, line.pl_subcategory, line.department]
                       .filter(Boolean).join(' › ')
                   : <span style={{ color: DIALOG.amber }}>još ništa nije izabrano</span>}
               </div>

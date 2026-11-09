@@ -139,24 +139,22 @@ export default function Transactions() {
 
   // ── Lookups ───────────────────────────────────────────────────────────────
   // Loaded once for the whole page, not per tab switch: the cascading pickers
-  // on two of the three tabs read the same five classification tables.
+  // on two of the three tabs read the same three classification tables.
   const [lk, setLk] = useState<{
     partners: any[]; banks: any[]
-    departments: any[]; deptSubs: any[]; expDescs: any[]; plCats: any[]; plSubs: any[]
-  }>({ partners: [], banks: [], departments: [], deptSubs: [], expDescs: [], plCats: [], plSubs: [] })
+    departments: any[]; plCats: any[]; plSubs: any[]
+  }>({ partners: [], banks: [], departments: [], plCats: [], plSubs: [] })
   const [lkReady, setLkReady] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     const load = async () => {
       const rowsOf = (p: any) => p.then((r: any) => r.data || [])
-      const [banks, plCats, plSubs, departments, deptSubs, expDescs, partners] = await Promise.all([
+      const [banks, plCats, plSubs, departments, partners] = await Promise.all([
         rowsOf(supabase.from('banks').select('id,name,company_id').order('name')),
         rowsOf(supabase.from('pl_categories').select('id,name,type,sort_order').order('sort_order')),
         rowsOf(supabase.from('pl_subcategories').select('id,name,category_id,sort_order').order('sort_order')),
         rowsOf(supabase.from('departments').select('id,name,sort_order').order('sort_order')),
-        rowsOf(supabase.from('dept_subcategories').select('id,name,department_id,sort_order').order('sort_order')),
-        rowsOf(supabase.from('expense_descriptions').select('id,name,dept_subcategory_id,sort_order').order('sort_order')),
         // Paged. The partner list is both the Partner picker's options and the
         // way free text reaches a partner name, and PostgREST's 1000-row cap
         // would have silently made both of those stop at the letter M.
@@ -164,7 +162,7 @@ export default function Transactions() {
           supabase.from('partners').select('id,name').order('name').order('id').range(from, to)),
       ])
       if (cancelled) return
-      setLk({ banks, plCats, plSubs, departments, deptSubs, expDescs, partners })
+      setLk({ banks, plCats, plSubs, departments, partners })
       setLkReady(true)
     }
     load()
@@ -437,19 +435,10 @@ export default function Transactions() {
   // Read off the lookup tables, not off the 50 rows on screen. The old P&L
   // dropdown listed the categories present in the current page, so a category
   // you could not see was a category you could not filter by.
-  const deptId = useMemo(
-    () => lk.departments.find(d => d.name === f.department)?.id || '', [lk.departments, f.department])
-  const deptSubOpts = useMemo(
-    () => lk.deptSubs.filter(x => x.department_id === deptId), [lk.deptSubs, deptId])
   const plCatId = useMemo(
     () => lk.plCats.find(c => c.name === f.plCategory)?.id || '', [lk.plCats, f.plCategory])
   const plSubOpts = useMemo(
     () => lk.plSubs.filter(x => x.category_id === plCatId), [lk.plSubs, plCatId])
-  // Its own dropdown, and deliberately not narrowed by the department above
-  // it: a row whose description and department disagree is exactly the row
-  // this filter is used to find.
-  const expDescOpts = useMemo(
-    () => Array.from(new Set(lk.expDescs.map(d => d.name).filter(Boolean))).sort(), [lk.expDescs])
   const bankOpts = useMemo(
     () => (f.companyId ? lk.banks.filter(b => b.company_id === f.companyId) : lk.banks), [lk.banks, f.companyId])
   const plCatOpts = useMemo(() => {
@@ -463,11 +452,8 @@ export default function Transactions() {
   // over whatever array it is handed.
   const partnerOpts = useMemo<SelectOption[]>(
     () => lk.partners.map(p => ({ value: p.id, label: p.name || '' })), [lk.partners])
-  const expDescSelOpts = useMemo<SelectOption[]>(() => nameOpts(expDescOpts), [expDescOpts])
   const departmentOpts = useMemo<SelectOption[]>(
     () => nameOpts(lk.departments.map(d => d.name)), [lk.departments])
-  const deptSubSelOpts = useMemo<SelectOption[]>(
-    () => nameOpts(deptSubOpts.map(d => d.name)), [deptSubOpts])
   const plCatSelOpts = useMemo<SelectOption[]>(() => nameOpts(plCatOpts), [plCatOpts])
   const plSubSelOpts = useMemo<SelectOption[]>(
     () => nameOpts(plSubOpts.map(x => x.name)), [plSubOpts])
@@ -508,7 +494,7 @@ export default function Transactions() {
     </select>
   )
   // The same shape as `picker`, for the lists too long to scan: partner,
-  // expense description, department, dept sub-category, P&L category and P&L
+  // department, P&L category and P&L
   // sub-category. The short ones above — company, currency, status,
   // direction, type, the date preset — stay native `<select>`s: they are
   // three to five options and a text box over them would be noise.
@@ -536,14 +522,8 @@ export default function Transactions() {
     <>
       {searchPicker(f.projectId, v => ({ projectId: v }), 'Svi projekti',
         projectSelOpts, { maxWidth: '210px' })}
-      {searchPicker(f.expenseDescription, v => ({ expenseDescription: v }), 'Svi opisi troškova',
-        expDescSelOpts, { maxWidth: '210px' })}
-      {searchPicker(f.department, v => ({ department: v, deptSubcategory: '' }), 'Svi sektori',
+      {searchPicker(f.department, v => ({ department: v }), 'Svi sektori',
         departmentOpts)}
-      {searchPicker(f.deptSubcategory, v => ({ deptSubcategory: v }),
-        deptId ? 'Svi podsektori' : 'Podsektor',
-        deptSubSelOpts,
-        !deptId || deptSubOpts.length === 0 ? { opacity: 0.45 } : undefined)}
       {searchPicker(f.plCategory, v => ({ plCategory: v, plSubcategory: '' }),
         plCategoryColumn(activeTab, f) === 'revenue_stream' ? 'Sve vrste prihoda' : 'Sve P&L kategorije',
         plCatSelOpts)}

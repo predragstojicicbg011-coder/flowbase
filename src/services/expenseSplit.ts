@@ -41,8 +41,6 @@ export interface SplitLine {
   pl_category: string
   pl_subcategory: string
   department: string
-  dept_subcategory: string
-  expense_description: string
   /**
    * The project this line belongs to; null is company overhead. A split
    * document's own project_id is null — the lines carry the projects.
@@ -74,7 +72,7 @@ export function emptyLine(key: string): SplitLine {
     key,
     amount: null,
     pl_category: '', pl_subcategory: '',
-    department: '', dept_subcategory: '', expense_description: '',
+    department: '',
     project_id: null, cf_type: '',
     note: '',
   }
@@ -184,8 +182,6 @@ export interface SplitRow {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
   project_id: string | null
   cf_type: string | null
   note: string | null
@@ -236,8 +232,6 @@ export function rowsFor(parent: SplitParent, lines: SplitLine[]): SplitRow[] {
       pl_category: l.pl_category.trim() || null,
       pl_subcategory: l.pl_subcategory.trim() || null,
       department: l.department.trim() || null,
-      dept_subcategory: l.dept_subcategory.trim() || null,
-      expense_description: l.expense_description.trim() || null,
       project_id: l.project_id || null,
       cf_type: l.cf_type || null,
       note: l.note.trim() || null,
@@ -256,8 +250,6 @@ export function linesFrom(rows: SplitRow[], keyOf: (n: number) => string): Split
       pl_category: r.pl_category || '',
       pl_subcategory: r.pl_subcategory || '',
       department: r.department || '',
-      dept_subcategory: r.dept_subcategory || '',
-      expense_description: r.expense_description || '',
       project_id: r.project_id || null,
       cf_type: r.cf_type || '',
       note: r.note || '',
@@ -266,9 +258,9 @@ export function linesFrom(rows: SplitRow[], keyOf: (n: number) => string): Split
 
 // ── A line is a script and an amount ────────────────────────────────────────
 //
-// Six classification fields per line, three lines, is eighteen dropdowns
+// Four classification fields per line, three lines, is twelve dropdowns
 // on a form whose whole point was to be unobtrusive. A quick-fill script
-// already carries all six and is the thing people actually think in — "this
+// already carries them all and is the thing people actually think in — "this
 // half is Figma, that half is the laptop" — so a line is a script and a
 // figure, and the classification comes along for the ride.
 //
@@ -283,8 +275,6 @@ export interface ScriptLike {
   pl_category: string
   pl_subcategory: string
   department: string
-  dept_subcategory: string
-  expense_description: string
   cf_type: string
 }
 
@@ -299,8 +289,6 @@ export function applyScript(line: SplitLine, script: ScriptLike): SplitLine {
     pl_category: script.pl_category || '',
     pl_subcategory: script.pl_subcategory || '',
     department: script.department || '',
-    dept_subcategory: script.dept_subcategory || '',
-    expense_description: script.expense_description || '',
     cf_type: script.cf_type || line.cf_type,
   }
 }
@@ -317,9 +305,7 @@ export function scriptMatching(line: SplitLine, scripts: ScriptLike[]): ScriptLi
   return scripts.find(s =>
     (s.pl_category || '') === line.pl_category
     && (s.pl_subcategory || '') === line.pl_subcategory
-    && (s.department || '') === line.department
-    && (s.dept_subcategory || '') === line.dept_subcategory
-    && (s.expense_description || '') === line.expense_description) ?? null
+    && (s.department || '') === line.department) ?? null
 }
 
 
@@ -346,8 +332,6 @@ export interface ParentClassification {
   pl_category: string
   pl_subcategory: string
   department: string
-  dept_subcategory: string
-  expense_description: string
 }
 
 /**
@@ -363,8 +347,6 @@ export function classificationFromSplit(lines: SplitLine[]): ParentClassificatio
     pl_category: top.pl_category,
     pl_subcategory: top.pl_subcategory,
     department: top.department,
-    dept_subcategory: top.dept_subcategory,
-    expense_description: top.expense_description,
   }
 }
 

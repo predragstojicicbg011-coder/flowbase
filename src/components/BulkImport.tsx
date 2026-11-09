@@ -34,7 +34,6 @@ import {
   fetchScripts, saveScript, removeScript, orderedForDifference, findCurrencyDifference,
 } from '../services/quickFillStore'
 import { formatMoney, toOwn, toRsd } from '../services/allocationDisplay'
-import { sameName } from '../services/lookupNames'
 import SplitEditor from './SplitEditor'
 import ProjectSelect from './ProjectSelect'
 import { projectIdFromInput, projectIdToInput } from '../services/projects'
@@ -136,9 +135,6 @@ interface ImportRow {
   override_pl_subcategory_name: string
   override_department_id: string
   override_department_name: string
-  override_dept_subcategory_id: string
-  override_dept_subcategory_name: string
-  override_expense_description: string
   override_revenue_stream: string
   /** The line's project: an id, or '' for company overhead. '' while split. */
   override_project_id: string
@@ -463,8 +459,7 @@ function makeImportRow(parsed: ParsedRow): ImportRow {
     override_pl_category_id: '', override_pl_category_name: '',
     override_pl_subcategory_id: '', override_pl_subcategory_name: '',
     override_department_id: '', override_department_name: '',
-    override_dept_subcategory_id: '', override_dept_subcategory_name: '',
-    override_expense_description: '', override_revenue_stream: '',
+    override_revenue_stream: '',
     override_project_id: '',
     override_cf_type: '',
     override_cf_frequency: 'monthly',
@@ -544,8 +539,6 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
   const [plCategories, setPlCategories] = useState<any[]>([])
   const [plSubcategories, setPlSubcategories] = useState<any[]>([])
   const [departments, setDepartments] = useState<any[]>([])
-  const [deptSubcategories, setDeptSubcategories] = useState<any[]>([])
-  const [expenseDescriptions, setExpenseDescriptions] = useState<any[]>([])
   const [partnerAccounts, setPartnerAccounts] = useState<any[]>([])
   const [credits, setCredits] = useState<any[]>([])
   const [bulkInstallments, setBulkInstallments] = useState<Record<string, any[]>>({})
@@ -558,8 +551,6 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
     pl_category: string
     pl_subcategory: string
     department: string
-    dept_subcategory: string
-    expense_description: string
     cf_type: string
   }
   // The starter set that used to live here is gone with the localStorage
@@ -592,22 +583,20 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
   const [qfEditing, setQfEditing] = useState<QuickFillScript | null>(null)
   const [qfSearch, setQfSearch] = useState('')
   const [qfOpen, setQfOpen] = useState<string | null>(null)
-  const EMPTY_SCRIPT: QuickFillScript = { id: '', name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '', dept_subcategory: '', expense_description: '', cf_type: 'recurring' }
+  const EMPTY_SCRIPT: QuickFillScript = { id: '', name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '', cf_type: 'recurring' }
 
   useEffect(() => {
     const load = async () => {
       const [
         { data: bnk }, part,
         { data: plCat }, { data: plSub }, { data: dept },
-        { data: deptSub }, { data: expDesc }, { data: pacc },
+        { data: pacc },
       ] = await Promise.all([
         supabase.from('banks').select('*').order('name'),
         fetchAllPartners(supabase),
         supabase.from('pl_categories').select('id,name,sort_order').order('sort_order'),
         supabase.from('pl_subcategories').select('id,name,category_id,sort_order').order('sort_order'),
         supabase.from('departments').select('id,name,sort_order').order('sort_order'),
-        supabase.from('dept_subcategories').select('id,name,department_id,sort_order').order('sort_order'),
-        supabase.from('expense_descriptions').select('id,name,dept_subcategory_id,sort_order').order('sort_order'),
         supabase.from('partner_accounts').select('id,partner_id,account_number,bank_name,is_primary').order('is_primary', { ascending: false }).range(0, 999),
       ])
       if (bnk) setAllBanks(bnk)
@@ -615,8 +604,6 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
       if (plCat) setPlCategories(plCat)
       if (plSub) setPlSubcategories(plSub)
       if (dept) setDepartments(dept)
-      if (deptSub) setDeptSubcategories(deptSub)
-      if (expDesc) setExpenseDescriptions(expDesc)
       if (pacc) setPartnerAccounts(pacc)
       const { data: creds } = await supabase
         .from('credits').select('id,name,bank,rate_description,currency')
@@ -719,8 +706,6 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
   const fxScripts = useMemo(() => orderedForDifference(quickFillScripts), [quickFillScripts])
 
   const getPlSubs = (catId: string) => plSubcategories.filter(s => s.category_id === catId)
-  const getDeptSubs = (deptId: string) => deptSubcategories.filter(s => s.department_id === deptId)
-  const getExpDescs = (subId: string) => expenseDescriptions.filter(e => e.dept_subcategory_id === subId)
 
   // Normalize Serbian bank account numbers for comparison.
   // Handles NBS format (160-123456-78) and izvod format (160-000000012345678).
@@ -964,7 +949,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
 
     // The partners' earlier lines and bills, newest first.
     const partnerIds = [...new Set(withPartners.map(r => r.override_partner_id).filter(Boolean))]
-    const HISTORY = 'id, partner_id, pl_category, pl_subcategory, department, dept_subcategory, expense_description, revenue_stream, project_id'
+    const HISTORY = 'id, partner_id, pl_category, pl_subcategory, department, revenue_stream, project_id'
     let pastLines: any[] = []
     let pastBills: any[] = []
     let splitIds = new Set<string>()
@@ -993,8 +978,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
 
     const asBooking = (r: any, date: string): PastBooking => ({
       date, pl_category: r.pl_category ?? null, pl_subcategory: r.pl_subcategory ?? null,
-      department: r.department ?? null, dept_subcategory: r.dept_subcategory ?? null,
-      expense_description: r.expense_description ?? null, revenue_stream: r.revenue_stream ?? null,
+      department: r.department ?? null, revenue_stream: r.revenue_stream ?? null,
       project_id: r.project_id ?? null, split: splitIds.has(r.id),
     })
     const linesOf = (partnerId: string, subtype: string) => pastLines
@@ -1043,7 +1027,6 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
       const cat = plCategories.find(x => x.name === f.pl_category)
       const sub = plSubcategories.find(x => x.name === f.pl_subcategory && x.category_id === cat?.id)
       const dept = departments.find(x => x.name === f.department)
-      const dsub = deptSubcategories.find(x => x.name === f.dept_subcategory && x.department_id === dept?.id)
       const what = fromLines
         ? (c.count === 1 ? 'Kao prethodno plaćanje' : `Kao prethodnih ${c.count} plaćanja`)
         : (c.count === 1 ? 'Kao prethodna faktura partnera' : `Kao prethodnih ${c.count} faktura partnera`)
@@ -1060,8 +1043,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
         override_pl_category_id: cat?.id || '', override_pl_category_name: f.pl_category || '',
         override_pl_subcategory_id: sub?.id || '', override_pl_subcategory_name: f.pl_subcategory || '',
         override_department_id: dept?.id || '', override_department_name: f.department || '',
-        override_dept_subcategory_id: dsub?.id || '', override_dept_subcategory_name: f.dept_subcategory || '',
-        override_expense_description: f.expense_description || '', override_revenue_stream: f.revenue_stream || '',
+        override_revenue_stream: f.revenue_stream || '',
         override_project_id: f.project_id || '',
         recognition: { sure, label },
       }
@@ -1266,7 +1248,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
       const { data: newTx, error: txErr } = await supabase.from('transactions').insert({
         import_hash: importHash, import_batch_id: importBatchId,
         company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), statement_number: p.statement_number || null, type: row.override_tx_type, tx_subtype: shape.tx_subtype, is_advance: shape.is_advance, payment_method: row.override_payment_method || null, currency: p.currency, amount, ...rowBook, pl_impact: shape.pl_impact,
-        pl_category: isDirectWithPL ? (row.override_pl_category_name || null) : null, pl_subcategory: isDirectWithPL ? (row.override_pl_subcategory_name || null) : null, department: isDirectWithPL ? (row.override_department_name || null) : null, dept_subcategory: isDirectWithPL ? (row.override_dept_subcategory_name || null) : null, expense_description: isDirectWithPL ? (row.override_expense_description || null) : null, revenue_stream: isDirectWithPL ? (row.override_revenue_stream || null) : null,
+        pl_category: isDirectWithPL ? (row.override_pl_category_name || null) : null, pl_subcategory: isDirectWithPL ? (row.override_pl_subcategory_name || null) : null, department: isDirectWithPL ? (row.override_department_name || null) : null, dept_subcategory: null, expense_description: null, revenue_stream: isDirectWithPL ? (row.override_revenue_stream || null) : null,
         project_id: rowProjectId,
         cf_type: isDirectWithPL && row.override_tx_subtype === 'expense' ? (row.override_cf_type || null) : null, cf_frequency: row.override_cf_type === 'recurring' ? row.override_cf_frequency : null, cf_next_month_est: row.override_cf_type === 'recurring' ? (row.override_cf_next_month_est ? parseFloat(row.override_cf_next_month_est) : amount) : null,
         account_number: p.account_number || null, model: p.model || null, reference_number: p.reference_number || null, note: row.override_note || p.description || null, status: 'posted',
@@ -1578,8 +1560,6 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                   pl_category: fxScript.pl_category || null,
                   pl_subcategory: fxScript.pl_subcategory || null,
                   department: fxScript.department || null,
-                  dept_subcategory: fxScript.dept_subcategory || null,
-                  expense_description: fxScript.expense_description || null,
                   // On the bill's project: the difference is part of what that
                   // bill cost or earned.
                   project_id: inv.project_id ?? null,
@@ -1960,8 +1940,6 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                   const amount = isExpense ? p.debit : p.credit
                   const isExpanded = expandedRow === p.id
                   const plSubs = getPlSubs(row.override_pl_category_id)
-                  const deptSubs = getDeptSubs(row.override_department_id)
-                  const expDescs = getExpDescs(row.override_dept_subcategory_id)
                   const linkedInvoice = openInvoices.find(i => i.id === row.override_linked_invoice_id)
                   const typeBadge = getTxTypeBadge(row.override_tx_type)
                   const rowAccounts = partnerAccounts.filter((pa: any) => pa.partner_id === row.override_partner_id)
@@ -2170,7 +2148,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                             <div style={s.editField}>
                               <label style={s.editLbl}>Tip</label>
                               <select style={s.editSelect} value={row.override_tx_type}
-                                onChange={e => updateRow(p.id, { override_tx_type: e.target.value as any, override_pl_category_id: '', override_pl_category_name: '', override_pl_subcategory_id: '', override_pl_subcategory_name: '', override_department_id: '', override_department_name: '', override_dept_subcategory_id: '', override_dept_subcategory_name: '', override_expense_description: '' })}>
+                                onChange={e => updateRow(p.id, { override_tx_type: e.target.value as any, override_pl_category_id: '', override_pl_category_name: '', override_pl_subcategory_id: '', override_pl_subcategory_name: '', override_department_id: '', override_department_name: '' })}>
                                 <option value="direct">⚡ Direktna (utiče na P&L)</option>
                                 <option value="invoice_payment">💳 Plaćanje fakture (samo novac)</option>
                                 <option value="passthrough">🔄 Prolazna stavka (tranzit)</option>
@@ -2497,14 +2475,12 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                                       override_pl_category_name: from.pl_category,
                                       override_pl_subcategory_name: from.pl_subcategory,
                                       override_department_name: from.department,
-                                      override_dept_subcategory_name: from.dept_subcategory,
-                                      override_expense_description: from.expense_description,
                                     } : {}),
                                   })
                                 }}
                                 companyId={company || null}
                                 scripts={quickFillScripts as any}
-                                classification={{ plCategories, plSubcategories, departments, deptSubcategories, expenseDescriptions }}
+                                classification={{ plCategories, plSubcategories, departments }}
                                 client={supabase}
                                 onScriptsChanged={() => { fetchScripts(supabase).then(setQuickFillScripts as any) }}
                                 hint="Jedna stavka izvoda, dva ili više troškova — svaki sa svojom klasifikacijom."
@@ -2558,12 +2534,6 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                                                   const matchCat = plCategories.find(c => c.name === sc.pl_category)
                                                   const matchDept = departments.find(d => d.name === sc.department)
                                                   const matchSub = plSubcategories.find(sub => sub.name === sc.pl_subcategory && sub.category_id === matchCat?.id)
-                                                  // `sameName`, not `===`. An exact match falls through to the
-                                                  // script's own text, so a script holding `Salary Expenses
-                                                  // Domestic` wrote that literal string onto every transaction it
-                                                  // filled — beside a lookup table that only ever held `Salary
-                                                  // expenses domestic`. That is where the two spellings came from.
-                                                  const matchDeptSub = deptSubcategories.find(sub => sameName(sub.name, sc.dept_subcategory) && sub.department_id === matchDept?.id)
                                                   updateRow(p.id, {
                                                     override_pl_category_id: matchCat?.id || '',
                                                     override_pl_category_name: matchCat?.name || sc.pl_category,
@@ -2571,16 +2541,13 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                                                     override_pl_subcategory_name: matchSub?.name || sc.pl_subcategory,
                                                     override_department_id: matchDept?.id || '',
                                                     override_department_name: matchDept?.name || sc.department,
-                                                    override_dept_subcategory_id: matchDeptSub?.id || '',
-                                                    override_dept_subcategory_name: matchDeptSub?.name || sc.dept_subcategory,
-                                                    override_expense_description: sc.expense_description,
                                                     override_cf_type: sc.cf_type,
                                                     status: 'accepted' as RowStatus,
                                                   })
                                                   setQfSearch(''); setQfOpen(null)
                                                 }}>
                                                 <span style={{ fontSize: '12px', fontWeight: '500', color: '#00D47E' }}>{sc.icon} {sc.name}</span>
-                                                <span style={{ fontSize: '10px', color: '#7A9BB8' }}>{sc.pl_category}{sc.dept_subcategory ? ` · ${sc.dept_subcategory}` : ''}</span>
+                                                <span style={{ fontSize: '10px', color: '#7A9BB8' }}>{sc.pl_category}{sc.department ? ` · ${sc.department}` : ''}</span>
                                               </div>
                                             ))
                                       })()}
@@ -2633,46 +2600,13 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                                   <label style={s.editLbl}>Sektor</label>
                                   <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                   <SearchableSelect value={row.override_department_id}
-                                    onChange={v => { const d = departments.find(x => x.id === v); updateRow(p.id, { override_department_id: v, override_department_name: d?.name || '', override_dept_subcategory_id: '', override_dept_subcategory_name: '', override_expense_description: '' }) }}
+                                    onChange={v => { const d = departments.find(x => x.id === v); updateRow(p.id, { override_department_id: v, override_department_name: d?.name || '' }) }}
                                     options={departments.map(d => ({ value: d.id, label: d.name }))}
                                     allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                                     style={pickerChrome} />
                                   <InlineCategoryAdd table="departments"
                                     currentCount={departments.length}
-                                    onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); updateRow(p.id, { override_department_id: item.id, override_department_name: item.name, override_dept_subcategory_id: '', override_dept_subcategory_name: '', override_expense_description: '' }) }} />
-                                  </div>
-                                </div>
-                                <div style={s.editField}>
-                                  <label style={s.editLbl}>Podsektor</label>
-                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                                  <SearchableSelect value={row.override_dept_subcategory_id}
-                                    onChange={v => { const sub = deptSubcategories.find(x => x.id === v); updateRow(p.id, { override_dept_subcategory_id: v, override_dept_subcategory_name: sub?.name || '', override_expense_description: '' }) }}
-                                    options={deptSubs.map(sub => ({ value: sub.id, label: sub.name }))}
-                                    allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
-                                    disabled={!row.override_department_id || deptSubs.length === 0}
-                                    style={pickerChrome} />
-                                  <InlineCategoryAdd table="dept_subcategories" parentId={row.override_department_id} parentField="department_id"
-                                    currentCount={deptSubs.length} disabled={!row.override_department_id}
-                                    onAdded={item => { setDeptSubcategories(prev => [...prev, { ...item, department_id: row.override_department_id, sort_order: prev.length + 1 }]); updateRow(p.id, { override_dept_subcategory_id: item.id, override_dept_subcategory_name: item.name, override_expense_description: '' }) }} />
-                                  </div>
-                                </div>
-                              </div>
-                              <div style={{ marginTop: '8px' }}>
-                                <div style={s.editField}>
-                                  <label style={s.editLbl}>Opis troška</label>
-                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                                    {expDescs.length > 0 ? (
-                                      <SearchableSelect value={row.override_expense_description}
-                                        onChange={v => updateRow(p.id, { override_expense_description: v })}
-                                        options={expDescs.map(d => ({ value: d.name, label: d.name }))}
-                                        allLabel="Izaberite opis…" searchPlaceholder="Pretraga opisa…"
-                                        style={{ ...pickerChrome, flex: 1 }} />
-                                    ) : (
-                                      <input style={{ ...s.editInput, flex: 1 }} value={row.override_expense_description} onChange={e => updateRow(p.id, { override_expense_description: e.target.value })} placeholder="npr. Telekom, AWS, zakup…" />
-                                    )}
-                                    <InlineCategoryAdd table="expense_descriptions" parentId={row.override_dept_subcategory_id} parentField="dept_subcategory_id"
-                                      currentCount={expDescs.length} disabled={!row.override_dept_subcategory_id}
-                                      onAdded={item => { setExpenseDescriptions(prev => [...prev, { ...item, dept_subcategory_id: row.override_dept_subcategory_id, sort_order: prev.length + 1 }]); updateRow(p.id, { override_expense_description: item.name }) }} />
+                                    onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); updateRow(p.id, { override_department_id: item.id, override_department_name: item.name }) }} />
                                   </div>
                                 </div>
                               </div>
@@ -2864,39 +2798,14 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                       </select>
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
                     <div>
                       <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Sektor</div>
-                      <select style={s.editSelect} value={qfEditing.department} onChange={e => setQfEditing({ ...qfEditing, department: e.target.value, dept_subcategory: '', expense_description: '' })}>
+                      <select style={s.editSelect} value={qfEditing.department} onChange={e => setQfEditing({ ...qfEditing, department: e.target.value })}>
                         <option value="">Izaberite…</option>
                         {departments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Podsektor</div>
-                      <select style={s.editSelect} value={qfEditing.dept_subcategory} onChange={e => setQfEditing({ ...qfEditing, dept_subcategory: e.target.value, expense_description: '' })}>
-                        <option value="">Izaberite…</option>
-                        {deptSubcategories.filter(sub => { const dept = departments.find(d => d.name === qfEditing.department); return dept && sub.department_id === dept.id }).map(sub => <option key={sub.id} value={sub.name}>{sub.name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Opis troška</div>
-                    {(() => {
-                      // Match dept_subcategory by BOTH name AND parent department to avoid cross-dept collisions
-                      const parentDept = departments.find(d => d.name === qfEditing.department)
-                      const deptSub = deptSubcategories.find(sub =>
-                        sub.name === qfEditing.dept_subcategory &&
-                        sub.department_id === parentDept?.id
-                      )
-                      const descs = deptSub ? expenseDescriptions.filter(ed => ed.dept_subcategory_id === deptSub.id) : []
-                      return descs.length > 0
-                        ? <select style={s.editSelect} value={qfEditing.expense_description} onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })}>
-                            <option value="">Izaberite…</option>
-                            {descs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-                          </select>
-                        : <input style={s.editInput} value={qfEditing.expense_description} onChange={e => setQfEditing({ ...qfEditing, expense_description: e.target.value })} placeholder="npr. AWS, Telekom…" />
-                    })()}
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
                     <div>
@@ -2934,8 +2843,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6' }}>{sc.name}</div>
                         <div style={{ fontSize: '10px', color: '#7A9BB8', marginTop: '2px' }}>
-                          {sc.pl_category}{sc.pl_subcategory ? ` › ${sc.pl_subcategory}` : ''} · {sc.department}{sc.dept_subcategory ? ` › ${sc.dept_subcategory}` : ''}
-                          {sc.expense_description ? ` · ${sc.expense_description}` : ''}
+                          {sc.pl_category}{sc.pl_subcategory ? ` › ${sc.pl_subcategory}` : ''} · {sc.department}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: '6px' }}>

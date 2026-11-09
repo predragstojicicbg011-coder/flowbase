@@ -115,8 +115,7 @@ const INBOX_COLUMNS = [
 
 const LEDGER_COLUMNS = [
   'id', 'invoice_number', 'invoice_date', 'amount', 'currency', 'partner_id',
-  'pl_category', 'pl_subcategory', 'department', 'dept_subcategory',
-  'expense_description', 'cf_type',
+  'pl_category', 'pl_subcategory', 'department', 'cf_type',
 ].join(', ')
 
 const STALE_AFTER_MS = 2 * 60 * 60 * 1000
@@ -825,7 +824,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
         {dup && <div style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>{dup.text}</div>}
         {proposal && (
           <div style={{ ...s.flag, color: DIALOG.dim, background: DIALOG.raised }}>
-            <span>Predlog: {[proposal.pl_category, proposal.pl_subcategory, proposal.department, proposal.dept_subcategory, proposal.expense_description].filter(Boolean).join(' › ')}. </span>
+            <span>Predlog: {[proposal.pl_category, proposal.pl_subcategory, proposal.department].filter(Boolean).join(' › ')}. </span>
             <span style={{ color: proposal.basis === 'mixed' ? DIALOG.amber : DIALOG.dim }}>{proposal.reason}</span>
           </div>
         )}

@@ -121,8 +121,6 @@ export interface PastBooking {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
   revenue_stream: string | null
   project_id: string | null
   /** Booked as several costs: the split itself is not copied. */
@@ -139,7 +137,9 @@ export interface HistoryClassification {
 }
 
 const HISTORY_DEPTH = 5
-const keyOf = (b: PastBooking) => [b.pl_category, b.pl_subcategory, b.department, b.dept_subcategory, b.revenue_stream, b.project_id].join('|')
+// Sub-sector and cost description are not part of a booking any more: two
+// lines alike in category, sector, revenue stream and project ARE alike.
+const keyOf = (b: PastBooking) => [b.pl_category, b.pl_subcategory, b.department, b.revenue_stream, b.project_id].join('|')
 
 /** Does the partner have a bill still open in the line's direction, in any currency? */
 export function hasOpenBill(partnerId: string | null, isExpense: boolean, bills: OpenBill[]): boolean {
@@ -153,6 +153,12 @@ export function classifyFromHistory(history: PastBooking[]): HistoryClassificati
   if (last.length === 0) return null
   const [latest] = last
   const alike = last.every(b => keyOf(b) === keyOf(latest))
-  const { date: _d, split: _s, ...fields } = latest
+  // Picked by name rather than spread: a row read with more columns than the
+  // booking has (an old sub-sector, a cost description) must not carry them.
+  const fields = {
+    pl_category: latest.pl_category, pl_subcategory: latest.pl_subcategory,
+    department: latest.department, revenue_stream: latest.revenue_stream,
+    project_id: latest.project_id,
+  }
   return { fields, sure: alike && !latest.split, count: last.length, split: latest.split }
 }

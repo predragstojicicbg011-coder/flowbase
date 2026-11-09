@@ -69,8 +69,8 @@ describe('the open bill a statement line pays', () => {
 })
 
 const past = (date: string, over: Partial<PastBooking> = {}): PastBooking => ({
-  date, pl_category: 'Gorivo', pl_subcategory: null, department: 'Gradilište', dept_subcategory: null,
-  expense_description: null, revenue_stream: null, project_id: null, split: false, ...over,
+  date, pl_category: 'Gorivo', pl_subcategory: null, department: 'Gradilište',
+  revenue_stream: null, project_id: null, split: false, ...over,
 })
 
 describe('a line booked the way the partner was booked before', () => {
@@ -86,6 +86,16 @@ describe('a line booked the way the partner was booked before', () => {
   it('as the latest, to be checked, when they differ', () => {
     const c = classifyFromHistory([past('2026-10-01', { department: 'Uprava' }), past('2026-09-01')])
     expect(c).toMatchObject({ sure: false, count: 2, fields: { department: 'Uprava' } })
+  })
+
+  it('reads lines that differ only in an old sub-sector or description as alike', () => {
+    const c = classifyFromHistory([
+      { ...past('2026-10-01'), dept_subcategory: 'A', expense_description: 'x' } as PastBooking,
+      { ...past('2026-09-01'), dept_subcategory: 'B', expense_description: 'y' } as PastBooking,
+    ])
+    expect(c).toMatchObject({ sure: true, count: 2 })
+    expect(c!.fields).not.toHaveProperty('dept_subcategory')
+    expect(c!.fields).not.toHaveProperty('expense_description')
   })
 
   it('looks at the last five only', () => {

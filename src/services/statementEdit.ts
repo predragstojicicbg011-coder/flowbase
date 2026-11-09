@@ -53,8 +53,6 @@ export interface RowSeed {
   pl_category_name: string
   pl_subcategory_name: string
   department_name: string
-  dept_subcategory_name: string
-  expense_description: string
   revenue_stream: string
   /**
    * The row's project as the grid holds it: a project id, or '' for company
@@ -104,8 +102,6 @@ export function txToSeed(tx: any, partnerName = ''): RowSeed {
     pl_category_name: str(tx.pl_category),
     pl_subcategory_name: str(tx.pl_subcategory),
     department_name: str(tx.department),
-    dept_subcategory_name: str(tx.dept_subcategory),
-    expense_description: str(tx.expense_description),
     revenue_stream: str(tx.revenue_stream),
     project_id: projectIdToInput(tx.project_id),
     cf_type: str(tx.cf_type),
@@ -142,8 +138,7 @@ export function passthroughToSeed(pt: any, partnerName = ''): RowSeed {
     pt_period: str(pt.period_month) || str(pt.transaction_date).slice(0, 7),
     linked_invoice_id: '',
     pl_category_name: '', pl_subcategory_name: '',
-    department_name: '', dept_subcategory_name: '',
-    expense_description: '', revenue_stream: '',
+    department_name: '', revenue_stream: '',
     project_id: '',
     cf_type: '', cf_frequency: 'monthly', cf_next_month_est: '',
     note: '',
