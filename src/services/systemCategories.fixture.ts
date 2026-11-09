@@ -5,7 +5,7 @@
 import type { Classification, SystemCategoryMap } from './systemCategories'
 
 const pl = (pl_category: string, pl_subcategory: string): Classification => ({
-  pl_category, pl_subcategory, department: null, dept_subcategory: null, expense_description: null,
+  pl_category, pl_subcategory, department: null,
 })
 
 export const TEST_SYSTEM_CATEGORIES: SystemCategoryMap = {
@@ -14,27 +14,23 @@ export const TEST_SYSTEM_CATEGORIES: SystemCategoryMap = {
   payroll_employee_contributions: pl('Zarade', 'Doprinosi na teret zaposlenog'),
   payroll_employer_contributions: pl('Zarade', 'Doprinosi na teret poslodavca'),
   payroll_other_income: pl('Zarade', 'Naknade i ostala primanja'),
-  payroll_salary_dept_subcategory: {
-    pl_category: null, pl_subcategory: null, department: null,
-    dept_subcategory: 'Zarade u zemlji', expense_description: null,
-  },
   payroll_retained_fallback: pl('Zarade', 'Naknade i ostala primanja'),
   payroll_fitpass: {
     pl_category: 'Zarade', pl_subcategory: 'FitPass',
-    department: 'Opšti troškovi', dept_subcategory: 'Troškovi zaposlenih', expense_description: 'FitPass',
+    department: 'Opšti troškovi',
   },
   payroll_health_insurance: pl('Zarade', 'Privatno zdravstveno osiguranje'),
   payroll_penalty: {
     pl_category: 'Opšti troškovi poslovanja', pl_subcategory: 'Kazne i penali',
-    department: 'Opšti troškovi', dept_subcategory: 'Opšti troškovi', expense_description: 'Kazne i penali',
+    department: 'Opšti troškovi',
   },
   credit_principal: {
     pl_category: 'Krediti', pl_subcategory: 'Otplata glavnice',
-    department: 'Krediti', dept_subcategory: 'Bankarski krediti', expense_description: 'Glavnica',
+    department: 'Krediti',
   },
   credit_interest: {
     pl_category: 'Krediti', pl_subcategory: 'Kamata na kredite',
-    department: 'Krediti', dept_subcategory: 'Bankarski krediti', expense_description: 'Kamata',
+    department: 'Krediti',
   },
   cashflow_banking: pl('Bankarski troškovi', ''),
   cashflow_taxes: pl('Porezi', ''),

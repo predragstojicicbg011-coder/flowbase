@@ -73,6 +73,11 @@ beforeEach(() => {
       // Set and valid.
       { id: 'x1', company_id: COMPANY, role: 'payroll_net_salary', pl_category: 'Zarade',
         pl_subcategory: 'Neto zarade', department: null, dept_subcategory: null, expense_description: null },
+      // An old mapping that still carries a sub-sector and a description: it
+      // keeps working, and the extra values are not asked for.
+      { id: 'x3', company_id: COMPANY, role: 'credit_interest', pl_category: 'Krediti',
+        pl_subcategory: 'Kamata', department: 'Finansije', dept_subcategory: 'Bankarski krediti',
+        expense_description: 'Kamata' },
       // Set, but to a name the owner has since renamed.
       { id: 'x2', company_id: COMPANY, role: 'cashflow_taxes', pl_category: 'Taxes',
         pl_subcategory: null, department: null, dept_subcategory: null, expense_description: null },
@@ -105,16 +110,23 @@ describe('Podešavanja → Sistemske kategorije', () => {
     expect(card('credit_principal').getByText('⚠ Nije podešeno')).toBeInTheDocument()
     expect(card('cashflow_taxes').getByText('⚠ Naziv više ne postoji')).toBeInTheDocument()
     expect(card('cashflow_taxes').getByRole('option', { name: 'Taxes (ne postoji)' })).toBeInTheDocument()
-    // Everything but the one valid role.
-    expect(screen.getByText(`${SYSTEM_ROLES.length - 1} kategorija još nije podešeno.`)).toBeInTheDocument()
+    // Everything but the two valid roles.
+    expect(card('credit_interest').getByText('Podešeno')).toBeInTheDocument()
+    expect(screen.getByText(`${SYSTEM_ROLES.length - 2} kategorija još nije podešeno.`)).toBeInTheDocument()
   })
 
   it('offers only the pickers the role fills', async () => {
     await show()
     expect(card('payroll_net_salary').getAllByRole('combobox')).toHaveLength(2)
-    expect(card('credit_principal').getAllByRole('combobox')).toHaveLength(5)
+    expect(card('credit_principal').getAllByRole('combobox')).toHaveLength(3)
     expect(card('cashflow_banking').getAllByRole('combobox')).toHaveLength(1)
-    expect(card('payroll_salary_dept_subcategory').getAllByRole('combobox')).toHaveLength(1)
+  })
+
+  it('asks for no sub-sector and no cost description anywhere', async () => {
+    await show()
+    expect(screen.queryByTestId('role-payroll_salary_dept_subcategory')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/— Podsektor$/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/— Opis troška$/)).not.toBeInTheDocument()
   })
 
   it('cascades, and saves the chosen names under the company and role', async () => {
@@ -131,8 +143,6 @@ describe('Podešavanja → Sistemske kategorije', () => {
     expect(subs).toEqual(['— izaberite —', 'Kamata', 'Otplata glavnice'])
     pick('P&L potkategorija', 'Otplata glavnice')
     pick('Sektor', 'Finansije')
-    pick('Podsektor', 'Bankarski krediti')
-    pick('Opis troška', 'Glavnica')
 
     fireEvent.click(c.getByText('Sačuvaj'))
     await waitFor(() => expect(mockUpserts).toHaveLength(1))
@@ -140,7 +150,7 @@ describe('Podešavanja → Sistemske kategorije', () => {
     expect(mockUpserts[0].payload).toMatchObject({
       company_id: COMPANY, role: 'credit_principal',
       pl_category: 'Krediti', pl_subcategory: 'Otplata glavnice',
-      department: 'Finansije', dept_subcategory: 'Bankarski krediti', expense_description: 'Glavnica',
+      department: 'Finansije', dept_subcategory: null, expense_description: null,
     })
     await waitFor(() => expect(card('credit_principal').getByText('Podešeno')).toBeInTheDocument())
     expect(screen.getByText('„Otplata glavnice kredita“ je sačuvana.')).toBeInTheDocument()
@@ -156,10 +166,10 @@ describe('Podešavanja → Sistemske kategorije', () => {
 
   it('refuses to save a role with a field left empty, and writes nothing', async () => {
     await show()
-    const c = card('credit_interest')
-    fireEvent.change(c.getByLabelText('Kamata na kredit — P&L kategorija'), { target: { value: 'Krediti' } })
+    const c = card('credit_principal')
+    fireEvent.change(c.getByLabelText('Otplata glavnice kredita — P&L kategorija'), { target: { value: 'Krediti' } })
     fireEvent.click(c.getByText('Sačuvaj'))
-    expect(await screen.findByText(/„Kamata na kredit“: izaberite p&l potkategorija, sektor, podsektor, opis troška\./)).toBeInTheDocument()
+    expect(await screen.findByText(/„Otplata glavnice kredita“: izaberite p&l potkategorija, sektor\./)).toBeInTheDocument()
     expect(mockUpserts).toHaveLength(0)
   })
 
@@ -176,21 +186,15 @@ describe('optionsFor', () => {
     categories: [{ id: 'c1', name: 'Zarade' }],
     subcategories: [{ id: 's1', name: 'Neto', category_id: 'c1' }],
     departments: [{ id: 'd1', name: 'A' }, { id: 'd2', name: 'B' }],
-    deptSubcategories: [
-      { id: 'x1', name: 'Plate', department_id: 'd1' },
-      { id: 'x2', name: 'Plate', department_id: 'd2' },
-      { id: 'x3', name: 'Ostalo', department_id: 'd2' },
-    ],
-    descriptions: [],
   }
 
-  it('offers every podsektor name, once, to a role that does not choose the sector', () => {
-    const def = roleDef('payroll_salary_dept_subcategory')
-    expect(optionsFor('dept_subcategory', EMPTY_CLASSIFICATION, st, def)).toEqual(['Ostalo', 'Plate'])
+  it('offers the sub-categories of the chosen category', () => {
+    const def = roleDef('credit_principal')
+    expect(optionsFor('pl_subcategory', { ...EMPTY_CLASSIFICATION, pl_category: 'Zarade' }, st, def)).toEqual(['Neto'])
   })
 
-  it('offers only the chosen sector\'s podsektori to a role that does', () => {
+  it('offers every sector', () => {
     const def = roleDef('credit_principal')
-    expect(optionsFor('dept_subcategory', { ...EMPTY_CLASSIFICATION, department: 'A' }, st, def)).toEqual(['Plate'])
+    expect(optionsFor('department', EMPTY_CLASSIFICATION, st, def)).toEqual(['A', 'B'])
   })
 })

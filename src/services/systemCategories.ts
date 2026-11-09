@@ -22,19 +22,18 @@
 //
 // Schema: supabase/migrations/20261008200000_system_categories.sql.
 
-export type ClassField =
-  | 'pl_category' | 'pl_subcategory' | 'department' | 'dept_subcategory' | 'expense_description'
+// Sub-sector (dept_subcategory) and cost description (expense_description)
+// are no longer part of a classification. The columns stay in the table and
+// an old row may still carry them; they are neither read nor required, and a
+// save clears them.
+export type ClassField = 'pl_category' | 'pl_subcategory' | 'department'
 
-export const CLASS_FIELDS: readonly ClassField[] = [
-  'pl_category', 'pl_subcategory', 'department', 'dept_subcategory', 'expense_description',
-]
+export const CLASS_FIELDS: readonly ClassField[] = ['pl_category', 'pl_subcategory', 'department']
 
 export const FIELD_LABEL: Readonly<Record<ClassField, string>> = {
   pl_category: 'P&L kategorija',
   pl_subcategory: 'P&L potkategorija',
   department: 'Sektor',
-  dept_subcategory: 'Podsektor',
-  expense_description: 'Opis troška',
 }
 
 /** A classification as transactions and invoices carry it. */
@@ -42,13 +41,10 @@ export interface Classification {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
 }
 
 export const EMPTY_CLASSIFICATION: Classification = {
   pl_category: null, pl_subcategory: null, department: null,
-  dept_subcategory: null, expense_description: null,
 }
 
 export type SystemRole =
@@ -57,7 +53,6 @@ export type SystemRole =
   | 'payroll_employee_contributions'
   | 'payroll_employer_contributions'
   | 'payroll_other_income'
-  | 'payroll_salary_dept_subcategory'
   | 'payroll_retained_fallback'
   | 'payroll_fitpass'
   | 'payroll_health_insurance'
@@ -93,7 +88,7 @@ export const SYSTEM_ROLES: readonly SystemRoleDef[] = [
   {
     role: 'payroll_net_salary', group: 'payroll', label: 'Neto zarade', fields: PL,
     description: 'Neto zarada svakog zaposlenog i obustave koje se prosleđuju trećem licu '
-      + '(npr. rata kredita). Sektor i podsektor dolaze iz raspodele zaposlenog.',
+      + '(npr. rata kredita). Sektor dolazi iz raspodele zaposlenog.',
   },
   {
     role: 'payroll_income_tax', group: 'payroll', label: 'Porez na zarade', fields: PL,
@@ -114,12 +109,6 @@ export const SYSTEM_ROLES: readonly SystemRoleDef[] = [
     role: 'payroll_other_income', group: 'payroll', label: 'Ostala primanja', fields: PL,
     description: 'Primanja isplaćena van zarade (nagrade, naknade). Pod sektorom zaposlenog, '
       + 'ali ne među neto zaradama.',
-  },
-  {
-    role: 'payroll_salary_dept_subcategory', group: 'payroll', label: 'Podsektor za zarade',
-    fields: ['dept_subcategory'],
-    description: 'Podsektor pod kojim se knjiže zarade kada raspodela zaposlenog ne navodi '
-      + 'svoj. Isti naziv treba da postoji pod svakim sektorom koji nosi zarade.',
   },
   {
     role: 'payroll_retained_fallback', group: 'payroll', label: 'Zadržane obustave (ostalo)', fields: PL,
@@ -257,6 +246,9 @@ export interface SystemCategoryRow extends Classification {
   id?: string
   company_id: string
   role: string
+  /** Old columns, still in the table. Never read; a save writes null. */
+  dept_subcategory?: string | null
+  expense_description?: string | null
 }
 
 const KNOWN = new Set<string>(SYSTEM_ROLES.map(r => r.role))
@@ -271,8 +263,6 @@ export function rowsToMap(rows: readonly SystemCategoryRow[], companyId?: string
       pl_category: r.pl_category ?? null,
       pl_subcategory: r.pl_subcategory ?? null,
       department: r.department ?? null,
-      dept_subcategory: r.dept_subcategory ?? null,
-      expense_description: r.expense_description ?? null,
     }
   }
   return map
@@ -289,7 +279,7 @@ export async function fetchSystemCategories(
   client: any, companyId?: string | null,
 ): Promise<SystemCategoryMap> {
   let q = client.from('system_categories')
-    .select('id, company_id, role, pl_category, pl_subcategory, department, dept_subcategory, expense_description')
+    .select('id, company_id, role, pl_category, pl_subcategory, department')
   if (companyId) q = q.eq('company_id', companyId)
   const { data, error } = await q
   if (error) throw new Error(`Sistemske kategorije nisu učitane: ${error.message}`)
@@ -298,13 +288,17 @@ export async function fetchSystemCategories(
 
 /**
  * Save one role. Only the role's own fields are written; the rest are
- * cleared, so a row never carries a value nobody can see in the settings tab.
+ * cleared, so a row never carries a value nobody can see in the settings tab
+ * — the old sub-sector and cost description columns included.
  */
 export async function saveSystemCategory(
   client: any, companyId: string, role: SystemRole, c: Partial<Classification>,
 ): Promise<void> {
   const fields = roleDef(role).fields
-  const row: SystemCategoryRow = { company_id: companyId, role, ...EMPTY_CLASSIFICATION }
+  const row: SystemCategoryRow = {
+    company_id: companyId, role, ...EMPTY_CLASSIFICATION,
+    dept_subcategory: null, expense_description: null,
+  }
   for (const f of fields) row[f] = filled(c[f]) ? (c[f] as string).trim() : null
   const { error } = await client.from('system_categories')
     .upsert({ ...row, updated_at: new Date().toISOString() }, { onConflict: 'company_id,role' })

@@ -147,7 +147,6 @@ describe('the principal heading of a mapping', () => {
     expect(principalHeadingOf({
       credit_principal: {
         pl_category: ' Finansiranje ', pl_subcategory: 'Glavnica', department: 'Uprava',
-        dept_subcategory: 'Krediti', expense_description: 'Rata',
       },
     })).toEqual({ pl_category: 'Finansiranje', pl_subcategory: 'Glavnica' })
   })
@@ -158,7 +157,6 @@ describe('the principal heading of a mapping', () => {
     expect(principalHeadingOf({
       credit_principal: {
         pl_category: '  ', pl_subcategory: 'Glavnica', department: null,
-        dept_subcategory: null, expense_description: null,
       },
     })).toBeNull()
   })
@@ -167,7 +165,6 @@ describe('the principal heading of a mapping', () => {
     expect(principalHeadingOf({
       credit_principal: {
         pl_category: 'Finansiranje', pl_subcategory: '', department: null,
-        dept_subcategory: null, expense_description: null,
       },
     })).toEqual({ pl_category: 'Finansiranje', pl_subcategory: null })
   })

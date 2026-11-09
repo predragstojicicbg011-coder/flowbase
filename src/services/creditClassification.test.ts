@@ -10,18 +10,15 @@ const { principal: CREDIT_PRINCIPAL, interest: CREDIT_INTEREST } = creditLegsFro
 const leg = (c: CreditClassification, amount: number): PlEntry => ({
   tx_type: 'expense', pl_date: '2026-08-31', amount_rsd: amount, amount_eur: null,
   pl_category: c.pl_category, pl_subcategory: c.pl_subcategory,
-  department: c.department, dept_subcategory: c.dept_subcategory,
-  expense_description: c.expense_description,
+  department: c.department,
 })
 
 describe('credit classification', () => {
-  it('reads both legs from the system categories, all five fields', () => {
+  it('reads both legs from the system categories: category, sub-category and sector', () => {
     expect(CREDIT_PRINCIPAL).toEqual({
       pl_category: 'Krediti',
       pl_subcategory: 'Otplata glavnice',
       department: 'Krediti',
-      dept_subcategory: 'Bankarski krediti',
-      expense_description: 'Glavnica',
     })
     expect(CREDIT_INTEREST.pl_subcategory).toBe('Kamata na kredite')
   })
@@ -43,7 +40,7 @@ describe('credit classification', () => {
 
   it('gives a reader null, not a throw, when they are unset', () => {
     expect(creditLegsOrNull({})).toBeNull()
-    expect(creditLegsOrNull(TEST_SYSTEM_CATEGORIES)!.interest.expense_description).toBe('Kamata')
+    expect(creditLegsOrNull(TEST_SYSTEM_CATEGORIES)!.interest.pl_subcategory).toBe('Kamata na kredite')
   })
 
   it('leaves no credit row under Unassigned in either branch', () => {
@@ -62,7 +59,7 @@ describe('credit classification', () => {
     // payments produced 200 leaves and the report could not group them.
     const rows = Array.from({ length: 12 }, (_, i) =>
       ({ ...leg(CREDIT_PRINCIPAL, 1800 + i), pl_date: `2026-${String(i + 1).padStart(2, '0')}-28` }))
-    const leaves = buildTree(rows, 'department', 'RSD').flatMap(n => n.children).flatMap(n => n.children)
+    const leaves = buildTree(rows, 'pl', 'RSD').flatMap(n => n.children)
     expect(leaves).toHaveLength(1)
     expect(leaves[0].count).toBe(12)
   })

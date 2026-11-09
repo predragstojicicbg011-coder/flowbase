@@ -351,7 +351,7 @@ export default function Dashboard() {
       // different headings. A failed read leaves every company unmapped —
       // its expenses whole and named under the card — never guessed.
       const { data: roleRows } = await supabase.from('system_categories')
-        .select('company_id,role,pl_category,pl_subcategory,department,dept_subcategory,expense_description')
+        .select('company_id,role,pl_category,pl_subcategory,department')
         .in('role', ['credit_principal', 'credit_interest'])
       const inScope = companyId ? [companyId] : companies.map(c => c.id)
       const principalByCompany: Record<string, PrincipalHeading | null> = {}

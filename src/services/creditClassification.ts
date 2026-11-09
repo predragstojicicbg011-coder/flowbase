@@ -10,8 +10,8 @@
 // had three copies of the same object literal, which is how they came to differ
 // from what the business actually wanted.
 //
-// Principal and interest are separate lines, each with all five fields, so
-// both branches of the expense report place them. WHICH headings is the
+// Principal and interest are separate lines, each with category, sub-category
+// and sector, so both branches of the expense report place them. WHICH headings is the
 // owner's choice: the system categories `credit_principal` and
 // `credit_interest` (services/systemCategories.ts), set in Podešavanja →
 // Sistemske kategorije. Mintflow's 'Loans/Credits/Dividend' names were
@@ -28,8 +28,6 @@ export interface CreditClassification {
   pl_category: string
   pl_subcategory: string
   department: string
-  dept_subcategory: string
-  expense_description: string
 }
 
 export interface CreditLegs {
@@ -39,8 +37,7 @@ export interface CreditLegs {
 
 const asCredit = (c: Classification): CreditClassification => ({
   pl_category: c.pl_category!, pl_subcategory: c.pl_subcategory!,
-  department: c.department!, dept_subcategory: c.dept_subcategory!,
-  expense_description: c.expense_description!,
+  department: c.department!,
 })
 
 /**
@@ -66,8 +63,8 @@ export function creditLegsOrNull(map: SystemCategoryMap | null | undefined): Cre
  *
  * The detail used to live in `expense_description`, where it made every
  * payment its own category — 200 payments, 200 "categories" in the report, and
- * nothing groupable. The description is now a fixed classification value and
- * the detail moves here, where free text belongs. Nothing is lost.
+ * nothing groupable. The cost description is no longer written at all; the
+ * detail lives here, where free text belongs. Nothing is lost.
  *
  * The leg leads and the bank's own wording follows it, because the drill-down
  * truncates a note at 80 characters. Put the statement description first and a

@@ -117,7 +117,7 @@ const pl = (o: Record<string, any>) => ({
 
 const principalRole = (company: string, cat: string, sub: string) => ({
   id: `sc-${company}`, company_id: company, role: 'credit_principal', pl_category: cat,
-  pl_subcategory: sub, department: 'Uprava', dept_subcategory: 'Krediti', expense_description: 'Rata kredita',
+  pl_subcategory: sub, department: 'Uprava',
 })
 
 beforeEach(() => {
@@ -417,7 +417,7 @@ describe('review fixes: the credits card', () => {
 describe('review fixes: the principal heading', () => {
   const interestRole = (company: string, cat: string, sub: string | null) => ({
     id: `si-${company}`, company_id: company, role: 'credit_interest', pl_category: cat,
-    pl_subcategory: sub, department: 'Uprava', dept_subcategory: 'Krediti', expense_description: 'Kamata',
+    pl_subcategory: sub, department: 'Uprava',
   })
 
   it('does not ask a company with no credits to map its principal', async () => {

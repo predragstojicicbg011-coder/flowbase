@@ -37,12 +37,12 @@ describe('classificationFor', () => {
       payroll_net_salary: {
         pl_category: ' Zarade ', pl_subcategory: 'Neto zarade',
         // Not a field this role owns — must not ride along onto a posting.
-        department: 'Uprava', dept_subcategory: null, expense_description: null,
+        department: 'Uprava',
       },
     }
     expect(classificationFor('payroll_net_salary', map)).toEqual({
       pl_category: 'Zarade', pl_subcategory: 'Neto zarade',
-      department: null, dept_subcategory: null, expense_description: null,
+      department: null,
     })
   })
 
@@ -55,7 +55,7 @@ describe('classificationFor', () => {
 
   it('throws when a field the role needs is empty or blank', () => {
     const map: SystemCategoryMap = {
-      credit_principal: { ...TEST_SYSTEM_CATEGORIES.credit_principal!, expense_description: '   ' },
+      credit_principal: { ...TEST_SYSTEM_CATEGORIES.credit_principal!, department: '   ' },
     }
     expect(isRoleSet('credit_principal', map)).toBe(false)
     expect(() => classificationFor('credit_principal', map)).toThrow(SystemCategoryMissing)
@@ -69,8 +69,6 @@ describe('classificationFor', () => {
   it('needs only the fields the role fills', () => {
     // The cash-flow roles name a category and nothing else.
     expect(classificationFor('cashflow_taxes', TEST_SYSTEM_CATEGORIES).pl_category).toBe('Porezi')
-    expect(classificationFor('payroll_salary_dept_subcategory', TEST_SYSTEM_CATEGORIES).dept_subcategory)
-      .toBe('Zarade u zemlji')
   })
 
   it('carries the error\'s role, for a caller that wants it', () => {
@@ -80,6 +78,43 @@ describe('classificationFor', () => {
     } catch (e) {
       expect((e as SystemCategoryMissing).role).toBe('payroll_fitpass')
     }
+  })
+})
+
+describe('without a sub-sector or a cost description', () => {
+  it('no role asks for a sub-sector or a cost description', () => {
+    expect(CLASS_FIELDS).toEqual(['pl_category', 'pl_subcategory', 'department'])
+    expect(SYSTEM_ROLES.map(r => r.role)).not.toContain('payroll_salary_dept_subcategory')
+    for (const r of SYSTEM_ROLES) {
+      expect(r.label).not.toMatch(/podsektor/i)
+      expect(r.description).not.toMatch(/podsektor/i)
+    }
+  })
+
+  it('a credit role is set with a category, a subcategory and a sector alone', () => {
+    const map: SystemCategoryMap = {
+      credit_interest: { pl_category: 'Krediti', pl_subcategory: 'Kamata', department: 'Finansije' },
+    }
+    expect(isRoleSet('credit_interest', map)).toBe(true)
+    expect(classificationFor('credit_interest', map))
+      .toEqual({ pl_category: 'Krediti', pl_subcategory: 'Kamata', department: 'Finansije' })
+  })
+
+  it('an old row that still carries them keeps working and they are ignored', () => {
+    const map = rowsToMap([{
+      company_id: 'c1', role: 'credit_interest', pl_category: 'Krediti', pl_subcategory: 'Kamata',
+      department: 'Finansije', dept_subcategory: 'Stari podsektor', expense_description: 'Stari opis',
+    } as any])
+    expect(map.credit_interest).toEqual({ pl_category: 'Krediti', pl_subcategory: 'Kamata', department: 'Finansije' })
+    expect(classificationFor('credit_interest', map))
+      .toEqual({ pl_category: 'Krediti', pl_subcategory: 'Kamata', department: 'Finansije' })
+  })
+
+  it('saving a role clears what an old row carried there', async () => {
+    const calls: any[] = []
+    const client = { from: () => ({ upsert: (payload: any) => { calls.push(payload); return Promise.resolve({ error: null }) } }) }
+    await saveSystemCategory(client, 'c1', 'credit_interest', { pl_category: 'Krediti', pl_subcategory: 'Kamata', department: 'Finansije' })
+    expect(calls[0]).toMatchObject({ dept_subcategory: null, expense_description: null, department: 'Finansije' })
   })
 })
 
@@ -104,13 +139,13 @@ describe('the other readers', () => {
 describe('rows and the database', () => {
   const row = (role: string, company_id = 'c1') => ({
     company_id, role, pl_category: 'A', pl_subcategory: 'B',
-    department: null, dept_subcategory: null, expense_description: null,
+    department: null,
   })
 
   it('ignores a role this code does not know', () => {
     expect(rowsToMap([row('payroll_net_salary'), row('something_old')])).toEqual({
       payroll_net_salary: {
-        pl_category: 'A', pl_subcategory: 'B', department: null, dept_subcategory: null, expense_description: null,
+        pl_category: 'A', pl_subcategory: 'B', department: null,
       },
     })
   })
@@ -142,7 +177,7 @@ describe('rows and the database', () => {
     expect(calls[0].opts).toEqual({ onConflict: 'company_id,role' })
     expect(calls[0].payload).toMatchObject({
       company_id: 'c1', role: 'cashflow_taxes', pl_category: 'Porezi',
-      pl_subcategory: null, department: null, dept_subcategory: null, expense_description: null,
+      pl_subcategory: null, department: null,
     })
   })
 

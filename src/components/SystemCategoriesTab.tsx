@@ -22,18 +22,16 @@ interface Structure {
   categories: Named[]
   subcategories: (Named & { category_id: string | null })[]
   departments: Named[]
-  deptSubcategories: (Named & { department_id: string | null })[]
-  descriptions: (Named & { dept_subcategory_id: string | null })[]
 }
 
 const EMPTY_STRUCTURE: Structure = {
-  categories: [], subcategories: [], departments: [], deptSubcategories: [], descriptions: [],
+  categories: [], subcategories: [], departments: [],
 }
 
 const uniq = (xs: string[]) => [...new Set(xs)].sort((a, b) => a.localeCompare(b, 'sr'))
 
 /** What each field of a draft may be, given what is chosen above it. */
-export function optionsFor(field: ClassField, draft: Classification, st: Structure, def: SystemRoleDef): string[] {
+export function optionsFor(field: ClassField, draft: Classification, st: Structure, _def?: SystemRoleDef): string[] {
   switch (field) {
     case 'pl_category':
       return st.categories.map(c => c.name)
@@ -43,21 +41,6 @@ export function optionsFor(field: ClassField, draft: Classification, st: Structu
     }
     case 'department':
       return st.departments.map(d => d.name)
-    case 'dept_subcategory': {
-      // A role that does not choose a sector (the salary podsektor) is offered
-      // every podsektor name: the person's sector decides which one it is.
-      if (!def.fields.includes('department')) return uniq(st.deptSubcategories.map(x => x.name))
-      const deps = st.departments.filter(d => d.name === draft.department).map(d => d.id)
-      return uniq(st.deptSubcategories.filter(x => x.department_id && deps.includes(x.department_id)).map(x => x.name))
-    }
-    case 'expense_description': {
-      const deps = st.departments.filter(d => d.name === draft.department).map(d => d.id)
-      const subs = st.deptSubcategories
-        .filter(x => x.name === draft.dept_subcategory && (!def.fields.includes('department')
-          || (x.department_id && deps.includes(x.department_id))))
-        .map(x => x.id)
-      return uniq(st.descriptions.filter(x => x.dept_subcategory_id && subs.includes(x.dept_subcategory_id)).map(x => x.name))
-    }
   }
 }
 
@@ -65,9 +48,7 @@ export function optionsFor(field: ClassField, draft: Classification, st: Structu
 const CHILDREN: Record<ClassField, ClassField[]> = {
   pl_category: ['pl_subcategory'],
   pl_subcategory: [],
-  department: ['dept_subcategory', 'expense_description'],
-  dept_subcategory: ['expense_description'],
-  expense_description: [],
+  department: [],
 }
 
 type Status = 'set' | 'unset' | 'stale'
@@ -85,18 +66,15 @@ export default function SystemCategoriesTab({ canEdit }: { canEdit: boolean }) {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [c, sc, d, ds, ed] = await Promise.all([
+    const [c, sc, d] = await Promise.all([
       supabase.from('pl_categories').select('id,name,sort_order').order('sort_order'),
       supabase.from('pl_subcategories').select('id,name,category_id,sort_order').order('sort_order'),
       supabase.from('departments').select('id,name,sort_order').order('sort_order'),
-      supabase.from('dept_subcategories').select('id,name,department_id,sort_order').order('sort_order'),
-      supabase.from('expense_descriptions').select('id,name,dept_subcategory_id,sort_order').order('sort_order'),
     ])
-    const failed = [c, sc, d, ds, ed].find(r => r?.error)
+    const failed = [c, sc, d].find(r => r?.error)
     if (failed) setError(`P&L struktura nije učitana: ${failed.error?.message}`)
     setStructure({
       categories: c?.data || [], subcategories: sc?.data || [], departments: d?.data || [],
-      deptSubcategories: ds?.data || [], descriptions: ed?.data || [],
     })
     setLoading(false)
   }, [])
