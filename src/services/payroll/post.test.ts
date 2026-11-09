@@ -14,17 +14,17 @@ const plan = (over: Partial<PostingPlan> = {}): PostingPlan => ({
   invoices: [
     { kind: 'net', employeeId: 'e1', employeeName: 'A', partnerId: null,
       pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries',
-      department: 'Dev', dept_subcategory: 'Eng', expense_description: 'A',
+      department: 'Dev', label: 'A',
       cf_type: 'recurring', projects: [{ project_id: 'p1', amount: 1000 }],
       amount: 1000, pl_impact: true, note: 'net' },
     { kind: 'obligation_parent', employeeId: null, employeeName: '', partnerId: null,
       pl_category: 'Employee and Labour', pl_subcategory: 'Tax on salary',
-      department: null, dept_subcategory: null, expense_description: 'Tax',
+      department: null, label: 'Tax',
       cf_type: 'recurring', projects: [],
       amount: 400, pl_impact: false, note: 'parent' },
     { kind: 'obligation_child', employeeId: null, employeeName: 'A', partnerId: null,
       pl_category: 'Employee and Labour', pl_subcategory: 'Tax on salary',
-      department: 'Dev', dept_subcategory: 'Eng', expense_description: 'A',
+      department: 'Dev', label: 'A',
       cf_type: 'one_time', projects: [{ project_id: 'p1', amount: 400 }],
       amount: 400, pl_impact: true, parentRef: 'obligation', note: 'child' },
   ],
@@ -95,6 +95,27 @@ function client(over: { claimError?: any; invoiceError?: any; txError?: any; lin
     },
   }
 }
+
+describe('no sub-sector and no cost description', () => {
+  it('writes neither on an invoice nor on a storno', async () => {
+    const c = client()
+    await postPlan(c, plan({
+      transactions: [{
+        kind: 'retained_storno', employeeName: 'A',
+        pl_category: 'Zarade', pl_subcategory: 'FitPass',
+        department: 'Dev', label: 'Fitpass',
+        cf_type: 'recurring',
+        amount: -1000, note: 'storno',
+      }],
+    }), CONTEXT, 'Salaries')
+    expect(c.calls.invoices.length).toBeGreaterThan(0)
+    for (const row of [...c.calls.invoices, ...c.calls.transactions]) {
+      expect(row).not.toHaveProperty('dept_subcategory')
+      expect(row).not.toHaveProperty('expense_description')
+    }
+    expect(c.calls.transactions[0].department).toBe('Dev')
+  })
+})
 
 describe('claiming the month', () => {
   it('writes the posting record BEFORE any invoice', async () => {
@@ -209,7 +230,7 @@ describe('retained deductions', () => {
       transactions: [{
         kind: 'retained_storno', employeeName: 'A',
         pl_category: 'Employee and Labour', pl_subcategory: 'FitPass expenses',
-        department: 'Dev', dept_subcategory: 'Eng', expense_description: 'Fitpass',
+        department: 'Dev', label: 'Fitpass',
         cf_type: 'recurring',
         amount: -1000, note: 'storno',
       }],
@@ -403,7 +424,7 @@ describe('projects', () => {
     invoices: [
       { kind: 'net', employeeId: 'e1', employeeName: 'A', partnerId: null,
         pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries',
-        department: 'Dev', dept_subcategory: 'Eng', expense_description: 'A',
+        department: 'Dev', label: 'A',
         cf_type: 'recurring',
         projects: [
           { project_id: 'p1', amount: 600.33 },

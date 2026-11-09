@@ -15,14 +15,13 @@ import { buildTree, UNASSIGNED, PlEntry } from './expenseTree'
 
 const emp = (o: Partial<EmployeeObligation> & { employee_name: string }): EmployeeObligation => ({
   department_name: 'Development Expenses',
-  dept_subcategory_name: 'Engineering',
   tax: 0, contributionsEmployee: 0, contributionsEmployer: 0,
   ...o,
 })
 
 const two = [
   emp({ employee_name: 'Ana Ilić', tax: 120.50, contributionsEmployee: 340.10, contributionsEmployer: 410.00 }),
-  emp({ employee_name: 'Marko Petrović', department_name: 'Sales Expenses', dept_subcategory_name: 'Field',
+  emp({ employee_name: 'Marko Petrović', department_name: 'Sales Expenses',
         tax: 95.25, contributionsEmployee: 280.00, contributionsEmployer: 330.40 }),
 ]
 
@@ -34,13 +33,14 @@ describe('obligationRows', () => {
   it('carries the employee department onto every row', () => {
     for (const r of obligationRows(two, CLASSES)) {
       expect(r.department).not.toBeNull()
-      expect(r.dept_subcategory).not.toBeNull()
+      expect(r).not.toHaveProperty('dept_subcategory')
+      expect(r).not.toHaveProperty('expense_description')
     }
     expect(unallocatedTotal(obligationRows(two, CLASSES))).toBe(0)
   })
 
-  it('names the row after the employee, so the department branch groups by person', () => {
-    const ana = obligationRows(two, CLASSES).filter(r => r.expense_description === 'Ana Ilić')
+  it('labels the row with the employee', () => {
+    const ana = obligationRows(two, CLASSES).filter(r => r.label === 'Ana Ilić')
     expect(ana).toHaveLength(3)
     expect(ana.map(r => r.pl_subcategory).sort())
       .toEqual([SUBCATEGORY.employer, SUBCATEGORY.employee, SUBCATEGORY.tax].sort())
@@ -99,8 +99,7 @@ describe('what the expense report then shows', () => {
   const asEntry = (r: ReturnType<typeof obligationRows>[number]): PlEntry => ({
     tx_type: 'invoice_expense', pl_date: '2026-08-31', amount_rsd: r.amount,
     pl_category: r.pl_category, pl_subcategory: r.pl_subcategory,
-    department: r.department, dept_subcategory: r.dept_subcategory,
-    expense_description: r.expense_description,
+    department: r.department,
   })
 
   it('leaves nothing under Unassigned', () => {
@@ -109,12 +108,11 @@ describe('what the expense report then shows', () => {
     expect(dept.map(n => n.label)).not.toContain(UNASSIGNED)
   })
 
-  it('groups an employee onto one line in the department branch', () => {
+  it('groups each employee under their sector in the department branch', () => {
     const entries = obligationRows(two, CLASSES).map(asEntry)
-    const leaves = buildTree(entries, 'department', 'RSD')
-      .flatMap(n => n.children).flatMap(n => n.children)
-    expect(leaves.map(l => l.label).sort()).toEqual(['Ana Ilić', 'Marko Petrović'])
-    expect(leaves.find(l => l.label === 'Ana Ilić')!.amount).toBeCloseTo(870.60, 2)
+    const sectors = buildTree(entries, 'department', 'RSD')
+    expect(sectors.map(l => l.label).sort()).toEqual(['Development Expenses', 'Sales Expenses'])
+    expect(sectors.find(l => l.label === 'Development Expenses')!.amount).toBeCloseTo(870.60, 2)
   })
 
   it('still separates the components in the P&L branch', () => {

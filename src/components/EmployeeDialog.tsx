@@ -270,7 +270,6 @@ export default function EmployeeDialog({ employee, companies, seniorityCoefficie
                   {currentAllocation
                     ? <>
                         {currentAllocation.department}
-                        {currentAllocation.dept_subcategory && ` · ${currentAllocation.dept_subcategory}`}
                       </>
                     : <span style={{ color: '#C8A24A' }}>
                         Nije raspoređen — za njega još ništa ne može da se proknjiži
@@ -1005,7 +1004,6 @@ function AllocationTab({ employee, rows, onChanged }: {
   onChanged: () => void
 }) {
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([])
-  const [subcategories, setSubcategories] = useState<{ id: string; name: string; department_id: string }[]>([])
   // The P&L half of every line below is a system category, set by the owner
   // in Podešavanja → Sistemske kategorije; this tab only shows it.
   const system = useSystemCategories()
@@ -1013,24 +1011,17 @@ function AllocationTab({ employee, rows, onChanged }: {
     const c = classificationOrNull(role, system.map)
     return c ? `${c.pl_category} › ${c.pl_subcategory}` : '(sistemska kategorija nije podešena)'
   }
-  const defaultSub = classificationOrNull('payroll_salary_dept_subcategory', system.map)?.dept_subcategory
-    || 'podsektor za zarade iz Podešavanja'
 
   useEffect(() => {
     // Straight from the ledger's own lists rather than typed. A department
     // spelled slightly differently here would create a second heading beside
     // the real one, and the P&L would show both with part of the payroll in
     // each.
-    Promise.all([
-      supabase.from('departments').select('id,name,sort_order').order('sort_order'),
-      supabase.from('dept_subcategories').select('id,name,department_id,sort_order').order('sort_order'),
-    ]).then(([d, sc]) => {
-      setDepartments(d.data || [])
-      setSubcategories(sc.data || [])
-    })
+    supabase.from('departments').select('id,name,sort_order').order('sort_order')
+      .then((d: any) => { setDepartments(d.data || []) })
   }, [])
   const blank = {
-    id: '', department: '', dept_subcategory: '',
+    id: '', department: '',
     valid_from: '', valid_to: '', note: '',
   }
   const [draft, setDraft] = useState(blank)
@@ -1047,7 +1038,8 @@ function AllocationTab({ employee, rows, onChanged }: {
     const row = {
       employee_id: employee.id,
       department: draft.department.trim(),
-      dept_subcategory: draft.dept_subcategory.trim() || null,
+      // No longer chosen: null, so an edited allocation never keeps an old one.
+      dept_subcategory: null,
       valid_from: draft.valid_from,
       valid_to: draft.valid_to || null,
       note: draft.note.trim() || null,
@@ -1077,17 +1069,12 @@ function AllocationTab({ employee, rows, onChanged }: {
     onChanged()
   }
 
-  const chosenDept = departments.find(d => d.name === draft.department)
-  const subsForDept = chosenDept
-    ? subcategories.filter(c => c.department_id === chosenDept.id)
-    : []
-
   return (
     <div>
       {error && <div style={s.error}>{error}</div>}
 
       <div style={s.hintBox}>
-        Pet polja određuje gde trošak završava, a kod zarada se <b>samo jedno odnosi na
+        Tri polja određuju gde trošak završava, a kod zarada se <b>samo jedno odnosi na
         zaposlenog</b>: koji sektor ga snosi. Ostala slede iz toga šta je iznos. Bez
         raspodele knjiženje odbija da trošak ode u neraspoređeno, gde bi zarada izgledala
         kao običan trošak bez nosioca.
@@ -1111,8 +1098,6 @@ function AllocationTab({ employee, rows, onChanged }: {
               <b style={{ color: draft.department ? '#00D47E' : '#C8A24A' }}>
                 {draft.department || 'izaberite sektor'}
               </b>
-              {' '}&rsaquo; {draft.dept_subcategory || defaultSub}
-              {' '}&rsaquo; {employee.full_name}
             </span>
           </div>
         ))}
@@ -1123,8 +1108,6 @@ function AllocationTab({ employee, rows, onChanged }: {
             <b style={{ color: draft.department ? '#00D47E' : '#C8A24A' }}>
               {draft.department || 'izaberite sektor'}
             </b>
-            {' '}&rsaquo; {draft.dept_subcategory || defaultSub}
-            {' '}&rsaquo; {employee.full_name}
           </span>
         </div>
         <div style={s.chainNote}>
@@ -1151,7 +1134,7 @@ function AllocationTab({ employee, rows, onChanged }: {
             <div style={s.cardTitle}>{srDate(r.valid_from)} &rarr; {r.valid_to ? srDate(r.valid_to) : 'neograničeno'}</div>
             <div style={{ display: 'flex', gap: '6px' }}>
               <button style={s.ghostSmall} onClick={() => setDraft({
-                id: r.id, department: r.department, dept_subcategory: r.dept_subcategory || '',
+                id: r.id, department: r.department,
                 valid_from: r.valid_from, valid_to: r.valid_to || '', note: r.note || '',
               })}>Izmeni</button>
               <button className="mf-trash" title="Obriši" aria-label="Obriši" style={s.deleteBtn} onClick={() => remove(r)}>&#128465;</button>
@@ -1159,7 +1142,6 @@ function AllocationTab({ employee, rows, onChanged }: {
           </div>
           <div style={s.cardRow}>
             <b style={{ color: '#DCE9F6' }}>{r.department}</b>
-            {r.dept_subcategory && <span>&middot; {r.dept_subcategory}</span>}
           </div>
           {r.note && <div style={s.cardNote}>{r.note}</div>}
         </div>
@@ -1169,20 +1151,9 @@ function AllocationTab({ employee, rows, onChanged }: {
       <div style={s.grid}>
         <Field label="Sektor" hint="Jedino polje koje se odnosi na zaposlenog">
           <select style={s.input} value={draft.department}
-            onChange={e => setDraft({ ...draft, department: e.target.value, dept_subcategory: '' })}>
+            onChange={e => setDraft({ ...draft, department: e.target.value })}>
             <option value="">— izaberite —</option>
             {departments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Podsektor"
-          hint={`Obično ${defaultSub}`}>
-          <select style={s.input} value={draft.dept_subcategory}
-            disabled={!chosenDept}
-            onChange={e => setDraft({ ...draft, dept_subcategory: e.target.value })}>
-            <option value="">
-              {chosenDept ? `— ${defaultSub} —` : 'prvo izaberite sektor'}
-            </option>
-            {subsForDept.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
         </Field>
         <Field label="Od">

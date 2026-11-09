@@ -41,8 +41,6 @@ interface EmployeeLine {
   employee_name: string
   department_id: string
   department_name: string
-  dept_subcategory_id: string
-  dept_subcategory_name: string
   gross_salary: string
   net_salary: string
   tax_on_salary: string
@@ -68,8 +66,6 @@ function makeEmployee(): EmployeeLine {
     employee_name: '',
     department_id: '',
     department_name: '',
-    dept_subcategory_id: '',
-    dept_subcategory_name: '',
     gross_salary: '',
     net_salary: '',
     tax_on_salary: '',
@@ -109,7 +105,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
   const systemCategories = useSystemCategories()
   const [partners, setPartners] = useState<any[]>([])
   const [departments, setDepartments] = useState<any[]>([])
-  const [deptSubcategories, setDeptSubcategories] = useState<any[]>([])
 
   const [companyId, setCompanyId] = useState('')
 
@@ -139,14 +134,12 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
 
   useEffect(() => {
     const load = async () => {
-      const [part, { data: dept }, { data: deptSub }] = await Promise.all([
+      const [part, { data: dept }] = await Promise.all([
         fetchAllPartners(supabase),
         supabase.from('departments').select('id,name,sort_order').order('sort_order'),
-        supabase.from('dept_subcategories').select('id,name,department_id,sort_order').order('sort_order'),
       ])
       if (part) setPartners(part)
       if (dept) setDepartments(dept)
-      if (deptSub) setDeptSubcategories(deptSub)
     }
     load()
   }, [])
@@ -178,7 +171,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
 
   useEffect(() => { fetchRate() }, [fetchRate])
 
-  const getDeptSubs = (deptId: string) => deptSubcategories.filter(s => s.department_id === deptId)
 
   const updateEmployee = useCallback((id: string, updates: Partial<EmployeeLine>) => {
     setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e))
@@ -314,8 +306,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           employee_name: emp.employee_name,
           department_id: emp.department_id || null,
           department_name: emp.department_name || null,
-          dept_subcategory_id: emp.dept_subcategory_id || null,
-          dept_subcategory_name: emp.dept_subcategory_name || null,
           gross_salary: parseFloat(emp.gross_salary) || 0,
           net_salary: parseFloat(emp.net_salary) || 0,
           tax_on_salary: parseFloat(emp.tax_on_salary) || 0,
@@ -343,8 +333,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           type: 'expense',
           ...heads.net,
           department: emp.department_name || null,
-          dept_subcategory: emp.dept_subcategory_name || null,
-          expense_description: emp.employee_name,
           project_id: emp.project_id || null,
           cf_type: emp.cf_type || 'recurring',
           cf_frequency: emp.cf_frequency || 'monthly',
@@ -372,8 +360,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
             type: 'expense',
             ...heads.net,
             department: emp.department_name || null,
-            dept_subcategory: emp.dept_subcategory_name || null,
-            expense_description: emp.employee_name,
             project_id: emp.project_id || null,
             cf_type: emp.cf_type || 'recurring',
             cf_frequency: emp.cf_frequency || 'monthly',
@@ -446,7 +432,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
           due_date: dueDate || null,
           type: 'expense',
           ...heads.obligations.tax,
-          expense_description: `Porez i doprinosi — ${taxFilingRef || periodMonth}`,
           cf_type: 'recurring',
           cf_frequency: 'monthly',
           cf_next_month_est: totalObl,
@@ -470,7 +455,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
         const rows = obligationRows(validEmps.map(e => ({
           employee_name: e.employee_name,
           department_name: e.department_name,
-          dept_subcategory_name: e.dept_subcategory_name,
           tax: parseFloat(e.tax_on_salary) || 0,
           contributionsEmployee: parseFloat(e.contrib_employee) || 0,
           contributionsEmployer: parseFloat(e.contrib_employer) || 0,
@@ -494,8 +478,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
             pl_category: r.pl_category,
             pl_subcategory: r.pl_subcategory,
             department: r.department,
-            dept_subcategory: r.dept_subcategory,
-            expense_description: r.expense_description,
             project_id: emp?.project_id || null,
             cf_type: 'recurring',
             cf_frequency: 'monthly',
@@ -722,7 +704,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
               </div>
 
               {employees.map((emp, idx) => {
-                const deptSubs = getDeptSubs(emp.department_id)
                 const totalEmp = (parseFloat(emp.net_salary) || 0)
                   + emp.deductions_third_party.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0)
                   + emp.deductions_retained.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0)
@@ -740,7 +721,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
                           <div style={{ fontSize: '13px', fontWeight: '600', color: '#DCE9F6' }}>
                             {emp.employee_name || <span style={{ color: 'rgba(255,255,255,0.3)', fontWeight: '400' }}>Zaposleni bez imena</span>}
                           </div>
-                          {emp.department_name && <div style={{ fontSize: '11px', color: '#7A9BB8', marginTop: '2px' }}>{emp.department_name}{emp.dept_subcategory_name ? ` / ${emp.dept_subcategory_name}` : ''}</div>}
+                          {emp.department_name && <div style={{ fontSize: '11px', color: '#7A9BB8', marginTop: '2px' }}>{emp.department_name}</div>}
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -787,7 +768,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
                           <div style={s.field}>
                             <label style={s.lbl}>Sektor <span style={s.req}>*</span></label>
                             <SearchableSelect value={emp.department_id}
-                              onChange={v => { const d = departments.find(x => x.id === v); updateEmployee(emp.id, { department_id: v, department_name: d?.name || '', dept_subcategory_id: '', dept_subcategory_name: '' }) }}
+                              onChange={v => { const d = departments.find(x => x.id === v); updateEmployee(emp.id, { department_id: v, department_name: d?.name || '' }) }}
                               options={departments.map(d => ({ value: d.id, label: d.name }))}
                               allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                               style={pickerChrome} />
@@ -795,15 +776,6 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
                         </div>
 
                         <div style={s.grid2}>
-                          <div style={s.field}>
-                            <label style={s.lbl}>Podsektor</label>
-                            <select style={s.select} value={emp.dept_subcategory_id}
-                              onChange={e => { const sub = deptSubcategories.find(x => x.id === e.target.value); updateEmployee(emp.id, { dept_subcategory_id: e.target.value, dept_subcategory_name: sub?.name || '' }) }}
-                              disabled={!emp.department_id || deptSubs.length === 0}>
-                              <option value="">Izaberite podsektor…</option>
-                              {deptSubs.map(sub => <option key={sub.id} value={sub.id}>{sub.name}</option>)}
-                            </select>
-                          </div>
                           <div style={s.field}>
                             <label style={s.lbl}>Bruto zarada ({currency}) — automatski</label>
                             <div style={{ ...s.input, background: 'rgba(0,212,126,0.06)', border: '1px solid rgba(0,212,126,0.25)', color: '#00D47E', fontWeight: '600', cursor: 'default' }}>
@@ -974,7 +946,7 @@ export default function PayrollDialog({ onClose, onPosted }: Props) {
                     <div key={emp.id} style={s.empReviewRow}>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: '13px', fontWeight: '500', color: '#DCE9F6' }}>{emp.employee_name}</div>
-                        <div style={{ fontSize: '11px', color: '#7A9BB8' }}>{emp.department_name || '—'}{emp.dept_subcategory_name ? ` / ${emp.dept_subcategory_name}` : ''}</div>
+                        <div style={{ fontSize: '11px', color: '#7A9BB8' }}>{emp.department_name || '—'}</div>
                       </div>
                       <div style={{ textAlign: 'right' as const }}>
                         <div style={{ fontSize: '13px', color: '#00D47E', fontWeight: '600' }}>Neto: {fmtNum(parseFloat(emp.net_salary) || 0)} {currency}</div>

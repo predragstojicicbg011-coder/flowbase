@@ -48,7 +48,6 @@ export interface EmployeeObligation {
   employee_id?: string | null
   employee_name: string
   department_name?: string | null
-  dept_subcategory_name?: string | null
   /** Tax on salary only — never including contributions. */
   tax: number
   /** Employee-side contributions, tax already excluded. */
@@ -60,8 +59,8 @@ export interface ObligationRow {
   pl_category: string
   pl_subcategory: string
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string
+  /** The employee's name — what the row is. Not a ledger column any more. */
+  label: string
   amount: number
   /** Which employee and component this row came from, for the note. */
   employee_id: string | null
@@ -99,8 +98,7 @@ export function obligationRows(
         pl_category: classes[component].pl_category,
         pl_subcategory: classes[component].pl_subcategory,
         department: e.department_name || null,
-        dept_subcategory: e.dept_subcategory_name || null,
-        expense_description: e.employee_name,
+        label: e.employee_name,
         amount: round2(amount),
         employee_id: e.employee_id ?? null,
         employee_name: e.employee_name,

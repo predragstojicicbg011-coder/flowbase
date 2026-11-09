@@ -169,8 +169,6 @@ export async function postPlan(
       pl_category: t.pl_category,
       pl_subcategory: t.pl_subcategory,
       department: t.department,
-      dept_subcategory: t.dept_subcategory,
-      expense_description: t.expense_description,
       // Overhead. A storno cancels part of an expense booked elsewhere (the
       // FitPass bill, the insurance premium), which is not a site's cost, so
       // its reversal is not one either.
@@ -242,8 +240,6 @@ export function splitLinesFor(invoice: PlannedInvoice): SplitLine[] {
     pl_category: invoice.pl_category,
     pl_subcategory: invoice.pl_subcategory,
     department: invoice.department ?? '',
-    dept_subcategory: invoice.dept_subcategory ?? '',
-    expense_description: invoice.expense_description,
     project_id: p.project_id,
     cf_type: invoice.cf_type,
     note: p.project_id ? 'Po satima na projektu' : 'Opšti troškovi — sati van projekata',
@@ -269,8 +265,6 @@ async function insertInvoice(
     pl_category: invoice.pl_category,
     pl_subcategory: invoice.pl_subcategory,
     department: invoice.department,
-    dept_subcategory: invoice.dept_subcategory,
-    expense_description: invoice.expense_description,
     project_id: ownProjectOf(invoice),
     cf_type: invoice.cf_type,
     cf_frequency: 'monthly',

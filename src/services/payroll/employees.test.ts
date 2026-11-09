@@ -451,7 +451,6 @@ describe('somebody who joined or left mid-month', () => {
     // who is in fact configured.
     const alloc = {
       id: 'al1', employee_id: 'e1', department: 'Office & Administration',
-      dept_subcategory: 'Salary expenses domestic',
       valid_from: '2026-09-07', valid_to: null, note: null,
     }
     const r = employeesForMonth([joiner], [theirContract], [], input, [alloc])

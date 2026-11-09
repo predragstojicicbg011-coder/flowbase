@@ -1,8 +1,8 @@
 // ─── Where each part of a payroll posts ─────────────────────────────────────
 //
-// Five fields decide where a cost lands in this application:
+// Three fields decide where a cost lands in this application:
 //
-//   pl_category · pl_subcategory · department · dept_subcategory · expense_description
+//   pl_category · pl_subcategory · department
 //
 // For a payroll, only ONE of them is a decision about a person. The rest follow
 // from what the amount is, and are set out here so they are in one place rather
@@ -16,9 +16,9 @@
 //   department           THE ONE CHOICE. Which sector carries this person's
 //                        cost — from their dated allocation
 //                        (employee_cost_allocation), else the unit mapping.
-//   dept_subcategory     the allocation's own, else the role
-//                        `payroll_salary_dept_subcategory`
-//   expense_description  the employee's name
+//
+// (Sub-sector and cost description are no longer written; the note on each
+// entry names the employee.)
 //
 // OTHER INCOME follows the person the same way, under their department, but
 // it is not a salary and so does not post under the net-salary role.
@@ -27,8 +27,8 @@
 // Labour', 'Net Salaries', 'Salary expenses domestic' …) were hardcoded here;
 // FlowBase's P&L is the owner's own, in Serbian, and an unset role refuses the
 // posting rather than inventing a heading. The names a role resolves to are
-// still matched against `pl_subcategories`, `departments` and
-// `dept_subcategories` when a posting is planned (`unknownNames`): a name
+// still matched against `pl_subcategories` and `departments` when a posting
+// is planned (`unknownNames`): a name
 // that is not in those tables is reported rather than written — a renamed
 // heading would otherwise come back as a second one beside it.
 
@@ -61,7 +61,6 @@ export function endOfMonth(month: string): string {
 export interface LedgerNames {
   plSubcategories: string[]
   departments: string[]
-  deptSubcategories: string[]
 }
 
 /**
@@ -73,7 +72,7 @@ export interface LedgerNames {
  * payroll in it.
  */
 export function unknownNames(
-  used: { pl_subcategory: string; department: string | null; dept_subcategory: string | null }[],
+  used: { pl_subcategory: string; department: string | null }[],
   known: LedgerNames,
 ): string[] {
   const missing = new Set<string>()
@@ -85,9 +84,6 @@ export function unknownNames(
     }
     if (!has(known.departments, u.department)) {
       missing.add(`sektor "${u.department}"`)
-    }
-    if (!has(known.deptSubcategories, u.dept_subcategory)) {
-      missing.add(`podsektor "${u.dept_subcategory}"`)
     }
   }
   return [...missing].sort()

@@ -45,13 +45,11 @@ describe('unknownNames', () => {
   const known = {
     plSubcategories: ['Net Salaries', 'Transportation cost'],
     departments: ['Development expenses', 'General Business expenses'],
-    deptSubcategories: ['Salary expenses domestic', 'Labour related expenses'],
   }
 
   it('is happy when every name is one the ledger already has', () => {
     expect(unknownNames([
-      { pl_subcategory: 'Net Salaries', department: 'Development expenses',
-        dept_subcategory: 'Salary expenses domestic' },
+      { pl_subcategory: 'Net Salaries', department: 'Development expenses' },
     ], known)).toEqual([])
   })
 
@@ -60,17 +58,15 @@ describe('unknownNames', () => {
     // character from the real one, and the P&L shows both, each with part of
     // the payroll in it.
     const missing = unknownNames([
-      { pl_subcategory: 'Net Salaries', department: 'Development expenses',
-        dept_subcategory: 'Salary expenses domestic ' },
+      { pl_subcategory: 'Net Salaries ', department: 'Development expenses' },
     ], known)
     expect(missing).toHaveLength(1)
-    expect(missing[0]).toContain('Salary expenses domestic ')
+    expect(missing[0]).toContain('Net Salaries ')
   })
 
   it('reports each unknown name once, however many rows used it', () => {
     const rows = Array.from({ length: 5 }, () => ({
       pl_subcategory: 'Net Salaries', department: 'Marketing expenses',
-      dept_subcategory: 'Salary expenses domestic',
     }))
     expect(unknownNames(rows, known)).toEqual(['sektor "Marketing expenses"'])
   })
@@ -78,7 +74,7 @@ describe('unknownNames', () => {
   it('does not complain about a field nobody filled in', () => {
     // The obligation parent has no department on purpose.
     expect(unknownNames([
-      { pl_subcategory: 'Net Salaries', department: null, dept_subcategory: null },
+      { pl_subcategory: 'Net Salaries', department: null },
     ], known)).toEqual([])
   })
 })

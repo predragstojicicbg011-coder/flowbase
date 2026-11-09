@@ -94,12 +94,11 @@ export default function PayrollPostingPanel({
   const reload = useCallback(async () => {
     setError(null)
     try {
-      const [{ data: maps, error: mapErr }, posted, sub, dep, dsub, people_, days] = await Promise.all([
+      const [{ data: maps, error: mapErr }, posted, sub, dep, people_, days] = await Promise.all([
         supabase.from('payroll_unit_mapping').select('*').eq('company_id', companyId),
         fetchPostings(supabase, companyId, month),
         supabase.from('pl_subcategories').select('name'),
         supabase.from('departments').select('name'),
-        supabase.from('dept_subcategories').select('name'),
         // THE WHOLE BOOK, and all of it. A payroll pays three kinds of
         // party — the employee, the tax authority and whoever a deduction is
         // forwarded to — and only the first of them is an individual.
@@ -138,7 +137,6 @@ export default function PayrollPostingPanel({
       setLedger({
         plSubcategories: (sub.data || []).map((r: any) => r.name),
         departments: (dep.data || []).map((r: any) => r.name),
-        deptSubcategories: (dsub.data || []).map((r: any) => r.name),
       })
     } catch (e: any) {
       setError(e.message)
@@ -619,7 +617,7 @@ function UnitMappingEditor({ companyId, units, existing, onChanged }: {
   existing: UnitMapping[]
   onChanged: () => void
 }) {
-  const [draft, setDraft] = useState<Record<string, { department: string; sub: string }>>({})
+  const [draft, setDraft] = useState<Record<string, { department: string }>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -632,7 +630,7 @@ function UnitMappingEditor({ companyId, units, existing, onChanged }: {
   const valueFor = (unit: string) => {
     if (draft[unit]) return draft[unit]
     const found = existing.find(m => m.organisational_unit === unit)
-    return { department: found?.department || '', sub: found?.dept_subcategory || '' }
+    return { department: found?.department || '' }
   }
 
   const save = async () => {
@@ -644,7 +642,8 @@ function UnitMappingEditor({ companyId, units, existing, onChanged }: {
         company_id: companyId,
         organisational_unit: r.unit,
         department: r.department.trim(),
-        dept_subcategory: r.sub.trim() || null,
+        // No longer chosen: null, so a saved mapping never keeps an old one.
+        dept_subcategory: null,
         updated_at: new Date().toISOString(),
       }))
     if (rows.length === 0) { setBusy(false); setError('Unesite sektor za bar jednu jedinicu.'); return }
@@ -690,7 +689,6 @@ function UnitMappingEditor({ companyId, units, existing, onChanged }: {
         return {
           employee_id: p.id,
           department: m.department,
-          dept_subcategory: m.dept_subcategory,
           valid_from: p.hired_on || '2026-01-01',
           note: 'Iz povezivanja organizacione jedinice sa sektorom. Izmenite je na zaposlenom '
             + 'ako njegov trošak pripada drugom sektoru od jedinice.',
@@ -724,8 +722,6 @@ function UnitMappingEditor({ companyId, units, existing, onChanged }: {
             <div style={s.mapUnit}>{unit}</div>
             <input style={s.input} placeholder="Sektor" value={v.department}
               onChange={e => setDraft(d => ({ ...d, [unit]: { ...v, department: e.target.value } }))} />
-            <input style={s.input} placeholder="Podsektor" value={v.sub}
-              onChange={e => setDraft(d => ({ ...d, [unit]: { ...v, sub: e.target.value } }))} />
           </div>
         )
       })}

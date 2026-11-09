@@ -55,7 +55,6 @@ export interface SavedRunLine {
   employee_code: string | null
   employee_name: string
   department: string | null
-  dept_subcategory: string | null
   line_kind: 'salary' | 'other'
   label: string | null
   hours: number
@@ -104,7 +103,6 @@ export function linesOf(run: PayrollRun, context: SaveContext): SavedRunLine[] {
       employee_code: s.code,
       employee_name: s.name,
       department: p?.allocation?.department ?? null,
-      dept_subcategory: p?.allocation?.dept_subcategory ?? null,
       line_kind: 'salary',
       label: null,
       hours: s.hours,
@@ -170,7 +168,7 @@ export function linesOf(run: PayrollRun, context: SaveContext): SavedRunLine[] {
 function emptyLine(): SavedRunLine {
   return {
     employee_id: null, employee_code: null, employee_name: '',
-    department: null, dept_subcategory: null, line_kind: 'other', label: null,
+    department: null, line_kind: 'other', label: null,
     hours: 0, month_hours: 0, contracted_net: 0, seniority_net: 0,
     additional_net: 0, service_years: null,
     gross: 0, contribution_base: 0, tax_free: 0, tax_base: 0, income_tax: 0,

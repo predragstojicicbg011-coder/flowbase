@@ -29,7 +29,6 @@ const person = (over: Partial<EmployeeForMonth> = {}): EmployeeForMonth => ({
   deductions: [],
   allocation: {
     id: 'a1', employee_id: 'e1', department: 'Development Expenses',
-    dept_subcategory: 'Salary expenses domestic',
     valid_from: '2026-01-01', valid_to: null, note: null,
   },
   serviceYears: 4, serviceYearsDerived: true, ...over,
@@ -76,7 +75,7 @@ describe('what a line keeps', () => {
     // The allocation may be changed next week. A posted payroll that moved
     // department underneath its own invoices would be worse than none.
     expect(line.department).toBe('Development Expenses')
-    expect(line.dept_subcategory).toBe('Salary expenses domestic')
+    expect(line).not.toHaveProperty('dept_subcategory')
   })
 
   it('keeps the parts the payslip needs and no row can hold', () => {

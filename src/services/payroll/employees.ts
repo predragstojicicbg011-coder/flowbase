@@ -83,14 +83,13 @@ export function absenceLabel(reason: AbsenceRow['reason']): string {
 }
 
 /**
- * Which department and sub-category a salary posts to, over a period. Which
+ * Which department a salary posts to, over a period. Which
  * project it goes to is decided by the hours, not here.
  */
 export interface CostAllocationRow {
   id: string
   employee_id: string
   department: string
-  dept_subcategory: string | null
   valid_from: string
   valid_to: string | null
   note: string | null

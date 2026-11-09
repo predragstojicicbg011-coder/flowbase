@@ -17,7 +17,7 @@ const FUND = 168
 const MONTH = '2026-08'
 
 const MAPPING: UnitMapping[] = [
-  { organisational_unit: 'GRAD - Gradilište', department: 'Development', dept_subcategory: 'Engineering' },
+  { organisational_unit: 'GRAD - Gradilište', department: 'Development' },
 ]
 
 const employee = (over: Partial<EmployeeRow> = {}): EmployeeRow => ({
@@ -322,7 +322,6 @@ describe('the ledger has to recognise every heading', () => {
       'Doprinosi na teret zaposlenog',
       'Doprinosi na teret poslodavca'],
     departments: ['Development'],
-    deptSubcategories: ['Engineering', 'Zarade u zemlji'],
   }
 
   it('passes a plan whose every name the ledger already has', () => {
@@ -362,10 +361,18 @@ describe('other income does not post as a salary', () => {
   })
 })
 
-describe('a salary carries the standard sub-category', () => {
-  it('files it under Salary expenses domestic when the allocation says nothing', () => {
-    const { plan: p } = plan([person()], { e1: sheet({ regular_hours: FUND }) })
-    expect(p.invoices.find(i => i.kind === 'net')!.dept_subcategory).toBe('Engineering')
+describe('a salary carries no sub-sector and no cost description', () => {
+  it('plans every row by department alone and names the employee in the note', () => {
+    const { plan: p } = plan(
+      [person({ deductions: [deduction({ label: 'Fitpass mesečna članarina' })] })],
+      { e1: sheet({ regular_hours: FUND }) })
+    for (const row of [...p.invoices, ...p.transactions]) {
+      expect(row).not.toHaveProperty('dept_subcategory')
+      expect(row).not.toHaveProperty('expense_description')
+    }
+    const net = p.invoices.find(i => i.kind === 'net')!
+    expect(net.department).toBe('Development')
+    expect(net.note).toContain('Gavrilov Dejan')
   })
 })
 
@@ -492,11 +499,10 @@ describe('the system categories decide every heading', () => {
   })
 
   it('asks only for the roles the month needs', () => {
-    // No other income, no retained deduction, every allocation names its
-    // podsektor: those three roles may stay unset.
+    // No other income, no retained deduction: those roles may stay unset.
     const { plan: p } = plan([person()], { e1: sheet({ regular_hours: FUND }) }, 'regular', {},
       without('payroll_other_income', 'payroll_retained_fallback', 'payroll_fitpass',
-        'payroll_salary_dept_subcategory', 'credit_principal'))
+        'credit_principal'))
     expect(checkPlan(p)).toBeNull()
   })
 
@@ -507,20 +513,15 @@ describe('the system categories decide every heading', () => {
     expect(checkPlan(p)).toContain('„FitPass“ nije podešena')
   })
 
-  it('uses the salary podsektor role when the mapping names none', () => {
-    const noSub: UnitMapping[] = [{ ...MAPPING[0], dept_subcategory: null }]
+  it('posts a salary without any sub-sector setting at all', () => {
     const p = person()
     const run = runsFor({
       people: [p], timesheets: { e1: sheet({ regular_hours: FUND }) },
       rates: RATES_2026, monthHours: FUND,
     }).runs.find(r => r.key === 'regular')!
-    const q = planFor({ run, month: MONTH, people: { e1: p }, mapping: noSub, system: SYSTEM })
-    expect(q.invoices.find(i => i.kind === 'net')!.dept_subcategory).toBe('Zarade u zemlji')
-    const r = planFor({
-      run, month: MONTH, people: { e1: p }, mapping: noSub,
-      system: without('payroll_salary_dept_subcategory'),
-    })
-    expect(checkPlan(r)).toContain('„Podsektor za zarade“')
+    const q = planFor({ run, month: MONTH, people: { e1: p }, mapping: MAPPING, system: SYSTEM })
+    expect(checkPlan(q)).toBeNull()
+    expect(q.invoices.find(i => i.kind === 'net')!.department).toBe('Development')
   })
 
   it('refuses a hand-built plan with a row under no heading', () => {

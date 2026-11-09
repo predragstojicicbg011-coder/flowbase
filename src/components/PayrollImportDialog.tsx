@@ -52,8 +52,6 @@ interface ParsedEmployee {
   gross_salary: number
   department_id: string
   department_name: string
-  dept_subcategory_id: string
-  dept_subcategory_name: string
   /** The project this person's cost goes to; null is overhead. */
   project_id: string | null
   cf_type: string
@@ -214,7 +212,6 @@ function parsePayrollXlsx(workbook: XLSX.WorkBook, taxMode: TaxMode): { header: 
         contrib_employee: contrib_ee, contrib_employer: contrib_er,
         deductions, gross_salary: gross,
         department_id: '', department_name: '',
-        dept_subcategory_id: '', dept_subcategory_name: '',
         project_id: null, cf_type: 'recurring',
         expanded: true, accepted: true,
         edit_net: String(net_salary_raw),
@@ -277,7 +274,6 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
   const [taxRounding, setTaxRounding] = useState('0')
   const [partners, setPartners] = useState<any[]>([])
   const [departments, setDepartments] = useState<any[]>([])
-  const [deptSubs, setDeptSubs] = useState<any[]>([])
   const [taxPartnerId, setTaxPartnerId] = useState('')
   const [taxPartnerSearch, setTaxPartnerSearch] = useState('')
   const [taxDropdown, setTaxDropdown] = useState(false)
@@ -288,10 +284,9 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
 
   React.useEffect(() => {
     const load = async () => {
-      const [part, { data: dept }, { data: ds }] = await Promise.all([
+      const [part, { data: dept }] = await Promise.all([
         fetchAllPartners(supabase, 'id,name,is_individual'),
         supabase.from('departments').select('id,name,sort_order').order('sort_order'),
-        supabase.from('dept_subcategories').select('id,name,department_id').order('sort_order'),
       ])
       if (part) {
         setPartners(part)
@@ -299,7 +294,6 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
         if (pu) { setTaxPartnerId(pu.id); setTaxPartnerSearch(pu.name) }
       }
       if (dept) setDepartments(dept)
-      if (ds) setDeptSubs(ds)
     }
     load()
   }, [])
@@ -518,7 +512,6 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             payroll_id: record.id, partner_id: partnerId,
             employee_name: emp.employee_name,
             department_id: emp.department_id || null, department_name: emp.department_name || null,
-            dept_subcategory_id: emp.dept_subcategory_id || null, dept_subcategory_name: emp.dept_subcategory_name || null,
             gross_salary: emp.gross_salary, net_salary: emp.net_salary,
             tax_on_salary: emp.tax_on_salary, contrib_employee: emp.contrib_employee, contrib_employer: emp.contrib_employer,
             deductions_third_party: emp.deductions.filter(d => d.type === 'third_party').map(d => ({ name: d.name, amount: d.amount, partner_id: d.partner_id })),
@@ -532,8 +525,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             company_id: companyId, partner_id: partnerId,
             invoice_date: invDate, due_date: dueDate || null,
             type: 'expense', ...heads.net,
-            department: emp.department_name || null, dept_subcategory: emp.dept_subcategory_name || null,
-            expense_description: emp.employee_name,
+            department: emp.department_name || null,
             project_id: emp.project_id || null,
             cf_type: emp.cf_type, cf_frequency: 'monthly', cf_next_month_est: emp.net_salary,
             currency, amount: emp.net_salary, ...book(emp.net_salary),
@@ -552,8 +544,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             company_id: companyId, partner_id: dPartnerId,
             invoice_date: invDate, due_date: dueDate || null,
             type: 'expense', ...heads.net,
-            department: emp.department_name || null, dept_subcategory: emp.dept_subcategory_name || null,
-            expense_description: emp.employee_name,
+            department: emp.department_name || null,
             project_id: emp.project_id || null,
             cf_type: emp.cf_type, cf_frequency: 'monthly', cf_next_month_est: ded.amount,
             currency, amount: ded.amount, ...book(ded.amount),
@@ -585,7 +576,6 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           company_id: companyId, partner_id: taxPartnerId || null,
           invoice_date: invDate, due_date: dueDate || null,
           type: 'expense', ...heads.obligations.tax,
-          expense_description: `Objedinjena naplata — ${taxFilingRef || invDate.slice(0, 7)} (${taxMode === 'incentive' ? 'poreske olakšice' : 'standardno'})`,
           cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: totalTaxObl,
           currency, amount: totalTaxObl, ...book(totalTaxObl),
           pl_impact: false, status: 'unpaid',
@@ -607,7 +597,6 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
           accepted.map(e => ({
             employee_name: e.employee_name,
             department_name: e.department_name,
-            dept_subcategory_name: e.dept_subcategory_name,
             tax: e.tax_on_salary,
             // In this path contrib_employee includes the tax — take it out, or
             // the tax is counted twice.
@@ -632,8 +621,7 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
             company_id: companyId, partner_id: taxPartnerId || null,
             invoice_date: invDate, due_date: dueDate || null,
             type: 'expense', pl_category: r.pl_category, pl_subcategory: r.pl_subcategory,
-            department: r.department, dept_subcategory: r.dept_subcategory,
-            expense_description: r.expense_description,
+            department: r.department,
             project_id: emp?.project_id || null,
             cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: r.amount,
             currency, amount: r.amount, ...book(r.amount),
@@ -877,7 +865,6 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                 </div>
 
                 {employees.map((emp, idx) => {
-                  const empDeptSubs = deptSubs.filter(d => d.department_id === emp.department_id)
                   return (
                     <div key={emp.id} style={{ ...s.empCard, opacity: emp.accepted ? 1 : 0.45, borderColor: emp.accepted ? 'rgba(255,255,255,0.08)' : 'rgba(255,91,90,0.3)' }}>
                       <div style={s.empCardHeader} onClick={() => updateEmployee(emp.id, { expanded: !emp.expanded } as any)}>
@@ -925,24 +912,12 @@ export default function PayrollImportDialog({ onClose, onPosted }: Props) {
                             <div style={s.field}>
                               <label style={s.lbl}>Sektor</label>
                               <select style={s.select} value={emp.department_id}
-                                onChange={e2 => { const d = departments.find(x => x.id === e2.target.value); updateEmployee(emp.id, { department_id: e2.target.value, department_name: d?.name || '', dept_subcategory_id: '', dept_subcategory_name: '' } as any) }}>
+                                onChange={e2 => { const d = departments.find(x => x.id === e2.target.value); updateEmployee(emp.id, { department_id: e2.target.value, department_name: d?.name || '' } as any) }}>
                                 <option value="">Izaberite…</option>
                                 {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                               </select>
                             </div>
                           </div>
-                          {emp.department_id && (
-                            <div style={{ marginBottom: '10px' }}>
-                              <div style={s.field}>
-                                <label style={s.lbl}>Podsektor</label>
-                                <select style={s.select} value={emp.dept_subcategory_id}
-                                  onChange={e2 => { const d = deptSubs.find(x => x.id === e2.target.value); updateEmployee(emp.id, { dept_subcategory_id: e2.target.value, dept_subcategory_name: d?.name || '' } as any) }}>
-                                  <option value="">Izaberite…</option>
-                                  {empDeptSubs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                </select>
-                              </div>
-                            </div>
-                          )}
 
                           <div style={s.empSection}>Delovi zarade (mogu da se menjaju)</div>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px', marginBottom: '10px' }}>

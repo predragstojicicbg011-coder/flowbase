@@ -39,7 +39,7 @@ import { deductionAmount } from './employees'
 import { countOf } from '../../utils/plural'
 import { obligationRows, obligationTotal, type ObligationClasses } from '../payrollAllocation'
 import {
-  classificationFor, plPartFor, SystemCategoryMissing,
+  plPartFor, SystemCategoryMissing,
   type SystemCategoryMap, type SystemRole,
 } from '../systemCategories'
 import {
@@ -53,7 +53,6 @@ import {
 export interface UnitMapping {
   organisational_unit: string
   department: string
-  dept_subcategory: string | null
 }
 
 export interface PlannedInvoice {
@@ -64,7 +63,6 @@ export interface PlannedInvoice {
   pl_category: string
   pl_subcategory: string
   department: string | null
-  dept_subcategory: string | null
   /**
    * How this invoice's amount falls over projects, by the employee's hours.
    *
@@ -76,7 +74,12 @@ export interface PlannedInvoice {
   projects: DistributedLine[]
   /** Recurring while they are still employed; one-off for a final month. */
   cf_type: 'recurring' | 'one_time'
-  expense_description: string
+  /**
+   * What the row is — the employee's name, or the filing — for the messages
+   * below. Not written: the ledger no longer carries a cost description; the
+   * note says the same.
+   */
+  label: string
   amount: number
   pl_impact: boolean
   /** Set on a child, resolved to the parent's real id at write time. */
@@ -90,9 +93,9 @@ export interface PlannedTransaction {
   pl_category: string
   pl_subcategory: string
   department: string | null
-  dept_subcategory: string | null
   cf_type: 'recurring' | 'one_time'
-  expense_description: string
+  /** What was retained, for the messages. Not written; the note says it. */
+  label: string
   /** Negative — it cancels part of an expense already booked. */
   amount: number
   note: string
@@ -205,10 +208,9 @@ export function retainedCategoryFor(
 
 export interface Placement {
   department: string | null
-  dept_subcategory: string | null
 }
 
-const UNPLACED: Placement = { department: null, dept_subcategory: null }
+const UNPLACED: Placement = { department: null }
 
 export function departmentFor(
   unit: string | null, mapping: UnitMapping[],
@@ -233,11 +235,11 @@ export function departmentFor(
 export function placementFor(person: EmployeeForMonth | undefined, mapping: UnitMapping[]): Placement {
   if (person?.allocation) {
     const a = person.allocation
-    return { department: a.department, dept_subcategory: a.dept_subcategory }
+    return { department: a.department }
   }
   const unit = departmentFor(person?.employee.organisational_unit ?? null, mapping)
   if (!unit) return UNPLACED
-  return { department: unit.department, dept_subcategory: unit.dept_subcategory }
+  return { department: unit.department }
 }
 
 /**
@@ -290,12 +292,6 @@ export function planFor(input: PlanInput): PostingPlan {
   const retainedHeading = (label: string) => {
     try { return retainedCategoryFor(label, system, retained) } catch (e) { unset(e); return NONE }
   }
-  /** The salary podsektor when the person's allocation names none. */
-  const defaultDeptSub = (): string => {
-    try {
-      return classificationFor('payroll_salary_dept_subcategory', system).dept_subcategory || ''
-    } catch (e) { unset(e); return '' }
-  }
 
   const invoices: PlannedInvoice[] = []
   const transactions: PlannedTransaction[] = []
@@ -329,9 +325,6 @@ export function planFor(input: PlanInput): PostingPlan {
     const p = people[line.employeeId]
     const where = placementFor(p, mapping)
     const department = where.department
-    // Every salary lands under the one sub-category, whichever department
-    // carries it. The allocation may name another, and then it is theirs.
-    const deptSub = where.dept_subcategory || defaultDeptSub()
     const cf = cashFlowTypeFor(p?.employee ?? {}, monthEnd)
 
     // Only the deductions this run carries. `runsFor` puts a person's whole
@@ -369,9 +362,9 @@ export function planFor(input: PlanInput): PostingPlan {
           employeeName: line.name,
           partnerId: partners[d.id] ?? null,
           ...headingOf('payroll_net_salary'),
-          department, dept_subcategory: deptSub,
+          department,
           cf_type: cf,
-          expense_description: line.name,
+          label: line.name,
           amount: round2(amount),
           projects: spread(line.employeeId, line.name, amount),
           pl_impact: true,
@@ -394,9 +387,9 @@ export function planFor(input: PlanInput): PostingPlan {
           employeeName: line.name,
           pl_category: retainedWhere.pl_category,
           pl_subcategory: retainedWhere.pl_subcategory,
-          department, dept_subcategory: deptSub,
+          department,
           cf_type: cf,
-          expense_description: d.label,
+          label: d.label,
           amount: round2(-amount),
           note: `${tag} — Zadržana obustava (storno): ${d.label} — ${line.name}`,
         })
@@ -413,9 +406,9 @@ export function planFor(input: PlanInput): PostingPlan {
         employeeName: line.name,
         partnerId: staffPartners[line.employeeId] ?? null,
         ...headingOf('payroll_net_salary'),
-        department, dept_subcategory: deptSub,
+        department,
         cf_type: cf,
-        expense_description: line.name,
+        label: line.name,
         amount: toEmployee,
         projects: spread(line.employeeId, line.name, toEmployee),
         pl_impact: true,
@@ -428,7 +421,6 @@ export function planFor(input: PlanInput): PostingPlan {
       employee_id: line.employeeId,
       employee_name: line.name,
       department_name: department,
-      dept_subcategory_name: deptSub,
       tax: round2(line.line.incomeTax),
       contributionsEmployee: round2(line.line.employeeContributions),
       contributionsEmployer: round2(line.line.employerContributions),
@@ -438,7 +430,6 @@ export function planFor(input: PlanInput): PostingPlan {
   for (const line of run.otherIncome) {
     const p = people[line.employeeId]
     const where = placementFor(p, mapping)
-    const deptSub = where.dept_subcategory || defaultDeptSub()
     // Under the person's own department, like their salary, but not among
     // the net salaries: an addition paid outside the salary is not one.
     invoices.push({
@@ -448,9 +439,8 @@ export function planFor(input: PlanInput): PostingPlan {
       partnerId: staffPartners[line.employeeId] ?? null,
       ...headingOf('payroll_other_income'),
       department: where.department,
-      dept_subcategory: deptSub,
       cf_type: cashFlowTypeFor(p?.employee ?? {}, monthEnd),
-      expense_description: line.name,
+      label: line.name,
       amount: round2(line.line.net),
       projects: spread(line.employeeId, line.name, line.line.net),
       pl_impact: true,
@@ -460,7 +450,6 @@ export function planFor(input: PlanInput): PostingPlan {
       employee_id: line.employeeId,
       employee_name: line.name,
       department_name: where.department,
-      dept_subcategory_name: deptSub,
       tax: round2(line.line.incomeTax),
       contributionsEmployee: 0,
       contributionsEmployer: 0,
@@ -491,9 +480,9 @@ export function planFor(input: PlanInput): PostingPlan {
       // The payable carries the tax heading; it is pl_impact false, so the
       // heading is for finding it, not for the P&L.
       ...classes!.tax,
-      department: null, dept_subcategory: null,
+      department: null,
       cf_type: 'recurring',
-      expense_description: `Porez i doprinosi — ${month} ${run.label}`,
+      label: `Porez i doprinosi — ${month} ${run.label}`,
       amount: owed,
       projects: [],
       // The payable the bank payment matches. Its children carry the P&L, so
@@ -510,9 +499,8 @@ export function planFor(input: PlanInput): PostingPlan {
         pl_category: r.pl_category,
         pl_subcategory: r.pl_subcategory,
         department: r.department,
-        dept_subcategory: r.dept_subcategory,
         cf_type: cfByName.get(r.employee_name) ?? 'recurring',
-        expense_description: r.expense_description,
+        label: r.label,
         amount: r.amount,
         projects: r.employee_id
           ? spread(r.employee_id, r.employee_name, r.amount)
@@ -618,7 +606,7 @@ export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null
   const headless = [...plan.invoices, ...plan.transactions]
     .find(r => !(r.pl_category || '').trim() || !(r.pl_subcategory || '').trim())
   if (headless) {
-    return `„${headless.expense_description}“ nema P&L kategoriju ili potkategoriju. `
+    return `„${headless.label}“ nema P&L kategoriju ili potkategoriju. `
       + 'Ništa nije upisano. Podesite sistemske kategorije u Podešavanja → Sistemske kategorije.'
   }
 
@@ -631,12 +619,10 @@ export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null
       ...plan.invoices.map(i => ({
         pl_subcategory: i.pl_subcategory,
         department: i.department,
-        dept_subcategory: i.dept_subcategory,
       })),
       ...plan.transactions.map(t => ({
         pl_subcategory: t.pl_subcategory,
         department: t.department,
-        dept_subcategory: t.dept_subcategory,
       })),
     ], known)
     if (unknown.length > 0) {
@@ -657,14 +643,14 @@ export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null
   // whose actual problem is a named employee with no department.
   const negative = plan.invoices.find(i => i.amount < 0)
   if (negative) {
-    return `„${negative.expense_description}“ bi bila proknjižena kao negativna faktura `
+    return `„${negative.label}“ bi bila proknjižena kao negativna faktura `
       + `(${negative.amount.toFixed(2)}). Negativna obaveza ne postoji; to znači da su `
       + 'obustave veće od zarade iz koje se odbijaju. Proverite obustave zaposlenog.'
   }
 
   const undept = plan.invoices.filter(i => i.pl_impact && !i.department)
   if (undept.length > 0) {
-    const names = [...new Set(undept.map(i => i.expense_description))].slice(0, 5)
+    const names = [...new Set(undept.map(i => i.label))].slice(0, 5)
     return `${countOf(undept.length, 'stavka bi ostala', 'stavke bi ostale', 'stavki bi ostalo')} `
       + `bez sektora (${names.join(', ')}). Sve bi završile u „Nedodeljeno“, gde zarada `
       + 'izgleda kao običan trošak bez nosioca. Prvo povežite organizacione jedinice sa sektorima.'
@@ -676,7 +662,7 @@ export function checkPlan(plan: PostingPlan, known?: LedgerNames): string | null
   const unbalanced = plan.invoices.find(i => i.pl_impact && Math.round(
     i.projects.reduce((s, l) => s + l.amount, 0) * 100) !== Math.round(i.amount * 100))
   if (unbalanced) {
-    return `„${unbalanced.expense_description}“ (${unbalanced.amount.toFixed(2)}) se ne `
+    return `„${unbalanced.label}“ (${unbalanced.amount.toFixed(2)}) se ne `
       + 'slaže sa zbirom po projektima. Ništa nije upisano.'
   }
 
