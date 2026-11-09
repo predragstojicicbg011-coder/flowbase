@@ -13,8 +13,6 @@ export interface QuickFillScript {
   pl_category: string
   pl_subcategory: string
   department: string
-  dept_subcategory: string
-  expense_description: string
   cf_type: string       // recurring | one_time | accrual | capex | reimbursable | ""
   sort_order?: number
 }

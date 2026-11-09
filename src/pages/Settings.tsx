@@ -19,9 +19,9 @@ import { countOf } from '../utils/plural'
 const inUse = (name: string, n: number, one: string, few: string, many: string) =>
   `„${name}“ ne može da se obriše — koristi se u ${countOf(n, one, few, many)}.`
 
-type SettingsTab = 'companies' | 'banks' | 'pl' | 'departments' | 'descriptions' | 'system' | 'users' | 'periods' | 'templates' | 'payroll' | 'sef'
+type SettingsTab = 'companies' | 'banks' | 'pl' | 'departments' | 'system' | 'users' | 'periods' | 'templates' | 'payroll' | 'sef'
 
-const TAB_IDS: readonly SettingsTab[] = ['companies', 'banks', 'pl', 'departments', 'descriptions', 'system', 'users', 'periods', 'templates', 'payroll', 'sef']
+const TAB_IDS: readonly SettingsTab[] = ['companies', 'banks', 'pl', 'departments', 'system', 'users', 'periods', 'templates', 'payroll', 'sef']
 
 /** `#/settings?tab=system` opens that tab — the notices on Zarade and Krediti link there. */
 function tabFromSearch(search: string): SettingsTab | null {
@@ -69,7 +69,6 @@ export default function Settings() {
             { id: 'banks',        label: '🏦 Banke',                show: true },
             { id: 'pl',           label: '📊 P&L kategorije',       show: true },
             { id: 'departments',  label: '🏗 Sektori',              show: true },
-            { id: 'descriptions', label: '🏷 Opisi troškova',       show: true },
             { id: 'system',       label: '⚙ Sistemske kategorije', show: true },
             { id: 'templates',    label: '⚡ Šabloni brze popune',  show: true },
             { id: 'payroll',      label: '💼 Podešavanja zarada',   show: true },
@@ -89,7 +88,6 @@ export default function Settings() {
         {activeTab === 'banks'        && <BanksTab canEdit={canManageSettings} />}
         {activeTab === 'pl'           && <PLCategoriesTab canEdit={canManageSettings} />}
         {activeTab === 'departments'  && <DepartmentsTab canEdit={canManageSettings} />}
-        {activeTab === 'descriptions' && <DescriptionsTab canEdit={canManageSettings} />}
         {activeTab === 'system'       && <SystemCategoriesTab canEdit={canManageSettings} />}
         {activeTab === 'templates'    && <QuickFillTab canEdit={canManageSettings} />}
         {activeTab === 'payroll'      && <PayrollSettingsTab canEdit={canManageSettings} />}
@@ -447,30 +445,24 @@ function PLCategoriesTab({ canEdit }: { canEdit: boolean }) {
 }
 
 // ── Departments Tab ──────────────────────────────────────
+// Sectors only. Sub-sectors (dept_subcategories) and cost descriptions
+// (expense_descriptions) are no longer managed here or used anywhere in the
+// app; their tables stay in the database untouched.
 function DepartmentsTab({ canEdit }: { canEdit: boolean }) {
   const [departments, setDepartments] = useState<any[]>([])
-  const [subcategories, setSubcategories] = useState<any[]>([])
-  const [selectedDept, setSelectedDept] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [newDeptName, setNewDeptName] = useState('')
-  const [newSubName, setNewSubName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
 
   const fetchDepartments = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase.from('departments').select('*').order('sort_order')
-    if (data) { setDepartments(data); if (!selectedDept && data.length > 0) setSelectedDept(data[0]) }
+    if (data) setDepartments(data)
     setLoading(false)
-  }, [selectedDept])
-
-  const fetchSubcategories = useCallback(async (deptId: string) => {
-    const { data } = await supabase.from('dept_subcategories').select('*').eq('department_id', deptId).order('sort_order')
-    if (data) setSubcategories(data)
   }, [])
 
   useEffect(() => { fetchDepartments() }, []) // eslint-disable-line
-  useEffect(() => { if (selectedDept) fetchSubcategories(selectedDept.id) }, [selectedDept]) // eslint-disable-line
 
   const addDepartment = async () => {
     if (!newDeptName.trim() || !canEdit) return
@@ -478,49 +470,22 @@ function DepartmentsTab({ canEdit }: { canEdit: boolean }) {
     setNewDeptName(''); fetchDepartments()
   }
 
-  const addSubcategory = async () => {
-    if (!newSubName.trim() || !selectedDept || !canEdit) return
-    if (!(await reportWrite('Dodavanje podsektora', supabase.from('dept_subcategories').insert({ department_id: selectedDept.id, name: newSubName.trim(), sort_order: subcategories.length + 1 })))) return
-    setNewSubName(''); fetchSubcategories(selectedDept.id)
-  }
-
-  const updateName = async (table: string, id: string) => {
+  const updateName = async (id: string) => {
     if (!editingName.trim() || !canEdit) return
-    if (!(await reportWrite('Preimenovanje', supabase.from(table).update({ name: editingName.trim() }).eq('id', id)))) return
+    if (!(await reportWrite('Preimenovanje', supabase.from('departments').update({ name: editingName.trim() }).eq('id', id)))) return
     setEditingId(null); setEditingName('')
-    if (table === 'departments') fetchDepartments()
-    else if (selectedDept) fetchSubcategories(selectedDept.id)
+    fetchDepartments()
   }
 
-  const deleteItem = async (table: string, id: string, name: string) => {
+  const deleteItem = async (id: string, name: string) => {
     if (!canEdit) return
-
-    if (table === 'departments') {
-      const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('department', name)
-      if (txCount && txCount > 0) { window.alert(inUse(name, txCount, 'transakciji', 'transakcije', 'transakcija')); return }
-      const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('department', name)
-      if (invCount && invCount > 0) { window.alert(inUse(name, invCount, 'fakturi', 'fakture', 'faktura')); return }
-      if (!window.confirm(`Obrisati sektor „${name}“ i sve njegove podsektore?`)) return
-      // Kaskadno: brisanje expense_descriptions → dept_subcategories → departments
-      const { data: subs } = await supabase.from('dept_subcategories').select('id').eq('department_id', id)
-      if (subs && subs.length > 0) {
-        const subIds = subs.map((s: any) => s.id)
-        if (!(await reportWrite('Brisanje opisa troškova', supabase.from('expense_descriptions').delete().in('dept_subcategory_id', subIds)))) return
-        if (!(await reportWrite('Brisanje podsektora', supabase.from('dept_subcategories').delete().eq('department_id', id)))) return
-      }
-      if (!(await reportWrite('Brisanje sektora', supabase.from('departments').delete().eq('id', id)))) return
-      fetchDepartments(); setSelectedDept(null); setSubcategories([])
-    } else if (table === 'dept_subcategories') {
-      const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('dept_subcategory', name)
-      if (txCount && txCount > 0) { window.alert(inUse(name, txCount, 'transakciji', 'transakcije', 'transakcija')); return }
-      const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('dept_subcategory', name)
-      if (invCount && invCount > 0) { window.alert(inUse(name, invCount, 'fakturi', 'fakture', 'faktura')); return }
-      if (!window.confirm(`Obrisati podsektor „${name}“ i sve njegove opise troškova?`)) return
-      // Kaskadno: brisanje expense_descriptions → dept_subcategories
-      if (!(await reportWrite('Brisanje opisa troškova', supabase.from('expense_descriptions').delete().eq('dept_subcategory_id', id)))) return
-      if (!(await reportWrite('Brisanje podsektora', supabase.from('dept_subcategories').delete().eq('id', id)))) return
-      if (selectedDept) fetchSubcategories(selectedDept.id)
-    }
+    const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('department', name)
+    if (txCount && txCount > 0) { window.alert(inUse(name, txCount, 'transakciji', 'transakcije', 'transakcija')); return }
+    const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('department', name)
+    if (invCount && invCount > 0) { window.alert(inUse(name, invCount, 'fakturi', 'fakture', 'faktura')); return }
+    if (!window.confirm(`Obrisati sektor „${name}“?`)) return
+    if (!(await reportWrite('Brisanje sektora', supabase.from('departments').delete().eq('id', id)))) return
+    fetchDepartments()
   }
 
   if (loading) return (
@@ -537,129 +502,18 @@ function DepartmentsTab({ canEdit }: { canEdit: boolean }) {
           <div style={s.colHeader}><div style={s.colTitle}>Sektori</div><span style={s.colCount}>{departments.length}</span></div>
           <div style={s.itemList}>
             {departments.map(dept => (
-              <div key={dept.id} style={{ ...s.itemRow, ...(selectedDept?.id === dept.id ? s.itemRowActive : {}) }} onClick={() => setSelectedDept(dept)}>
-                {editingId === dept.id ? <input style={s.inlineInput} value={editingName} onChange={e => setEditingName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') updateName('departments', dept.id) }} onClick={e => e.stopPropagation()} autoFocus /> : <span style={s.itemName}>{dept.name}</span>}
+              <div key={dept.id} style={s.itemRow}>
+                {editingId === dept.id ? <input style={s.inlineInput} value={editingName} onChange={e => setEditingName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') updateName(dept.id) }} autoFocus /> : <span style={s.itemName}>{dept.name}</span>}
                 {canEdit && (
-                  <div style={s.itemActions} onClick={e => e.stopPropagation()}>
-                    {editingId === dept.id ? <button style={s.saveBtn} onClick={() => updateName('departments', dept.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(dept.id); setEditingName(dept.name) }}>✏️</button>}
-                    <button style={s.deleteBtn} onClick={() => deleteItem('departments', dept.id, dept.name)}>Obriši</button>
+                  <div style={s.itemActions}>
+                    {editingId === dept.id ? <button style={s.saveBtn} onClick={() => updateName(dept.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(dept.id); setEditingName(dept.name) }}>✏️</button>}
+                    <button style={s.deleteBtn} onClick={() => deleteItem(dept.id, dept.name)}>Obriši</button>
                   </div>
                 )}
               </div>
             ))}
           </div>
           {canEdit && <div style={s.addRow}><input style={s.addInput} value={newDeptName} onChange={e => setNewDeptName(e.target.value)} placeholder="Novi sektor…" onKeyDown={e => { if (e.key === 'Enter') addDepartment() }} /><button style={s.addBtn} onClick={addDepartment}>+ Dodaj</button></div>}
-        </div>
-        <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>{selectedDept ? `Podsektori — ${selectedDept.name}` : 'Izaberite sektor'}</div>{selectedDept && <span style={s.colCount}>{subcategories.length}</span>}</div>
-          {!selectedDept ? <div style={s.emptyHint}>← Izaberite sektor da biste uređivali njegove podsektore</div> : (
-            <>
-              <div style={s.itemList}>
-                {subcategories.map(sub => (
-                  <div key={sub.id} style={s.itemRow}>
-                    {editingId === sub.id ? <input style={s.inlineInput} value={editingName} onChange={e => setEditingName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') updateName('dept_subcategories', sub.id) }} autoFocus /> : <span style={s.itemName}>{sub.name}</span>}
-                    {canEdit && <div style={s.itemActions}>{editingId === sub.id ? <button style={s.saveBtn} onClick={() => updateName('dept_subcategories', sub.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(sub.id); setEditingName(sub.name) }}>✏️</button>}<button style={s.deleteBtn} onClick={() => deleteItem('dept_subcategories', sub.id, sub.name)}>Obriši</button></div>}
-                  </div>
-                ))}
-              </div>
-              {canEdit && <div style={s.addRow}><input style={s.addInput} value={newSubName} onChange={e => setNewSubName(e.target.value)} placeholder="Novi podsektor…" onKeyDown={e => { if (e.key === 'Enter') addSubcategory() }} /><button style={s.addBtn} onClick={addSubcategory}>+ Dodaj</button></div>}
-            </>
-          )}
-        </div>
-      </div>
-    </>
-  )
-}
-
-// ── Expense Descriptions Tab ─────────────────────────────
-function DescriptionsTab({ canEdit }: { canEdit: boolean }) {
-  const [subcategories, setSubcategories] = useState<any[]>([])
-  const [descriptions, setDescriptions] = useState<any[]>([])
-  const [selectedSub, setSelectedSub] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [searchSub, setSearchSub] = useState('')
-  const [newDescName, setNewDescName] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingName, setEditingName] = useState('')
-
-  const fetchSubcategories = useCallback(async () => {
-    setLoading(true)
-    const { data } = await supabase.from('dept_subcategories').select('*, departments(name)').order('name')
-    if (data) setSubcategories(data)
-    setLoading(false)
-  }, [])
-
-  const fetchDescriptions = useCallback(async (subId: string) => {
-    const { data } = await supabase.from('expense_descriptions').select('*').eq('dept_subcategory_id', subId).order('sort_order')
-    if (data) setDescriptions(data)
-  }, [])
-
-  useEffect(() => { fetchSubcategories() }, []) // eslint-disable-line
-  useEffect(() => { if (selectedSub) fetchDescriptions(selectedSub.id) }, [selectedSub]) // eslint-disable-line
-
-  const addDescription = async () => {
-    if (!newDescName.trim() || !selectedSub || !canEdit) return
-    if (!(await reportWrite('Dodavanje opisa troška', supabase.from('expense_descriptions').insert({ dept_subcategory_id: selectedSub.id, name: newDescName.trim(), sort_order: descriptions.length + 1 })))) return
-    setNewDescName(''); fetchDescriptions(selectedSub.id)
-  }
-
-  const updateName = async (id: string) => {
-    if (!editingName.trim() || !canEdit) return
-    if (!(await reportWrite('Preimenovanje', supabase.from('expense_descriptions').update({ name: editingName.trim() }).eq('id', id)))) return
-    setEditingId(null); setEditingName('')
-    if (selectedSub) fetchDescriptions(selectedSub.id)
-  }
-
-  const deleteDesc = async (id: string, name: string) => {
-    if (!canEdit) return
-    const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('expense_description', name)
-    if (txCount && txCount > 0) { window.alert(inUse(name, txCount, 'transakciji', 'transakcije', 'transakcija')); return }
-    const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('expense_description', name)
-    if (invCount && invCount > 0) { window.alert(inUse(name, invCount, 'fakturi', 'fakture', 'faktura')); return }
-    if (!window.confirm(`Obrisati opis "${name}"?`)) return
-    if (!(await reportWrite('Brisanje opisa troška', supabase.from('expense_descriptions').delete().eq('id', id)))) return
-    if (selectedSub) fetchDescriptions(selectedSub.id)
-  }
-
-  const filteredSubs = subcategories.filter(sub =>
-    !searchSub || sub.name.toLowerCase().includes(searchSub.toLowerCase()) ||
-    (sub.departments?.name || '').toLowerCase().includes(searchSub.toLowerCase())
-  )
-
-  if (loading) return <div style={s.loading}>Učitavanje…</div>
-
-  return (
-    <>
-      {!canEdit && <div style={s.readOnlyBanner}>👁 Samo pregled — opise mogu da menjaju samo administratori.</div>}
-      <div style={s.twoCol}>
-        <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>Podsektori</div><span style={s.colCount}>{subcategories.length}</span></div>
-          <div style={{ padding: '8px 12px', borderBottom: '0.5px solid rgba(255,255,255,0.05)' }}>
-            <input style={{ ...s.addInput, width: '100%', boxSizing: 'border-box' as const }} value={searchSub} onChange={e => setSearchSub(e.target.value)} placeholder="Pretraga podsektora…" />
-          </div>
-          <div style={s.itemList}>
-            {filteredSubs.map(sub => (
-              <div key={sub.id} style={{ ...s.itemRow, ...(selectedSub?.id === sub.id ? s.itemRowActive : {}) }} onClick={() => setSelectedSub(sub)}>
-                <div><div style={s.itemName}>{sub.name}</div><div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.30)' }}>{sub.departments?.name}</div></div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div style={s.colPanel}>
-          <div style={s.colHeader}><div style={s.colTitle}>{selectedSub ? `Opisi troškova — ${selectedSub.name}` : 'Izaberite podsektor'}</div>{selectedSub && <span style={s.colCount}>{descriptions.length}</span>}</div>
-          {!selectedSub ? <div style={s.emptyHint}>← Izaberite podsektor da biste uređivali njegove opise troškova</div> : (
-            <>
-              <div style={s.itemList}>
-                {descriptions.map(desc => (
-                  <div key={desc.id} style={s.itemRow}>
-                    {editingId === desc.id ? <input style={s.inlineInput} value={editingName} onChange={e => setEditingName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') updateName(desc.id) }} autoFocus /> : <span style={s.itemName}>{desc.name}</span>}
-                    {canEdit && <div style={s.itemActions}>{editingId === desc.id ? <button style={s.saveBtn} onClick={() => updateName(desc.id)}>✓</button> : <button style={s.iconBtn} onClick={() => { setEditingId(desc.id); setEditingName(desc.name) }}>✏️</button>}<button style={s.deleteBtn} onClick={() => deleteDesc(desc.id, desc.name)}>Obriši</button></div>}
-                  </div>
-                ))}
-              </div>
-              {canEdit && <div style={s.addRow}><input style={s.addInput} value={newDescName} onChange={e => setNewDescName(e.target.value)} placeholder="Novi opis…" onKeyDown={e => { if (e.key === 'Enter') addDescription() }} /><button style={s.addBtn} onClick={addDescription}>+ Dodaj</button></div>}
-            </>
-          )}
         </div>
       </div>
     </>

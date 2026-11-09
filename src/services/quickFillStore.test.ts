@@ -6,7 +6,7 @@ import type { QuickFillScript } from '../data/quickfill'
 
 const script = (id: string, name: string): QuickFillScript => ({
   id, name, icon: '', pl_category: 'Banking and Finance', pl_subcategory: '',
-  department: '', dept_subcategory: '', expense_description: '',
+  department: '',
   cf_type: '',
 })
 
@@ -54,7 +54,6 @@ describe('whyNotSavable', () => {
   const existing = [{ id: 'a', name: 'Bank fee' }, { id: 'b', name: 'Currency Differences' }]
   const draft = (over: Partial<ScriptDraft> = {}): ScriptDraft => ({
     name: 'Rent', icon: '', pl_category: '', pl_subcategory: '', department: '',
-    dept_subcategory: '', expense_description: '',
     cf_type: '', ...over,
   })
 
@@ -104,7 +103,7 @@ describe('toRow', () => {
   it('trims the name and fills the defaults the table expects', () => {
     const row = toRow({
       name: '  Rent  ', icon: '', pl_category: 'Overheads', pl_subcategory: '',
-      department: '', dept_subcategory: '', expense_description: '',
+      department: '',
       cf_type: '',
     })
     expect(row.name).toBe('Rent')
@@ -115,7 +114,7 @@ describe('toRow', () => {
   it('carries no id, so the same shape serves an insert and an update', () => {
     expect(Object.keys(toRow({
       id: 'x', name: 'Rent', icon: '', pl_category: '', pl_subcategory: '',
-      department: '', dept_subcategory: '', expense_description: '',
+      department: '',
       cf_type: '',
     }))).not.toContain('id')
   })
@@ -125,10 +124,22 @@ describe('toRow', () => {
   it('writes no allocation and no project', () => {
     const keys = Object.keys(toRow({
       name: 'Rent', icon: '', pl_category: '', pl_subcategory: '',
-      department: '', dept_subcategory: '', expense_description: '', cf_type: '',
+      department: '', cf_type: '',
     }))
     expect(keys).not.toContain('rev_alloc')
     expect(keys).not.toContain('opex_type')
     expect(keys).not.toContain('project_id')
+  })
+
+  it('clears an old sub-sector and cost description rather than keeping them', () => {
+    // The columns are NOT NULL with an empty default, so empty is how they
+    // are cleared; a template edited now never keeps a stale value there.
+    const row = toRow({
+      name: 'Rent', icon: '', pl_category: 'Overheads', pl_subcategory: '', department: 'Admin', cf_type: '',
+      dept_subcategory: 'Old sub-sector', expense_description: 'Old note',
+    } as ScriptDraft)
+    expect(row.dept_subcategory).toBe('')
+    expect(row.expense_description).toBe('')
+    expect(row.department).toBe('Admin')
   })
 })

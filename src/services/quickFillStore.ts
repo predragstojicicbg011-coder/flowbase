@@ -44,8 +44,6 @@ export interface ScriptDraft {
   pl_category: string
   pl_subcategory: string
   department: string
-  dept_subcategory: string
-  expense_description: string
   cf_type: string
   sort_order?: number
 }
@@ -80,7 +78,13 @@ export function sortScripts<T extends { name: string; sort_order?: number }>(scr
     (a.sort_order ?? 0) - (b.sort_order ?? 0) || (a.name || '').localeCompare(b.name || ''))
 }
 
-/** A template stripped to the columns the table has. */
+/**
+ * A template stripped to the columns the table has.
+ *
+ * Sub-sector and cost description are no longer part of a template. Their
+ * columns are still in the table (NOT NULL, empty by default), so they are
+ * written empty: an edited template never keeps a value nobody can see.
+ */
 export function toRow(draft: ScriptDraft): Record<string, unknown> {
   return {
     name: (draft.name || '').trim(),
@@ -88,8 +92,8 @@ export function toRow(draft: ScriptDraft): Record<string, unknown> {
     pl_category: draft.pl_category || '',
     pl_subcategory: draft.pl_subcategory || '',
     department: draft.department || '',
-    dept_subcategory: draft.dept_subcategory || '',
-    expense_description: draft.expense_description || '',
+    dept_subcategory: '',
+    expense_description: '',
     cf_type: draft.cf_type || '',
     sort_order: draft.sort_order ?? 0,
   }

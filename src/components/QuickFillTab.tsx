@@ -24,7 +24,7 @@ import {
 
 const BLANK: ScriptDraft = {
   name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '',
-  dept_subcategory: '', expense_description: '', cf_type: '',
+  cf_type: '',
 }
 
 const CF = [
@@ -67,8 +67,7 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return scripts
-    return scripts.filter(sc => [sc.name, sc.pl_category, sc.pl_subcategory, sc.department,
-      sc.dept_subcategory, sc.expense_description]
+    return scripts.filter(sc => [sc.name, sc.pl_category, sc.pl_subcategory, sc.department]
       .some((v: string) => (v || '').toLowerCase().includes(q)))
   }, [scripts, search])
 
@@ -148,8 +147,6 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
             {field('P&L kategorija', 'pl_category')}
             {field('Potkategorija', 'pl_subcategory')}
             {field('Sektor', 'department')}
-            {field('Podsektor', 'dept_subcategory')}
-            {field('Opis troška', 'expense_description')}
             {choice('Tip novčanog toka', 'cf_type', CF)}
           </div>
           <div style={s.editorFoot}>
@@ -188,7 +185,7 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
                   <div style={s.path}>
                     {[sc.pl_category, sc.pl_subcategory].filter(Boolean).join(' / ') || '—'}
                     {' · '}
-                    {[sc.department, sc.dept_subcategory, sc.expense_description].filter(Boolean).join(' / ') || '—'}
+                    {sc.department || '—'}
                   </div>
                   {(staleCat || staleDept) && (
                     <div style={s.stale}>
