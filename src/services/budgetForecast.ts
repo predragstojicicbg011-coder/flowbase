@@ -699,36 +699,46 @@ export function pinnedBase(
 }
 
 /**
- * The levels a budget line is recorded at today. An entry at any other level
- * (`dept_subcategory`, `expense_description`) was recorded before those levels
- * were removed.
+ * The day sub-sectors and cost descriptions were removed. A budget entry
+ * created before it was recorded on the old tree.
  */
-const CURRENT_LEVELS: readonly string[] = ['pl_category', 'pl_subcategory', 'department']
+export const SUBSECTOR_CUTOVER = '2026-11-09'
+
+/** Levels that no longer exist. A pin taken on one describes no node today. */
+const REMOVED_LEVELS: readonly string[] = ['dept_subcategory', 'expense_description']
 
 /**
- * Whether an entry's pinned seed (`seed_rsd` / `seed_eur`) still describes the
- * node it lands on, and so may be its base (`pinnedBase`).
- *
- * A pin is the seed of the node the figure was typed on. Until sub-sectors and
- * cost descriptions were removed, every actual walked down to a description
- * leaf, so the department and the P&L sub-category were PARENTS whose own seed
- * was always 0 — and a figure typed on one pinned 0. Those nodes are leaves
- * now and hold the whole seed: a 0 honoured there would replace all of it, and
- * the total would drop by exactly the seed. A figure typed on a sub-sector or
- * a description pinned a node that no longer exists, and lands on its sector
- * now; its pin says nothing about the sector's seed.
- *
- * So a pin holds only when it was taken at a level that still exists AND is
- * not 0. Nothing old can be both: an old pin at a current level is a parent's
- * 0. A 0 typed today, on a line nothing had been spent on, is read as no pin —
- * the line then moves with a later benchmark like any untouched line, which
- * is the cost of telling the two apart. The entry's own amount always counts.
+ * Levels that were PARENTS on the old tree and are leaves now. Every actual
+ * used to walk down to a description leaf, so a figure typed on a department
+ * or a P&L sub-category pinned that parent's own seed — always 0. Honoured on
+ * today's leaf, that old 0 would replace the whole seed the node now holds.
  */
-export function pinStillHolds(a: { level?: string | null }, pinned: unknown): boolean {
+const PARENT_TURNED_LEAF: readonly string[] = ['department', 'pl_subcategory']
+
+/**
+ * Whether an entry's pinned seed (`seed_rsd` / `seed_eur`) is still its node's
+ * base (`pinnedBase`). Decided by LEVEL and by when the entry was recorded,
+ * never by the value alone:
+ *
+ *   - a pin taken at a level that no longer exists is ignored;
+ *   - a 0 saved before the cut-over at a level that turned from parent into
+ *     leaf is ignored — it is the old parent's own seed, not a decision;
+ *   - every other pin is honoured exactly as before, a 0 saved since the
+ *     cut-over included (a line planned before anything was spent on it).
+ *
+ * The entry's own amount always counts; only its pin can be set aside.
+ */
+export function pinStillHolds(
+  a: { level?: string | null; created_at?: string | null }, pinned: unknown,
+): boolean {
   if (pinned === null || pinned === undefined) return false
-  if (!CURRENT_LEVELS.includes(String(a.level || ''))) return false
   const n = Number(pinned)
-  return Number.isFinite(n) && n !== 0
+  if (!Number.isFinite(n)) return false
+  const level = String(a.level || '')
+  if (REMOVED_LEVELS.includes(level)) return false
+  const before = String(a.created_at || '') < SUBSECTOR_CUTOVER
+  if (n === 0 && before && PARENT_TURNED_LEAF.includes(level)) return false
+  return true
 }
 
 /**

@@ -153,6 +153,34 @@ describe('a figure pinned before sub-sectors were removed', () => {
     ] })
     expect(tree.rolledRsd[MONTH][NODE].budget).toBe(1000)
   })
+
+  it('holds a figure planned ahead on a line nothing had been spent on (a 0 saved after the cut-over)', async () => {
+    // Planned 500.000 on a new line whose seed was 0; 200.000 has since been
+    // spent in the benchmark month. The typed figure holds.
+    const spent = [actual({ id: 'ovh', amount_rsd: 200000 })]
+    const { tree } = await load({ v_pl_entries: spent, budget_adjustments: [
+      line({ id: 'a1', level: 'department', amount_rsd: 500000, seed_rsd: 0,
+        created_at: '2026-11-20T10:00:00Z' }),
+    ] })
+    expect(tree.rolledRsd[MONTH][NODE].budget).toBe(500000)
+  })
+
+  it('honours a 0 saved after the cut-over on a P&L sub-category too', async () => {
+    const spent = [actual({ id: 'ovh', amount_rsd: 200000 })]
+    const { tree } = await load({ v_pl_entries: spent, budget_adjustments: [
+      line({ id: 'a1', level: 'pl_subcategory', amount_rsd: 500000, seed_rsd: 0,
+        created_at: '2026-11-20T10:00:00Z' }),
+    ] })
+    expect(tree.rolledRsd[MONTH][NODE].budget).toBe(500000)
+  })
+
+  it('lets an old 0 on a former parent follow the live seed', async () => {
+    const { tree } = await load({ v_pl_entries: overheadOnly, budget_adjustments: [
+      line({ id: 'a1', level: 'pl_subcategory', amount_rsd: 200, seed_rsd: 0,
+        created_at: '2026-11-08T23:00:00Z' }),
+    ] })
+    expect(tree.rolledRsd[MONTH][NODE].budget).toBe(1200)
+  })
 })
 
 describe('the budget tree with projects', () => {

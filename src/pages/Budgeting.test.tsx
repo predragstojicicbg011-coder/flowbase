@@ -1369,3 +1369,39 @@ describe('a budget for one project, or for overhead', () => {
     expect(ledgerWrites()[0].row).toMatchObject({ project_id: null, amount_rsd: 600, seed_rsd: 1000 })
   })
 })
+
+describe('the warning about figures that still move with the benchmark', () => {
+  const entry = (over: Record<string, any>) => ({
+    id: 'adj-1', company_id: null,
+    budget_month: `${horizonMonth(0)}-01`, level: 'department',
+    pl_category: null, pl_subcategory: null, department: 'Administration',
+    kind: 'adjust', amount_rsd: 500, reason: 'Plan',
+    created_at: '2026-11-20T10:00:00Z', seed_rsd: 0, seed_eur: 0,
+    ...over,
+  })
+  const warning = () => screen.queryByText(/nego što su budžeti fiksirani/i)
+
+  it('does not count a figure whose pin is honoured, a 0 on a line with nothing spent included', async () => {
+    seedDb({ budget_adjustments: [entry({})] })
+    await renderConsolidated()
+    await screen.findByText('Administration')
+    expect(warning()).not.toBeInTheDocument()
+  })
+
+  it('counts an old 0 on a former parent, which no longer anchors anything', async () => {
+    seedDb({ budget_adjustments: [entry({ created_at: '2026-10-01T10:00:00Z' })] })
+    await renderConsolidated()
+    await screen.findByText('Administration')
+    expect(warning()).toBeInTheDocument()
+  })
+
+  it('is cleared by typing the figure again', async () => {
+    seedDb({ budget_adjustments: [
+      entry({ created_at: '2026-10-01T10:00:00Z' }),
+      entry({ id: 'adj-2', amount_rsd: 0, created_at: '2026-11-21T10:00:00Z' }),
+    ] })
+    await renderConsolidated()
+    await screen.findByText('Administration')
+    expect(warning()).not.toBeInTheDocument()
+  })
+})

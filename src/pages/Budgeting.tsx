@@ -13,7 +13,7 @@ import { useProjects } from '../contexts/ProjectsContext'
 import { OVERHEAD_LABEL, projectLabel } from '../services/projects'
 import { PROJECT_FILTER_OVERHEAD } from '../services/ledgerFilters'
 import {
-  inLedgerOrder, variance,
+  inLedgerOrder, variance, pinStillHolds,
   type Adjustment, type RolledNode, type BudgetCurrency,
 } from '../services/budgetForecast'
 import {
@@ -692,8 +692,10 @@ export default function Budgeting() {
         // One loose line, however many entries are on it: the newest recorded
         // base anchors the whole replay, so a line whose LAST entry carries
         // one is already anchored however many older ones do not.
+        // Anchored means the same as in `pinnedBase`: a pin `pinStillHolds`
+        // honours. The tree has already set the others aside.
         const last = [...entries].sort(inLedgerOrder).pop()
-        if (last && (last.seed_rsd === null || last.seed_rsd === undefined)) n++
+        if (last && !pinStillHolds(last, last.seed_rsd)) n++
       }
     }
     return n

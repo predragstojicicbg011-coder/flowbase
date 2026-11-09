@@ -925,3 +925,31 @@ describe('the credit legs not set', () => {
     expect(r.unclassified).toEqual(['i1'])
   })
 })
+
+describe('pinStillHolds', () => {
+  const { pinStillHolds, SUBSECTOR_CUTOVER } = jest.requireActual('./budgetForecast')
+  const at = (level: string, created_at: string) => ({ level, created_at })
+
+  it('ignores any pin taken at a level that no longer exists', () => {
+    expect(pinStillHolds(at('dept_subcategory', '2026-12-01T00:00:00Z'), 400)).toBe(false)
+    expect(pinStillHolds(at('expense_description', '2026-01-01T00:00:00Z'), 0)).toBe(false)
+  })
+
+  it('ignores a 0 saved before the cut-over on a former parent, and only that', () => {
+    expect(SUBSECTOR_CUTOVER).toBe('2026-11-09')
+    expect(pinStillHolds(at('department', '2026-11-08T23:59:59Z'), 0)).toBe(false)
+    expect(pinStillHolds(at('pl_subcategory', '2026-10-01T00:00:00Z'), 0)).toBe(false)
+    expect(pinStillHolds(at('department', '2026-10-01T00:00:00Z'), 900)).toBe(true)
+  })
+
+  it('honours a 0 saved after the cut-over, and a 0 on a category whenever', () => {
+    expect(pinStillHolds(at('department', '2026-11-09T08:00:00Z'), 0)).toBe(true)
+    expect(pinStillHolds(at('pl_subcategory', '2026-11-20T08:00:00Z'), '0')).toBe(true)
+    expect(pinStillHolds(at('pl_category', '2026-01-01T00:00:00Z'), 0)).toBe(true)
+  })
+
+  it('has nothing to honour when nothing was pinned', () => {
+    expect(pinStillHolds(at('department', '2026-12-01T00:00:00Z'), null)).toBe(false)
+    expect(pinStillHolds(at('department', '2026-12-01T00:00:00Z'), undefined)).toBe(false)
+  })
+})

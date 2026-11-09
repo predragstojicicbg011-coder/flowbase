@@ -64,6 +64,13 @@ describe('building the entries behind a drill-down', () => {
     expect(items.map(i => i.id)).not.toContain('t0000')
   })
 
+  it('titles a row with no partner by its note rather than a dash', async () => {
+    const tx = { n1: { id: 'n1', transaction_date: day(3), amount: 5, amount_rsd: 5, currency: 'RSD',
+      pl_category: 'Opex', department: 'Sales', cf_type: null, note: 'Kafa za sastanak', partners: null } }
+    const { items } = await buildEntryItems([{ id: 'n1', source: 'transaction', pl_date: day(3) }], stubClient(tx))
+    expect(items[0].title).toBe('Kafa za sastanak')
+  })
+
   it('returns the list newest-first', async () => {
     const { rows, tx } = ascendingMonth()
     const { items } = await buildEntryItems(rows, stubClient(tx))

@@ -127,7 +127,7 @@ export async function buildEntryItems(
   const items = [
     ...((tx.data || []) as any[]).map(r => ({
       id: r.id,
-      title: (r.partners as any)?.name || '—',
+      title: (r.partners as any)?.name || r.note || '—',
       date: r.transaction_date,
       path: path(r),
       note: r.note,
@@ -140,7 +140,7 @@ export async function buildEntryItems(
     })),
     ...((inv.data || []) as any[]).map(r => ({
       id: r.id,
-      title: (r.partners as any)?.name || '—',
+      title: (r.partners as any)?.name || r.note || '—',
       date: r.invoice_date,
       path: path(r),
       note: r.note,
