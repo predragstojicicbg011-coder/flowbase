@@ -238,19 +238,19 @@ export function matchesText(needle: string, fields: (string | null | undefined)[
 /**
  * The text a row can be searched by.
  *
- * `expense_description` rides on the row the page already holds. The rest — vendor
- * name, note, the classification path — exist only on the detail fetched for
- * that row's month, which is why a text search has to make sure every month's
- * detail is loaded before it can honestly claim to have searched.
+ * Vendor name, note and the classification path exist only on the detail
+ * fetched for that row's month, which is why a text search has to make sure
+ * every month's detail is loaded before it can honestly claim to have
+ * searched. (The cost description, which used to ride on the row itself, is
+ * no longer shown or searched.)
  */
 export interface RowText {
-  expense_description?: string | null
   title?: string | null
   note?: string | null
   path?: string | null
 }
 
-export type FilterableRow = DatedRow & { id?: string; expense_description?: string | null }
+export type FilterableRow = DatedRow & { id?: string }
 
 export function rowMatches(
   row: FilterableRow,
@@ -260,7 +260,7 @@ export function rowMatches(
 ): boolean {
   if (filter.kind === 'none') return true
   if (filter.kind === 'amount') return matchesAmount(amountOf(row, currency), filter.amount)
-  return matchesText(filter.text, [row.expense_description, detail?.title, detail?.note, detail?.path])
+  return matchesText(filter.text, [detail?.title, detail?.note, detail?.path])
 }
 
 /**

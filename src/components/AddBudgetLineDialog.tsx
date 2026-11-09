@@ -15,7 +15,7 @@ import type { Level } from '../services/budgetForecast'
 // or in the change ledger — money already spent, or already budgeted. There was
 // no way in to a line that has neither, which is precisely what planning ahead
 // is: "we will sponsor a conference in November" is a figure against a
-// description nobody has ever paid for.
+// heading nobody has ever paid for.
 //
 // This dialog is the way in. It does NOT write a budget figure itself: it picks
 // the classification and the month, and hands both to `BudgetChangeDialog`,
@@ -25,7 +25,7 @@ import type { Level } from '../services/budgetForecast'
 //
 // ── The half that is easy to leave out ──────────────────────────────────────
 //
-// A new name has to reach the LOOKUP TABLE, not only the ledger. A description
+// A new name has to reach the LOOKUP TABLE, not only the ledger. A heading
 // that exists only as a budget line cannot be picked when the real invoice
 // arrives three months later: the spend is classified to something else, the
 // budgeted row sits at zero actual for ever, and the variance column quietly
@@ -33,21 +33,24 @@ import type { Level } from '../services/budgetForecast'
 // `{id, name}` — it is beside every level here, not only the last one, for that
 // reason.
 //
+// Sub-sectors and cost descriptions are not offered: a budget line is never
+// created at either level any more (old lines recorded there are summed under
+// their department).
+//
 // ── There is no company to ask for ──────────────────────────────────────────
 //
 // A budget line is the GROUP's: the ledger row carries `company_id: null` and
 // this dialog asks nothing about companies. It briefly did — a required
 // Company field above everything else — and that field was wrong on its own
-// terms. The five tables it picks a line out of (`departments`,
-// `dept_subcategories`, `expense_descriptions`, `pl_categories`,
-// `pl_subcategories`) have no `company_id` at all: one chart of accounts for
-// every company. A new expense description was never a per-company thing, so
+// terms. The three tables it picks a line out of (`departments`,
+// `pl_categories`, `pl_subcategories`) have no `company_id` at all: one chart
+// of accounts for every company. A new heading was never a per-company thing, so
 // demanding a company before the `+` beside a level would write anything was
 // refusing on behalf of a column those tables do not have.
 
 type LookupTable =
   | 'pl_categories' | 'pl_subcategories'
-  | 'departments' | 'dept_subcategories' | 'expense_descriptions'
+  | 'departments'
 
 interface Lookup {
   id: string
@@ -55,24 +58,18 @@ interface Lookup {
   /** `pl_categories` only: revenue categories are not budgeted here. */
   type?: string
   category_id?: string
-  department_id?: string
-  dept_subcategory_id?: string
 }
 
 const TABLE_FOR: Record<Level, LookupTable> = {
   pl_category: 'pl_categories',
   pl_subcategory: 'pl_subcategories',
   department: 'departments',
-  dept_subcategory: 'dept_subcategories',
-  expense_description: 'expense_descriptions',
 }
 
 const LABEL_FOR: Record<Level, string> = {
   pl_category: 'P&L kategorija',
   pl_subcategory: 'P&L potkategorija',
   department: 'Sektor',
-  dept_subcategory: 'Podsektor',
-  expense_description: 'Opis troška',
 }
 
 /** The same names in the accusative, for "Izaberite …". */
@@ -80,8 +77,6 @@ const PICK_FOR: Record<Level, string> = {
   pl_category: 'P&L kategoriju',
   pl_subcategory: 'P&L potkategoriju',
   department: 'sektor',
-  dept_subcategory: 'podsektor',
-  expense_description: 'opis troška',
 }
 
 /** The placeholder of the box that adds a new name, with the right gender. */
@@ -89,8 +84,6 @@ const NEW_FOR: Record<Level, string> = {
   pl_category: 'Nova P&L kategorija…',
   pl_subcategory: 'Nova P&L potkategorija…',
   department: 'Novi sektor…',
-  dept_subcategory: 'Novi podsektor…',
-  expense_description: 'Novi opis troška…',
 }
 
 /**
@@ -103,23 +96,19 @@ const midSentence = (label: string): string =>
 /**
  * Which level OWNS each lookup table, in the database rather than in a branch.
  *
- * The two branches are an arrangement of the five classification levels; the
- * lookup tables are a fixed hierarchy, and the two do not line up everywhere.
- * `expense_descriptions.dept_subcategory_id` points at a department
- * sub-category whichever branch is open — so in the P&L branch, where the level
- * above a description is a P&L sub-category, there is no parent id to insert a
- * new description under. It is offered unfiltered there and cannot be added;
- * see `specs`.
+ * The two branches are an arrangement of the classification levels; the
+ * lookup tables are a fixed hierarchy. A level whose owner is not the level
+ * above it in the open branch is offered unfiltered and cannot be added to;
+ * see `specs`. With category → sub-category and the department on its own,
+ * that case does not arise today, and the rule stays for when it does.
  */
 const OWNED_BY: Partial<Record<Level, { parent: Level; field: string }>> = {
   pl_subcategory: { parent: 'pl_category', field: 'category_id' },
-  dept_subcategory: { parent: 'department', field: 'department_id' },
-  expense_description: { parent: 'dept_subcategory', field: 'dept_subcategory_id' },
 }
 
 const EMPTY: Record<LookupTable, Lookup[]> = {
   pl_categories: [], pl_subcategories: [],
-  departments: [], dept_subcategories: [], expense_descriptions: [],
+  departments: [],
 }
 
 /**
@@ -159,20 +148,19 @@ export function scopeOfNewLine(
 /**
  * A path of LABELS, as the tree shows it, turned back into lookup rows.
  *
- * The `+` beside a sub-category in the table knows the row it was clicked on
- * as three words — "Development Expenses › Outsourcing services and
- * Associates" — and the dialog works in rows with ids. This is the join
+ * The `+` beside a category in the table knows the row it was clicked on as
+ * words — "Operating Expenses" — and the dialog works in rows with ids. This is the join
  * between them, and it is the whole of what "pre-filled" means here.
  *
  * It walks DOWN, using each resolved pick to filter the next level exactly as
- * the dropdowns do. Two departments may each have a sub-category called
- * `General`, and matching on the name alone would put the new description
- * under whichever of them happened to be stored first — a mistake that writes
- * a correct-looking budget line onto the wrong department.
+ * the dropdowns do. Two categories may each have a sub-category called
+ * `General`, and matching on the name alone would pick whichever of them
+ * happened to be stored first — a mistake that writes a correct-looking budget
+ * line onto the wrong category.
  *
  * A label the lookup tables do not hold stops the walk. A node can exist in
  * the tree and not in the tables: the tree is built from what has been SPENT,
- * and a description can be removed from the lookup after an invoice used it.
+ * and a name can be removed from the lookup after an invoice used it.
  * Everything resolved so far is kept, the rest is left for the user to pick,
  * and nothing is guessed — a half-filled form is honest, a wrong one is not.
  */
@@ -265,8 +253,6 @@ export default function AddBudgetLineDialog({
       supabase.from('pl_categories').select('id,name,type,sort_order').order('sort_order'),
       supabase.from('pl_subcategories').select('id,name,category_id,sort_order').order('sort_order'),
       supabase.from('departments').select('id,name,sort_order').order('sort_order'),
-      supabase.from('dept_subcategories').select('id,name,department_id,sort_order').order('sort_order'),
-      supabase.from('expense_descriptions').select('id,name,dept_subcategory_id,sort_order').order('sort_order'),
     ]).then((res: any[]) => {
       if (cancelled) return
       // Said rather than swallowed. An empty dropdown reads as "there are no
@@ -282,8 +268,6 @@ export default function AddBudgetLineDialog({
         pl_categories: res[0].data || [],
         pl_subcategories: res[1].data || [],
         departments: res[2].data || [],
-        dept_subcategories: res[3].data || [],
-        expense_descriptions: res[4].data || [],
       }
       setLookups(loaded)
       // Only now: the seed is labels, and there is nothing to match them
@@ -304,8 +288,8 @@ export default function AddBudgetLineDialog({
     const table = TABLE_FOR[level]
     const owner = OWNED_BY[level]
     // The level above this one in the OPEN BRANCH also owns it in the database.
-    // When it does not — a description under a P&L sub-category — there is no
-    // parent id, so nothing can be inserted and nothing can be filtered.
+    // When it does not, there is no parent id, so nothing can be inserted and
+    // nothing can be filtered.
     const ownedByPrevious = !!owner && i > 0 && levels[i - 1] === owner.parent
     const parent = i > 0 ? picks[i - 1] : null
 

@@ -37,10 +37,17 @@ export function figureIn(row: object, base: string, currency: BudgetCurrency): n
 /** A month as 'YYYY-MM'. */
 export type MonthKey = string
 
+/**
+ * The classification levels a budget line is made of.
+ *
+ * Sub-sector (`dept_subcategory`) and cost description (`expense_description`)
+ * are no longer levels. Their columns are still in the database and an old row
+ * may carry them; nothing here reads them, so such a row is summed under its
+ * department like any other.
+ */
 export type Level =
   | 'pl_category' | 'pl_subcategory'
-  | 'department' | 'dept_subcategory'
-  | 'expense_description'
+  | 'department'
 
 /** A row of v_pl_entries, narrowed to what the forecast reads. */
 export interface SourceEntry {
@@ -58,8 +65,6 @@ export interface SourceEntry {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
   /** Book amount in RSD. */
   amount_rsd: number | null
   /** The same in EUR. */
@@ -70,22 +75,19 @@ export interface SourceEntry {
 }
 
 /**
- * The five classification levels joined into one key.
+ * The three classification levels joined into one key.
  *
  * A missing level stays as an empty segment rather than being dropped, so
- * `A|B|C||` and `A|B|C` can never collide.
+ * `A||` and `A` can never collide.
  */
 export function classificationKey(e: {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
 }): string {
   return [
     e.pl_category || '', e.pl_subcategory || '',
-    e.department || '', e.dept_subcategory || '',
-    e.expense_description || '',
+    e.department || '',
   ].join('|')
 }
 
@@ -108,9 +110,9 @@ export function budgetLineKey(e: Parameters<typeof classificationKey>[0] & { pro
  *
  * Exact, by construction: the two classifications this app writes for the two
  * legs are the system categories `credit_principal` and `credit_interest`
- * (`creditLegsOrNull`), handed in as `legs` and compared here on all five
+ * (`creditLegsOrNull`), handed in as `legs` and compared here on all three
  * levels at once, through the same `classificationKey` everything else
- * groups by. A row agreeing on four of the five is not a credit payment and is
+ * groups by. A row agreeing on two of the three is not a credit payment and is
  * not treated as one — which is the whole point of matching the classification
  * rather than a name or a substring of one.
  *
@@ -123,8 +125,6 @@ export function isCreditPayment(e: {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
 }, legs: CreditLegs | null): boolean {
   if (!legs) return false
   const key = classificationKey(e)
@@ -699,6 +699,39 @@ export function pinnedBase(
 }
 
 /**
+ * The levels a budget line is recorded at today. An entry at any other level
+ * (`dept_subcategory`, `expense_description`) was recorded before those levels
+ * were removed.
+ */
+const CURRENT_LEVELS: readonly string[] = ['pl_category', 'pl_subcategory', 'department']
+
+/**
+ * Whether an entry's pinned seed (`seed_rsd` / `seed_eur`) still describes the
+ * node it lands on, and so may be its base (`pinnedBase`).
+ *
+ * A pin is the seed of the node the figure was typed on. Until sub-sectors and
+ * cost descriptions were removed, every actual walked down to a description
+ * leaf, so the department and the P&L sub-category were PARENTS whose own seed
+ * was always 0 — and a figure typed on one pinned 0. Those nodes are leaves
+ * now and hold the whole seed: a 0 honoured there would replace all of it, and
+ * the total would drop by exactly the seed. A figure typed on a sub-sector or
+ * a description pinned a node that no longer exists, and lands on its sector
+ * now; its pin says nothing about the sector's seed.
+ *
+ * So a pin holds only when it was taken at a level that still exists AND is
+ * not 0. Nothing old can be both: an old pin at a current level is a parent's
+ * 0. A 0 typed today, on a line nothing had been spent on, is read as no pin —
+ * the line then moves with a later benchmark like any untouched line, which
+ * is the cost of telling the two apart. The entry's own amount always counts.
+ */
+export function pinStillHolds(a: { level?: string | null }, pinned: unknown): boolean {
+  if (pinned === null || pinned === undefined) return false
+  if (!CURRENT_LEVELS.includes(String(a.level || ''))) return false
+  const n = Number(pinned)
+  return Number.isFinite(n) && n !== 0
+}
+
+/**
  * What a budget cell reads, from the base it is handed and its change ledger.
  *
  * A figure is never overwritten. The most recent `set` replaces the base;
@@ -707,7 +740,7 @@ export function pinnedBase(
  *
  * This used to say a `set` replaces "the seeded base", and that was written
  * when there was one arrangement of the levels to be seeded against. There are
- * two. The department branch and the P&L branch are the same five levels read
+ * two. The department branch and the P&L branch are the same three levels read
  * in two orders, so one entry lands on a node seeded 1000 in one and on a node
  * seeded 3000 in the other — the P&L node holds Sales and Engineering salaries
  * together. A `set` of 5000 replacing a per-node base therefore moved the two

@@ -33,7 +33,7 @@ import type { DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 export const CLASS_COLUMNS = [
   'Projekat',
   'P&L kategorija', 'P&L potkategorija',
-  'Sektor', 'Podsektor', 'Opis troška',
+  'Sektor',
 ] as const
 
 export interface SummaryRow {
@@ -45,8 +45,6 @@ export interface SummaryRow {
   'P&L kategorija': string
   'P&L potkategorija': string
   'Sektor': string
-  'Podsektor': string
-  'Opis troška': string
   'Iznos': number
   'Prethodni iznos': number
   'Promena': number
@@ -62,14 +60,14 @@ const pct1 = (n: number) => Math.round(n * 10) / 10
 /**
  * Which classification column a branch's level N fills.
  *
- * The branches are the same six levels in a different order and each shows
- * two or three of them, so a node's path has to be mapped back to the columns
+ * The branches are the same four levels in a different order and each shows
+ * one to three of them, so a node's path has to be mapped back to the columns
  * it actually stands for rather than written into fixed "level 1, 2, 3" slots
  * that mean something different per branch.
  */
 export const BRANCH_LEVELS: Record<Branch, readonly string[]> = {
-  pl: ['P&L kategorija', 'P&L potkategorija', 'Opis troška'],
-  department: ['Sektor', 'Podsektor', 'Opis troška'],
+  pl: ['P&L kategorija', 'P&L potkategorija'],
+  department: ['Sektor'],
   // The project branch puts the project first and then breaks it down the
   // same way the P&L branch does, so the two can be read side by side.
   project: ['Projekat', 'P&L kategorija', 'P&L potkategorija'],
@@ -101,7 +99,7 @@ export function summaryRows(
       const cls: Record<string, string> = {
         'Projekat': '',
         'P&L kategorija': '', 'P&L potkategorija': '',
-        'Sektor': '', 'Podsektor': '', 'Opis troška': '',
+        'Sektor': '',
       }
       n.path.forEach((seg, i) => { if (levels[i]) cls[levels[i]] = seg })
 
@@ -113,8 +111,6 @@ export function summaryRows(
         'P&L kategorija': cls['P&L kategorija'],
         'P&L potkategorija': cls['P&L potkategorija'],
         'Sektor': cls['Sektor'],
-        'Podsektor': cls['Podsektor'],
-        'Opis troška': cls['Opis troška'],
         'Iznos': money2(n.amount),
         'Prethodni iznos': money2(n.priorAmount),
         'Promena': money2(n.delta),
@@ -155,8 +151,6 @@ export interface EntryRowOut {
   'P&L kategorija': string
   'P&L potkategorija': string
   'Sektor': string
-  'Podsektor': string
-  'Opis troška': string
   'Valuta': string
   'Iznos': number | ''
   /** The book figure in dinars. */
@@ -193,8 +187,6 @@ export function entryRows(
         'P&L kategorija': e.pl_category || '',
         'P&L potkategorija': e.pl_subcategory || '',
         'Sektor': e.department || '',
-        'Podsektor': e.dept_subcategory || '',
-        'Opis troška': e.expense_description || '',
         'Valuta': d?.currency || '',
         'Iznos': d?.amount == null ? '' : money2(d.amount),
         'Iznos RSD': money2(e.amount_rsd || 0),

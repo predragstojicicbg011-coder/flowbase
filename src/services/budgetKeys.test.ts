@@ -8,7 +8,7 @@ import {
   type Adjustment, type ForecastNode, type Level,
 } from './budgetForecast'
 
-/** The two orders the five classification levels are read in. */
+/** The two orders the three classification levels are read in. */
 type Branch = 'department' | 'pl'
 
 describe('the budget classification key', () => {
@@ -17,52 +17,55 @@ describe('the budget classification key', () => {
       pl_category: 'Operating Expenses',
       pl_subcategory: null,
       department: null,
-      dept_subcategory: null,
-      expense_description: null,
     })
     const withEmpties = makeClassKey({
       pl_category: 'Operating Expenses',
       pl_subcategory: '',
       department: '',
-      dept_subcategory: '',
-      expense_description: '',
     })
     expect(withNulls).toBe(withEmpties)
-    expect(withNulls).toBe('Operating Expenses||||')
+    expect(withNulls).toBe('Operating Expenses||')
   })
 
   it('treats a missing property the same as a null one', () => {
     expect(makeClassKey({ pl_category: 'Payroll' }))
       .toBe(makeClassKey({
         pl_category: 'Payroll', pl_subcategory: null, department: null,
-        dept_subcategory: null, expense_description: null,
       }))
   })
 
   it('gives an all-empty row the empty key', () => {
-    expect(makeClassKey({})).toBe('||||')
+    expect(makeClassKey({})).toBe('||')
     expect(makeClassKey({
       pl_category: null, pl_subcategory: null, department: null,
-      dept_subcategory: null, expense_description: null,
-    })).toBe('||||')
+    })).toBe('||')
   })
 
-  it('keeps the five segments in classification order', () => {
+  it('keeps the three segments in classification order', () => {
     expect(makeClassKey({
       pl_category: 'a', pl_subcategory: 'b', department: 'c',
-      dept_subcategory: 'd', expense_description: 'e',
-    })).toBe('a|b|c|d|e')
+    })).toBe('a|b|c')
+  })
+
+  it('leaves an old sub-sector and cost description out of the key', () => {
+    // The columns are still in the database. A row that carries them keys as
+    // its department, so it is summed there rather than on a level that no
+    // longer exists.
+    const old = { pl_category: 'a', pl_subcategory: 'b', department: 'c',
+      dept_subcategory: 'd', expense_description: 'e' } as any
+    expect(makeClassKey(old)).toBe('a|b|c')
+    expect(makeClassKey(old)).toBe(makeClassKey({ pl_category: 'a', pl_subcategory: 'b', department: 'c' }))
   })
 
   // Known limitation: `|` is the separator, so a classification value
-  // containing one produces a key that splits into more than five segments,
+  // containing one produces a key that splits into more than three segments,
   // and two different classifications can produce the same key. Fixing it
   // means escaping the separator here and re-parsing everything built from a
   // key.
   it('is ambiguous for a value containing a literal pipe (known limitation)', () => {
     const collision = makeClassKey({ pl_category: 'a|b', pl_subcategory: 'c' })
     const other = makeClassKey({ pl_category: 'a', pl_subcategory: 'b|c' })
-    expect(collision).toBe('a|b|c|||')
+    expect(collision).toBe('a|b|c|')
     expect(other).toBe(collision)
   })
 
@@ -70,10 +73,10 @@ describe('the budget classification key', () => {
     // The row is not dropped and the value is not escaped: it is carried into
     // the key verbatim, which is exactly why the segments no longer line up.
     expect(makeClassKey({ department: 'R&D | Platform' }))
-      .toBe('||R&D | Platform||')
-    // Five segments were joined; six come back out.
+      .toBe('||R&D | Platform')
+    // Three segments were joined; four come back out.
     expect(makeClassKey({ department: 'R&D | Platform' }).split('|'))
-      .toHaveLength(6)
+      .toHaveLength(4)
   })
 })
 
@@ -81,10 +84,10 @@ describe('the keys under a budget row', () => {
   // The shape Budgeting builds: `cat:` → `dept:` → `leaf:`, each row carrying
   // the classification key its own cells were summed from.
   const tree = [
-    { key: 'cat:Opex', classKey: 'Opex||||' },
-    { key: 'dept:Opex||Sales', parent: 'cat:Opex', classKey: 'Opex||Sales||' },
-    { key: 'leaf:Opex||Sales||Ads', parent: 'dept:Opex||Sales', classKey: 'Opex||Sales||Ads' },
-    { key: 'dept:Opex||Legal', parent: 'cat:Opex', classKey: 'Opex||Legal||' },
+    { key: 'cat:Opex', classKey: 'Opex||' },
+    { key: 'dept:Opex||Sales', parent: 'cat:Opex', classKey: 'Opex||Sales' },
+    { key: 'leaf:Opex|Ads|Sales', parent: 'dept:Opex||Sales', classKey: 'Opex|Ads|Sales' },
+    { key: 'dept:Opex||Legal', parent: 'cat:Opex', classKey: 'Opex||Legal' },
   ]
 
   // The regression commit 219e466 fixed. `dept:Opex||Sales` holds rows
@@ -93,20 +96,20 @@ describe('the keys under a budget row', () => {
   // while they stay in the total the drill-down was opened from.
   it('returns both a node own key and its children keys', () => {
     expect(classKeysUnder(tree, 'dept:Opex||Sales').sort())
-      .toEqual(['Opex||Sales||', 'Opex||Sales||Ads'])
+      .toEqual(['Opex|Ads|Sales', 'Opex||Sales'])
   })
 
   it('reaches a key several levels below the root', () => {
     expect(classKeysUnder(tree, 'cat:Opex').sort())
-      .toEqual(['Opex||||', 'Opex||Legal||', 'Opex||Sales||', 'Opex||Sales||Ads'].sort())
+      .toEqual(['Opex||', 'Opex||Legal', 'Opex||Sales', 'Opex|Ads|Sales'].sort())
   })
 
   it('does not reach across to a sibling branch', () => {
-    expect(classKeysUnder(tree, 'dept:Opex||Legal')).toEqual(['Opex||Legal||'])
+    expect(classKeysUnder(tree, 'dept:Opex||Legal')).toEqual(['Opex||Legal'])
   })
 
   it('returns nothing for a leaf, not even its siblings', () => {
-    expect(classKeysUnder(tree, 'leaf:Opex||Sales||Ads')).toEqual(['Opex||Sales||Ads'])
+    expect(classKeysUnder(tree, 'leaf:Opex|Ads|Sales')).toEqual(['Opex|Ads|Sales'])
   })
 
   it('returns an empty list for a key that is not in the tree', () => {
@@ -119,39 +122,39 @@ describe('the keys under a budget row', () => {
   it('skips a row that carries no classification key', () => {
     const rows = [
       { key: 'cat:Opex' },
-      { key: 'dept:Opex||Sales', parent: 'cat:Opex', classKey: 'Opex||Sales||' },
+      { key: 'dept:Opex||Sales', parent: 'cat:Opex', classKey: 'Opex||Sales' },
     ]
-    expect(classKeysUnder(rows, 'cat:Opex')).toEqual(['Opex||Sales||'])
+    expect(classKeysUnder(rows, 'cat:Opex')).toEqual(['Opex||Sales'])
   })
 
   it('returns every key a node was summed from, not just the first', () => {
-    // A branch showing three of the five levels puts every row matching those
-    // three on one node whatever its P&L classification, so the node's total
-    // is summed from several keys and its drill-down must list all of them.
+    // A branch showing one of the three levels puts every row matching it on
+    // one node whatever its P&L classification, so the node's total is summed
+    // from several keys and its drill-down must list all of them.
     const branchTree = [
-      { key: 'department:Sales', classKeys: ['Opex||Sales||', 'Other||Sales||'] },
+      { key: 'department:Sales', classKeys: ['Opex||Sales', 'Other||Sales'] },
       {
-        key: 'department:Sales|Ads', parent: 'department:Sales',
-        classKeys: ['Opex||Sales||Ads', 'Other||Sales||Ads'],
+        key: 'department:Sales|x', parent: 'department:Sales',
+        classKeys: ['Opex|Ads|Sales', 'Other|Ads|Sales'],
       },
     ]
     expect(classKeysUnder(branchTree, 'department:Sales').sort())
-      .toEqual(['Opex||Sales||', 'Opex||Sales||Ads', 'Other||Sales||', 'Other||Sales||Ads'])
+      .toEqual(['Opex|Ads|Sales', 'Opex||Sales', 'Other|Ads|Sales', 'Other||Sales'])
   })
 
   it('lists a key held by both a node and its child only once', () => {
     const rows = [
-      { key: 'root', classKeys: ['A||||'] },
-      { key: 'child', parent: 'root', classKey: 'A||||' },
+      { key: 'root', classKeys: ['A||'] },
+      { key: 'child', parent: 'root', classKey: 'A||' },
     ]
-    expect(classKeysUnder(rows, 'root')).toEqual(['A||||'])
+    expect(classKeysUnder(rows, 'root')).toEqual(['A||'])
   })
 
   it('lists the node keys of the subtree, which is what a cell is summed from', () => {
     expect(nodeKeysUnder(tree, 'dept:Opex||Sales').sort())
-      .toEqual(['dept:Opex||Sales', 'leaf:Opex||Sales||Ads'])
+      .toEqual(['dept:Opex||Sales', 'leaf:Opex|Ads|Sales'])
     expect(nodeKeysUnder(tree, 'cat:Opex')).toHaveLength(4)
-    expect(nodeKeysUnder(tree, 'leaf:Opex||Sales||Ads')).toEqual(['leaf:Opex||Sales||Ads'])
+    expect(nodeKeysUnder(tree, 'leaf:Opex|Ads|Sales')).toEqual(['leaf:Opex|Ads|Sales'])
     expect(nodeKeysUnder(tree, 'dept:Nope')).toEqual([])
   })
 
@@ -161,24 +164,24 @@ describe('the keys under a budget row', () => {
     // descendant's. Reading one node's own ledger said "Never changed" beside
     // a parent whose child had been adjusted.
     const rows = [
-      { key: 'Sales' },
-      { key: 'Sales|Reps', parent: 'Sales' },
+      { key: 'Payroll' },
+      { key: 'Payroll|Salaries', parent: 'Payroll' },
     ]
     const ledgerByNode: Record<string, Adjustment[]> = {
-      'Sales|Reps': [{
+      'Payroll|Salaries': [{
         id: 'a1', kind: 'adjust', amount_rsd: 250,
         reason: 'Two more reps', created_at: '2026-01-01T00:00:00Z',
       }],
     }
     const nodes: ForecastNode[] = [
-      { key: 'Sales', label: 'Sales', level: 'department', parent: null, seed: 1000, ledger: 0, actual: 0 },
-      { key: 'Sales|Reps', label: 'Reps', level: 'dept_subcategory', parent: 'Sales', seed: 400, ledger: 250, actual: 0 },
+      { key: 'Payroll', label: 'Payroll', level: 'pl_category', parent: null, seed: 1000, ledger: 0, actual: 0 },
+      { key: 'Payroll|Salaries', label: 'Salaries', level: 'pl_subcategory', parent: 'Payroll', seed: 400, ledger: 250, actual: 0 },
     ]
-    const parent = rollUp(nodes).find(n => n.key === 'Sales')!
-    const under = nodeKeysUnder(rows, 'Sales')
+    const parent = rollUp(nodes).find(n => n.key === 'Payroll')!
+    const under = nodeKeysUnder(rows, 'Payroll')
 
     // The node's own ledger is empty; the cell moved all the same.
-    expect(ledgerByNode['Sales']).toBeUndefined()
+    expect(ledgerByNode['Payroll']).toBeUndefined()
 
     const seeded = nodes.filter(n => under.includes(n.key)).reduce((s, n) => s + n.seed, 0)
     const movement = under
@@ -192,15 +195,15 @@ describe('the keys under a budget row', () => {
     // Row keys are strings, so nothing in the type system prevents a loop. An
     // unguarded ancestor walk hangs the render thread; this must return.
     const cyclic = [
-      { key: 'a', parent: 'b', classKey: 'A||||' },
-      { key: 'b', parent: 'a', classKey: 'B||||' },
-      { key: 'c', parent: 'c', classKey: 'C||||' },
-      { key: 'root', classKey: 'R||||' },
+      { key: 'a', parent: 'b', classKey: 'A||' },
+      { key: 'b', parent: 'a', classKey: 'B||' },
+      { key: 'c', parent: 'c', classKey: 'C||' },
+      { key: 'root', classKey: 'R||' },
     ]
-    expect(classKeysUnder(cyclic, 'root')).toEqual(['R||||'])
+    expect(classKeysUnder(cyclic, 'root')).toEqual(['R||'])
     // A root inside the cycle is still found, once, without looping.
-    expect(classKeysUnder(cyclic, 'a').sort()).toEqual(['A||||', 'B||||'])
-    expect(classKeysUnder(cyclic, 'c')).toEqual(['C||||'])
+    expect(classKeysUnder(cyclic, 'a').sort()).toEqual(['A||', 'B||'])
+    expect(classKeysUnder(cyclic, 'c')).toEqual(['C||'])
     expect(nodeKeysUnder(cyclic, 'root')).toEqual(['root'])
     expect(nodeKeysUnder(cyclic, 'a').sort()).toEqual(['a', 'b'])
   })
@@ -208,36 +211,46 @@ describe('the keys under a budget row', () => {
 
 // ─── Where a ledger entry lands, and why the two branches still agree ─────────
 
-const DEPT: Level[] = ['department', 'dept_subcategory', 'expense_description']
-const PL: Level[] = ['pl_category', 'pl_subcategory', 'expense_description']
+const DEPT: Level[] = ['department']
+const PL: Level[] = ['pl_category', 'pl_subcategory']
 const LEVELS: Record<Branch, Level[]> = { department: DEPT, pl: PL }
 
 describe('placing a ledger entry in a branch', () => {
   const entry = (over: Partial<ClassifiedEntry> = {}): ClassifiedEntry => ({
     level: 'department', pl_category: null, pl_subcategory: null,
-    department: null, dept_subcategory: null, expense_description: null, ...over,
+    department: null, ...over,
   })
 
   it('places an entry at its own level when the branch shows that level', () => {
-    const e = entry({ level: 'dept_subcategory', department: 'Sales', dept_subcategory: 'Reps' })
-    expect(placeEntry(e, DEPT)).toEqual({
-      pathLabels: ['Sales', 'Reps'], level: 'dept_subcategory', key: 'Sales|Reps',
+    const e = entry({ level: 'pl_subcategory', pl_category: 'Payroll', pl_subcategory: 'Salaries' })
+    expect(placeEntry(e, PL)).toEqual({
+      pathLabels: ['Payroll', 'Salaries'], level: 'pl_subcategory', key: 'Payroll|Salaries',
     })
   })
 
   it('places an entry recorded at a level the branch does not show, rather than dropping it', () => {
-    // This is the bug. `dept_subcategory` is not one of the P&L branch levels,
-    // and the page used to `continue` past it — so the amount was in the
-    // department branch total and absent from the P&L one, and the two
-    // disagreed by exactly that amount. It must be PLACED, not skipped.
+    // `department` is not one of the P&L branch levels, and the page used to
+    // `continue` past such an entry — so the amount was in one branch total
+    // and absent from the other. It must be PLACED, not skipped.
     const e = entry({
-      level: 'dept_subcategory', department: 'Sales', dept_subcategory: 'Reps',
+      level: 'department', department: 'Sales',
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
     })
     // As deep as it can honestly go in the P&L ordering: it carries a P&L
     // category and sub-category, so it lands on that node — the right row.
     expect(nodeKeyForEntry(e, PL)).toBe('Payroll|Salaries')
-    expect(nodeKeyForEntry(e, DEPT)).toBe('Sales|Reps')
+    expect(nodeKeyForEntry(e, DEPT)).toBe('Sales')
+  })
+
+  it('sums an old line recorded on a sub-sector or a cost description under its department', () => {
+    // budget_adjustments still holds rows recorded at those levels. They are
+    // neither a level nor a node any more: they land on their department.
+    for (const level of ['dept_subcategory', 'expense_description']) {
+      const old = { ...entry({ department: 'Sales', pl_category: 'Payroll', pl_subcategory: 'Salaries' }),
+        level, dept_subcategory: 'Reps', expense_description: 'Base pay' } as ClassifiedEntry
+      expect(placeEntry(old, DEPT)).toEqual({ pathLabels: ['Sales'], level: 'department', key: 'Sales' })
+      expect(nodeKeyForEntry(old, PL)).toBe('Payroll|Salaries')
+    }
   })
 
   it('lands an entry with no value for any level of the branch under Unassigned', () => {
@@ -254,8 +267,8 @@ describe('placing a ledger entry in a branch', () => {
   it('uses Unassigned for a level between the ones the entry does carry', () => {
     // Exactly what `valueAt` does for a source row, so the entry lands on the
     // same node the tree already built for keys with that hole in them.
-    const e = entry({ level: 'expense_description', expense_description: 'Laptops' })
-    expect(placeEntry(e, DEPT).pathLabels).toEqual(['Nedodeljeno', 'Nedodeljeno', 'Laptops'])
+    const e = entry({ level: 'pl_subcategory', pl_subcategory: 'Laptops' })
+    expect(placeEntry(e, PL).pathLabels).toEqual(['Nedodeljeno', 'Laptops'])
   })
 
   it('never returns an empty placement, whatever the entry carries', () => {
@@ -269,34 +282,37 @@ describe('placing a ledger entry in a branch', () => {
 
 describe('the classification a change is filed under', () => {
   it('takes the shown levels from the node path, not from any one class key', () => {
-    const c = classificationFor(['Sales', 'Reps'], 'dept_subcategory',
-      ['Payroll|Salaries|Sales|Reps|Base pay'], DEPT)
+    const c = classificationFor(['Payroll'], 'pl_category',
+      ['Payroll|Salaries|Sales'], PL)
+    expect(c.pl_category).toBe('Payroll')
+    // Deeper than the node itself: the node does not claim a sub-category.
+    expect(c.pl_subcategory).toBeNull()
     expect(c.department).toBe('Sales')
-    expect(c.dept_subcategory).toBe('Reps')
-    // Deeper than the node itself: the node does not claim a description.
-    expect(c.expense_description).toBeNull()
+  })
+
+  it('files a change under the three columns and nothing else', () => {
+    const c = classificationFor(['Sales'], 'department', ['Payroll|Salaries|Sales'], DEPT)
+    expect(c).toEqual({ pl_category: 'Payroll', pl_subcategory: 'Salaries', department: 'Sales' })
   })
 
   it('records a hidden level every class key agrees on', () => {
     // A P&L node holding only Sales rows genuinely IS Sales, so recording the
     // department lands the change on the right row in the other branch too.
     const c = classificationFor(['Payroll', 'Salaries'], 'pl_subcategory', [
-      'Payroll|Salaries|Sales|Reps|Base pay',
-      'Payroll|Salaries|Sales|Reps|Bonus',
+      'Payroll|Salaries|Sales',
+      'Payroll|Salaries|Sales|#p1',
     ], PL)
     expect(c.department).toBe('Sales')
-    expect(c.dept_subcategory).toBe('Reps')
   })
 
   it('records null for a hidden level the class keys disagree on', () => {
     // Salaries spanning Sales and Engineering cannot be attributed to one
     // department. Guessing would put the money on a department not paying it.
     const c = classificationFor(['Payroll', 'Salaries'], 'pl_subcategory', [
-      'Payroll|Salaries|Sales|Reps|Base pay',
-      'Payroll|Salaries|Engineering|Backend|Base pay',
+      'Payroll|Salaries|Sales',
+      'Payroll|Salaries|Engineering',
     ], PL)
     expect(c.department).toBeNull()
-    expect(c.dept_subcategory).toBeNull()
     expect(c.pl_category).toBe('Payroll')
     expect(c.pl_subcategory).toBe('Salaries')
   })
@@ -316,7 +332,7 @@ describe('the classification a change is filed under', () => {
 
   it('records null where the keys carry nothing — an empty segment is not a value', () => {
     const c = classificationFor(['Payroll', 'Salaries'], 'pl_subcategory',
-      ['Payroll|Salaries|||'], PL)
+      ['Payroll|Salaries|'], PL)
     expect(c.department).toBeNull()
   })
 })
@@ -325,8 +341,8 @@ describe('the seed a set entry is measured against', () => {
   const MONTH = '2026-03'
   const CO = 'company-1'
   const seedsByKey: Record<string, Record<string, number>> = {
-    'Payroll|Salaries|Sales|Reps|Base pay': { [MONTH]: 120000 },
-    'Payroll|Salaries|Engineering|Backend|Base pay': { [MONTH]: 80000 },
+    'Payroll|Salaries|Sales': { [MONTH]: 120000 },
+    'Payroll|Salaries|Engineering': { [MONTH]: 80000 },
   }
   const seedsByCompany: SeedsByCompany = { [CO]: seedsByKey }
 
@@ -346,7 +362,7 @@ describe('the seed a set entry is measured against', () => {
     // Reachable from live data, not hypothetical: the carry-across in
     // 20260917130000_budget_adjustments.sql falls through to `else
     // 'pl_category'`, so a budget_entries row with no classification at all
-    // becomes a `set` at level 'pl_category' with five null columns.
+    // becomes a `set` at level 'pl_category' with every column null.
     //
     // "Not classified this far, matches any value" applied to every column at
     // once compares nothing and matches everything, and the entry is measured
@@ -357,12 +373,12 @@ describe('the seed a set entry is measured against', () => {
     expect(seedForEntry({
       company_id: CO,
       pl_category: null, pl_subcategory: null,
-      department: null, dept_subcategory: null, expense_description: null,
+      department: null,
     }, seedsByCompany, MONTH)).toBe(0)
     expect(seedForEntry({
       company_id: CO,
       pl_category: '', pl_subcategory: '',
-      department: '', dept_subcategory: '', expense_description: '',
+      department: '',
     }, seedsByCompany, MONTH)).toBe(0)
   })
 
@@ -376,8 +392,8 @@ describe('the seed a set entry is measured against', () => {
     // figure recorded on company A's Sales line says what A's Sales line
     // reads, and resolving it against A+B turns a +200 into a -800.
     const twoCompanies: SeedsByCompany = {
-      A: { '||Sales||': { [MONTH]: 1000 } },
-      B: { '||Sales||': { [MONTH]: 1000 } },
+      A: { '||Sales': { [MONTH]: 1000 } },
+      B: { '||Sales': { [MONTH]: 1000 } },
     }
     expect(seedForEntry({ company_id: 'A', department: 'Sales' }, twoCompanies, MONTH)).toBe(1000)
     expect(seedForEntry({ company_id: 'B', department: 'Sales' }, twoCompanies, MONTH)).toBe(1000)
@@ -388,9 +404,9 @@ describe('the invariant: the two branches total the same', () => {
   // The seeded base, as classification keys. The same money whichever order
   // the levels are read in.
   const seeds: Record<string, number> = {
-    'Payroll|Salaries|Sales|Reps|Base pay': 1000,
-    'Payroll|Salaries|Engineering|Backend|Base pay': 2000,
-    'Opex|Software|||': 500,
+    'Payroll|Salaries|Sales': 1000,
+    'Payroll|Salaries|Engineering': 2000,
+    'Opex|Software|': 500,
   }
 
   /** One month of it, in the shape `seedFromEntries` returns and the page holds. */
@@ -468,7 +484,7 @@ describe('the invariant: the two branches total the same', () => {
     id: 'a1', kind: 'adjust', reason: 'because', created_at: '2026-01-01T00:00:00Z',
     company_id: CO,
     level: 'department', pl_category: null, pl_subcategory: null,
-    department: null, dept_subcategory: null, expense_description: null,
+    department: null,
     ...over,
   } as unknown as ClassifiedEntry)
 
@@ -477,13 +493,12 @@ describe('the invariant: the two branches total the same', () => {
     expect(branchTotal('pl', [])).toBe(3500)
   })
 
-  it('agrees after a change recorded at dept_subcategory, which the P&L branch does not show', () => {
+  it('agrees after a change recorded at department, which the P&L branch does not show', () => {
     // The regression this describe block exists for. The P&L branch used to
-    // skip this entry outright, and its total stayed at 3500 while the
-    // department branch read 3650.
+    // skip such an entry outright, and the two totals disagreed by it.
     const e = adjustment({
-      level: 'dept_subcategory', amount_rsd: 150,
-      department: 'Sales', dept_subcategory: 'Reps',
+      level: 'department', amount_rsd: 150,
+      department: 'Sales',
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
     })
     expect(branchTotal('department', [e])).toBe(3650)
@@ -499,15 +514,16 @@ describe('the invariant: the two branches total the same', () => {
     expect(branchTotal('department', [e])).toBe(3800)
   })
 
-  it('agrees for a change recorded at every one of the five levels', () => {
-    const all: Level[] = [
+  it('agrees for a change recorded at every level, old sub-sector and description ones included', () => {
+    const all = [
       'pl_category', 'pl_subcategory', 'department', 'dept_subcategory', 'expense_description',
     ]
     for (const level of all) {
       const e = adjustment({
-        level, amount_rsd: 77,
+        level: level as Level, amount_rsd: 77,
         pl_category: 'Payroll', pl_subcategory: 'Salaries',
-        department: 'Sales', dept_subcategory: 'Reps', expense_description: 'Base pay',
+        department: 'Sales',
+        ...({ dept_subcategory: 'Reps', expense_description: 'Base pay' } as object),
       })
       expect(branchTotal('department', [e])).toBe(branchTotal('pl', [e]))
       expect(branchTotal('pl', [e])).toBe(3577)
@@ -520,8 +536,8 @@ describe('the invariant: the two branches total the same', () => {
     // `placeEntry` is what the page reads back — this is the whole loop, and it
     // is the test that would have caught the skip.
     const classKeys = [
-      'Payroll|Salaries|Sales|Reps|Base pay',
-      'Payroll|Salaries|Engineering|Backend|Base pay',
+      'Payroll|Salaries|Sales',
+      'Payroll|Salaries|Engineering',
     ]
     const stored = classificationFor(['Payroll', 'Salaries'], 'pl_subcategory', classKeys, PL)
     // It spans two departments, so it names neither.
@@ -547,13 +563,13 @@ describe('the invariant: the two branches total the same', () => {
   // node it lands on, which is why the tests above pass. A `set` does not.
 
   it('agrees after a set, where the node it lands on is seeded differently in the two branches', () => {
-    // The department branch puts this on `Sales|Reps|Base pay`, seeded 1000.
-    // The P&L branch puts it on `Payroll|Salaries|Base pay`, seeded 3000 -
-    // Sales and Engineering salaries are one node there.
+    // The department branch puts this on `Sales`, seeded 1000. The P&L branch
+    // puts it on `Payroll|Salaries`, seeded 3000 - Sales and Engineering
+    // salaries are one node there.
     const e = adjustment({
-      kind: 'set', level: 'expense_description', amount_rsd: 5000,
+      kind: 'set', level: 'department', amount_rsd: 5000,
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
-      department: 'Sales', dept_subcategory: 'Reps', expense_description: 'Base pay',
+      department: 'Sales',
     })
     expect(branchTotal('department', [e])).toBe(branchTotal('pl', [e]))
     // 3500 seeded, less the 1000 this entry's own classification carries,
@@ -564,15 +580,15 @@ describe('the invariant: the two branches total the same', () => {
   it('agrees after a set followed by an adjust', () => {
     const s = adjustment({
       id: 'a1', created_at: '2026-01-01T00:00:00Z',
-      kind: 'set', level: 'expense_description', amount_rsd: 5000,
+      kind: 'set', level: 'department', amount_rsd: 5000,
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
-      department: 'Sales', dept_subcategory: 'Reps', expense_description: 'Base pay',
+      department: 'Sales',
     })
     const a = adjustment({
       id: 'a2', created_at: '2026-02-01T00:00:00Z',
-      kind: 'adjust', level: 'expense_description', amount_rsd: 250,
+      kind: 'adjust', level: 'department', amount_rsd: 250,
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
-      department: 'Sales', dept_subcategory: 'Reps', expense_description: 'Base pay',
+      department: 'Sales',
     })
     expect(branchTotal('department', [s, a])).toBe(branchTotal('pl', [s, a]))
     expect(branchTotal('department', [s, a])).toBe(7750)
@@ -580,13 +596,15 @@ describe('the invariant: the two branches total the same', () => {
 
   it('agrees for the carried-over shape: a set on a node seeded in one branch and unseeded in the other', () => {
     // Exactly what the migration produced - a fully classified budget_entries
-    // row carried across as one opening `set` at expense_description. Marketing
-    // has no history, so the department branch node is unseeded, while the P&L
-    // node it shares with Sales and Engineering is seeded 3000.
+    // row carried across as one opening `set`, here at expense_description, a
+    // level that no longer exists. Marketing has no history, so the department
+    // branch node is unseeded, while the P&L node it shares with Sales and
+    // Engineering is seeded 3000.
     const e = adjustment({
-      kind: 'set', level: 'expense_description', amount_rsd: 800,
+      kind: 'set', level: 'expense_description' as Level, amount_rsd: 800,
       pl_category: 'Payroll', pl_subcategory: 'Salaries',
-      department: 'Marketing', dept_subcategory: null, expense_description: 'Base pay',
+      department: 'Marketing',
+      ...({ dept_subcategory: null, expense_description: 'Base pay' } as object),
     })
     expect(branchTotal('department', [e])).toBe(branchTotal('pl', [e]))
     // Nothing is seeded to Marketing, so the whole 800 is new money.
@@ -596,13 +614,13 @@ describe('the invariant: the two branches total the same', () => {
   it('does not let a set with no classification at all swallow the month', () => {
     // The other shape the migration produced: a budget_entries row carrying no
     // classification falls through `else 'pl_category'` and lands here as a
-    // `set` at pl_category with five null columns. Measured against the whole
+    // `set` at pl_category with every column null. Measured against the whole
     // month it resolved to 5000 - 3500 = 1500 and the month read 5000 instead
     // of 8500 — the seeded 3500 vanished behind one unclassified figure.
     const e = adjustment({
       kind: 'set', level: 'pl_category', amount_rsd: 5000,
       pl_category: null, pl_subcategory: null,
-      department: null, dept_subcategory: null, expense_description: null,
+      department: null,
     })
     expect(branchTotal('department', [e])).toBe(branchTotal('pl', [e]))
     expect(branchTotal('department', [e])).toBe(8500)
@@ -610,11 +628,11 @@ describe('the invariant: the two branches total the same', () => {
 
   it('round trip: a node spanning one department only lands on that department row', () => {
     const stored = classificationFor(['Opex', 'Software'], 'pl_subcategory',
-      ['Opex|Software|Sales|Reps|Seats'], PL)
+      ['Opex|Software|Sales'], PL)
     expect(stored.department).toBe('Sales')
 
     const e = adjustment({ ...stored, level: 'pl_subcategory', amount_rsd: 60 })
-    expect(nodeKeyForEntry(e, DEPT)).toBe('Sales|Reps')
+    expect(nodeKeyForEntry(e, DEPT)).toBe('Sales')
     expect(branchTotal('pl', [e])).toBe(3560)
     expect(branchTotal('department', [e])).toBe(3560)
   })
@@ -634,15 +652,15 @@ describe('the invariant: a group total is the sum of the companies in it', () =>
   // out as −800.
   const MONTH = '2026-10'
   const seedRows = [
-    { company_id: 'A', classKey: '||Sales||', amount: 1000 },
-    { company_id: 'B', classKey: '||Sales||', amount: 1000 },
+    { company_id: 'A', classKey: '||Sales', amount: 1000 },
+    { company_id: 'B', classKey: '||Sales', amount: 1000 },
   ]
 
   const setOnA = {
     id: 'a1', kind: 'set', amount_rsd: 1200, reason: 'because',
     created_at: '2026-01-01T00:00:00Z', company_id: 'A', level: 'department',
     pl_category: null, pl_subcategory: null,
-    department: 'Sales', dept_subcategory: null, expense_description: null,
+    department: 'Sales',
   }
 
   /**
@@ -730,19 +748,19 @@ describe('the invariant: a group total is the sum of the companies in it', () =>
 import { projectKeySuffix, projectOfKey, agreedProject } from './budgetKeys'
 
 describe('the project in a budget line key', () => {
-  const cls = { pl_category: 'Opex', department: 'Sales', expense_description: 'Ads' }
+  const cls = { pl_category: 'Opex', pl_subcategory: 'Ads', department: 'Sales' }
 
   it('leaves an overhead line\'s key exactly as it was before projects', () => {
-    expect(makeClassKey(cls)).toBe('Opex||Sales||Ads')
-    expect(makeClassKey({ ...cls, project_id: null })).toBe('Opex||Sales||Ads')
-    expect(makeClassKey({ ...cls, project_id: '' })).toBe('Opex||Sales||Ads')
+    expect(makeClassKey(cls)).toBe('Opex|Ads|Sales')
+    expect(makeClassKey({ ...cls, project_id: null })).toBe('Opex|Ads|Sales')
+    expect(makeClassKey({ ...cls, project_id: '' })).toBe('Opex|Ads|Sales')
     expect(projectKeySuffix(null)).toBe('')
   })
 
-  it('adds the project as a sixth segment, so two sites never share a line', () => {
+  it('adds the project as a fourth segment, so two sites never share a line', () => {
     const a = makeClassKey({ ...cls, project_id: 'p1' })
     const b = makeClassKey({ ...cls, project_id: 'p2' })
-    expect(a).toBe('Opex||Sales||Ads|#p1')
+    expect(a).toBe('Opex|Ads|Sales|#p1')
     expect(a).not.toBe(b)
     expect(a).not.toBe(makeClassKey(cls))
   })
@@ -751,18 +769,18 @@ describe('the project in a budget line key', () => {
     expect(projectOfKey(makeClassKey({ ...cls, project_id: 'p1' }))).toBe('p1')
     expect(projectOfKey(makeClassKey(cls))).toBeNull()
     // A classification value starting with # is not a project.
-    expect(projectOfKey(makeClassKey({ expense_description: '#7 crane' }))).toBeNull()
+    expect(projectOfKey(makeClassKey({ department: '#7 crane' }))).toBeNull()
   })
 
-  it('does not move a project key off its node: the tree reads the five levels only', () => {
+  it('does not move a project key off its node: the tree reads the three levels only', () => {
     const parts = makeClassKey({ ...cls, project_id: 'p1' }).split('|')
     expect(valueAt(parts, 'department')).toBe('Sales')
-    expect(valueAt(parts, 'expense_description')).toBe('Ads')
+    expect(valueAt(parts, 'pl_subcategory')).toBe('Ads')
   })
 
   it('agrees on a project only when every key under a row does', () => {
     const p1 = makeClassKey({ ...cls, project_id: 'p1' })
-    const p1b = makeClassKey({ ...cls, expense_description: 'Print', project_id: 'p1' })
+    const p1b = makeClassKey({ ...cls, pl_subcategory: 'Print', project_id: 'p1' })
     const ovh = makeClassKey(cls)
     expect(agreedProject([p1, p1b])).toBe('p1')
     expect(agreedProject([p1, ovh])).toBeNull()
@@ -770,12 +788,12 @@ describe('the project in a budget line key', () => {
     expect(agreedProject([])).toBeNull()
   })
 
-  it('files a change under the five columns only — the project travels separately', () => {
+  it('files a change under the three columns only — the project travels separately', () => {
     const p1 = makeClassKey({ ...cls, project_id: 'p1' })
-    const c = classificationFor(['Sales'], 'department', [p1], ['department', 'dept_subcategory', 'expense_description'])
+    const c = classificationFor(['Sales'], 'department', [p1], ['department'])
     expect(c).toEqual({
-      pl_category: 'Opex', pl_subcategory: null,
-      department: 'Sales', dept_subcategory: null, expense_description: null,
+      pl_category: 'Opex', pl_subcategory: 'Ads',
+      department: 'Sales',
     })
   })
 })
@@ -785,9 +803,9 @@ describe('the seed a set entry is measured against, per project', () => {
   const CO = 'company-1'
   const seeds: SeedsByCompany = {
     [CO]: {
-      'Payroll|Salaries|Sales||': { [MONTH]: 1000 },
-      'Payroll|Salaries|Sales|||#p1': { [MONTH]: 400 },
-      'Payroll|Salaries|Sales|||#p2': { [MONTH]: 250 },
+      'Payroll|Salaries|Sales': { [MONTH]: 1000 },
+      'Payroll|Salaries|Sales|#p1': { [MONTH]: 400 },
+      'Payroll|Salaries|Sales|#p2': { [MONTH]: 250 },
     },
   }
 

@@ -177,6 +177,7 @@ const expenseRow = (over: Record<string, any> = {}) => ({
   pl_category: 'Operating Expenses',
   pl_subcategory: 'Telecom',
   department: 'Administration',
+  // An old row may still carry these; nothing reads them any more.
   dept_subcategory: 'Office',
   expense_description: 'Telekom',
   pl_date: `${benchmarkMonth()}-14`,
@@ -227,13 +228,6 @@ const seedDb = (over: Partial<MockDb['rows']> = {}) => {
     departments: [
       { id: 'dep-1', name: 'Administration', sort_order: 1 },
       { id: 'dep-2', name: 'Marketing', sort_order: 2 },
-    ],
-    dept_subcategories: [
-      { id: 'dsc-1', name: 'Office', department_id: 'dep-1', sort_order: 1 },
-      { id: 'dsc-2', name: 'Events', department_id: 'dep-2', sort_order: 2 },
-    ],
-    expense_descriptions: [
-      { id: 'exd-1', name: 'Telekom', dept_subcategory_id: 'dsc-1', sort_order: 1 },
     ],
     ...over,
   }
@@ -319,6 +313,19 @@ const expandAll = async () => {
       if (cell) await act(async () => { fireEvent.click(cell) })
     }
   }
+}
+
+/**
+ * Render on the consolidated view, on the P&L branch.
+ *
+ * The department branch is one level since sub-sectors and cost descriptions
+ * were removed, so a parent with children — and everything said about one —
+ * is read on the P&L branch: Operating Expenses → Telecom.
+ */
+const renderConsolidatedPL = async () => {
+  await renderConsolidated()
+  fireEvent.click(screen.getByRole('button', { name: 'P&L' }))
+  await screen.findByText('Operating Expenses')
 }
 
 /** The budget figure in the row labelled `label`, for the month `n` ahead. */
@@ -605,16 +612,14 @@ describe('adding a budget line nothing has been spent on', () => {
 
   const ledgerWrites = () => mockDb.writes.filter(w => w.table === 'budget_adjustments')
 
-  it('records the line at the deepest level the user filled in', async () => {
-    // Marketing → Events, with the description left blank. The entry has to be
-    // a `dept_subcategory` row: filed one level deeper it would land on an
-    // `Unassigned` description, and one level shallower it would move the whole
-    // department.
+  it('records a sector line at the sector, with no sub-sector and no description', async () => {
+    // The department branch is the sector alone: a new line can no longer be
+    // recorded on a sub-sector or a cost description, and the row carries
+    // neither.
     await renderConsolidated()
 
     await openAddLine()
     fireEvent.change(await screen.findByLabelText('Sektor'), { target: { value: 'dep-2' } })
-    fireEvent.change(screen.getByLabelText('Podsektor'), { target: { value: 'dsc-2' } })
     fireEvent.change(screen.getByLabelText('Mesec'), { target: { value: horizonMonth(2) } })
     fireEvent.click(screen.getByText('Dalje'))
 
@@ -628,26 +633,26 @@ describe('adding a budget line nothing has been spent on', () => {
       // ledger reads as "this line is the group's".
       company_id: null,
       budget_month: `${horizonMonth(2)}-01`,
-      level: 'dept_subcategory',
+      level: 'department',
       department: 'Marketing',
-      dept_subcategory: 'Events',
       // Said to be nothing, rather than guessed at. Nothing has been claimed
-      // about the description or about the P&L side of this line.
-      expense_description: null,
+      // about the P&L side of this line.
       pl_category: null,
       pl_subcategory: null,
       kind: 'adjust',
       amount_rsd: 4000,
       reason: 'Autumn campaign',
     })
+    expect(ledgerWrites()[0].row).not.toHaveProperty('dept_subcategory')
+    expect(ledgerWrites()[0].row).not.toHaveProperty('expense_description')
   })
 
   it('asks nothing about companies, and is live from the moment it opens', async () => {
     // It used to open with a required Company field above everything else, and
     // everything below it dead until the field was answered. The question was
-    // wrong on its own terms: the five tables this dialog picks a line out of
-    // carry no `company_id` at all, so a new expense description was never a
-    // per-company thing — and a budget line is the group's anyway.
+    // wrong on its own terms: the tables this dialog picks a line out of carry
+    // no `company_id` at all, so a new heading was never a per-company thing —
+    // and a budget line is the group's anyway.
     await renderConsolidated()
 
     await openAddLine()
@@ -667,7 +672,7 @@ describe('adding a budget line nothing has been spent on', () => {
   })
 
   it('lets a line that is already budgeted be changed, against the group figure', async () => {
-    // This used to be refused: the figure Administration → Office reads on the
+    // This used to be refused: the figure Administration reads on the
     // consolidated view is the sum across every company, so a target typed
     // against it was said to be nobody's delta. It is the GROUP's, which is
     // whose budget this is — so the dialog is handed that figure as the
@@ -676,7 +681,6 @@ describe('adding a budget line nothing has been spent on', () => {
 
     await openAddLine()
     fireEvent.change(await screen.findByLabelText('Sektor'), { target: { value: 'dep-1' } })
-    fireEvent.change(screen.getByLabelText('Podsektor'), { target: { value: 'dsc-1' } })
 
     expect(screen.queryByText(/already budgeted/i)).not.toBeInTheDocument()
     expect(screen.getByText('Dalje')).not.toBeDisabled()
@@ -687,32 +691,31 @@ describe('adding a budget line nothing has been spent on', () => {
   })
 
   it('writes a new name into the lookup table, not only into the ledger', async () => {
-    // The half that is easy to leave out. A description that exists only as a
+    // The half that is easy to leave out. A sub-category that exists only as a
     // budget line cannot be picked when the real invoice arrives: the spend is
     // classified elsewhere and the budgeted row sits at zero actual for ever.
     //
     // On the consolidated view, with no company chosen anywhere: these tables
     // have no `company_id`, so the `+` beside a level has never needed one.
-    await renderConsolidated()
+    await renderConsolidatedPL()
 
     await openAddLine()
-    fireEvent.change(await screen.findByLabelText('Sektor'), { target: { value: 'dep-2' } })
-    fireEvent.change(screen.getByLabelText('Podsektor'), { target: { value: 'dsc-2' } })
+    fireEvent.change(await screen.findByLabelText('P&L kategorija'), { target: { value: 'plc-1' } })
 
-    // The `+` beside the description — the level with no existing value to pick.
+    // The `+` beside the sub-category — the level with no existing value to pick.
     const adders = screen.getAllByTitle('Dodaj novu kategoriju')
     fireEvent.click(adders[adders.length - 1])
-    fireEvent.change(screen.getByPlaceholderText(/Novi opis troška/i),
+    fireEvent.change(screen.getByPlaceholderText(/Nova P&L potkategorija/i),
       { target: { value: 'Conference sponsorship' } })
     fireEvent.click(screen.getByText('✓ Dodaj'))
 
     await waitFor(() =>
-      expect(mockDb.writes.filter(w => w.table === 'expense_descriptions')).toHaveLength(1))
-    expect(mockDb.writes.find(w => w.table === 'expense_descriptions')?.row).toMatchObject({
+      expect(mockDb.writes.filter(w => w.table === 'pl_subcategories')).toHaveLength(1))
+    expect(mockDb.writes.find(w => w.table === 'pl_subcategories')?.row).toMatchObject({
       name: 'Conference sponsorship',
-      // Under the sub-category it was created in, or the transaction dialog
-      // will never offer it.
-      dept_subcategory_id: 'dsc-2',
+      // Under the category it was created in, or the transaction dialog will
+      // never offer it.
+      category_id: 'plc-1',
     })
 
     fireEvent.click(screen.getByText('Dalje'))
@@ -722,14 +725,13 @@ describe('adding a budget line nothing has been spent on', () => {
 
     await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
     expect(ledgerWrites()[0].row).toMatchObject({
-      level: 'expense_description',
-      department: 'Marketing',
-      dept_subcategory: 'Events',
-      expense_description: 'Conference sponsorship',
+      level: 'pl_subcategory',
+      pl_category: 'Operating Expenses',
+      pl_subcategory: 'Conference sponsorship',
     })
     // And it is still in the lookup table afterwards — which is what makes the
     // real spend classifiable to the same line months later.
-    expect((mockDb.rows.expense_descriptions || []).map((d: any) => d.name))
+    expect((mockDb.rows.pl_subcategories || []).map((d: any) => d.name))
       .toContain('Conference sponsorship')
   })
 
@@ -742,7 +744,6 @@ describe('adding a budget line nothing has been spent on', () => {
 
     await openAddLine()
     fireEvent.change(await screen.findByLabelText('Sektor'), { target: { value: 'dep-2' } })
-    fireEvent.change(screen.getByLabelText('Podsektor'), { target: { value: 'dsc-2' } })
     fireEvent.click(screen.getByText('Dalje'))
 
     fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '4000' } })
@@ -750,30 +751,25 @@ describe('adding a budget line nothing has been spent on', () => {
     fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 
     await waitFor(() => expect(screen.getByText('Marketing')).toBeInTheDocument())
-    expect(screen.getByText('Events')).toBeInTheDocument()
     expect(screen.getAllByText('4.000 RSD').length).toBeGreaterThan(0)
   })
 
-  it('does not offer a new description under a P&L sub-category it cannot parent', async () => {
-    // `expense_descriptions.dept_subcategory_id` points at a department
-    // sub-category whichever branch is open. In the P&L branch there is no
-    // parent id to insert under, so the description is offered unfiltered and
-    // the `+` is not there — rather than writing a lookup row with no parent.
+  it('asks for no sub-sector and no cost description in either branch', async () => {
     await renderConsolidated()
-    fireEvent.click(screen.getByRole('button', { name: 'P&L' }))
-    await waitFor(() => expect(screen.getByText(/Ukupni troškovi/i)).toBeInTheDocument())
+    await openAddLine()
+    await screen.findByLabelText('Sektor')
+    expect(screen.queryByLabelText('Podsektor')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Opis troška')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Otkaži'))
 
+    fireEvent.click(screen.getByRole('button', { name: 'P&L' }))
+    await screen.findByText('Operating Expenses')
     await openAddLine()
     fireEvent.change(await screen.findByLabelText('P&L kategorija'), { target: { value: 'plc-1' } })
-    fireEvent.change(screen.getByLabelText('P&L potkategorija'), { target: { value: 'pls-1' } })
-
-    // Two `+` controls, not three: the category and the sub-category can take
-    // a new name here; the description cannot.
+    // Two levels, each able to take a new name; nothing below them.
     expect(screen.getAllByTitle('Dodaj novu kategoriju')).toHaveLength(2)
-    expect(screen.getByText(/Pređite na granu Sektor/i)).toBeInTheDocument()
-    // The descriptions that do exist are still pickable.
-    expect(within(screen.getByLabelText('Opis troška') as HTMLElement)
-      .getByText('Telekom')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Opis troška')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Pređite na granu Sektor/i)).not.toBeInTheDocument()
   })
 })
 
@@ -860,15 +856,15 @@ describe('how much of the table is open when it loads', () => {
     // Several hundred rows of leaf detail answer a question the categories
     // above them already answer. Compact is the readable one, and it is the
     // one that was asked for.
-    await renderConsolidated()
+    await renderConsolidatedPL()
     expect(screen.queryAllByText('▶').length).toBeGreaterThan(0)
     expect(screen.queryAllByText('▼')).toHaveLength(0)
   })
 
   it('opens a category to its children, and they are folded in turn', async () => {
-    // Progressive, not all-or-nothing: opening Marketing should not lay out
-    // every description under every sub-category at once.
-    await renderConsolidated()
+    // Progressive, not all-or-nothing: opening a category opens that one
+    // category and nothing else.
+    await renderConsolidatedPL()
     const first = screen.queryAllByText('▶')[0].closest('td')!
     await act(async () => { fireEvent.click(first) })
     expect(screen.queryAllByText('▼')).toHaveLength(1)
@@ -878,7 +874,7 @@ describe('how much of the table is open when it loads', () => {
     // `refreshTick` bumps after every recorded change. Refolding then throws
     // the reader back to the top of the table in the middle of the run of
     // edits they are least able to afford losing their place in.
-    await renderConsolidated()
+    await renderConsolidatedPL()
     await expandAll()
     const openBefore = screen.queryAllByText('▼').length
     expect(openBefore).toBeGreaterThan(0)
@@ -889,13 +885,14 @@ describe('how much of the table is open when it loads', () => {
 })
 
 describe('which row a budget change is about to land on', () => {
-  // The trap this covers, in full. `Administration → Office → Telekom` is one
-  // department, one sub-category, one description: `Office` has exactly ONE
-  // child, so `Office` and `Telekom` print the SAME figure, one directly above
-  // the other, both green, both clickable. Clicking the parent by mistake is
-  // arithmetically correct and completely silent — the money lands on `Office`
-  // itself and surfaces afterwards as the direct row, which reads to the owner
-  // as "it went in uncategorised".
+  // The trap this covers, in full. `Operating Expenses → Telecom` is one
+  // category and one sub-category: `Operating Expenses` has exactly ONE child,
+  // so the two print the SAME figure, one directly above the other, both
+  // green, both clickable. Clicking the parent by mistake is arithmetically
+  // correct and completely silent — the money lands on the category itself
+  // and surfaces afterwards as the direct row, which reads to the owner as "it
+  // went in uncategorised". (The P&L branch: the department branch is one
+  // level and has no parent to mistake.)
   //
   // Nothing here refuses a change on a parent. Budgeting on a parent is a
   // supported act — "Marketing: $8,000 without itemising sixty lines". What
@@ -913,108 +910,118 @@ describe('which row a budget change is about to land on', () => {
   it('shows the same figure on a parent with one child as on the child itself', async () => {
     // The premise. If these ever diverge the trap is a different one, and the
     // tests below are testing something other than what happened.
-    await renderConsolidated()
+    await renderConsolidatedPL()
     await expandAll()
-    await waitFor(() => expect(screen.getByText('Telekom')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Telecom')).toBeInTheDocument())
 
-    expect(budgetFigure('Office', 0).textContent)
-      .toBe(budgetFigure('Telekom', 0).textContent)
+    expect(budgetFigure('Operating Expenses', 0).textContent)
+      .toBe(budgetFigure('Telecom', 0).textContent)
   })
 
   it('says the change sits on the parent, and names the line it will not touch', async () => {
-    await renderConsolidated()
+    await renderConsolidatedPL()
     await expandAll()
-    await waitFor(() => expect(screen.getByText('Office')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Telecom')).toBeInTheDocument())
 
-    fireEvent.click(budgetFigure('Office', 0))
+    fireEvent.click(budgetFigure('Operating Expenses', 0))
     await screen.findByLabelText('Novi iznos')
 
-    const notice = screen.getByText(/Ova izmena se beleži na samoj stavci Office/i)
+    const notice = screen.getByText(/Ova izmena se beleži na samoj stavci Operating Expenses/i)
     expect(notice).toBeInTheDocument()
     // The child is NAMED. "this row has sub-lines" would leave the owner to
     // work out which of the two identical figures he was looking at.
-    expect(notice.textContent).toMatch(/Telekom/)
+    expect(notice.textContent).toMatch(/Telecom/)
     expect(notice.textContent).toMatch(/ima jednu stavku ispod sebe/i)
   })
 
   it('says nothing of the kind on a leaf, which is the common case', async () => {
-    await renderConsolidated()
+    await renderConsolidatedPL()
     await expandAll()
-    await waitFor(() => expect(screen.getByText('Telekom')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Telecom')).toBeInTheDocument())
 
-    fireEvent.click(budgetFigure('Telekom', 0))
+    fireEvent.click(budgetFigure('Telecom', 0))
     await screen.findByLabelText('Novi iznos')
 
     expect(screen.queryByText(/Ova izmena se beleži/i)).not.toBeInTheDocument()
     // It reads differently rather than merely reading less: an absent notice
     // is not a statement, and the two cases have to be told apart at a glance.
-    expect(screen.getByText(/Telekom nema stavki ispod sebe/i)).toBeInTheDocument()
+    expect(screen.getByText(/Telecom nema stavki ispod sebe/i)).toBeInTheDocument()
+  })
+
+  it('says nothing of the kind on a sector, which is always a leaf now', async () => {
+    await renderConsolidated()
+    await screen.findByText('Administration')
+
+    fireEvent.click(budgetFigure('Administration', 0))
+    await screen.findByLabelText('Novi iznos')
+    expect(screen.queryByText(/Ova izmena se beleži/i)).not.toBeInTheDocument()
   })
 
   it('counts the lines instead of naming them once there are too many to name', async () => {
     seedDb({
-      v_pl_entries: ['Telekom', 'Yettel', 'A1', 'Orion', 'SBB'].map((name, i) => expenseRow({
-        id: `tx-${i}`, expense_description: name, amount_rsd: 100,
+      v_pl_entries: ['Telecom', 'Internet', 'Mobile', 'Cloud', 'Power'].map((name, i) => expenseRow({
+        id: `tx-${i}`, pl_subcategory: name, amount_rsd: 100,
       })),
     })
-    await renderConsolidated()
+    await renderConsolidatedPL()
     await expandAll()
-    await waitFor(() => expect(screen.getByText('Office')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Cloud')).toBeInTheDocument())
 
-    fireEvent.click(budgetFigure('Office', 0))
+    fireEvent.click(budgetFigure('Operating Expenses', 0))
     await screen.findByLabelText('Novi iznos')
 
-    const notice = screen.getByText(/Ova izmena se beleži na samoj stavci Office/i)
+    const notice = screen.getByText(/Ova izmena se beleži na samoj stavci Operating Expenses/i)
     expect(notice.textContent).toMatch(/ima 5 stavki ispod sebe, između ostalih/i)
   })
 
-  it('still writes the leaf change against the description, exactly as before', async () => {
-    await renderConsolidated()
+  it('writes the leaf change against the sub-category, and nothing below it', async () => {
+    await renderConsolidatedPL()
     await expandAll()
-    await waitFor(() => expect(screen.getByText('Telekom')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Telecom')).toBeInTheDocument())
 
-    fireEvent.click(budgetFigure('Telekom', 0))
+    fireEvent.click(budgetFigure('Telecom', 0))
     await record('1020')
 
     await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
     expect(ledgerWrites()[0].row).toMatchObject({
-      level: 'expense_description',
+      level: 'pl_subcategory',
+      pl_category: 'Operating Expenses',
+      pl_subcategory: 'Telecom',
+      // The one sector every row under it agrees on.
       department: 'Administration',
-      dept_subcategory: 'Office',
-      expense_description: 'Telekom',
       amount_rsd: 20,
     })
+    expect(ledgerWrites()[0].row).not.toHaveProperty('dept_subcategory')
+    expect(ledgerWrites()[0].row).not.toHaveProperty('expense_description')
   })
 
-  it('still writes the parent change with no description, exactly as before', async () => {
+  it('still writes the parent change with no sub-category, exactly as before', async () => {
     // The write was never the fault and must not move: a change entered on a
-    // parent belongs to the parent, and `expense_description: null` is what
-    // says so.
-    await renderConsolidated()
+    // parent belongs to the parent, and `pl_subcategory: null` is what says so.
+    await renderConsolidatedPL()
     await expandAll()
-    await waitFor(() => expect(screen.getByText('Office')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Telecom')).toBeInTheDocument())
 
-    fireEvent.click(budgetFigure('Office', 0))
+    fireEvent.click(budgetFigure('Operating Expenses', 0))
     await record('1020')
 
     await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
     expect(ledgerWrites()[0].row).toMatchObject({
-      level: 'dept_subcategory',
-      department: 'Administration',
-      dept_subcategory: 'Office',
-      expense_description: null,
+      level: 'pl_category',
+      pl_category: 'Operating Expenses',
+      pl_subcategory: null,
       amount_rsd: 20,
     })
   })
 
   it('tells the hover on a parent apart from the hover on a leaf', async () => {
-    await renderConsolidated()
+    await renderConsolidatedPL()
     await expandAll()
-    await waitFor(() => expect(screen.getByText('Telekom')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Telecom')).toBeInTheDocument())
 
-    expect(budgetFigure('Office', 0).getAttribute('title'))
-      .toMatch(/beleži na samoj stavci Office, ne na stavci ispod nje/i)
-    expect(budgetFigure('Telekom', 0).getAttribute('title'))
+    expect(budgetFigure('Operating Expenses', 0).getAttribute('title'))
+      .toMatch(/beleži na samoj stavci Operating Expenses, ne na stavci ispod nje/i)
+    expect(budgetFigure('Telecom', 0).getAttribute('title'))
       .not.toMatch(/samoj stavci/i)
   })
 })
@@ -1025,12 +1032,12 @@ describe("the row for a parent's own budget", () => {
   // "uncategorised". It is neither uncategorised nor an error: it is the part
   // of the parent's budget that was entered on the parent.
 
-  const officeDirect = () => seedDb({
+  const categoryDirect = () => seedDb({
     budget_adjustments: [{
       id: 'adj-direct', company_id: null,
-      budget_month: `${horizonMonth(0)}-01`, level: 'dept_subcategory',
-      pl_category: null, pl_subcategory: null,
-      department: 'Administration', dept_subcategory: 'Office', expense_description: null,
+      budget_month: `${horizonMonth(0)}-01`, level: 'pl_category',
+      pl_category: 'Operating Expenses', pl_subcategory: null,
+      department: 'Administration',
       kind: 'adjust', amount_rsd: 20,
       reason: 'Seat added',
       created_at: '2026-01-01T00:00:00Z',
@@ -1038,25 +1045,25 @@ describe("the row for a parent's own budget", () => {
   })
 
   it('leads with what the money is, so truncation cannot turn it into "uncategorised"', async () => {
-    officeDirect()
-    await renderConsolidated()
+    categoryDirect()
+    await renderConsolidatedPL()
     await expandAll()
 
-    const label = await screen.findByText(/na samoj stavci Office/i)
+    const label = await screen.findByText(/na samoj stavci Operating Expenses/i)
     // The meaning is in the opening words, which is the part that survives the
     // ellipsis. The old label spent them on `direct — not attributed to a`.
-    expect((label.textContent || '').slice(0, 22)).toBe('na samoj stavci Office')
+    expect((label.textContent || '').startsWith('na samoj stavci Operating Expenses')).toBe(true)
     expect(label.textContent).not.toMatch(/^direct/)
   })
 
   it('carries the whole sentence on hover', async () => {
-    officeDirect()
-    await renderConsolidated()
+    categoryDirect()
+    await renderConsolidatedPL()
     await expandAll()
 
-    const label = await screen.findByText(/na samoj stavci Office/i)
+    const label = await screen.findByText(/na samoj stavci Operating Expenses/i)
     const title = label.getAttribute('title') || ''
-    expect(title).toMatch(/Budžetirano na samoj stavci Office/i)
+    expect(title).toMatch(/Budžetirano na samoj stavci Operating Expenses/i)
     expect(title).toMatch(/Nije nerazvrstano i nije greška/i)
   })
 })
@@ -1143,50 +1150,54 @@ describe('the page without tabs', () => {
 })
 
 describe('adding a line from the row it belongs under', () => {
-  // The dialog above exists and works; what it cost was picking a department
-  // and a sub-category the reader was already looking at. The `+` on a
-  // sub-category row is the same dialog with those two answers already given.
+  // The dialog above exists and works; what it cost was picking a category the
+  // reader was already looking at. The `+` on a category row is the same
+  // dialog with that answer already given.
 
   const plusUnder = (label: string) =>
     screen.queryByRole('button', { name: `Dodaj budžetsku stavku pod ${label}` })
 
   /**
-   * An expense description belongs to a dept. sub-category in the database, so
-   * that is the only node in the tree that can own a new child. A `+` on a
-   * department would open a dialog with a level still to pick; a `+` on a
-   * description would open one with nothing left to add.
+   * A P&L sub-category belongs to a category in the database, so a category is
+   * the only node in the tree that can own a new child. A sector has nothing
+   * below it any more, and a sub-category would open a dialog with nothing
+   * left to add.
    */
-  it('offers the plus on a sub-category and nowhere else', async () => {
-    await renderConsolidated()
+  it('offers the plus on a category and nowhere else', async () => {
+    await renderConsolidatedPL()
     await expandAll()
 
-    expect(plusUnder('Office')).toBeInTheDocument()
+    expect(plusUnder('Operating Expenses')).toBeInTheDocument()
+    expect(plusUnder('Telecom')).not.toBeInTheDocument()
+  })
+
+  it('offers no plus in the department branch, where there is nothing below a sector', async () => {
+    await renderConsolidated()
+    await screen.findByText('Administration')
     expect(plusUnder('Administration')).not.toBeInTheDocument()
-    expect(plusUnder('Telekom')).not.toBeInTheDocument()
   })
 
   it('opens the dialog with the row already answered', async () => {
-    await renderConsolidated()
+    await renderConsolidatedPL()
     await expandAll()
 
-    fireEvent.click(plusUnder('Office')!)
+    fireEvent.click(plusUnder('Operating Expenses')!)
     await screen.findByText('Dodaj budžetsku stavku')
 
-    expect((await screen.findByLabelText('Sektor') as HTMLSelectElement).value).toBe('dep-1')
-    expect((screen.getByLabelText('Podsektor') as HTMLSelectElement).value).toBe('dsc-1')
+    expect((await screen.findByLabelText('P&L kategorija') as HTMLSelectElement).value).toBe('plc-1')
     // The one thing it was opened to say is the one thing left to say.
-    expect((screen.getByLabelText('Opis troška') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByLabelText('P&L potkategorija') as HTMLSelectElement).value).toBe('')
   })
 
   /** The cell folds the row. A button that folds what it just opened is a
    *  button nobody presses twice. */
   it('does not fold the row it was clicked on', async () => {
-    await renderConsolidated()
+    await renderConsolidatedPL()
     await expandAll()
 
-    fireEvent.click(plusUnder('Office')!)
+    fireEvent.click(plusUnder('Operating Expenses')!)
     await screen.findByText('Dodaj budžetsku stavku')
-    expect(screen.getByText('Telekom')).toBeInTheDocument()
+    expect(screen.getByText('Telecom')).toBeInTheDocument()
   })
 
   it('leaves the page button opening an empty dialog', async () => {
@@ -1197,13 +1208,13 @@ describe('adding a line from the row it belongs under', () => {
     expect((await screen.findByLabelText('Sektor') as HTMLSelectElement).value).toBe('')
   })
 
-  it('records the line under the sub-category it was opened from', async () => {
-    await renderConsolidated()
+  it('records the line under the category it was opened from', async () => {
+    await renderConsolidatedPL()
     await expandAll()
 
-    fireEvent.click(plusUnder('Office')!)
+    fireEvent.click(plusUnder('Operating Expenses')!)
     await screen.findByText('Dodaj budžetsku stavku')
-    fireEvent.change(await screen.findByLabelText('Opis troška'), { target: { value: 'exd-1' } })
+    fireEvent.change(await screen.findByLabelText('P&L potkategorija'), { target: { value: 'pls-1' } })
     fireEvent.change(screen.getByLabelText('Mesec'), { target: { value: horizonMonth(2) } })
     fireEvent.click(screen.getByText('Dalje'))
 
@@ -1214,11 +1225,10 @@ describe('adding a line from the row it belongs under', () => {
     await waitFor(() =>
       expect(mockDb.writes.filter(w => w.table === 'budget_adjustments')).toHaveLength(1))
     expect(mockDb.writes.filter(w => w.table === 'budget_adjustments')[0].row).toMatchObject({
-      level: 'expense_description',
-      department: 'Administration',
-      dept_subcategory: 'Office',
-      expense_description: 'Telekom',
-      // A DELTA, and this is the assertion worth having. Telekom already
+      level: 'pl_subcategory',
+      pl_category: 'Operating Expenses',
+      pl_subcategory: 'Telecom',
+      // A DELTA, and this is the assertion worth having. Telecom already
       // carries a $1,000 seed, so moving it to $750 is −250 — which only
       // comes out right if the seeded path was handed to `currentFor` and
       // read its real figure. Had the dialog assumed a pre-filled line starts
@@ -1258,8 +1268,9 @@ describe('the budget read in EUR', () => {
     })
     await renderIn('EUR')
     await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
-    // 1,000 EUR seeded on the Telekom line under it + 500 EUR recorded on
-    // Administration itself (whose own seed, recorded with the entry, is 0).
+    // 1,000 EUR seeded on Administration + 500 EUR recorded on it. The 0
+    // pinned with the entry is a pin taken when Administration was a parent
+    // with no seed of its own, and does not wipe the seed it now holds.
     await waitFor(() => expect(budgetFigure('Administration', 1).textContent).toContain('1.500 EUR'))
     expect(screen.queryByText(/ne može da se prikaže u EUR/)).not.toBeInTheDocument()
   })
@@ -1331,14 +1342,15 @@ describe('a budget for one project, or for overhead', () => {
     await expandAll()
 
     // The leaf, where the seed sits: a row pins its OWN seed, not its children's.
-    fireEvent.click(budgetFigure('Telekom', 0))
+    // The sector is the leaf of its branch now.
+    fireEvent.click(budgetFigure('Administration', 0))
     fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '1000' } })
     fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Site plan' } })
     fireEvent.click(screen.getByText('Sačuvaj izmenu'))
 
     await waitFor(() => expect(ledgerWrites()).toHaveLength(1))
     expect(ledgerWrites()[0].row).toMatchObject({
-      company_id: null, project_id: 'p1', expense_description: 'Telekom',
+      company_id: null, project_id: 'p1', level: 'department', department: 'Administration',
       amount_rsd: 600, seed_rsd: 400,
     })
   })
@@ -1348,7 +1360,7 @@ describe('a budget for one project, or for overhead', () => {
     await waitFor(() => expect(screen.getByText('Administration')).toBeInTheDocument())
     await expandAll()
 
-    fireEvent.click(budgetFigure('Telekom', 0))
+    fireEvent.click(budgetFigure('Administration', 0))
     fireEvent.change(await screen.findByLabelText('Novi iznos'), { target: { value: '2000' } })
     fireEvent.change(screen.getByLabelText('Razlog'), { target: { value: 'Group plan' } })
     fireEvent.click(screen.getByText('Sačuvaj izmenu'))

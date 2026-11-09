@@ -11,8 +11,6 @@ const entry = (over: Partial<SourceEntry> = {}): SourceEntry => ({
   pl_category: 'Operating Expenses',
   pl_subcategory: 'Telecom',
   department: 'Administration',
-  dept_subcategory: 'Office',
-  expense_description: 'Telekom',
   amount_rsd: 100,
   cf_type: 'recurring',
   cf_frequency: 'monthly',
@@ -23,13 +21,28 @@ const entry = (over: Partial<SourceEntry> = {}): SourceEntry => ({
 const MONTHS = ['2026-09', '2026-10', '2026-11', '2026-12']
 
 describe('classificationKey', () => {
-  it('joins the five levels so two rows of the same kind share a key', () => {
-    expect(classificationKey(entry())).toBe('Operating Expenses|Telecom|Administration|Office|Telekom')
+  it('joins the three levels so two rows of the same kind share a key', () => {
+    expect(classificationKey(entry())).toBe('Operating Expenses|Telecom|Administration')
   })
 
   it('treats a missing level as empty rather than dropping it', () => {
-    expect(classificationKey(entry({ dept_subcategory: null, expense_description: null })))
-      .toBe('Operating Expenses|Telecom|Administration||')
+    expect(classificationKey(entry({ department: null })))
+      .toBe('Operating Expenses|Telecom|')
+  })
+
+  it('keys an old row with a sub-sector and a cost description as its department', () => {
+    const old = { ...entry(), dept_subcategory: 'Office', expense_description: 'Telekom' }
+    expect(classificationKey(old)).toBe(classificationKey(entry()))
+  })
+
+  it('seeds old rows of one department with different sub-sectors into one line', () => {
+    const rows = [
+      { ...entry({ amount_rsd: 100 }), dept_subcategory: 'Office', expense_description: 'Telekom' },
+      { ...entry({ amount_rsd: 40 }), dept_subcategory: 'Field', expense_description: 'SIM' },
+    ] as unknown as SourceEntry[]
+    const { byKey } = seedFromEntries(rows, MONTHS, '2026-08', 'RSD', LEGS)
+    expect(Object.keys(byKey)).toEqual(['Operating Expenses|Telecom|Administration'])
+    expect(byKey['Operating Expenses|Telecom|Administration']['2026-09']).toBe(140)
   })
 })
 
@@ -412,13 +425,11 @@ describe('isCreditPayment', () => {
   })
 
   // The reason it matches the whole classification rather than a name or a
-  // substring of one: four levels out of five is a different cost.
+  // substring of one: two levels out of three is a different cost.
   it.each([
     ['pl_category', { pl_category: 'Financial Expenses' }],
     ['pl_subcategory', { pl_subcategory: 'Bank Fees' }],
     ['department', { department: 'Administration' }],
-    ['dept_subcategory', { dept_subcategory: 'Office' }],
-    ['expense_description', { expense_description: 'Credit card' }],
   ])('is not fooled by a row differing only in %s', (_level, over) => {
     expect(isCreditPayment({ ...CREDIT_PRINCIPAL, ...over }, LEGS)).toBe(false)
   })
@@ -426,8 +437,12 @@ describe('isCreditPayment', () => {
   it('does not take an empty classification for a credit payment', () => {
     expect(isCreditPayment({
       pl_category: null, pl_subcategory: null, department: null,
-      dept_subcategory: null, expense_description: null,
     }, LEGS)).toBe(false)
+  })
+
+  it('still recognises an old leg that carries a sub-sector and a description', () => {
+    expect(isCreditPayment({ ...CREDIT_PRINCIPAL, dept_subcategory: 'Bankarski krediti',
+      expense_description: 'Glavnica' } as any, LEGS)).toBe(true)
   })
 })
 
@@ -526,8 +541,7 @@ describe('a benchmark-month credit payment and its schedule, end to end', () => 
   // credit legs did before this fix.
   it('used to produce it twice — 624,000 RSD for a 312,000 RSD schedule', () => {
     const asOrdinarySpend = paid.map((e, i) => ({
-      ...e, department: 'Administration', dept_subcategory: 'Office',
-      expense_description: `Leg ${i}`,
+      ...e, department: `Administration ${i}`,
     }))
     const { byKey } = seedFromEntries(asOrdinarySpend, HORIZON, BENCHMARK, 'RSD', LEGS)
     const sched = creditScheduleByMonth(schedule, HORIZON, 'RSD', LEGS)

@@ -3,7 +3,10 @@
 // One key function, used to sum the totals and to pick the rows behind them.
 // Two predicates that have to be kept in step will drift; this cannot.
 //
-// The budget tree groups expenses by the five classification columns. A cell's
+// The budget tree groups expenses by the three classification columns —
+// category, sub-category, department. Sub-sector and cost description are no
+// longer part of a key: an old row that carries them keys, and is summed, as
+// its department. A cell's
 // total is the sum of every row whose key matches; the drill-down behind that
 // cell is every row whose key matches. Both sides call this, so the list under
 // a number is the same set the number was summed from — by construction, not by
@@ -17,9 +20,8 @@
 //
 // A budget line is a classification AND a project: `project_id` on
 // budget_adjustments, null meaning an overhead line (Opšti troškovi). The key
-// carries it as a sixth segment, `|#<project id>`, written ONLY when there is a
-// project. An overhead line's key is therefore exactly the five-segment key it
-// always was, so a budget with no projects in it behaves byte for byte as it
+// carries it as a fourth segment, `|#<project id>`, written ONLY when there is a
+// project. An overhead line's key is therefore exactly the three-segment key, so a budget with no projects in it behaves byte for byte as it
 // did before projects existed.
 //
 // The tree does not branch on the project — it is not a level. Lines of
@@ -34,8 +36,6 @@ export interface ClassifiedRow {
   pl_category?: string | null
   pl_subcategory?: string | null
   department?: string | null
-  dept_subcategory?: string | null
-  expense_description?: string | null
   /** The project the line belongs to; null or absent is overhead. */
   project_id?: string | null
 }
@@ -56,8 +56,8 @@ export function projectKeySuffix(projectId: string | null | undefined): string {
 export function projectOfKey(classKey: string): string | null {
   const parts = classKey.split('|')
   const last = parts[parts.length - 1] || ''
-  // Only a sixth segment can be the project; a classification value that
-  // happens to start with `#` sits in one of the first five.
+  // Only a segment after the classification can be the project; a value that
+  // happens to start with `#` sits in one of the classification segments.
   if (parts.length <= CLASS_LEVELS.length || !last.startsWith(PROJECT_SEGMENT)) return null
   return last.slice(PROJECT_SEGMENT.length) || null
 }
@@ -74,7 +74,7 @@ export function projectOfKey(classKey: string): string | null {
 export type SeedsByCompany = Record<string, Record<string, Record<string, number>>>
 
 /**
- * The five classification columns joined into one key, and the project after
+ * The three classification columns joined into one key, and the project after
  * them when there is one.
  *
  * `null` and `''` fold to the same `''`: a row with no department and a row
@@ -94,9 +94,8 @@ export interface KeyedRow {
    * Every classification key summed into this node, when one key is not
    * enough.
    *
-   * A branch that shows three of the five levels — department →
-   * dept_subcategory → expense_description — puts every row matching those
-   * three on one node, whatever its P&L classification. That node's total is
+   * A branch that shows one of the three levels — the department — puts
+   * every row matching it on one node, whatever its P&L classification. That node's total is
    * summed from several keys, so its drill-down has to list them all; holding
    * one `classKey` per node listed whichever arrived first and lost the rest.
    *
@@ -177,7 +176,7 @@ export function nodeKeysUnder(rows: KeyedRow[], rootKey: string): string[] {
 
 // ── Where a thing sits in the open branch ────────────────────────────────────
 //
-// The two branches are the same five classification levels read in two orders:
+// The two branches are the same three classification levels read in two orders:
 // the department branch answers "who spends it", the P&L branch "what kind of
 // cost it is". Because they are the same money rearranged, a month's total must
 // not move when the toggle flips. No arrangement of the levels may create or
@@ -196,19 +195,19 @@ export function nodeKeysUnder(rows: KeyedRow[], rootKey: string): string[] {
 // `Unassigned` in the department branch is truthful. Dropping it is not.
 
 /**
- * The five classification segments, in the fixed order `makeClassKey` joins
- * them and `budget_adjustments` stores them.
+ * The three classification segments, in the fixed order `makeClassKey` joins
+ * them. `budget_adjustments` still has columns for sub-sector and cost
+ * description; they are neither written nor read.
  */
 export const CLASS_LEVELS: Level[] = [
   'pl_category', 'pl_subcategory',
-  'department', 'dept_subcategory',
-  'expense_description',
+  'department',
 ]
 
 /** The tree's stand-in for a level a row carries no value for. */
 export const UNASSIGNED = 'Nedodeljeno'
 
-/** The five classification columns as an array, in `CLASS_LEVELS` order. */
+/** The three classification columns as an array, in `CLASS_LEVELS` order. */
 export function classPartsOf(r: ClassifiedRow): string[] {
   return CLASS_LEVELS.map(l => valueOfLevel(r, l))
 }
@@ -219,8 +218,6 @@ function valueOfLevel(r: ClassifiedRow, level: Level): string {
     case 'pl_category': return r.pl_category || ''
     case 'pl_subcategory': return r.pl_subcategory || ''
     case 'department': return r.department || ''
-    case 'dept_subcategory': return r.dept_subcategory || ''
-    case 'expense_description': return r.expense_description || ''
     default: return ''
   }
 }
@@ -303,7 +300,7 @@ export function nodeKeyForEntry(entry: ClassifiedEntry, levels: Level[]): string
  * in the P&L branch — the P&L node holds Sales and Engineering salaries
  * together. Replacing a per-node base with X therefore moves the two branch
  * totals by different amounts, and the invariant the whole page rests on —
- * no arrangement of the five levels creates or destroys money — breaks.
+ * no arrangement of the levels creates or destroys money — breaks.
  *
  * This is the base that does NOT depend on which branch is open: the seed of
  * the classification the entry itself carries. `amount_rsd - seedForEntry(…)` (or the same in EUR)
@@ -390,7 +387,7 @@ export function seedForEntry(
   return total
 }
 
-/** The five classification columns a ledger row stores. */
+/** The classification columns a ledger row is written with. */
 export type Classification = Record<Level, string | null>
 
 /**
@@ -448,7 +445,7 @@ export function classificationFor(
 ): Classification {
   const out: Classification = {
     pl_category: null, pl_subcategory: null,
-    department: null, dept_subcategory: null, expense_description: null,
+    department: null,
   }
 
   const depth = levels.indexOf(level)

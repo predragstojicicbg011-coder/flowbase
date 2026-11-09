@@ -224,7 +224,7 @@ function tabsFor(branch: Branch): { key: ChartTab; label: string; hint: string }
 function levelNames(branch: Branch): string[] {
   switch (branch) {
     case 'pl': return ['Kategorija', 'Potkategorija']
-    case 'department': return ['Sektor', 'Podsektor', 'Opis']
+    case 'department': return ['Sektor']
     default: return ['Projekat', 'Kategorija', 'Potkategorija']
   }
 }

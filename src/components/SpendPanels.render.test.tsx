@@ -26,7 +26,7 @@ beforeAll(() => {
 const e = (o: Partial<PlEntry> & { amount_rsd: number }): PlEntry => ({
   tx_type: 'expense',
   pl_category: 'Marketing', pl_subcategory: 'Ads',
-  department: 'Growth', dept_subcategory: 'Paid', expense_description: 'Meta',
+  department: 'Growth',
   pl_date: '2026-07-10',
   ...o,
 })
@@ -37,14 +37,14 @@ const B = { project_id: 'p2', project_name: 'Hala B' }
 const ROWS: PlEntry[] = [
   e({ amount_rsd: 12000, amount: 12000, pl_date: '2026-07-10', ...A }),
   e({ amount_rsd: 18000, amount: 18000, pl_date: '2026-08-10', ...B }),
-  e({ amount_rsd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', dept_subcategory: 'People', expense_description: 'Payroll', pl_date: '2026-07-28', ...A }),
-  e({ amount_rsd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', dept_subcategory: 'People', expense_description: 'Payroll', pl_date: '2026-08-28', ...A }),
-  e({ amount_rsd: 980, pl_category: 'General Business', pl_subcategory: 'Software', department: 'Admin', dept_subcategory: 'Tools', expense_description: 'Figma', pl_date: '2026-08-03', project_id: null }),
+  e({ amount_rsd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', pl_date: '2026-07-28', ...A }),
+  e({ amount_rsd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', pl_date: '2026-08-28', ...A }),
+  e({ amount_rsd: 980, pl_category: 'General Business', pl_subcategory: 'Software', department: 'Admin', pl_date: '2026-08-03', project_id: null }),
 ]
 
 const PRIOR: PlEntry[] = [
   e({ amount_rsd: 4000, amount: 4000, pl_date: '2026-06-10', ...B }),
-  e({ amount_rsd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', dept_subcategory: 'People', expense_description: 'Payroll', pl_date: '2026-06-28', ...A }),
+  e({ amount_rsd: 7400, pl_category: 'Employee and Labour', pl_subcategory: 'Salaries', department: 'Admin', pl_date: '2026-06-28', ...A }),
 ]
 
 function deckFor(branch: Branch, rows = ROWS, prior = PRIOR) {
@@ -115,8 +115,10 @@ describe('the panels that read a level', () => {
   it('names the depth buttons after the branch rather than "level 2"', () => {
     render(deckFor('department'))
     fireEvent.click(screen.getByText('Šta se promenilo'))
-    for (const level of ['Sektor', 'Podsektor', 'Opis']) {
-      expect(screen.getByText(level)).toBeInTheDocument()
+    // The sector alone: sub-sector and cost description are no longer levels.
+    expect(screen.getByText('Sektor')).toBeInTheDocument()
+    for (const level of ['Podsektor', 'Opis']) {
+      expect(screen.queryByText(level)).not.toBeInTheDocument()
     }
   })
 
@@ -131,12 +133,12 @@ describe('the panels that read a level', () => {
 
   /** A two-level branch must not keep a third-level choice made on another. */
   it('clamps the open level when the new branch is shallower', () => {
-    const { rerender } = render(deckFor('department'))
+    const { rerender } = render(deckFor('project'))
     fireEvent.click(screen.getByText('Šta se promenilo'))
-    fireEvent.click(screen.getByText('Opis'))
-    rerender(deckFor('pl'))
-    expect(screen.queryByText('Opis')).not.toBeInTheDocument()
-    expect(screen.getByText('Potkategorija')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Potkategorija'))
+    rerender(deckFor('department'))
+    expect(screen.queryByText('Potkategorija')).not.toBeInTheDocument()
+    expect(screen.getByText('Sektor')).toBeInTheDocument()
   })
 
   it('offers the heatmap a per-line scale', () => {

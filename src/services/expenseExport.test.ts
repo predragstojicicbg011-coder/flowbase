@@ -31,8 +31,8 @@ describe('summaryRows', () => {
   it('puts each level in the column it actually stands for, not a numbered slot', () => {
     const [, , leaf] = summaryRows(tree, 'department', 1000, never)
     expect(leaf['Sektor']).toBe('Marketing')
-    expect(leaf['Podsektor']).toBe('Office')
-    expect(leaf['Opis troška']).toBe('Figma')
+    expect(leaf).not.toHaveProperty('Podsektor')
+    expect(leaf).not.toHaveProperty('Opis troška')
     expect(leaf['P&L kategorija']).toBe('')
   })
 
@@ -40,14 +40,13 @@ describe('summaryRows', () => {
     const [, , leaf] = summaryRows(tree, 'pl', 1000, never)
     expect(leaf['P&L kategorija']).toBe('Marketing')
     expect(leaf['P&L potkategorija']).toBe('Office')
-    expect(leaf['Opis troška']).toBe('Figma')
     expect(leaf['Sektor']).toBe('')
   })
 
   it('carries a node its whole ancestry, so a row reads on its own', () => {
-    const [, mid] = summaryRows(tree, 'department', 1000, never)
-    expect(mid['Sektor']).toBe('Marketing')
-    expect(mid['Podsektor']).toBe('Office')
+    const [, mid] = summaryRows(tree, 'pl', 1000, never)
+    expect(mid['P&L kategorija']).toBe('Marketing')
+    expect(mid['P&L potkategorija']).toBe('Office')
   })
 
   it('reports the share of the total', () => {
@@ -101,11 +100,9 @@ describe('summaryRows', () => {
 describe('entryRows', () => {
   const entries: PlEntry[] = [
     { id: 'a', pl_date: '2026-03-01', amount_rsd: 10100, amount_eur: 86.18, source: 'transaction',
-      pl_category: 'Ops', pl_subcategory: 'Telecom', department: 'Admin',
-      dept_subcategory: 'Office', expense_description: 'Telekom' },
+      pl_category: 'Ops', pl_subcategory: 'Telecom', department: 'Admin' },
     { id: 'b', pl_date: '2026-05-20', amount_rsd: 29300, source: 'invoice',
-      pl_category: 'Ops', pl_subcategory: 'Telecom', department: 'Admin',
-      dept_subcategory: 'Office', expense_description: 'Telekom' },
+      pl_category: 'Ops', pl_subcategory: 'Telecom', department: 'Admin' },
   ]
   const detail = new Map([
     ['a', { id: 'a', date: '2026-03-01', partner: 'Telekom Srbija', company: 'Test Company',
@@ -119,8 +116,8 @@ describe('entryRows', () => {
   it('repeats the full classification onto every row', () => {
     const r = entryRows(entries, detail)[1]
     expect(r['Sektor']).toBe('Admin')
-    expect(r['Podsektor']).toBe('Office')
-    expect(r['Opis troška']).toBe('Telekom')
+    expect(r).not.toHaveProperty('Podsektor')
+    expect(r).not.toHaveProperty('Opis troška')
     expect(r['P&L kategorija']).toBe('Ops')
   })
 
@@ -204,9 +201,9 @@ describe('preambleRows', () => {
 })
 
 describe('BRANCH_LEVELS', () => {
-  it('ends a filing branch in the expense description', () => {
-    expect(BRANCH_LEVELS.pl).toEqual(['P&L kategorija', 'P&L potkategorija', 'Opis troška'])
-    expect(BRANCH_LEVELS.department).toEqual(['Sektor', 'Podsektor', 'Opis troška'])
+  it('has no sub-sector and no cost description level', () => {
+    expect(BRANCH_LEVELS.pl).toEqual(['P&L kategorija', 'P&L potkategorija'])
+    expect(BRANCH_LEVELS.department).toEqual(['Sektor'])
   })
 
   it('starts the project branch with the project', () => {
@@ -221,8 +218,7 @@ describe('BRANCH_LEVELS', () => {
 })
 
 describe('entryRows — the project column', () => {
-  const base = { pl_date: '2026-03-01', pl_category: 'Ops', pl_subcategory: null, department: null,
-    dept_subcategory: null, expense_description: null }
+  const base = { pl_date: '2026-03-01', pl_category: 'Ops', pl_subcategory: null, department: null }
 
   it('names each row by its own project, and overhead when it has none', () => {
     const rows = entryRows([

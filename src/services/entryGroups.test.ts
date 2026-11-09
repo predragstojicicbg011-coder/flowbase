@@ -8,6 +8,7 @@ type Row = {
   id: string
   pl_date: string
   amount_rsd: number | null
+  /** An old cost description a row may still carry. Never searched. */
   expense_description?: string | null
 }
 
@@ -261,8 +262,9 @@ describe('matching a row', () => {
     expect(rowMatches(r, undefined, NO_FILTER, 'RSD')).toBe(true)
   })
 
-  it('searches the description without any detail having been fetched', () => {
-    expect(rowMatches(r, undefined, parseFilter('subscriptions'), 'RSD')).toBe(true)
+  it('does not search an old cost description the row still carries', () => {
+    expect(rowMatches(r, undefined, parseFilter('subscriptions'), 'RSD')).toBe(false)
+    expect(rowMatches(r, detail, parseFilter('subscriptions'), 'RSD')).toBe(false)
   })
 
   it('searches the vendor name, which only the fetched detail carries', () => {

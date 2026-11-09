@@ -11,8 +11,6 @@ const e = (o: Partial<PlEntry> & { amount_rsd: number }): PlEntry => ({
   pl_category: 'Professional and Production Services',
   pl_subcategory: 'LinkedIn Account Rentals',
   department: 'Sales Expenses',
-  dept_subcategory: 'Outsourcing services and Associates',
-  expense_description: 'Scaffolding rental',
   pl_date: '2026-09-14',
   ...o,
 })
@@ -91,23 +89,38 @@ describe('pathFor', () => {
       .toEqual(['Professional and Production Services', 'LinkedIn Account Rentals'])
   })
 
-  it('uses three levels for the department branch', () => {
-    expect(pathFor(e({ amount_rsd: 1 }), 'department'))
-      .toEqual(['Sales Expenses', 'Outsourcing services and Associates', 'Scaffolding rental'])
+  it('uses the sector alone for the department branch', () => {
+    expect(pathFor(e({ amount_rsd: 1 }), 'department')).toEqual(['Sales Expenses'])
+  })
+
+  it('ignores a sub-sector and a cost description an old row still carries', () => {
+    const old = { ...e({ amount_rsd: 1 }), dept_subcategory: 'Old sub-sector', expense_description: 'Old note' } as PlEntry
+    expect(pathFor(old, 'department')).toEqual(['Sales Expenses'])
   })
 
   it('substitutes Unassigned for a missing level instead of dropping the row', () => {
-    const row = e({ amount_rsd: 1, department: null, dept_subcategory: '  ' })
-    expect(pathFor(row, 'department'))
-      .toEqual([UNASSIGNED, UNASSIGNED, 'Scaffolding rental'])
+    const row = e({ amount_rsd: 1, department: '  ' })
+    expect(pathFor(row, 'department')).toEqual([UNASSIGNED])
+  })
+
+  it('sums old rows of one sector that had different sub-sectors into one node', () => {
+    const rows = [
+      { ...e({ amount_rsd: 100 }), dept_subcategory: 'A', expense_description: 'x' } as PlEntry,
+      { ...e({ amount_rsd: 40 }), dept_subcategory: 'B', expense_description: 'y' } as PlEntry,
+      e({ amount_rsd: 5, department: 'Uprava' }),
+    ]
+    const tree = buildTree(rows, 'department', 'RSD')
+    expect(tree.map(n => [n.label, n.amount, n.children.length]))
+      .toEqual([['Sales Expenses', 140, 0], ['Uprava', 5, 0]])
+    expect(totalOf(tree)).toBe(145)
   })
 })
 
 describe('buildTree — the two branches must tie', () => {
   const rows = [
     e({ amount_rsd: 100 }),
-    e({ amount_rsd: 250, pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries', department: null, dept_subcategory: null }),
-    e({ amount_rsd: 75, pl_subcategory: 'Affiliates Payment', expense_description: 'Growth Engine' }),
+    e({ amount_rsd: 250, pl_category: 'Employee and Labour', pl_subcategory: 'Net Salaries', department: null }),
+    e({ amount_rsd: 75, pl_subcategory: 'Affiliates Payment' }),
   ]
 
   it('both branches total the same', () => {

@@ -168,7 +168,7 @@ export default function BudgetDrillModal({
             // project_id is part of the key the cell was summed by
             // (`makeClassKey`); without it every project row would read as
             // overhead and fall out of the list.
-            .select('id, source, pl_category, pl_subcategory, department, dept_subcategory, expense_description, cf_type, cf_frequency, project_id')
+            .select('id, source, pl_category, pl_subcategory, department, cf_type, cf_frequency, project_id')
             .eq('tx_type', 'expense')
             .gte('pl_date', `${readMonth}-01`)
             .lte('pl_date', `${readMonth}-${String(lastDay).padStart(2, '0')}`)

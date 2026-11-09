@@ -99,7 +99,7 @@ function fetchEntries(dateFrom: string, dateTo: string, companyId: string): Prom
     // `project_id` / `project_name` are the row's own — a split line's, not
     // its document's — and are what the project branch and filter read.
     let q = supabase.from('v_pl_entries')
-      .select('id, tx_type, amount, amount_rsd, amount_eur, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, project_id, project_name')
+      .select('id, tx_type, amount, amount_rsd, amount_eur, pl_category, pl_subcategory, department, pl_date, company_id, source, project_id, project_name')
       .gte('pl_date', dateFrom).lte('pl_date', dateTo)
     if (companyId !== 'all') q = q.eq('company_id', companyId)
     return q.order('pl_date').order('id').range(from, to)

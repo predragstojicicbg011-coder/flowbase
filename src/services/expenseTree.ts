@@ -58,7 +58,7 @@ export const BRANCH_LABEL: Record<Branch, string> = {
 /** Column heading over the tree's first column, per branch. */
 export const BRANCH_COLUMNS: Record<Branch, string> = {
   pl: 'Kategorija / potkategorija',
-  department: 'Sektor / podsektor / opis',
+  department: 'Sektor',
   project: 'Projekat / kategorija / potkategorija',
 }
 
@@ -71,8 +71,6 @@ export interface PlEntry {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
   pl_date: string                 // 'YYYY-MM-DD'
   company_id?: string | null
   source?: string | null
@@ -170,7 +168,9 @@ export function projectRootOf(e: Pick<PlEntry, 'project_id' | 'project_name'>): 
 /** Path of a row within a branch. Missing levels collapse to Unassigned. */
 export function pathFor(e: PlEntry, branch: Branch): string[] {
   if (branch === 'pl') return [norm(e.pl_category), norm(e.pl_subcategory)]
-  if (branch === 'department') return [norm(e.department), norm(e.dept_subcategory), norm(e.expense_description)]
+  // The sector alone: sub-sector and cost description are no longer levels,
+  // and an old row that still carries them is summed under its sector.
+  if (branch === 'department') return [norm(e.department)]
   // Under each project, the same breakdown the P&L itself uses: by category.
   return [projectRootOf(e), norm(e.pl_category), norm(e.pl_subcategory)]
 }

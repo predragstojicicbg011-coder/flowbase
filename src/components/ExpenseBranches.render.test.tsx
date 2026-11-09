@@ -98,10 +98,8 @@ describe('the branches draw', () => {
   })
 
   it('STOPS THE BULK OPEN AT TWO LEVELS', () => {
-    // The third level is `expense_description` — one row per person on the
-    // payroll lines — and on a real October that is hundreds of rows. Opened
-    // all at once the canvas grows to several thousand pixels and answers
-    // nothing.
+    // A deeper level can hold hundreds of rows. Opened all at once the canvas
+    // grows to several thousand pixels and answers nothing.
     const { container } = render(branches())
     fireEvent.click(screen.getByRole('button', { name: 'Dva nivoa' }))
     capture('branches-2-two-levels', container.innerHTML)

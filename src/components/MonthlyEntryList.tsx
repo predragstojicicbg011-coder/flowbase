@@ -47,7 +47,6 @@ export interface MonthlyEntryRow {
   pl_date: string
   amount_rsd: number | null
   amount_eur?: number | null
-  expense_description?: string | null
 }
 
 export function MonthlyEntryList({

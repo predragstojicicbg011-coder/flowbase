@@ -42,8 +42,10 @@ function fixture() {
     ['a2', '2026-08-04', 100, 'Software', 'Notion Labs'],
     ['j1', '2026-07-11', 75, 'Video calls', 'Zoom Video'],
   ]
+  // The old cost description is still on the rows, as it can be on a real
+  // one; it is neither shown nor searched.
   const rows: MonthlyEntryRow[] = spec.map(([id, pl_date, amount_rsd, expense_description]) =>
-    ({ id, pl_date, amount_rsd, expense_description, source: 'transaction' }))
+    ({ id, pl_date, amount_rsd, expense_description, source: 'transaction' } as MonthlyEntryRow))
   const byId: Record<string, any> = {}
   for (const [id, d, amt, desc, partner] of spec) {
     byId[id] = {
@@ -227,11 +229,11 @@ describe('filtering a drill-down', () => {
     expect(calls.every(c => c.ids.length <= 3)).toBe(true)
   })
 
-  it('searches the expense description as well as the vendor', async () => {
+  it('does not search an old cost description, only the vendor and the rest', async () => {
     const { rows, byId } = fixture()
     renderList(rows, byId)
     type('hosting')
-    await waitFor(() => expect(screen.getByText(/2 od 6 transakcija/)).toBeInTheDocument(),
+    await waitFor(() => expect(screen.getByText(/Ništa ne odgovara/)).toBeInTheDocument(),
       { timeout: 3000 })
   })
 
@@ -267,7 +269,7 @@ describe('a drill-down with a month bigger than the fetch cap', () => {
     for (let i = 0; i < 400; i++) {
       const id = `b${String(i).padStart(3, '0')}`
       const d = `2026-09-${String((i % 28) + 1).padStart(2, '0')}`
-      rows.push({ id, pl_date: d, amount_rsd: 10, expense_description: 'Ads', source: 'transaction' })
+      rows.push({ id, pl_date: d, amount_rsd: 10, source: 'transaction' })
       byId[id] = {
         id, transaction_date: d, amount: 10, amount_rsd: 10, currency: 'RSD',
         pl_category: 'Opex', department: 'Growth', expense_description: 'Ads',

@@ -32,7 +32,7 @@ beforeEach(() => {
 
 const classification = {
   pl_category: 'Payroll', pl_subcategory: 'Salaries',
-  department: 'Sales', dept_subcategory: null, expense_description: null,
+  department: 'Sales',
 }
 
 const open = (over: { current?: number; seed?: number; seedEur?: number | null } = {}) => render(

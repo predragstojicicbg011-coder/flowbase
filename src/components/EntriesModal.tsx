@@ -111,23 +111,23 @@ export async function buildEntryItems(
   const [tx, inv] = await Promise.all([
     txIds.length === 0 ? Promise.resolve({ data: [], error: null }) : supabase
       .from('transactions')
-      .select('id, transaction_date, amount, amount_rsd, amount_eur, currency, pl_category, department, expense_description, cf_type, note, partners(name)')
+      .select('id, transaction_date, amount, amount_rsd, amount_eur, currency, pl_category, department, cf_type, note, partners(name)')
       .in('id', txIds),
     invIds.length === 0 ? Promise.resolve({ data: [], error: null }) : supabase
       .from('invoices')
-      .select('id, invoice_date, invoice_number, amount, amount_rsd, amount_eur, currency, pl_category, department, expense_description, note, partners(name)')
+      .select('id, invoice_date, invoice_number, amount, amount_rsd, amount_eur, currency, pl_category, department, note, partners(name)')
       .in('id', invIds),
   ])
   if (tx.error) throw tx.error
   if (inv.error) throw inv.error
 
-  const path = (r: any) => [r.pl_category, r.department && `/ ${r.department}`, r.expense_description]
+  const path = (r: any) => [r.pl_category, r.department && `/ ${r.department}`]
     .filter(Boolean).join(' ')
 
   const items = [
     ...((tx.data || []) as any[]).map(r => ({
       id: r.id,
-      title: (r.partners as any)?.name || r.expense_description || '—',
+      title: (r.partners as any)?.name || '—',
       date: r.transaction_date,
       path: path(r),
       note: r.note,
@@ -140,7 +140,7 @@ export async function buildEntryItems(
     })),
     ...((inv.data || []) as any[]).map(r => ({
       id: r.id,
-      title: (r.partners as any)?.name || r.expense_description || '—',
+      title: (r.partners as any)?.name || '—',
       date: r.invoice_date,
       path: path(r),
       note: r.note,

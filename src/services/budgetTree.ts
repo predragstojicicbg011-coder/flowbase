@@ -27,7 +27,7 @@ import {
 } from './budgetKeys'
 import { getBookRates, rateFor, type BookRates } from './bookAmounts'
 import {
-  seedFromEntries, creditScheduleByMonth, applyLedger, rollUp, figureIn, ledgerReadableIn,
+  seedFromEntries, creditScheduleByMonth, applyLedger, rollUp, figureIn, ledgerReadableIn, pinStillHolds,
   type Adjustment, type Installment, type BudgetCurrency,
   type ForecastNode, type RolledNode, type Level,
 } from './budgetForecast'
@@ -41,12 +41,16 @@ export type BranchId = 'department' | 'pl'
  * The levels each branch walks, in order.
  *
  * Here rather than in the page because the tree is built from them: a caller
- * asking for the P&L branch is asking for these three levels, and the page
- * that draws the answer should not be the thing that defines it.
+ * asking for the P&L branch is asking for these levels, and the page that
+ * draws the answer should not be the thing that defines it.
+ *
+ * Sub-sector and cost description are no longer levels: the department branch
+ * is the department alone, and a line recorded on a sub-sector is summed
+ * under its department (`placeEntry` places it at the deepest level shown).
  */
 export const LEVELS: Record<BranchId, Level[]> = {
-  department: ['department', 'dept_subcategory', 'expense_description'],
-  pl: ['pl_category', 'pl_subcategory', 'expense_description'],
+  department: ['department'],
+  pl: ['pl_category', 'pl_subcategory'],
 }
 
 export interface BudgetRow {
@@ -213,7 +217,7 @@ export async function loadBudgetTree(
       // same rows, so the forecast and the actuals cannot disagree about
       // which universe they describe.
       // project_id is part of the budget line a row seeds (`makeClassKey`).
-      .select('id, amount_rsd, amount_eur, pl_category, pl_subcategory, department, dept_subcategory, expense_description, pl_date, company_id, source, cf_type, cf_frequency, project_id')
+      .select('id, amount_rsd, amount_eur, pl_category, pl_subcategory, department, pl_date, company_id, source, cf_type, cf_frequency, project_id')
       // The view carries revenue as well: its tx_type is the transaction's
       // tx_subtype. Without this filter revenue lands in an expense budget.
       .eq('tx_type', 'expense')
@@ -257,7 +261,7 @@ export async function loadBudgetTree(
       // `seed_rsd` / `seed_eur` are what stop a typed figure moving when the benchmark
       // month rolls over. Left out of this list, every cell on the page goes
       // back to drifting and nothing says so. See `pinnedBase`.
-      .select('id, company_id, budget_month, level, pl_category, pl_subcategory, department, dept_subcategory, expense_description, project_id, kind, amount_rsd, amount_eur, reason, created_at, seed_rsd, seed_eur')
+      .select('id, company_id, budget_month, level, pl_category, pl_subcategory, department, project_id, kind, amount_rsd, amount_eur, reason, created_at, seed_rsd, seed_eur')
       .gte('budget_month', `${firstMonth}-01`)
       .lte('budget_month', `${lastMonth}-01`)
     // NO company filter on the consolidated view, deliberately. The budget
@@ -326,8 +330,15 @@ export async function loadBudgetTree(
     // Resolved in each currency against that currency's own seed. An entry
     // with no EUR figure stays without one; see `ledgerReadableIn`.
     const eur = figureIn(a, 'amount', 'EUR')
-    const entry: Adjustment = a.kind !== 'set' ? a : {
+    // A pin taken on a node that no longer exists, or on what was a parent,
+    // is dropped; the entry's amount still counts. See `pinStillHolds`.
+    const pins = {
+      seed_rsd: pinStillHolds(a, a.seed_rsd) ? a.seed_rsd : null,
+      seed_eur: pinStillHolds(a, a.seed_eur) ? a.seed_eur : null,
+    }
+    const entry: Adjustment = a.kind !== 'set' ? { ...a, ...pins } : {
       ...a,
+      ...pins,
       kind: 'adjust',
       amount_rsd: Number(a.amount_rsd) - seedForEntry(a, seeded.RSD.byCompany, mk),
       amount_eur: eur === null ? null : eur - seedForEntry(a, seeded.EUR.byCompany, mk),

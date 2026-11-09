@@ -650,8 +650,8 @@ export default function Budgeting() {
    * A row's depth: the position of its level in the open branch.
    *
    * Indentation and type styling are a function of depth, never of the level
-   * itself — `expense_description` is the third level in both branches, but
-   * `department` is the first in one and the third in the other.
+   * itself — the department is the first level of its branch and is not a
+   * level of the P&L branch at all.
    */
   const depthOf = (row: BudgetRow) => Math.max(0, LEVELS[branch].indexOf(row.level))
 
@@ -1044,8 +1044,8 @@ export default function Budgeting() {
                       userSelect: 'none',
                     }}
                     // The label column is the one thing the narrower horizon
-                    // takes width FROM, and a long expense description still
-                    // ends in an ellipsis. The full label is at least
+                    // takes width FROM, and a long label still ends in an
+                    // ellipsis. The full label is at least
                     // readable on hover rather than lost.
                     title={row.label}
                     onClick={() => isCollapsible && toggleCollapse(row.key)}>
@@ -1058,23 +1058,23 @@ export default function Budgeting() {
                           {row.label}
                         </span>
 
-                        {/* ADD A LINE UNDER THIS SUB-CATEGORY.
-                            Only here, and not because it is tidier: an expense
-                            description belongs to a dept. sub-category in the
-                            database — `expense_descriptions.dept_subcategory_id`
-                            — so this is the only node in either branch that can
-                            own a new child. Offering the same `+` on a P&L
-                            sub-category would open a dialog that cannot insert
-                            what it appears to be asking for.
+                        {/* ADD A LINE UNDER THIS CATEGORY.
+                            Only here, and not because it is tidier: a P&L
+                            sub-category belongs to a category in the database
+                            — `pl_subcategories.category_id` — so a category is
+                            the only node in either branch that can own a new
+                            child. The department branch has one level and
+                            nothing below it; sub-sectors and cost descriptions
+                            are no longer budgeted.
 
                             It stops the click: the cell itself folds the row,
                             and a button that folds what it just opened is a
                             button nobody trusts twice. */}
-                        {row.level === 'dept_subcategory' && (
+                        {row.level === 'pl_category' && (
                           <button
                             className="mf-add-under"
                             style={pg.addUnder}
-                            title={`Budžetirajte opis troška pod ${row.label} na koji još ništa nije potrošeno`}
+                            title={`Budžetirajte potkategoriju pod ${row.label} na koju još ništa nije potrošeno`}
                             aria-label={`Dodaj budžetsku stavku pod ${row.label}`}
                             onClick={ev => {
                               ev.stopPropagation()

@@ -77,7 +77,7 @@ const PAD = 24
  *
  * ONE, not two, because `keysToDepth` counts the nodes it OPENS rather than
  * the levels that end up on screen — opening the depth-0 nodes puts two
- * levels there. The third would be `expense_description`.
+ * levels there. The third would be a project branch's sub-category.
  */
 const TWO_LEVELS = 1
 
@@ -173,13 +173,11 @@ export default function ExpenseBranches({
   return (
     <div style={bare ? bareWrap : deck.wrap} ref={ref}>
       <div style={deck.head}>
-        {/* THE BULK OPEN STOPS AT TWO LEVELS. The third is
-            `expense_description` — one row per person on the payroll lines —
-            and on a real October that is hundreds of rows. Opened all at once
-            the canvas grows to several thousand pixels and answers nothing:
-            nobody reads a payroll one name at a time off a tree. A single
-            branch still opens as deep as it goes by clicking it, because that
-            is asked for one branch at a time and deliberately. */}
+        {/* THE BULK OPEN STOPS AT TWO LEVELS. A deeper level can hold
+            hundreds of rows, and opened all at once the canvas grows to
+            several thousand pixels and answers nothing. A single branch still
+            opens as deep as it goes by clicking it, because that is asked for
+            one branch at a time and deliberately. */}
         <div style={deck.tabs}>
           <button style={deck.tab} onClick={() => setOpen(new Set())}>Sklopi sve</button>
           <button style={deck.tab}

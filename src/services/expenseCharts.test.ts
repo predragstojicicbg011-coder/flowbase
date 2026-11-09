@@ -11,7 +11,7 @@ import {
 const e = (o: Partial<PlEntry> & { amount_rsd: number }): PlEntry => ({
   tx_type: 'expense',
   pl_category: 'A', pl_subcategory: 'A1',
-  department: 'D', dept_subcategory: 'D1', expense_description: 'x',
+  department: 'D',
   pl_date: '2026-08-14',
   ...o,
 })

@@ -52,13 +52,15 @@ import { projectLabelById } from '../services/projects'
 // page itself not readable in EUR — both are left null rather than guessed,
 // and the budget then reads in RSD only, which the page says.
 
-/** The five classification columns a ledger row files a change under. */
+/**
+ * The classification columns a ledger row files a change under. The ledger
+ * table still has sub-sector and cost description columns; a new row leaves
+ * them null.
+ */
 export interface BudgetClassification {
   pl_category: string | null
   pl_subcategory: string | null
   department: string | null
-  dept_subcategory: string | null
-  expense_description: string | null
 }
 
 /**
