@@ -214,3 +214,11 @@ describe('a debit note', () => {
     })
   })
 })
+
+describe('saving a classification template from the bill', () => {
+  it('is offered even before any template exists', async () => {
+    render(<InvoiceDialog onClose={() => {}} invoice={draft({ amount: 30000 })} />)
+    next(); next()
+    expect(await screen.findByText('+ Sačuvaj ovu klasifikaciju kao šablon')).toBeInTheDocument()
+  })
+})

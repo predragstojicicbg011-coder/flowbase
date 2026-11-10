@@ -16,11 +16,11 @@ import {
 // 20260922140000 moved them into the database, organisation-wide. This is the
 // tab that reads and writes that table.
 //
-// The classification fields are plain text on purpose. A template names a
-// category rather than pointing at its id — that is how the dialogs apply it,
-// by writing the NAME onto the entry — so validating against the current
-// chart of accounts here would refuse templates that are merely ahead of it.
-// The list shows which of them no longer match anything instead.
+// The classification is picked from the chart of accounts: the category, the
+// sub-categories of that category only, and the sector. A template still
+// stores NAMES (that is how the dialogs apply it), so a template that names
+// something since retired keeps it — shown as „nije u kontnom planu“ — and the
+// list says which templates no longer match anything.
 
 const BLANK: ScriptDraft = {
   name: '', icon: '⚡', pl_category: '', pl_subcategory: '', department: '',
@@ -44,21 +44,26 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
   const [notice, setNotice] = useState('')
   const [search, setSearch] = useState('')
 
-  /** What the chart of accounts currently has, to flag a template that names something retired. */
-  const [knownCategories, setKnownCategories] = useState<Set<string>>(new Set())
-  const [knownDepartments, setKnownDepartments] = useState<Set<string>>(new Set())
+  /** The chart of accounts: what a template is picked from, and what flags a retired name. */
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
+  const [subcategories, setSubcategories] = useState<{ id: string; name: string; category_id: string }[]>([])
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([])
+  const knownCategories = useMemo(() => new Set(categories.map(c => c.name)), [categories])
+  const knownDepartments = useMemo(() => new Set(departments.map(d => d.name)), [departments])
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [{ data, error: err }, { data: cats }, { data: depts }] = await Promise.all([
+    const [{ data, error: err }, { data: cats }, { data: subs }, { data: depts }] = await Promise.all([
       supabase.from('quick_fill_scripts').select('*'),
-      supabase.from('pl_categories').select('name'),
-      supabase.from('departments').select('name'),
+      supabase.from('pl_categories').select('id,name,sort_order').order('sort_order'),
+      supabase.from('pl_subcategories').select('id,name,category_id,sort_order').order('sort_order'),
+      supabase.from('departments').select('id,name,sort_order').order('sort_order'),
     ])
     if (err) setError(`Šabloni nisu mogli da se učitaju: ${err.message}`)
     setScripts(sortScripts(data || []))
-    setKnownCategories(new Set((cats || []).map((c: any) => c.name)))
-    setKnownDepartments(new Set((depts || []).map((d: any) => d.name)))
+    setCategories((cats || []) as any)
+    setSubcategories((subs || []) as any)
+    setDepartments((depts || []) as any)
     setLoading(false)
   }, [])
 
@@ -108,15 +113,31 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
     </div>
   )
 
-  const choice = (label: string, key: keyof ScriptDraft, options: { value: string; label: string }[]) => (
+  const choice = (label: string, key: keyof ScriptDraft, options: { value: string; label: string }[],
+    onPick?: (value: string) => void) => (
     <div style={s.field}>
-      <label style={s.label}>{label}</label>
-      <select style={s.input} value={(draft?.[key] as string) ?? ''}
-        onChange={e => setDraft(d => d ? { ...d, [key]: e.target.value } : d)}>
+      <label style={s.label} htmlFor={`qf-${String(key)}`}>{label}</label>
+      <select id={`qf-${String(key)}`} style={s.input} value={(draft?.[key] as string) ?? ''}
+        onChange={e => onPick ? onPick(e.target.value) : setDraft(d => d ? { ...d, [key]: e.target.value } : d)}>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </div>
   )
+
+  /** The chart's names, with the template's own value kept (and marked) when it left the chart. */
+  const pickList = (names: string[], current: string | undefined) => {
+    const opts = [{ value: '', label: '— prazno —' }, ...names.map(n => ({ value: n, label: n }))]
+    if (current && !names.includes(current)) opts.push({ value: current, label: `${current} (nije u kontnom planu)` })
+    return opts
+  }
+  const categoryOf = (name: string | undefined) => categories.find(c => c.name === name)
+  const subNames = subcategories.filter(sc => sc.category_id === categoryOf(draft?.pl_category)?.id).map(sc => sc.name)
+  // A new category keeps the sub-category only if it is one of its own.
+  const pickCategory = (name: string) => setDraft(d => {
+    if (!d) return d
+    const own = subcategories.filter(sc => sc.category_id === categoryOf(name)?.id).map(sc => sc.name)
+    return { ...d, pl_category: name, pl_subcategory: own.includes(d.pl_subcategory || '') ? d.pl_subcategory : '' }
+  })
 
   return (
     <div style={s.wrap}>
@@ -144,9 +165,9 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
           <div style={s.grid}>
             {field('Naziv', 'name', 'npr. Bankarska provizija — domaća')}
             {field('Ikonica', 'icon', '⚡')}
-            {field('P&L kategorija', 'pl_category')}
-            {field('Potkategorija', 'pl_subcategory')}
-            {field('Sektor', 'department')}
+            {choice('P&L kategorija', 'pl_category', pickList(categories.map(c => c.name), draft.pl_category), pickCategory)}
+            {choice('Potkategorija', 'pl_subcategory', pickList(subNames, draft.pl_subcategory))}
+            {choice('Sektor', 'department', pickList(departments.map(d => d.name), draft.department))}
             {choice('Tip novčanog toka', 'cf_type', CF)}
           </div>
           <div style={s.editorFoot}>

@@ -2190,7 +2190,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                             Uklonite podelu da biste ovo podesili ručno.
                           </div>
                         )}
-                        {quickFillScripts.length > 0 && (
+                        {(
                           <div style={{ marginBottom: '12px', position: 'relative' as const }}>
                             <div style={{ position: 'relative' as const }}>
                               <input
@@ -2199,7 +2199,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                                 onChange={e => setQfSearch(e.target.value)}
                                 onFocus={() => setQfOpen(true)}
                                 onBlur={() => setTimeout(() => setQfOpen(false), 150)}
-                                placeholder="⚡ Brza popuna — kliknite ili pretražite…"
+                                placeholder={quickFillScripts.length > 0 ? '⚡ Brza popuna — kliknite ili pretražite…' : '⚡ Još nema šablona — sačuvajte ovu klasifikaciju kao prvi'}
+                                disabled={quickFillScripts.length === 0}
                               />
                               <span style={{ position: 'absolute' as const, right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '10px', color: DIALOG.accent, pointerEvents: 'none' as const }}>
                                 {qfOpen ? '▲' : '▼'}
