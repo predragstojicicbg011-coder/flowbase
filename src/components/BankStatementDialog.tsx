@@ -15,6 +15,7 @@ import {
 import { softDeleteRow } from '../services/writeOrder'
 import CreditInstallmentSelector from './CreditInstallmentSelector'
 import { DIALOG, chrome } from './dialogTheme'
+import IconPicker from './IconPicker'
 import SearchableSelect from './SearchableSelect'
 import { REVENUE_STREAMS } from '../services/revenueStreams'
 import {
@@ -2691,6 +2692,10 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                         onChange={e => setQfEditing({ ...qfEditing, name: e.target.value })}
                         placeholder="npr. Bankarska provizija — domaća" />
                     </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: DIALOG.dim, marginBottom: '4px', textTransform: 'uppercase' as const }}>Izaberite ikonicu</div>
+                    <IconPicker value={qfEditing.icon || '⚡'} onChange={icon => setQfEditing({ ...qfEditing, icon })} />
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>

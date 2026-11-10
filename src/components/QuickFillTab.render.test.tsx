@@ -69,3 +69,14 @@ describe('a new classification template', () => {
     expect([...cat.options].map(o => o.text)).toContain('Ukinuta (nije u kontnom planu)')
   })
 })
+
+describe('the icon of a template', () => {
+  it('is picked from the set and saved', async () => {
+    await open()
+    fireEvent.change(screen.getByPlaceholderText('npr. Bankarska provizija — domaća'), { target: { value: 'Gorivo za kamione' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ikonica ⛽' }))
+    fireEvent.click(screen.getByText('Sačuvaj'))
+    await waitFor(() => expect(mockState.inserted).toHaveLength(1))
+    expect(mockState.inserted[0]).toMatchObject({ name: 'Gorivo za kamione', icon: '⛽' })
+  })
+})

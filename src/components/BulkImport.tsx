@@ -20,6 +20,7 @@ import { importRowHash } from '../utils/importHash'
 import PartnerDialog from './PartnerDialog'
 import CreditInstallmentSelector from './CreditInstallmentSelector'
 import { DIALOG } from './dialogTheme'
+import IconPicker from './IconPicker'
 import SearchableSelect from './SearchableSelect'
 import { REVENUE_STREAMS } from '../services/revenueStreams'
 import { decodeStatement, hasLostCharacters } from '../services/decodeUpload'
@@ -2781,6 +2782,10 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                       <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Naziv šablona *</div>
                       <input style={s.editInput} value={qfEditing.name} onChange={e => setQfEditing({ ...qfEditing, name: e.target.value })} placeholder="npr. Bankarska provizija — domaća" />
                     </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)', marginBottom: '4px', textTransform: 'uppercase' as const }}>Izaberite ikonicu</div>
+                    <IconPicker value={qfEditing.icon || '⚡'} onChange={icon => setQfEditing({ ...qfEditing, icon })} />
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>

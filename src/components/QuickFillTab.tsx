@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
 import { runWrite } from '../services/writeOrder'
+import IconPicker from './IconPicker'
 import {
   sortScripts, toRow, whyNotSavable,
   type ScriptDraft,
@@ -164,11 +165,14 @@ export default function QuickFillTab({ canEdit }: { canEdit: boolean }) {
           <div style={s.editorTitle}>{draft.id ? 'Izmena šablona' : 'Novi šablon'}</div>
           <div style={s.grid}>
             {field('Naziv', 'name', 'npr. Bankarska provizija — domaća')}
-            {field('Ikonica', 'icon', '⚡')}
             {choice('P&L kategorija', 'pl_category', pickList(categories.map(c => c.name), draft.pl_category), pickCategory)}
             {choice('Potkategorija', 'pl_subcategory', pickList(subNames, draft.pl_subcategory))}
             {choice('Sektor', 'department', pickList(departments.map(d => d.name), draft.department))}
             {choice('Tip novčanog toka', 'cf_type', CF)}
+          </div>
+          <div style={{ ...s.field, marginTop: '10px' }}>
+            <label style={s.label}>Ikonica</label>
+            <IconPicker value={draft.icon || '⚡'} onChange={icon => setDraft(d => d ? { ...d, icon } : d)} />
           </div>
           <div style={s.editorFoot}>
             <span style={s.hint}>
