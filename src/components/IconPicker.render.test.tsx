@@ -1,6 +1,6 @@
 import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
-import IconPicker, { TEMPLATE_ICONS } from './IconPicker'
+import IconPicker, { TEMPLATE_ICONS, iconLabel } from './IconPicker'
 
 // A template's icon is picked from a set, so the list of templates is not a
 // column of identical lightning bolts.
@@ -24,5 +24,23 @@ describe('the icon picker', () => {
   it('keeps an icon a template already has even when it is not in the set', () => {
     render(<IconPicker value="🦄" onChange={() => {}} />)
     expect(screen.getByRole('button', { name: 'Ikonica 🦄' })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('the description of an icon', () => {
+  it('names the chosen icon right under the set, and each icon on hover', () => {
+    render(<IconPicker value="⛽" onChange={() => {}} />)
+    expect(screen.getByText('Izabrano: ⛽ Gorivo')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ikonica 🏦' })).toHaveAttribute('title', 'Banka i provizije')
+  })
+
+  it('every icon in the set has a description of its own', () => {
+    expect(TEMPLATE_ICONS.every(i => !!iconLabel(i))).toBe(true)
+    expect(new Set(TEMPLATE_ICONS.map(iconLabel)).size).toBe(TEMPLATE_ICONS.length)
+  })
+
+  it('an icon from outside the set is shown with no made-up name', () => {
+    render(<IconPicker value="🦄" onChange={() => {}} />)
+    expect(screen.getByText('Izabrano: 🦄')).toBeInTheDocument()
   })
 })
