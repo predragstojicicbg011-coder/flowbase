@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within, act } from '@testing-librar
 import BankStatementDialog from './BankStatementDialog'
 import { DIALOG } from './dialogTheme'
 import { REFUND_TAG, REFUND_LINE_NOTE, REFUND_ONE_TIME_NOTE } from '../services/refund'
+import { REVENUE_STREAMS } from '../services/revenueStreams'
 
 // ── Money that came back, typed into the statement grid ─────────────────────
 //
@@ -156,6 +157,12 @@ const quickFill = async () => {
   fireEvent.focus(screen.getByPlaceholderText('⚡ Brza popuna — kliknite ili pretražite…'))
   fireEvent.mouseDown(await screen.findByText('⚡ Kancelarijski materijal'))
   await screen.findByText(/📤 Trošak · Kancelarija \/ Uprava/)
+}
+
+/** Picks an option from one of the Trosak panel searchable pickers, found by its empty label. */
+const pick = (emptyLabel: string, option: string) => {
+  fireEvent.click(screen.getByRole('combobox', { name: emptyLabel }))
+  fireEvent.click(screen.getByRole('option', { name: option }))
 }
 
 const lineOf = (key: string, amount: number) => ({
@@ -448,6 +455,21 @@ describe('a subtype chosen is kept whichever box the figure goes into', () => {
     expect(tx.tx_subtype).toBe('expense')
     expect(tx.amount).toBe(-300)
     expect(tx.amount_rsd).toBe(-300)
+    expect(tx.amount_eur).toBe(-2.56)
+  })
+
+  it('Prihod clicked on an uplata, the amount moved to Isplata: still revenue', async () => {
+    await openDialog()
+    describeRow()
+    typeUplata('300')
+    toggleRow()
+    subtype('📥 Prihod')
+    typeIsplata('300')
+    expect(screen.queryByText(REFUND_TAG)).toBeNull()
+    await post()
+    const tx = theTransaction()
+    expect(tx.tx_subtype).toBe('revenue')
+    expect([tx.amount, tx.amount_rsd, tx.amount_eur]).toEqual([300, 300, 2.56])
   })
 
   it('a quick fill is a choice of expense: the amount moved to Uplata stays one', async () => {
@@ -467,6 +489,80 @@ describe('a subtype chosen is kept whichever box the figure goes into', () => {
     expect(tx.department).toBe('Uprava')
     // The script said recurring; a refund is one-time all the same.
     expect(tx.cf_type).toBe('one_time')
+  })
+})
+
+// ── Classifying in the Trosak panel is the choice of expense ────────────────
+
+describe('classifying in the Trosak panel is a choice of expense', () => {
+  it('a category picked on an isplata, the amount moved to Uplata: a refund', async () => {
+    await openDialog()
+    describeRow()
+    typeIsplata('1199.22')
+    toggleRow()
+    pick('Izaberite kategoriju…', 'Kancelarija')
+    typeUplata('1199.22')
+
+    expect(screen.getByText(REFUND_TAG)).toBeInTheDocument()
+    expect(screen.getByText(REFUND_LINE_NOTE)).toBeInTheDocument()
+    await post()
+    const tx = theTransaction()
+    expect(tx.tx_subtype).toBe('expense')
+    expect(tx.pl_category).toBe('Kancelarija')
+    expect([tx.amount, tx.amount_rsd, tx.amount_eur]).toEqual([-1199.22, -1199.22, -10.23])
+  })
+
+  it('a sector picked on an isplata, the amount moved to Uplata: a refund', async () => {
+    await openDialog()
+    describeRow()
+    typeIsplata('1199.22')
+    toggleRow()
+    pick('Izaberite sektor…', 'Uprava')
+    typeUplata('1199.22')
+
+    expect(screen.getByText(REFUND_TAG)).toBeInTheDocument()
+    await post()
+    const tx = theTransaction()
+    expect(tx.tx_subtype).toBe('expense')
+    expect(tx.department).toBe('Uprava')
+    expect([tx.amount, tx.amount_rsd, tx.amount_eur]).toEqual([-1199.22, -1199.22, -10.23])
+  })
+
+  it('a revenue stream picked on an uplata is no choice: moved to Isplata it follows to expense', async () => {
+    await openDialog()
+    describeRow()
+    typeUplata('300')
+    toggleRow()
+    const streamSelect = screen.getByDisplayValue('Izaberite vrstu prihoda…')
+    fireEvent.change(streamSelect, { target: { value: REVENUE_STREAMS[0] } })
+    typeIsplata('300')
+
+    expect(screen.queryByText(REFUND_TAG)).toBeNull()
+    await post()
+    const tx = theTransaction()
+    // As before this round: the box decides, the figure stays positive, and
+    // the stream typed while it was revenue is still written with it.
+    expect(tx.tx_subtype).toBe('expense')
+    expect([tx.amount, tx.amount_rsd, tx.amount_eur]).toEqual([300, 300, 2.56])
+    expect(tx.revenue_stream).toBe(REVENUE_STREAMS[0])
+  })
+})
+
+// ── A typed minus ───────────────────────────────────────────────────────────
+
+describe('a typed minus', () => {
+  it('is not a valid row and nothing is written', async () => {
+    await openDialog()
+    describeRow()
+    typeUplata('-300')
+    expect(screen.getByText('ispravnih: 0')).toBeInTheDocument()
+    expect(screen.queryByText(REFUND_TAG)).toBeNull()
+    const button = screen.getByText('Proknjiži (0)')
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    await act(async () => { await Promise.resolve() })
+    expect(wrote('transactions')).toHaveLength(0)
+    expect(mockState.writes).toHaveLength(0)
   })
 })
 
@@ -501,8 +597,8 @@ describe('Review Focus 5 and 3: a statement holding a refund and a storno, reope
     cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: 12500,
   })
 
-  const reopen = async () => {
-    mockState.tables.transactions = [REFUND, STORNO, COST]
+  const reopen = async (transactions: any[] = [REFUND, STORNO, COST]) => {
+    mockState.tables.transactions = transactions
     const log = {
       id: 'log-1', filing_ref: BATCH, company_id: 'co', bank_id: 'b1',
       file_name: 'Izvod #7', import_type: 'manual_statement', note: '', default_currency: 'RSD',
@@ -545,6 +641,40 @@ describe('Review Focus 5 and 3: a statement holding a refund and a storno, reope
     const refund = updateOf('tx-refund')
     expect(refund.tx_subtype).toBe('expense')
     expect([refund.amount, refund.amount_rsd, refund.amount_eur]).toEqual([-1100, -1100, -9.39])
+  })
+
+  it('Review Focus 1 on the edit save: a refund in euros keeps all three figures negative', async () => {
+    const EUR_REFUND = stored({
+      id: 'tx-refund', note: 'Povracaj za reklamaciju', tx_subtype: 'expense', currency: 'EUR',
+      amount: -1199.22, amount_rsd: -140548.58, amount_eur: -1199.22, exchange_rate: EUR_RATE,
+      pl_category: 'Kancelarija', department: 'Uprava', cf_type: 'one_time',
+    })
+    await reopen([EUR_REFUND])
+    expect([cell('Uplata', 0).value, cell('Isplata', 0).value]).toEqual(['1199.22', ''])
+    await save()
+
+    const refund = updateOf('tx-refund')
+    expect(refund.currency).toBe('EUR')
+    expect([refund.amount, refund.amount_rsd, refund.amount_eur]).toEqual([-1199.22, -140548.58, -1199.22])
+    expect([refund.exchange_rate, refund.eur_rate]).toEqual([EUR_RATE, EUR_RATE])
+  })
+
+  it('a stored refund with stored split lines, saved untouched, writes back the same negative amount', async () => {
+    mockState.tables.pl_splits = [
+      { id: 'sp-1', source: 'transaction', source_id: 'tx-refund', amount: -1000 },
+      { id: 'sp-2', source: 'transaction', source_id: 'tx-refund', amount: -199.22 },
+    ]
+    await reopen([REFUND])
+    await save()
+
+    // The stored lines are neither loaded nor rewritten here; they balance
+    // only because the parent goes back exactly as it was.
+    const refund = updateOf('tx-refund')
+    expect(refund.amount).toBe(REFUND.amount)
+    expect(refund.amount_rsd).toBe(REFUND.amount_rsd)
+    expect(refund.amount_eur).toBe(REFUND.amount_eur)
+    expect(refund.project_id).toBeNull()
+    expect(mockState.writes.filter(w => w.table === 'pl_splits')).toHaveLength(0)
   })
 
   it('saved with nothing changed, writes each back as it was stored', async () => {

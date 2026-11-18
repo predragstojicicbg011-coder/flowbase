@@ -105,17 +105,21 @@ interface StatementRow {
   tx_subtype: 'expense' | 'revenue'
   /**
    * Somebody has said what this row is: clicked a Podtip card, typed a split
-   * of expenses, applied a quick fill, or the row came from a stored
-   * transaction. Until then the subtype follows the box the figure is typed
-   * into — Uplata is revenue, Isplata is expense — so an uplata nobody
-   * classified is not booked as a cost. Once chosen, typing never changes it:
-   * an uplata filed as an expense is a refund (services/refund.ts).
+   * of expenses, applied a quick fill, classified it in the Trošak panel
+   * (EXPENSE_CHOSEN), or the row came from a stored transaction. Until then
+   * the subtype follows the box the figure is typed into — Uplata is revenue,
+   * Isplata is expense — so an uplata nobody classified is not booked as a
+   * cost. Once chosen, typing never changes it: an uplata filed as an expense
+   * is a refund (services/refund.ts).
    *
-   * Not limited to direct rows: every type carries a subtype, the statement
-   * import already sets it from the side of the line for every type, and a
-   * reopened statement reads it to put the figure back in the box it was
-   * typed into — so an invoice payment typed into Uplata is stored as revenue,
-   * as the import would store it.
+   * Not limited to direct rows, so the row reads the same whatever its type,
+   * as the statement import sets it. What it changes in the database: a direct
+   * row, and a credit-payment row (a loan instalment typed into Uplata is now
+   * stored `revenue`, as the import writes it; nothing sums that row — its
+   * principal and interest legs are written as expense on their own, and the
+   * row itself carries no P&L). An invoice payment's stored subtype comes from
+   * `paymentSubtypeFor(invoiceType, bankSide)` (receiptShape) and never reads
+   * this one; a pass-through row has no subtype column.
    */
   subtype_chosen: boolean
   pt_direction: 'in' | 'out'
@@ -162,6 +166,15 @@ interface StatementRow {
   is_advance: boolean
 }
 
+/**
+ * Classifying a row in the Trošak panel (a P&L category, a subcategory, a
+ * sector, or one added on the spot) is the choice of expense, as clicking the
+ * Trošak card is. Otherwise a figure moved to Uplata afterwards would flip the
+ * row to revenue, hide the panel, and post a revenue still carrying that
+ * classification with nothing on screen to show it. A revenue stream picked
+ * in the Prihod panel is deliberately not a choice.
+ */
+const EXPENSE_CHOSEN = { tx_subtype: 'expense' as const, subtype_chosen: true }
 
 let rowCounter = 0
 /** Today, in the form every row's date input uses. */
@@ -2477,27 +2490,27 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                     <label style={s.lbl}>P&L kategorija</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                     <SearchableSelect value={row.pl_category_id}
-                                      onChange={v => { const c = plCategories.find(x => x.id === v); updateRow(row.id, { pl_category_id: v, pl_category_name: c?.name || '', pl_subcategory_id: '', pl_subcategory_name: '' }) }}
+                                      onChange={v => { const c = plCategories.find(x => x.id === v); updateRow(row.id, { ...EXPENSE_CHOSEN, pl_category_id: v, pl_category_name: c?.name || '', pl_subcategory_id: '', pl_subcategory_name: '' }) }}
                                       options={plCategories.map(c => ({ value: c.id, label: c.name }))}
                                       allLabel="Izaberite kategoriju…" searchPlaceholder="Pretraga kategorija…"
                                       style={{ ...pickerChrome, flex: 1 }} />
                                     <InlineCategoryAdd table="pl_categories"
                                       currentCount={plCategories.length}
-                                      onAdded={item => { setPlCategories(prev => [...prev, { ...item, type: 'expense', sort_order: prev.length + 1 }]); updateRow(row.id, { pl_category_id: item.id, pl_category_name: item.name, pl_subcategory_id: '', pl_subcategory_name: '' }) }} />
+                                      onAdded={item => { setPlCategories(prev => [...prev, { ...item, type: 'expense', sort_order: prev.length + 1 }]); updateRow(row.id, { ...EXPENSE_CHOSEN, pl_category_id: item.id, pl_category_name: item.name, pl_subcategory_id: '', pl_subcategory_name: '' }) }} />
                                     </div>
                                   </div>
                                   <div style={s.field}>
                                     <label style={s.lbl}>Potkategorija</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                     <SearchableSelect value={row.pl_subcategory_id}
-                                      onChange={v => { const sub = plSubcategories.find(x => x.id === v); updateRow(row.id, { pl_subcategory_id: v, pl_subcategory_name: sub?.name || '' }) }}
+                                      onChange={v => { const sub = plSubcategories.find(x => x.id === v); updateRow(row.id, { ...EXPENSE_CHOSEN, pl_subcategory_id: v, pl_subcategory_name: sub?.name || '' }) }}
                                       options={plSubs.map(sub => ({ value: sub.id, label: sub.name }))}
                                       allLabel="Izaberite potkategoriju…" searchPlaceholder="Pretraga potkategorija…"
                                       disabled={!row.pl_category_id || plSubs.length === 0}
                                       style={{ ...pickerChrome, flex: 1 }} />
                                     <InlineCategoryAdd table="pl_subcategories" parentId={row.pl_category_id} parentField="category_id"
                                       currentCount={plSubs.length} disabled={!row.pl_category_id}
-                                      onAdded={item => { setPlSubcategories(prev => [...prev, { ...item, category_id: row.pl_category_id, sort_order: prev.length + 1 }]); updateRow(row.id, { pl_subcategory_id: item.id, pl_subcategory_name: item.name }) }} />
+                                      onAdded={item => { setPlSubcategories(prev => [...prev, { ...item, category_id: row.pl_category_id, sort_order: prev.length + 1 }]); updateRow(row.id, { ...EXPENSE_CHOSEN, pl_subcategory_id: item.id, pl_subcategory_name: item.name }) }} />
                                     </div>
                                   </div>
                                 </div>
@@ -2508,13 +2521,13 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                     <label style={s.lbl}>Sektor</label>
                                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                     <SearchableSelect value={row.department_id}
-                                      onChange={v => { const d = departments.find(x => x.id === v); updateRow(row.id, { department_id: v, department_name: d?.name || '' }) }}
+                                      onChange={v => { const d = departments.find(x => x.id === v); updateRow(row.id, { ...EXPENSE_CHOSEN, department_id: v, department_name: d?.name || '' }) }}
                                       options={departments.map(d => ({ value: d.id, label: d.name }))}
                                       allLabel="Izaberite sektor…" searchPlaceholder="Pretraga sektora…"
                                       style={{ ...pickerChrome, flex: 1 }} />
                                     <InlineCategoryAdd table="departments"
                                       currentCount={departments.length}
-                                      onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); updateRow(row.id, { department_id: item.id, department_name: item.name }) }} />
+                                      onAdded={item => { setDepartments(prev => [...prev, { ...item, sort_order: prev.length + 1 }]); updateRow(row.id, { ...EXPENSE_CHOSEN, department_id: item.id, department_name: item.name }) }} />
                                     </div>
                                   </div>
                                 </div>
