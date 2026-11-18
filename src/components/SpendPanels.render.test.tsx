@@ -328,6 +328,13 @@ describe('the bridge when the period nets below zero', () => {
     expectSaneGeometry(container)
   })
 
+  it('marks a truncated axis on an anchor that is drawn', () => {
+    const big = (n: number, d: string) => e({ amount_rsd: n, pl_date: d })
+    render(deckFor('pl', [big(101000, '2026-08-10')], [big(100000, '2026-06-10')]))
+    fireEvent.click(screen.getByText('Most'))
+    expect(screen.getByTestId('bridge-break-start')).toBeInTheDocument()
+  })
+
   it('draws the end anchor when the period is above zero', () => {
     render(deckFor('pl', ROWS, PRIOR))
     fireEvent.click(screen.getByText('Most'))
@@ -342,11 +349,13 @@ describe('the folded Ostalo row of the heatmap', () => {
       e({ amount_rsd: 1000 - i, pl_category: 'K', pl_subcategory: `Linija ${i}`, pl_date: '2026-08-02' }))
     many.push(e({ amount_rsd: 20, pl_category: 'K', pl_subcategory: 'Rep plus', pl_date: '2026-08-03' }))
     many.push(e({ amount_rsd: -500, pl_category: 'K', pl_subcategory: 'Rep minus', pl_date: '2026-08-04' }))
-    render(deckFor('pl', many, []))
+    const { container } = render(deckFor('pl', many, []))
     fireEvent.click(screen.getByText('Sve stavke'))
     // The folded cell is the 20 of the positive line, not 20 - 500; it is the
     // only cell of its row that is not empty, so the row carries 20 of the 13.929 drawn.
     expect(screen.getByTestId('heat-share-Ostalo').textContent).toBe('0,1%')
+    // The printed total of the folded row is the signed net: 20 - 500.
+    expect(container.textContent).toContain('-480')
     expect(screen.getByTestId('heat-cell-Ostalo-2026-08')).toBeInTheDocument()
   })
 })

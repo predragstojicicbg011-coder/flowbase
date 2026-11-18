@@ -620,7 +620,8 @@ describe('a figure at or below zero is in the table and not in the picture', () 
     const g = heatGrid(t, ['2026-08'], 1, 1)
     const other = g.rows.find(r => r.label === OTHER)!
     expect(other.values).toEqual([300])
-    expect(other.total).toBe(300)
+    expect(other.total).toBe(100)         // the signed net of the folded lines: 300 - 200
+    expect(other.drawnTotal).toBe(300)    // what the picture shares with
     expect(other.max).toBe(300)
   })
 

@@ -572,8 +572,8 @@ function BridgeChart({ steps, w, h, onTip, onSelect, priorLabel, periodLabel }: 
             {/* A truncated axis makes the two anchors look further apart than
                 they are. The break glyph is the conventional way to say so on
                 the bar itself, not only in a footnote. */}
-            {anchor && scale.zoomed && (
-              <path
+            {anchor && st.end > 0 && scale.zoomed && (
+              <path data-testid={`bridge-break-${st.kind}`}
                 d={`M${cx(i) - barW / 2},${PAD.t + ih - 7} l${barW / 4},-5 l${barW / 4},10 l${barW / 4},-10 l${barW / 4},5`}
                 fill="none" stroke={C.bgDeep} strokeWidth="4.5" strokeLinejoin="round" />
             )}

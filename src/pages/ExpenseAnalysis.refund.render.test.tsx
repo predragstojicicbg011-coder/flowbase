@@ -159,7 +159,8 @@ describe('the tree table with a category at or below zero', () => {
 
   it('counts, beside the concentration, only the lines above zero', async () => {
     await show()
-    // Two lines are above zero (900 and 300) of five leaves in all (the net-zero line is not above zero either).
+    // Two leaves are above zero (900 and 300); the other three (a refund line, a
+    // refund category and a category netting to exactly zero) are not.
     const card = screen.getByText('Koncentracija', { selector: 'div' }).parentElement as HTMLElement
     expect(card).toHaveTextContent('2 od 2')
   })

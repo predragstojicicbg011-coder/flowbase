@@ -405,7 +405,10 @@ export interface HeatRow {
   parent: string[]
   path: string[]
   values: number[]
+  /** The signed net of the line, or of the folded lines: what is printed. */
   total: number
+  /** What the picture sizes and shares with: the figure above zero, else 0. */
+  drawnTotal: number
   /** The row's own biggest month — the denominator of the per-row scale. */
   max: number
   node: TreeNode | null
@@ -492,7 +495,7 @@ export function heatGrid(
     const values = months.map(m => n.monthly[m] || 0)
     return {
       key: n.key, label: n.label, parent: n.path.slice(0, -1), path: n.path,
-      values, total: n.amount, max: Math.max(0, ...values.map(drawn)), node: n,
+      values, total: n.amount, drawnTotal: drawn(n.amount), max: Math.max(0, ...values.map(drawn)), node: n,
     }
   }
 
@@ -500,11 +503,12 @@ export function heatGrid(
 
   if (rest.length > 0) {
     // Folded lines add what they draw: one netting below zero takes nothing off
-    // another, in a cell or in the row's total.
+    // another in a cell. The row's printed total stays the signed net.
     const values = months.map(m => rest.reduce((sum, n) => sum + drawn(n.monthly[m]), 0))
     rows.push({
       key: `__other__`, label: OTHER, parent: [], path: [],
-      values, total: rest.reduce((sum, n) => sum + drawn(n.amount), 0),
+      values, total: rest.reduce((sum, n) => sum + n.amount, 0),
+      drawnTotal: rest.reduce((sum, n) => sum + drawn(n.amount), 0),
       max: Math.max(0, ...values.map(drawn)), node: null,
     })
   }

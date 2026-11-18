@@ -205,7 +205,7 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
 
   // A share is of the figures above zero: a cell or a line at or below zero is
   // in the table and not in the picture, and nothing here is negative or over 100.
-  const grandTotal = grid.rows.reduce((s, r) => s + drawn(r.total), 0)
+  const grandTotal = grid.rows.reduce((s, r) => s + r.drawnTotal, 0)
   const monthTotals = months.map((_, i) => grid.rows.reduce((s, r) => s + drawn(r.values[i]), 0))
   const rowTotals = grid.rows.map(r => r.values.reduce((s, v) => s + drawn(v), 0))
 
@@ -271,7 +271,7 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
             </text>
             <text x={w - 4} y={y + ROW / 2 + 11} textAnchor="end" fontSize="8.5" fill={C.faint}
               data-testid={`heat-share-${r.label}`}>
-              {r.total > 0 && grandTotal > 0 ? `${(r.total / grandTotal * 100).toFixed(1).replace('.', ',')}%` : ''}
+              {r.drawnTotal > 0 && grandTotal > 0 ? `${(r.drawnTotal / grandTotal * 100).toFixed(1).replace('.', ',')}%` : ''}
             </text>
           </g>
         )
