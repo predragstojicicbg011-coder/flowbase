@@ -1,6 +1,6 @@
 import {
   txToSeed, passthroughToSeed, allowedTypes, isRowEditable,
-  statementSpan, statementLabel, invoiceStatus, rowAmount,
+  statementSpan, statementLabel, invoiceStatus, rowAmount, rowLine,
   editedStatementName, editedStatementNote,
 } from './statementEdit'
 
@@ -102,6 +102,46 @@ describe('txToSeed', () => {
 
   it('does not treat a zero amount as absent', () => {
     expect(txToSeed({ ...expenseTx, amount: 0 }).debit).toBe('0')
+  })
+
+  // A refund (money back from a supplier, stored as an expense with a minus)
+  // came IN on the statement, so it goes back into the credit column as the
+  // magnitude a person typed. It stays an expense: a stored refund reopened
+  // must not turn into revenue (Review Focus 5).
+  describe('a stored refund', () => {
+    const refundTx = {
+      ...expenseTx, amount: -1199.22, amount_rsd: -1199.22, amount_eur: -10.23,
+      cf_type: 'one_time', cf_frequency: null, cf_next_month_est: null,
+    }
+
+    it('goes into the credit column as a magnitude and stays an expense', () => {
+      const seed = txToSeed(refundTx)
+      expect(seed.debit).toBe('')
+      expect(seed.credit).toBe('1199.22')
+      expect(seed.tx_subtype).toBe('expense')
+      expect(seed.tx_type).toBe('direct')
+    })
+
+    it('reads a payroll storno as a stored refund like any other', () => {
+      const seed = txToSeed({
+        ...expenseTx, amount: -50, amount_rsd: -50, amount_eur: -0.43,
+        note: 'Storno: izmišljena obustava',
+      })
+      expect([seed.debit, seed.credit, seed.tx_subtype]).toEqual(['', '50', 'expense'])
+      expect(seed.description).toBe('Storno: izmišljena obustava')
+    })
+
+    it('leaves a positive expense and a revenue exactly as they were', () => {
+      const cost = txToSeed({ ...expenseTx, amount_rsd: 12500 })
+      expect([cost.debit, cost.credit, cost.tx_subtype]).toEqual(['12500', '', 'expense'])
+      const income = txToSeed({ ...expenseTx, tx_subtype: 'revenue', amount_rsd: 12500 })
+      expect([income.debit, income.credit, income.tx_subtype]).toEqual(['', '12500', 'revenue'])
+    })
+
+    it('does not read a negative invoice payment as a refund', () => {
+      const seed = txToSeed({ ...expenseTx, type: 'invoice_payment', amount: -300, amount_rsd: -300 })
+      expect([seed.debit, seed.credit]).toEqual(['-300', ''])
+    })
   })
 })
 
@@ -270,6 +310,15 @@ describe('rowAmount', () => {
 
   it('ignores text that is not a number', () => {
     expect(rowAmount({ debit: 'abc', credit: '' })).toEqual({ amount: 0, isExpense: false })
+  })
+})
+
+describe('rowLine', () => {
+  it('reads the two boxes as numbers, an empty box as nothing', () => {
+    expect(rowLine({ debit: '', credit: '1199.22' })).toEqual({ debit: null, credit: 1199.22 })
+    expect(rowLine({ debit: '300', credit: '' })).toEqual({ debit: 300, credit: null })
+    expect(rowLine({})).toEqual({ debit: null, credit: null })
+    expect(rowLine({ debit: 'abc' })).toEqual({ debit: null, credit: null })
   })
 })
 

@@ -42,8 +42,12 @@ import { creditLegBooker, checkCreditCurrency } from '../services/creditPayment'
 import {
   txToSeed, passthroughToSeed, allowedTypes, statementSpan, statementLabel,
   editedStatementName, editedStatementNote,
-  invoiceStatus, rowAmount, type RowSeed, type RowSource,
+  invoiceStatus, rowAmount, rowLine, type RowSeed, type RowSource,
 } from '../services/statementEdit'
+import {
+  isRefundLine, bookedSign, booked, bookedAmounts,
+  REFUND_TAG, REFUND_LINE_NOTE, REFUND_ONE_TIME_NOTE, REFUND_CASH_FLOW,
+} from '../services/refund'
 import { fetchAllPartners } from '../services/allPartners'
 import SplitEditor from './SplitEditor'
 import ProjectSelect from './ProjectSelect'
@@ -99,6 +103,21 @@ interface StatementRow {
   // Classification
   tx_type: 'direct' | 'invoice_payment' | 'passthrough' | 'credit_payment'
   tx_subtype: 'expense' | 'revenue'
+  /**
+   * Somebody has said what this row is: clicked a Podtip card, typed a split
+   * of expenses, applied a quick fill, or the row came from a stored
+   * transaction. Until then the subtype follows the box the figure is typed
+   * into — Uplata is revenue, Isplata is expense — so an uplata nobody
+   * classified is not booked as a cost. Once chosen, typing never changes it:
+   * an uplata filed as an expense is a refund (services/refund.ts).
+   *
+   * Not limited to direct rows: every type carries a subtype, the statement
+   * import already sets it from the side of the line for every type, and a
+   * reopened statement reads it to put the figure back in the box it was
+   * typed into — so an invoice payment typed into Uplata is stored as revenue,
+   * as the import would store it.
+   */
+  subtype_chosen: boolean
   pt_direction: 'in' | 'out'
   pt_period: string
   linked_invoice_id: string
@@ -157,7 +176,7 @@ function makeRow(defaultCurrency = 'RSD', date = ''): StatementRow {
     debit: '', credit: '',
     currency: defaultCurrency,
     reference_number: '', model: '', account_number: '',
-    tx_type: 'direct', tx_subtype: 'expense',
+    tx_type: 'direct', tx_subtype: 'expense', subtype_chosen: false,
     pt_direction: 'out', pt_period: new Date().toISOString().slice(0, 7),
     linked_invoice_id: '', fx_book: false, fx_script_id: '',
     pl_splits: [], stored_split: false, stored_advance: false,
@@ -324,6 +343,11 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       department_id: matchDept?.id || '',
       department_name: matchDept?.name || script.department,
       cf_type: script.cf_type || '',
+      // A quick fill classifies an expense — it is offered only in the Trošak
+      // panel — so applying one is that choice, and moving the figure to
+      // Uplata afterwards does not turn the row into revenue.
+      tx_subtype: 'expense',
+      subtype_chosen: true,
     })
   }
   const [posted, setPosted] = useState(false)
@@ -665,6 +689,9 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
         ...makeRow(seed.currency),
         ...seed,
         ...resolveLookupIds(seed),
+        // What it is was decided when it was posted; typing a new figure
+        // into it must not reclassify it.
+        subtype_chosen: true,
         id: `row_${++rowCounter}`,
       }))
 
@@ -1055,12 +1082,35 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
         const rowProjectId = isDirectWithPL && row.pl_splits.length === 0 && !row.stored_split
           ? projectIdFromInput(row.project_id) : null
 
+        // Advance, P&L, and which way an invoice payment moves cash — one
+        // rule for every dialog (services/advanceReceipt.ts). Pure.
+        const shape = shapeOf(row)
+        // Money that came in, booked as an expense, is a refund: stored with a
+        // minus so it reduces the expense it is filed under
+        // (services/refund.ts). An advance never is one. `amount` and
+        // `rowBook` above stay the line's magnitudes — the rates were asked
+        // with them, and the credit, invoice and currency-difference paths
+        // below read them. Only what this row writes to `transactions` and
+        // `pl_splits` is signed.
+        const sign = shape.is_advance ? 1 : bookedSign(rowLine(row), row.tx_type, row.tx_subtype)
+        const isRefund = sign === -1
+        const bookedAmount = booked(amount, sign) as number
+        const bookedBook = bookedAmounts(rowBook, sign)
+        // The split is the row's own amount in parts, all three figures signed
+        // together (the last line is the remainder, so a parent with one
+        // figure positive would not add up). Lines are typed as magnitudes and
+        // carry the row's sign; a non-refund passes its own lines through.
+        const splitParent = { amount: bookedAmount, currency: cur, ...bookedBook }
+        const splitLines = isRefund
+          ? row.pl_splits.map(l => ({ ...l, amount: booked(l.amount, sign) }))
+          : row.pl_splits
+
         // Refused before the row is written rather than after. A statement
         // posts many rows in a loop, and a split that cannot be stored would
         // otherwise leave this line booked as one expense while every line
         // before it went in correctly — a mess to find and worse to undo.
         const whyThisSplit = isDirectWithPL
-          ? whySplitNotSavable({ amount, currency: cur, ...rowBook }, row.pl_splits)
+          ? whySplitNotSavable(splitParent, splitLines)
           : null
         if (whyThisSplit) {
           throw new Error(`Stavka ${row.date} ${row.description || ''}: ${whyThisSplit}`)
@@ -1070,9 +1120,9 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
           import_hash: importHash, import_batch_id: importBatchId,
           company_id: company, bank_id: bank, partner_id: partnerId,
           transaction_date: row.date, statement_number: statementNumber || null,
-          type: row.tx_type, tx_subtype: shapeOf(row).tx_subtype, is_advance: shapeOf(row).is_advance,
-          currency: cur, amount, ...rowBook,
-          pl_impact: shapeOf(row).pl_impact,
+          type: row.tx_type, tx_subtype: shape.tx_subtype, is_advance: shape.is_advance,
+          currency: cur, amount: bookedAmount, ...bookedBook,
+          pl_impact: shape.pl_impact,
           pl_category: isDirectWithPL ? (row.pl_category_name || null) : null,
           pl_subcategory: isDirectWithPL ? (row.pl_subcategory_name || null) : null,
           department: isDirectWithPL ? (row.department_name || null) : null,
@@ -1082,9 +1132,13 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
           expense_description: null,
           revenue_stream: isDirectWithPL ? (row.revenue_stream || null) : null,
           project_id: rowProjectId,
-          cf_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.cf_type || null) : null,
-          cf_frequency: row.cf_type === 'recurring' ? row.cf_frequency : null,
-          cf_next_month_est: row.cf_type === 'recurring' ? (row.cf_next_month_est ? parseFloat(row.cf_next_month_est) : (parseFloat(row.debit) || null)) : null,
+          // A refund is one-time and is never carried into a future month
+          // (D2). Everything else keeps exactly the fields it had.
+          ...(isRefund ? REFUND_CASH_FLOW : {
+            cf_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.cf_type || null) : null,
+            cf_frequency: row.cf_type === 'recurring' ? row.cf_frequency : null,
+            cf_next_month_est: row.cf_type === 'recurring' ? (row.cf_next_month_est ? parseFloat(row.cf_next_month_est) : (parseFloat(row.debit) || null)) : null,
+          }),
           account_number: row.account_number || null,
           model: row.model || null, reference_number: row.reference_number || null,
           note: row.note || row.description || null, status: 'posted',
@@ -1103,8 +1157,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
         // dozens booked correctly. Stopping names it; carrying on hides it.
         if (isDirectWithPL && row.pl_splits.length > 0 && newTx?.id) {
           const outcome = await saveSplits(
-            supabase, 'transaction', newTx.id,
-            { amount, currency: cur, ...rowBook }, row.pl_splits)
+            supabase, 'transaction', newTx.id, splitParent, splitLines)
           if (!outcome.ok) throw new Error(`Stavka ${row.date}: ${outcome.message}`)
         }
 
@@ -1531,12 +1584,20 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
         const rowProjectId = isDirectWithPL && row.pl_splits.length === 0 && !row.stored_split
           ? projectIdFromInput(row.project_id) : null
 
+        // A refund — a stored one reopened, a payroll storno, or an uplata
+        // filed as an expense here — is written back with its minus, as
+        // posting writes it. `amount` and `rowBook` stay magnitudes: the
+        // invoice link below settles with them.
+        const shape = shapeOf(row)
+        const sign = shape.is_advance ? 1 : bookedSign(rowLine(row), row.tx_type, row.tx_subtype)
+        const isRefund = sign === -1
+
         const payload = {
           company_id: company, bank_id: bank, partner_id: partnerId,
           transaction_date: row.date, statement_number: statementNumber || null,
-          type: row.tx_type, tx_subtype: shapeOf(row).tx_subtype, is_advance: shapeOf(row).is_advance,
-          currency: cur, amount, ...rowBook,
-          pl_impact: shapeOf(row).pl_impact,
+          type: row.tx_type, tx_subtype: shape.tx_subtype, is_advance: shape.is_advance,
+          currency: cur, amount: booked(amount, sign) as number, ...bookedAmounts(rowBook, sign),
+          pl_impact: shape.pl_impact,
           pl_category: isDirectWithPL ? (row.pl_category_name || null) : null,
           pl_subcategory: isDirectWithPL ? (row.pl_subcategory_name || null) : null,
           department: isDirectWithPL ? (row.department_name || null) : null,
@@ -1546,11 +1607,15 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
           expense_description: null,
           revenue_stream: isDirectWithPL ? (row.revenue_stream || null) : null,
           project_id: rowProjectId,
-          cf_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.cf_type || null) : null,
-          cf_frequency: row.cf_type === 'recurring' ? row.cf_frequency : null,
-          cf_next_month_est: row.cf_type === 'recurring'
-            ? (row.cf_next_month_est ? parseFloat(row.cf_next_month_est) : (amount || null))
-            : null,
+          // A refund is one-time and is never carried into a future month
+          // (D2). Everything else keeps exactly the fields it had.
+          ...(isRefund ? REFUND_CASH_FLOW : {
+            cf_type: isDirectWithPL && row.tx_subtype === 'expense' ? (row.cf_type || null) : null,
+            cf_frequency: row.cf_type === 'recurring' ? row.cf_frequency : null,
+            cf_next_month_est: row.cf_type === 'recurring'
+              ? (row.cf_next_month_est ? parseFloat(row.cf_next_month_est) : (amount || null))
+              : null,
+          }),
           account_number: row.account_number || null,
           model: row.model || null, reference_number: row.reference_number || null,
           note: row.note || row.description || null, status: 'posted',
@@ -1881,6 +1946,11 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                 const isExpanded = expandedRow === row.id
                 const hasAmount = parseFloat(row.debit) > 0 || parseFloat(row.credit) > 0
                 const isValid = row.date && hasAmount
+                // Money that came in, filed as an expense: it will be stored
+                // with a minus and reduce that expense. The same inputs as the
+                // `sign` at posting; an advance never is one.
+                const isRefund = isRefundLine(rowLine(row), row.tx_type, row.tx_subtype)
+                  && !effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance)
                 const plSubs = getPlSubs(row.pl_category_id)
                 const linkedInvoice = openInvoices.find(i => i.id === row.linked_invoice_id)
                 const rowPartnerAccounts = getPartnerAccounts(row.partner_id)
@@ -1965,11 +2035,28 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                         onClick={e => e.stopPropagation()} placeholder="Opis" />
                       <input type="number" style={{ ...s.cellInput, color: parseFloat(row.debit) > 0 ? DIALOG.red : DIALOG.text }}
                         value={row.debit} placeholder="Isplata"
-                        onChange={e => { e.stopPropagation(); updateRow(row.id, { debit: e.target.value, credit: e.target.value ? '' : row.credit }) }}
+                        onChange={e => {
+                          e.stopPropagation()
+                          updateRow(row.id, {
+                            debit: e.target.value, credit: e.target.value ? '' : row.credit,
+                            // Money out is an expense, until somebody says what it is.
+                            ...(!row.subtype_chosen && e.target.value ? { tx_subtype: 'expense' as const } : {}),
+                          })
+                        }}
                         onClick={e => e.stopPropagation()} />
+                      {/* A refund is typed here too, as the magnitude that came
+                          in; it keeps the green of money in, and the tag beside
+                          the summary says in words that it reduces an expense. */}
                       <input type="number" style={{ ...s.cellInput, color: parseFloat(row.credit) > 0 ? DIALOG.accent : DIALOG.text }}
                         value={row.credit} placeholder="Uplata"
-                        onChange={e => { e.stopPropagation(); updateRow(row.id, { credit: e.target.value, debit: e.target.value ? '' : row.debit }) }}
+                        onChange={e => {
+                          e.stopPropagation()
+                          updateRow(row.id, {
+                            credit: e.target.value, debit: e.target.value ? '' : row.debit,
+                            // Money in is revenue, until somebody says what it is.
+                            ...(!row.subtype_chosen && e.target.value ? { tx_subtype: 'revenue' as const } : {}),
+                          })
+                        }}
                         onClick={e => e.stopPropagation()} />
                       <select style={s.cellInput} value={row.currency}
                         onChange={e => { e.stopPropagation(); updateRow(row.id, { currency: e.target.value }) }}
@@ -1979,6 +2066,9 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                       <div style={{ fontSize: '10px', color: DIALOG.dim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                         {hasAmount && effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance) && (
                           <span style={{ ...ADVANCE_BADGE_STYLE, marginRight: '4px' }}>{ADVANCE_LABEL}</span>
+                        )}
+                        {isRefund && (
+                          <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: DIALOG.accentFill, color: DIALOG.accent, marginRight: '4px' }}>{REFUND_TAG}</span>
                         )}
                         {hasAmount ? getRowSummary(row) : <span style={{ color: DIALOG.faint }}>kliknite da razvrstate</span>}
                       </div>
@@ -2249,6 +2339,9 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                 classified when it was raised. */}
                             {!effectiveAdvance(row.tx_type, row.tx_subtype, row.is_advance) && <SplitEditor
                               parent={{
+                                // A magnitude, for a refund as well: the lines
+                                // are typed positive and the minus is put on
+                                // them when the row is posted.
                                 amount: parseFloat(row.debit) || parseFloat(row.credit) || 0,
                                 // The book figures are worked out at post
                                 // time from the official rate for the day, so
@@ -2272,6 +2365,12 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                 updateRow(row.id, {
                                   pl_splits: moved.lines,
                                   project_id: projectIdToInput(moved.parentProjectId),
+                                  // A split of expenses IS the choice of
+                                  // Trošak — the Podtip cards are locked while
+                                  // it stands, so it is the only chance to
+                                  // make it. On an uplata, a refund.
+                                  ...(!row.subtype_chosen && lines.length > 0
+                                    ? { tx_subtype: 'expense' as const, subtype_chosen: true } : {}),
                                   ...(from ? {
                                     pl_category_name: from.pl_category,
                                     pl_subcategory_name: from.pl_subcategory,
@@ -2306,13 +2405,18 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                   border: row.tx_subtype === sub.id ? `1.5px solid ${sub.id === 'expense' ? DIALOG.red : DIALOG.accent}` : '0.5px solid ' + DIALOG.border,
                                   background: row.tx_subtype === sub.id ? (sub.id === 'expense' ? DIALOG.redFill : DIALOG.accentFill) : DIALOG.raised,
                                   color: row.tx_subtype === sub.id ? (sub.id === 'expense' ? DIALOG.red : DIALOG.accent) : DIALOG.dim,
-                                }} onClick={() => updateRow(row.id, { tx_subtype: sub.id as any })}>{sub.label}</div>
+                                }} onClick={() => updateRow(row.id, { tx_subtype: sub.id as any, subtype_chosen: true })}>{sub.label}</div>
                               ))}
                             </div>
 
                             {/* Expense classification */}
                             {row.tx_subtype === 'expense' && (
                               <>
+                                {isRefund && (
+                                  <div style={{ fontSize: '11.5px', color: DIALOG.accent, margin: '-6px 0 12px', lineHeight: 1.55 }}>
+                                    {REFUND_LINE_NOTE}
+                                  </div>
+                                )}
                                 <div style={s.classTitle}>P&L klasifikacija</div>
                                 <div style={{ marginBottom: '10px', display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
                                   <div style={{ flex: 1, position: 'relative' as const }}>
@@ -2420,6 +2524,12 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
 
                             {/* Cash Flow Classification */}
                             <div style={s.classTitle}>Klasifikacija novčanog toka</div>
+                            {/* A refund is one-time by rule (D2): nothing to choose. */}
+                            {isRefund ? (
+                              <div style={{ marginBottom: '10px', fontSize: '11.5px', color: DIALOG.dim, lineHeight: 1.55 }}>
+                                {REFUND_ONE_TIME_NOTE}
+                              </div>
+                            ) : (<>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '6px', marginBottom: '10px' }}>
                               {[
                                 { id: 'recurring', label: '🔁 Ponavljajući' },
@@ -2473,6 +2583,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
                                 Jednokratni — neće ući u buduće procene.
                               </div>
                             )}
+                            </>)}
 
                             {/* Revenue */}
                             {row.tx_subtype === 'revenue' && (

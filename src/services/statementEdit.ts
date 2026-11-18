@@ -25,6 +25,7 @@
 
 import { settledStatus } from './settleInvoice'
 import { projectIdToInput } from './projects'
+import { isRefundRow, type BankLine } from './refund'
 
 export type RowSource = 'transactions' | 'passthrough'
 
@@ -72,14 +73,26 @@ const str = (v: unknown): string => (v === null || v === undefined ? '' : String
 
 const money = (v: unknown): string => (v === null || v === undefined || v === '' ? '' : String(v))
 
+const numberOrNull = (v: unknown): number | null =>
+  (v === null || v === undefined || v === '' ? null : Number(v))
+
 /**
  * A row from `transactions`, as the entry grid would have held it.
  *
  * Revenue was typed into the credit column and expense into the debit column,
- * so `tx_subtype` is what decides which one it goes back into.
+ * so `tx_subtype` is what decides which one it goes back into — except for a
+ * refund: an expense stored with a minus (services/refund.ts), money that came
+ * IN. It goes back into the credit column as the magnitude a person types, and
+ * stays an expense; the grid puts the minus back when it is saved. A payroll
+ * storno is one of these.
  */
 export function txToSeed(tx: any, partnerName = ''): RowSeed {
   const isRevenue = tx.tx_subtype === 'revenue'
+  const isRefund = isRefundRow({
+    type: tx.type, tx_subtype: tx.tx_subtype,
+    amount: numberOrNull(tx.amount), amount_rsd: numberOrNull(tx.amount_rsd),
+  })
+  const typed = numberOrNull(tx.amount)
   return {
     tx_id: tx.id,
     source: 'transactions',
@@ -88,8 +101,10 @@ export function txToSeed(tx: any, partnerName = ''): RowSeed {
     partner_name: partnerName,
     partner_id: tx.partner_id ?? null,
     description: str(tx.note),
-    debit: isRevenue ? '' : money(tx.amount),
-    credit: isRevenue ? money(tx.amount) : '',
+    debit: isRevenue || isRefund ? '' : money(tx.amount),
+    credit: isRevenue
+      ? money(tx.amount)
+      : isRefund ? (typed === null ? '' : money(Math.abs(typed))) : '',
     currency: str(tx.currency) || 'RSD',
     reference_number: str(tx.reference_number),
     model: str(tx.model),
@@ -238,4 +253,13 @@ export function rowAmount(row: { debit?: string; credit?: string }): { amount: n
   const debit = parseFloat(row.debit || '') || 0
   const credit = parseFloat(row.credit || '') || 0
   return debit > 0 ? { amount: debit, isExpense: true } : { amount: credit, isExpense: false }
+}
+
+/** A grid row's two boxes as the refund rule reads them (services/refund.ts). */
+export function rowLine(row: { debit?: string; credit?: string }): BankLine {
+  const figure = (s?: string): number | null => {
+    const n = parseFloat(s || '')
+    return isNaN(n) ? null : n
+  }
+  return { debit: figure(row.debit), credit: figure(row.credit) }
 }
