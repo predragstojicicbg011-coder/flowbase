@@ -189,7 +189,7 @@ export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPick
                   <>
                     <div style={st.tipHead}>{monthTick(r.month)} · {BASIS_WORD[r.basis]}</div>
                     <div style={st.tipRow}><span>Priliv</span><b style={{ color: IN }}>+{money2(r.inflow)}</b></div>
-                    <div style={st.tipRow}><span>Odliv</span><b style={{ color: OUT }}>{r.outflow < 0 ? '+' : r.outflow > 0 ? '−' : ''}{money2(Math.abs(r.outflow))}</b></div>
+                    <div style={st.tipRow}><span>Odliv</span><b style={{ color: r.outflow < 0 ? IN : OUT }}>{r.outflow < 0 ? '+' : r.outflow > 0 ? '−' : ''}{money2(Math.abs(r.outflow))}</b></div>
                     <div style={st.tipRow}>
                       <span>{r.net >= 0 ? 'Višak' : 'Manjak'}</span>
                       <b>{money2(Math.abs(r.net))}</b>

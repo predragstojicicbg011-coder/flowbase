@@ -1405,3 +1405,60 @@ describe('the warning about figures that still move with the benchmark', () => {
     expect(warning()).not.toBeInTheDocument()
   })
 })
+
+describe('a budget cell that nets below zero', () => {
+  // A refund booked in a later month than its charge leaves a category with a
+  // minus in that month. It is a figure, not an empty cell: it prints its
+  // minus, opens the drill like any other cell and counts in the totals row.
+  // Exactly zero is still the dash.
+  const refundTx = {
+    id: 'tx-refund', type: 'direct', tx_subtype: 'expense', transaction_date: `${horizonMonth(0)}-10`,
+    amount: -200, amount_rsd: -200, amount_eur: null, currency: 'RSD',
+    pl_category: 'Operating Expenses', department: 'Administration', cf_type: 'one_time', note: null,
+    partners: { name: 'Hosting Primer doo' },
+  }
+
+  const refundRow = (over: Record<string, any> = {}) => expenseRow({
+    id: 'tx-refund', amount_rsd: -200, pl_date: `${horizonMonth(0)}-10`, cf_type: 'one_time', cf_frequency: null,
+    ...over,
+  })
+
+  it('shows the signed figure, opens the drill and the totals row counts it', async () => {
+    seedDb({ v_pl_entries: [expenseRow(), refundRow()], transactions: [refundTx] })
+    await renderConsolidated()
+
+    const row = screen.getByText('Administration').closest('tr') as HTMLElement
+    const cell = within(row).getByTitle('Kliknite da vidite transakcije')
+    expect(cell).toHaveTextContent('-200 RSD')
+
+    const totals = screen.getByText(/Ukupni troškovi/i).closest('tr') as HTMLElement
+    expect(within(totals).getAllByText('-200 RSD').length).toBeGreaterThan(0)
+
+    fireEvent.click(cell)
+    expect(await screen.findByText('Povraćaj')).toBeInTheDocument()
+    expect(screen.getAllByText('-200,00 RSD').length).toBeGreaterThan(0)
+  })
+
+  it('still shows the dash for a month that nets to exactly zero', async () => {
+    seedDb({
+      v_pl_entries: [
+        expenseRow(),
+        refundRow({ id: 'tx-a', amount_rsd: 500 }),
+        refundRow({ id: 'tx-b', amount_rsd: -500 }),
+      ],
+    })
+    await renderConsolidated()
+
+    const row = screen.getByText('Administration').closest('tr') as HTMLElement
+    expect(within(row).queryByTitle('Kliknite da vidite transakcije')).toBeNull()
+  })
+
+  it('shows the signed benchmark figure of a category that nets below zero last month', async () => {
+    seedDb({ v_pl_entries: [refundRow({ pl_date: `${benchmarkMonth()}-10` })] })
+    await renderConsolidated()
+
+    const row = screen.getByText('Administration').closest('tr') as HTMLElement
+    const bench = within(row).getByTitle('Kliknite da vidite transakcije referentnog meseca')
+    expect(bench).toHaveTextContent('-200 RSD')
+  })
+})

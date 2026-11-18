@@ -21,6 +21,7 @@ import AutoMatchPanel from '../components/AutoMatchPanel'
 import PayrollImportDialog from '../components/PayrollImportDialog'
 import SearchableSelect, { type SelectOption } from '../components/SearchableSelect'
 import { fmtMoney } from '../utils/formatters'
+import { isRefundRow, REFUND_TAG } from '../services/refund'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { useProjects } from '../contexts/ProjectsContext'
 import { OVERHEAD_LABEL, projectLabel, projectLabelById } from '../services/projects'
@@ -871,7 +872,7 @@ export default function Transactions() {
                     <tr key={t.id} style={{ ...s.tr, background: i % 2 === 0 ? '#0D1B2C' : '#111F30' }}>
                       <td style={s.td}><span style={s.dateCell}>{t.transaction_date}</span></td>
                       <td style={s.td}><span style={s.partnerCell}>{t.partners?.name || '—'}</span></td>
-                      <td style={s.td}><span style={{ ...s.badge, background: txTypeColors[t.type]?.bg, color: txTypeColors[t.type]?.color }}>{valueLabel(t.type)}</span></td>
+                      <td style={s.td}><span style={{ ...s.badge, background: txTypeColors[t.type]?.bg, color: txTypeColors[t.type]?.color }}>{valueLabel(t.type)}</span>{isRefundRow(t) && <span style={{ ...s.badge, marginLeft: '6px', background: 'rgba(0,212,126,0.12)', color: '#00D47E' }}>{REFUND_TAG}</span>}</td>
                       <td style={s.td}><span style={s.catCell}>{t.pl_impact ? (t.pl_category || t.revenue_stream || '—') : <span style={{ color: 'rgba(255,255,255,0.30)', fontSize: '11px' }}>preko fakture</span>}</span></td>
                       <td style={s.td}><span style={s.compCell}>{projectLabelById(projects, t.project_id)}</span></td>
                       <td style={s.td}><span style={s.descCell}>{t.note || '—'}</span></td>

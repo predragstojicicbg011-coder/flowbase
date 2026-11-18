@@ -9,6 +9,7 @@ import CashFlowTimeline from '../components/CashFlowTimeline'
 import CashPositionDialog from '../components/CashPositionDialog'
 import { loadCashTimeline, type LoadedCashTimeline } from '../services/loadCashTimeline'
 import { cashDirection, cashRowIsIn, previousMonth } from '../services/cashTimeline'
+import { isRefundRow, REFUND_TAG } from '../services/refund'
 import { monthLongLabel, capitalize } from '../utils/months'
 import { countOf } from '../utils/plural'
 import { useSystemCategories } from '../contexts/SystemCategoriesContext'
@@ -387,14 +388,18 @@ export default function CashFlow() {
                           // A refund (a direct expense booked with a minus) is
                           // money that came back: it reads as money in.
                           const isIn = cashRowIsIn(tx)
+                          // The refund reads as money in, so its badge says so in the
+                          // in colour; an advance is never a refund.
+                          const isRefund = isIn && !tx.is_advance && isRefundRow(tx)
+                          const inBadge = isRefund || (tx.type === 'direct' && tx.tx_subtype === 'revenue')
                           return (
                             <tr key={tx.id} style={s.dataRow}>
                               <td style={s.td}>{tx.transaction_date}</td>
                               <td style={s.td}>{tx.partners?.name || '—'}</td>
                               <td style={s.td}>{tx.banks?.name || '—'}</td>
                               <td style={s.td}>
-                                <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '20px', background: tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? 'rgba(0,212,126,0.12)' : 'rgba(255,91,90,0.13)') : 'rgba(78,168,255,0.13)', color: tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? '#085041' : '#A32D2D') : '#0C447C' }}>
-                                  {tx.is_advance ? 'Avans' : tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? '📥 Direktna uplata' : '📤 Direktna isplata') : (isIn ? '💳 Naplata fakture' : '💳 Plaćanje fakture')}
+                                <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '20px', background: tx.type === 'direct' ? (inBadge ? 'rgba(0,212,126,0.12)' : 'rgba(255,91,90,0.13)') : 'rgba(78,168,255,0.13)', color: tx.type === 'direct' ? (inBadge ? '#085041' : '#A32D2D') : '#0C447C' }}>
+                                  {tx.is_advance ? 'Avans' : isRefund ? `📥 ${REFUND_TAG}` : tx.type === 'direct' ? (tx.tx_subtype === 'revenue' ? '📥 Direktna uplata' : '📤 Direktna isplata') : (isIn ? '💳 Naplata fakture' : '💳 Plaćanje fakture')}
                                 </span>
                               </td>
                               <td style={{ ...s.td, textAlign: 'right' as const, color: isIn ? '#0F6E56' : '#A32D2D', fontWeight: '500' }}>

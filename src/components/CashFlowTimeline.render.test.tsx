@@ -186,6 +186,16 @@ describe('a month whose refunds exceed its spending', () => {
     expect(document.body.textContent).not.toMatch(/−\+|\+−|−−|−-/)
   })
 
+  it('prints a negative outflow in the in colour and a plain outflow in the out colour', () => {
+    const first = render(<CashFlowTimeline timeline={refundMonths()} dated={{}} />)
+    hover(first.container, 1)
+    expect((screen.getByText('Odliv').nextElementSibling as HTMLElement).style.color).toBe('rgb(0, 212, 126)')
+    first.unmount()
+    const second = render(<CashFlowTimeline timeline={refundMonths()} dated={{}} />)
+    hover(second.container, 0)
+    expect((screen.getByText('Odliv').nextElementSibling as HTMLElement).style.color).toBe('rgb(255, 91, 90)')
+  })
+
   it('prints an outflow of exactly zero with no sign, and a plain outflow with a minus', () => {
     const zero = cashTimeline({
       months: ['2026-09'], currentMonth: '2026-10',

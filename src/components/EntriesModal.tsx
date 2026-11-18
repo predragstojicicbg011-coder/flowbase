@@ -5,6 +5,7 @@ import InvoiceDialog from './InvoiceDialog'
 import { byDateDesc } from '../services/expenseTree'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
+import { isRefundRow, REFUND_TAG } from '../services/refund'
 
 // ── Entries modal ───────────────────────────────────────────────────────────
 //
@@ -52,6 +53,9 @@ export interface EntryItem {
   /** The book figures. The row prints the one for the display currency. */
   amount_rsd?: number | null
   amount_eur?: number | null
+  /** `type` and `tx_subtype` of a transaction row, passed through as read, so a refund can be told from a credit note. */
+  txType?: string | null
+  txSubtype?: string | null
   badges?: EntryBadge[]
   edit: EditTarget
 }
@@ -111,7 +115,7 @@ export async function buildEntryItems(
   const [tx, inv] = await Promise.all([
     txIds.length === 0 ? Promise.resolve({ data: [], error: null }) : supabase
       .from('transactions')
-      .select('id, transaction_date, amount, amount_rsd, amount_eur, currency, pl_category, department, cf_type, note, partners(name)')
+      .select('id, type, tx_subtype, transaction_date, amount, amount_rsd, amount_eur, currency, pl_category, department, cf_type, note, partners(name)')
       .in('id', txIds),
     invIds.length === 0 ? Promise.resolve({ data: [], error: null }) : supabase
       .from('invoices')
@@ -135,6 +139,8 @@ export async function buildEntryItems(
       currency: r.currency,
       amount_rsd: r.amount_rsd,
       amount_eur: r.amount_eur,
+      txType: r.type,
+      txSubtype: r.tx_subtype,
       badges: r.cf_type && CF_BADGES[r.cf_type] ? [CF_BADGES[r.cf_type]] : [],
       edit: { table: 'transactions' as const, id: r.id },
     })),
@@ -246,6 +252,12 @@ export function EntryRow({ item, onEdit, busy }: {
 }) {
   const { currency, pick, format } = useDisplayCurrency()
   const book = pick(item)
+  // A refund is a transaction with a minus. An invoice with a minus is a credit
+  // note: it keeps its minus and is not tagged. The kind is read only by
+  // `isRefundRow`, from what the row says: a missing subtype is not an expense.
+  const refund = item.edit.table === 'transactions' && isRefundRow({
+    type: item.txType, tx_subtype: item.txSubtype, amount: item.amount, amount_rsd: item.amount_rsd,
+  })
   return (
     <div style={em.txRow}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -257,6 +269,12 @@ export function EntryRow({ item, onEdit, busy }: {
               background: b.bg, color: b.color, fontWeight: '500', letterSpacing: '0.02em',
             }}>{b.label}</span>
           ))}
+          {refund && (
+            <span style={{
+              fontSize: '10px', padding: '2px 8px', borderRadius: '20px',
+              background: 'rgba(0,212,126,0.12)', color: '#00D47E', fontWeight: '500', letterSpacing: '0.02em',
+            }}>{REFUND_TAG}</span>
+          )}
         </div>
         <div style={{ fontSize: '11px', color: '#7A9BB8' }}>
           {item.date}{item.path && <span> · {item.path}</span>}
@@ -273,7 +291,7 @@ export function EntryRow({ item, onEdit, busy }: {
           12.436 RSD and reads the header as wrong. The original amount stays,
           one line down, when it is in another currency. */}
       <div style={{ textAlign: 'right', flexShrink: 0, marginRight: '12px' }}>
-        <div style={{ fontSize: '13px', fontWeight: '600', color: '#FF5B5A', fontFamily: "'DM Mono', monospace" }}>
+        <div style={{ fontSize: '13px', fontWeight: '600', color: refund ? '#00D47E' : '#FF5B5A', fontFamily: "'DM Mono', monospace" }}>
           {book != null ? format(book) : fmtMoney(item.amount, item.currency)}
         </div>
         {item.currency !== currency && book != null && (

@@ -120,6 +120,7 @@ fajl.
 | Accrual | Razgraničenje |
 | CapEx | Kapitalni izdatak (kratko: Kap. izdatak) |
 | Reimbursable | Refundacija |
+| Refund (money back from a supplier) | Povraćaj |
 | Seasonal | Sezonski |
 | Subtype (expense / revenue) | Podtip (trošak / prihod) |
 | Expense category | Kategorija troška |

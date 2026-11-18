@@ -1096,7 +1096,7 @@ export default function Budgeting() {
                       borderRight: '0.5px solid rgba(255,255,255,0.10)',
                       fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', 'Fira Mono', monospace",
                     }}>
-                      {benchActual > 0 ? (
+                      {benchActual !== 0 ? (
                         <span
                           style={{ color: '#4EA8FF', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'rgba(78,168,255,0.4)', textUnderlineOffset: '3px' }}
                           title="Kliknite da vidite transakcije referentnog meseca"
@@ -1118,9 +1118,9 @@ export default function Budgeting() {
                         <React.Fragment key={m.key}>
                           {/* ACTUAL */}
                           <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: consolidated ? '8px' : '12px', borderLeft: '1px solid rgba(255,255,255,0.04)', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', 'Fira Mono', monospace" }}>
-                            {actual > 0 ? (
+                            {actual !== 0 ? (
                               <span
-                                style={{ color: '#FF8080', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'rgba(255,128,128,0.4)', textUnderlineOffset: '3px' }}
+                                style={{ color: actual < 0 ? '#00D47E' : '#FF8080', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'rgba(255,128,128,0.4)', textUnderlineOffset: '3px' }}
                                 title="Kliknite da vidite transakcije"
                                 onClick={() => openDrill(row, m, 'actual')}
                               >
@@ -1160,7 +1160,7 @@ export default function Budgeting() {
                           {/* VARIANCE */}
                           {consolidated && (
                             <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: '12px', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', 'Fira Mono', monospace" }}>
-                              {(actual > 0 || budget !== 0)
+                              {(actual !== 0 || budget !== 0)
                                 ? <span style={{ color: varianceColor(varAmt), fontSize: '11px', fontWeight: '500' }}>{varAmt === 0 ? '—' : fmtFigure(varAmt, true)}</span>
                                 : <span style={{ color: 'rgba(255,255,255,0.15)' }}>—</span>}
                             </td>
@@ -1218,8 +1218,8 @@ export default function Budgeting() {
                 <td style={{ ...pg.td, paddingLeft: '16px', fontWeight: '700', fontSize: '11px', color: '#DCE9F6', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
                   Ukupni troškovi
                 </td>
-                <td style={{ ...pg.td, textAlign: 'right', paddingRight: '8px', background: 'rgba(0,0,0,0.18)', borderRight: '0.5px solid rgba(255,255,255,0.10)', color: (totals[benchmark]?.actual || 0) > 0 ? '#4EA8FF' : 'rgba(255,255,255,0.20)', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace" }}>
-                  {(totals[benchmark]?.actual || 0) > 0 ? fmtFigure(totals[benchmark].actual) : '—'}
+                <td style={{ ...pg.td, textAlign: 'right', paddingRight: '8px', background: 'rgba(0,0,0,0.18)', borderRight: '0.5px solid rgba(255,255,255,0.10)', color: (totals[benchmark]?.actual || 0) !== 0 ? '#4EA8FF' : 'rgba(255,255,255,0.20)', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace" }}>
+                  {(totals[benchmark]?.actual || 0) !== 0 ? fmtFigure(totals[benchmark].actual) : '—'}
                 </td>
                 {visibleMonths.map(m => {
                   const cell = totals[m.key] || { actual: 0, budget: 0, committed: 0 }
@@ -1229,8 +1229,8 @@ export default function Budgeting() {
                   const varAmt = variance(forecast, cell.actual)
                   return (
                     <React.Fragment key={m.key}>
-                      <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: consolidated ? '8px' : '12px', color: cell.actual > 0 ? '#FF8080' : 'rgba(255,255,255,0.20)', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace", borderLeft: '1px solid rgba(255,255,255,0.06)' }}>
-                        {cell.actual > 0 ? fmtFigure(cell.actual) : '—'}
+                      <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: consolidated ? '8px' : '12px', color: cell.actual < 0 ? '#00D47E' : cell.actual > 0 ? '#FF8080' : 'rgba(255,255,255,0.20)', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace", borderLeft: '1px solid rgba(255,255,255,0.06)' }}>
+                        {cell.actual !== 0 ? fmtFigure(cell.actual) : '—'}
                       </td>
                       {consolidated && (
                         <>
@@ -1239,7 +1239,7 @@ export default function Budgeting() {
                           </td>
                           <td style={{ ...pg.td, ...nowCell(m.key), textAlign: 'right', paddingRight: '12px', fontWeight: '600', fontVariantNumeric: 'tabular-nums', fontFamily: "'DM Mono', monospace" }}>
                             <span style={{ color: varianceColor(varAmt) }}>
-                              {(cell.actual > 0 || forecast !== 0) ? fmtFigure(varAmt, true) : '—'}
+                              {(cell.actual !== 0 || forecast !== 0) ? fmtFigure(varAmt, true) : '—'}
                             </span>
                           </td>
                         </>

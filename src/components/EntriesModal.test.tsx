@@ -1,6 +1,6 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
-import { buildEntryItems, DRILL_CAP, EntryRow, type EntryItem } from './EntriesModal'
+import { buildEntryItems, CF_BADGES, DRILL_CAP, EntryRow, type EntryItem } from './EntriesModal'
 import { DisplayCurrencyProvider } from '../contexts/DisplayCurrencyContext'
 
 // The module imports the real Supabase client for `useEntryEditor`, and the
@@ -140,5 +140,82 @@ describe('an entry row', () => {
       <EntryRow item={{ ...item, currency: 'RSD', amount: 5000, amount_rsd: 5000, amount_eur: null }} onEdit={() => {}} />
     </DisplayCurrencyProvider>)
     expect(screen.getByText('5.000,00 RSD')).toBeInTheDocument()
+  })
+})
+
+describe('a refund row in the drill-down', () => {
+  const base: EntryItem = {
+    id: 'r1', title: 'Hosting Primer doo', date: '2026-03-04', path: 'Operating Expenses / Administration', note: null,
+    amount: -1199.22, currency: 'RSD', amount_rsd: -1199.22, amount_eur: -10.23,
+    txType: 'direct', txSubtype: 'expense',
+    edit: { table: 'transactions', id: 'r1' },
+  }
+  const show = (item: EntryItem) => render(<EntryRow item={item} onEdit={() => {}} />)
+
+  it('prints its minus in the in colour and carries the Povraćaj tag', () => {
+    show(base)
+    const figure = screen.getByText('-1.199,22 RSD')
+    expect(figure.style.color).toBe('rgb(0, 212, 126)')
+    expect(screen.getByText('Povraćaj')).toBeInTheDocument()
+  })
+
+  it('leaves a positive transaction in the cost red with no tag', () => {
+    show({ ...base, amount: 80, amount_rsd: 80, amount_eur: 0.68 })
+    expect(screen.getByText('80,00 RSD').style.color).toBe('rgb(255, 91, 90)')
+    expect(screen.queryByText('Povraćaj')).not.toBeInTheDocument()
+  })
+
+  it('prints the minus of a credit note and gives it no tag', () => {
+    show({ ...base, txType: undefined, txSubtype: undefined, edit: { table: 'invoices', id: 'r1' } })
+    const figure = screen.getByText('-1.199,22 RSD')
+    expect(figure.style.color).toBe('rgb(255, 91, 90)')
+    expect(screen.queryByText('Povraćaj')).not.toBeInTheDocument()
+  })
+
+  it('does not tag a negative row whose subtype is missing', () => {
+    show({ ...base, txSubtype: null })
+    expect(screen.queryByText('Povraćaj')).not.toBeInTheDocument()
+  })
+
+  it('does not tag a negative revenue or a negative invoice payment', () => {
+    const { unmount } = show({ ...base, txSubtype: 'revenue' })
+    expect(screen.queryByText('Povraćaj')).not.toBeInTheDocument()
+    unmount()
+    show({ ...base, txType: 'invoice_payment' })
+    expect(screen.queryByText('Povraćaj')).not.toBeInTheDocument()
+  })
+
+  it('keeps the Refund. badge of a reimbursable row next to the new tag', () => {
+    show({ ...base, badges: [CF_BADGES.reimbursable] })
+    expect(screen.getByText('Refund.')).toBeInTheDocument()
+    expect(screen.getByText('Povraćaj')).toBeInTheDocument()
+  })
+
+  it('keeps the Refund. badge of a positive reimbursable row without the tag', () => {
+    show({ ...base, amount: 80, amount_rsd: 80, badges: [CF_BADGES.reimbursable] })
+    expect(screen.getByText('Refund.')).toBeInTheDocument()
+    expect(screen.queryByText('Povraćaj')).not.toBeInTheDocument()
+  })
+
+  it('reads the kind of a transaction from the select and carries it on the item', async () => {
+    const seen: string[] = []
+    const row = {
+      id: 'a', type: 'direct', tx_subtype: null, transaction_date: day(1), amount: -5, amount_rsd: -5,
+      currency: 'RSD', partners: null,
+    }
+    const client = {
+      from: () => ({
+        select: (cols: string) => {
+          seen.push(cols)
+          return { in: () => Promise.resolve({ data: [row], error: null }) }
+        },
+      }),
+    }
+    const { items } = await buildEntryItems([{ id: 'a', source: 'transaction', pl_date: day(1) }], client)
+    expect(seen[0]).toMatch(/\btype\b/)
+    expect(seen[0]).toMatch(/tx_subtype/)
+    // Passed straight through: a missing subtype is not turned into an expense.
+    expect(items[0].txType).toBe('direct')
+    expect(items[0].txSubtype).toBeNull()
   })
 })
