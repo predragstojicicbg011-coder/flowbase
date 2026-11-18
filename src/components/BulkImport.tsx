@@ -42,6 +42,10 @@ import {
   whySplitNotSavable, classificationFromSplit, splitProjectChange, type SplitLine,
 } from '../services/expenseSplit'
 import { saveSplits } from '../services/saveSplits'
+import {
+  isRefundLine, bookedSign, booked, bookedAmounts,
+  REFUND_TAG, REFUND_LINE_NOTE, REFUND_ONE_TIME_NOTE, REFUND_CASH_FLOW,
+} from '../services/refund'
 import { linkAmountsFromOwn } from '../services/invoiceLinks'
 import { outstandingOwn, settledStatus, settlementFor, owedAmount } from '../services/settleInvoice'
 import {
@@ -1223,20 +1227,10 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
       // split row's projects are on its lines.
       const rowProjectId = isDirectWithPL && row.override_pl_splits.length === 0
         ? projectIdFromInput(row.override_project_id) : null
-      // Refused before the row is written rather than after. An import posts
-      // seventy rows in a loop, and a split that cannot be stored would leave
-      // one line booked as a single expense among sixty-nine booked right —
-      // which nobody finds, because every other line is correct.
-      if (isDirectWithPL) {
-        const whyThisSplit = whySplitNotSavable(
-          { amount, currency: p.currency, ...rowBook }, row.override_pl_splits)
-        if (whyThisSplit) {
-          throw new Error(`${formatDate(p.date)} ${p.description || ''}: ${whyThisSplit}`)
-        }
-      }
 
       // Advance, P&L, and which way an invoice payment moves cash — one rule
-      // for every dialog (services/advanceReceipt.ts).
+      // for every dialog (services/advanceReceipt.ts). Pure; worked out
+      // before the split check because the refund below depends on it.
       const firstInvoiceId = row.override_linked_invoice_ids?.[0] || row.override_linked_invoice_id
       const shape = receiptShape({
         type: row.override_tx_type,
@@ -1246,12 +1240,49 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
         invoiceType: openInvoices.find(i => i.id === firstInvoiceId)?.type ?? null,
       })
 
+      // Money that came back, booked as an expense, is a refund: stored with a
+      // minus so it reduces the expense it is filed under (services/refund.ts).
+      // An advance never is one. `amount` and `rowBook` above stay the line's
+      // magnitudes — the rates are asked with them, and the credit and
+      // invoice paths below read them. Only what this row writes to
+      // `transactions` and `pl_splits` is signed.
+      const sign = shape.is_advance
+        ? 1
+        : bookedSign({ debit: p.debit, credit: p.credit }, row.override_tx_type, row.override_tx_subtype)
+      const isRefund = sign === -1
+      const bookedAmount = booked(amount, sign) as number
+      const bookedBook = bookedAmounts(rowBook, sign)
+      // The split is the row's own amount in parts, all three figures signed
+      // together (the last line is the remainder, so a parent with one figure
+      // positive would not add up). Lines are typed as magnitudes and carry
+      // the row's sign; a non-refund passes its own lines through untouched.
+      const splitParent = { amount: bookedAmount, currency: p.currency, ...bookedBook }
+      const splitLines = isRefund
+        ? row.override_pl_splits.map(l => ({ ...l, amount: booked(l.amount, sign) }))
+        : row.override_pl_splits
+
+      // Refused before the row is written rather than after. An import posts
+      // seventy rows in a loop, and a split that cannot be stored would leave
+      // one line booked as a single expense among sixty-nine booked right —
+      // which nobody finds, because every other line is correct.
+      if (isDirectWithPL) {
+        const whyThisSplit = whySplitNotSavable(splitParent, splitLines)
+        if (whyThisSplit) {
+          throw new Error(`${formatDate(p.date)} ${p.description || ''}: ${whyThisSplit}`)
+        }
+      }
+
       const { data: newTx, error: txErr } = await supabase.from('transactions').insert({
         import_hash: importHash, import_batch_id: importBatchId,
-        company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), statement_number: p.statement_number || null, type: row.override_tx_type, tx_subtype: shape.tx_subtype, is_advance: shape.is_advance, payment_method: row.override_payment_method || null, currency: p.currency, amount, ...rowBook, pl_impact: shape.pl_impact,
+        company_id: company, bank_id: bank, partner_id: partnerId, transaction_date: formatDate(p.date), statement_number: p.statement_number || null, type: row.override_tx_type, tx_subtype: shape.tx_subtype, is_advance: shape.is_advance, payment_method: row.override_payment_method || null, currency: p.currency, amount: bookedAmount, ...bookedBook, pl_impact: shape.pl_impact,
         pl_category: isDirectWithPL ? (row.override_pl_category_name || null) : null, pl_subcategory: isDirectWithPL ? (row.override_pl_subcategory_name || null) : null, department: isDirectWithPL ? (row.override_department_name || null) : null, dept_subcategory: null, expense_description: null, revenue_stream: isDirectWithPL ? (row.override_revenue_stream || null) : null,
         project_id: rowProjectId,
-        cf_type: isDirectWithPL && row.override_tx_subtype === 'expense' ? (row.override_cf_type || null) : null, cf_frequency: row.override_cf_type === 'recurring' ? row.override_cf_frequency : null, cf_next_month_est: row.override_cf_type === 'recurring' ? (row.override_cf_next_month_est ? parseFloat(row.override_cf_next_month_est) : amount) : null,
+        // A refund is one-time and is never carried into a future month (D2).
+        // Everything else keeps its own fields; the estimate's fallback is the
+        // line's magnitude.
+        ...(isRefund ? REFUND_CASH_FLOW : {
+          cf_type: isDirectWithPL && row.override_tx_subtype === 'expense' ? (row.override_cf_type || null) : null, cf_frequency: row.override_cf_type === 'recurring' ? row.override_cf_frequency : null, cf_next_month_est: row.override_cf_type === 'recurring' ? (row.override_cf_next_month_est ? parseFloat(row.override_cf_next_month_est) : amount) : null,
+        }),
         account_number: p.account_number || null, model: p.model || null, reference_number: p.reference_number || null, note: row.override_note || p.description || null, status: 'posted',
       }).select().single()
 
@@ -1268,8 +1299,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
       // booked correctly. Stopping names it; carrying on hides it.
       if (isDirectWithPL && row.override_pl_splits.length > 0 && newTx?.id) {
         const outcome = await saveSplits(
-          supabase, 'transaction', newTx.id,
-          { amount, currency: p.currency, ...rowBook }, row.override_pl_splits)
+          supabase, 'transaction', newTx.id, splitParent, splitLines)
         if (!outcome.ok) throw new Error(`${formatDate(p.date)}: ${outcome.message}`)
       }
       if (row.override_tx_type === 'credit_payment' && row.override_installment_ids.length > 0) {
@@ -1939,6 +1969,11 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                   const p = row.parsed
                   const isExpense = (p.debit || 0) > 0
                   const amount = isExpense ? p.debit : p.credit
+                  // Money that came back, booked as an expense: it will be
+                  // stored with a minus and reduce that expense. The same
+                  // inputs as the `sign` at posting; an advance never is one.
+                  const isRefund = isRefundLine({ debit: p.debit, credit: p.credit }, row.override_tx_type, row.override_tx_subtype)
+                    && !effectiveAdvance(row.override_tx_type, row.override_tx_subtype, row.override_is_advance)
                   const isExpanded = expandedRow === p.id
                   const plSubs = getPlSubs(row.override_pl_category_id)
                   const linkedInvoice = openInvoices.find(i => i.id === row.override_linked_invoice_id)
@@ -1966,6 +2001,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                               </span>
                             )}
                             <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: typeBadge.bg, color: typeBadge.color }}>{typeBadge.label}</span>
+                            {isRefund && <span style={{ fontSize: '10px', fontWeight: '500', padding: '1px 7px', borderRadius: '20px', background: DIALOG.accentFill, color: DIALOG.accent }}>{REFUND_TAG}</span>}
                             <span style={{ fontSize: '10px', color: DIALOG.faint }}>{FORMAT_LABELS[p.source_format]}</span>
                             {row.already_imported && (
                               <span style={{
@@ -1991,7 +2027,11 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                           )}
                         </div>
                         <div style={{ textAlign: 'right' as const, flexShrink: 0, marginRight: '10px' }}>
-                          <div style={{ fontSize: '13px', fontWeight: '500', color: isExpense ? DIALOG.red : DIALOG.accent }}>{isExpense ? '-' : '+'}{fmtMoney(amount || 0, p.currency)}</div>
+                          {/* A refund reads as money that came back: the green
+                              of a credit, with the minus it reduces the
+                              expense by — and the tag beside the name says so
+                              in words. */}
+                          <div data-testid={`review-amount-${p.id}`} style={{ fontSize: '13px', fontWeight: '500', color: isExpense ? DIALOG.red : DIALOG.accent }}>{isExpense || isRefund ? '-' : '+'}{fmtMoney(amount || 0, p.currency)}</div>
                           <div style={{ fontSize: '10px', color: DIALOG.faint }}>{p.statement_number ? `Izvod #${p.statement_number}` : p.date}</div>
                         </div>
                         <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
@@ -2443,6 +2483,11 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
 
                           {row.override_tx_type === 'direct' && row.override_tx_subtype === 'expense' && (
                             <>
+                              {isRefund && (
+                                <div style={{ fontSize: '11.5px', color: DIALOG.accent, margin: '2px 0 10px', lineHeight: 1.55 }}>
+                                  {REFUND_LINE_NOTE}
+                                </div>
+                              )}
                               {/* ONE BANK LINE, SEVERAL COSTS.
                                   Above the classification, because the first
                                   question is how many expenses this is — and
@@ -2451,6 +2496,9 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                                   side reads instead. */}
                               <SplitEditor
                                 parent={{
+                                  // A magnitude, for a refund as well: the
+                                  // lines are typed positive and the minus is
+                                  // put on them when the row is posted.
                                   amount: (p.debit || 0) > 0 ? (p.debit || 0) : (p.credit || 0),
                                   // The book figures are worked out at post
                                   // time from the official rate for the day.
@@ -2612,6 +2660,12 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                                 </div>
                               </div>
                               <div style={s.editSectionTitle}>Klasifikacija novčanog toka</div>
+                              {/* A refund is one-time by rule (D2): nothing to choose. */}
+                              {isRefund ? (
+                                <div style={{ fontSize: '11.5px', color: DIALOG.dim, marginTop: '6px', lineHeight: 1.55 }}>
+                                  {REFUND_ONE_TIME_NOTE}
+                                </div>
+                              ) : (<>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '6px', marginTop: '6px' }}>
                                 {[{ id: 'recurring', label: '🔁 Ponavljajući' }, { id: 'one_time', label: '1️⃣ Jednokratni' }, { id: 'accrual', label: '📅 Razgraničenje' }, { id: 'capex', label: '🏗 Kap. izdatak' }, { id: 'reimbursable', label: '↩️ Refund.' }].map(a => (
                                   <div key={a.id} style={{ ...s.allocBtn, padding: '6px 4px', ...(row.override_cf_type === a.id ? { border: '2px solid ' + DIALOG.accent, background: DIALOG.accentFill } : {}) }}
@@ -2661,6 +2715,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                                   </div>
                                 </div>
                               )}
+                              </>)}
                               </div>
                             </>
                           )}
