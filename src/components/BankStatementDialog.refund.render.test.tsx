@@ -759,7 +759,7 @@ describe('a statement holding a refund and a storno, reopened and saved', () => 
       amount: 1199.22, amount_rsd: 1199.22, amount_eur: 10.23,
       pl_category: null, department: null,
     })
-    const REFUSED = 'Stavka 1 je podeljena na više troškova, pa se njen iznos ovde ne menja. '
+    const REFUSED = 'Stavka 1 je podeljena na više troškova, pa se njen iznos, valuta i datum ovde ne menjaju. '
       + 'Otvorite tu transakciju iz Glavne knjige i izmenite je tamo.'
     const reopenSplit = async () => {
       mockState.tables.pl_splits = [
@@ -787,6 +787,17 @@ describe('a statement holding a refund and a storno, reopened and saved', () => 
 
       expect(warning()).toBe(REFUSED)
       expect(screen.queryByText(/Izvod je sačuvan/)).toBeNull()
+      expect(mockState.writes).toHaveLength(0)
+    })
+
+    it('its date changed is refused whole and nothing is written', async () => {
+      // A new date re-books the row at another day rate while its stored
+      // lines keep the old book figures.
+      await reopenSplit()
+      fireEvent.change(header(0).querySelector('input[type="date"]')!, { target: { value: '2026-11-20' } })
+      await save()
+
+      expect(warning()).toBe(REFUSED)
       expect(mockState.writes).toHaveLength(0)
     })
 

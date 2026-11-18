@@ -250,7 +250,9 @@ function DonutChart({ segments }: { segments: { label: string; value: number; co
 // ── Horizontal Bar ────────────────────────────────────────
 function HBar({ label, value, max, color, sub }: { label: string; value: number; max: number; color: string; sub?: string }) {
   const { format } = useDisplayCurrency()
-  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0
+  // A partner can net below zero (a refund only): no bar for it, never a
+  // negative width; the figure beside it keeps its minus.
+  const pct = max > 0 ? Math.min((drawn(value) / max) * 100, 100) : 0
   return (
     <div style={{ marginBottom: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -532,7 +534,8 @@ export default function Dashboard() {
 
   const sparkRevenue = monthlyData.map(m => m.revenue)
   const sparkExpenses = monthlyData.map(m => m.expenses)
-  const maxPartner = topPartners[0]?.amount || 1
+  // The scale is the largest bar drawn; a total at or below zero draws none.
+  const maxPartner = Math.max(0, ...topPartners.map(p => drawn(p.amount)))
 
   return (
     <div style={s.root} className="app-surface">

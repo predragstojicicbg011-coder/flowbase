@@ -567,3 +567,40 @@ describe('the recent transactions', () => {
     expect(within(recent).getAllByText(REFUND_TAG)).toHaveLength(1)
   })
 })
+
+describe('the partner bars when a partner nets below zero', () => {
+  const partnerTx = (name: string, amount: number, date = '2026-10-10') => ({
+    transaction_date: date, type: 'direct', tx_subtype: 'expense', company_id: 'comp-1', partner_id: name,
+    amount, currency: 'RSD', amount_rsd: amount, amount_eur: amount / 117,
+    partners: { name, type: 'vendor' },
+  })
+  const partnersCard = () => screen.getByText('Najveći partneri').parentElement!.parentElement as HTMLElement
+  /** A partner line: its label and figure, then the track holding the bar. */
+  const lineOf = (name: string) => within(partnersCard()).getByText(name).parentElement!.parentElement as HTMLElement
+  const barOf = (name: string) => lineOf(name).lastElementChild!.firstElementChild as HTMLElement
+
+  it('draws no bar for a refund-only partner, prints its minus, and the positive one fills the track', async () => {
+    ;(global as any).__db.transactions = [
+      partnerTx('Primer Dobavljac doo', 1000),
+      partnerTx('Izmišljena Papirnica doo', -300),
+    ]
+    await show()
+    await waitFor(() => expect(partnersCard()).toHaveTextContent('Izmišljena Papirnica doo'))
+    expect(barOf('Primer Dobavljac doo').style.width).toBe('100%')
+    expect(barOf('Izmišljena Papirnica doo').style.width).toBe('0%')
+    expect(lineOf('Izmišljena Papirnica doo')).toHaveTextContent(rsd(-300))
+    expect(rsd(-300)).toContain('-')
+  })
+
+  it('draws an all-positive list exactly as before', async () => {
+    ;(global as any).__db.transactions = [
+      partnerTx('Primer Dobavljac doo', 1000),
+      partnerTx('Izmišljena Papirnica doo', 250),
+    ]
+    await show()
+    await waitFor(() => expect(partnersCard()).toHaveTextContent('Izmišljena Papirnica doo'))
+    expect(barOf('Primer Dobavljac doo').style.width).toBe('100%')
+    expect(barOf('Izmišljena Papirnica doo').style.width).toBe('25%')
+    expect(lineOf('Izmišljena Papirnica doo')).toHaveTextContent(rsd(250))
+  })
+})

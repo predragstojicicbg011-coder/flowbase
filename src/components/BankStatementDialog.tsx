@@ -1515,12 +1515,13 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       return
     }
     // A split row's lines are neither loaded nor written here, and the P&L
-    // reads those lines, not the row. Its amount, side or subtype changed here
-    // would leave the lines saying the opposite of the row (the database
-    // checks the balance only when the lines are written), so the whole save
-    // is refused: that change is made in the transaction, which re-signs the
-    // lines. Compared with what was loaded, in the row's own currency, to the
-    // cent. Its note, partner or date may still change.
+    // reads those lines, not the row. Its amount, side, subtype, currency or
+    // date changed here would leave the lines saying something else than the
+    // row (a new date re-books the row at that day's rate; the lines keep
+    // theirs; the database checks the balance only when the lines are
+    // written), so the whole save is refused: that change is made in the
+    // transaction, which rewrites the lines. Compared with what was loaded, in
+    // the row's own currency, to the cent. Its note or partner may still change.
     {
       const cents = (n: number) => Math.round(n * 100)
       const changed = (r: StatementRow): boolean => {
@@ -1531,10 +1532,11 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
           || now.isExpense !== then.isExpense
           || (r.currency || defaultCurrency) !== (r.seed.currency || defaultCurrency)
           || r.tx_subtype !== r.seed.tx_subtype
+          || r.date !== r.seed.date
       }
       const idx = rows.findIndex(r => !r.locked && changed(r))
       if (idx >= 0) {
-        setError(`Stavka ${idx + 1} je podeljena na više troškova, pa se njen iznos ovde ne menja. Otvorite tu transakciju iz Glavne knjige i izmenite je tamo.`)
+        setError(`Stavka ${idx + 1} je podeljena na više troškova, pa se njen iznos, valuta i datum ovde ne menjaju. Otvorite tu transakciju iz Glavne knjige i izmenite je tamo.`)
         return
       }
     }
