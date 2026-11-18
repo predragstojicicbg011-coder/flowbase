@@ -7,12 +7,16 @@
 // transactions, as with one. A bill the transactions do not cover in full is
 // left partly closed (the client's decision), its remainder visible.
 //
+// A refund (a direct expense with a minus) is money that came back: it paid
+// nothing, so it is never given a share and is named among those not used.
+//
 // Amounts are compared in dinars (every transaction has amount_rsd) and
 // written in the bill's own currency at the bill's stored rates; the last
 // link of a fully covered bill takes the exact remainder, so it closes to the
 // cent in its own currency.
 
 import { partBookAmounts, partFromRsd, round2 } from './bookAmounts'
+import { isRefundRow } from './refund'
 
 export interface LinkBill {
   amount: number
@@ -31,7 +35,13 @@ export interface AllocatedLink {
 }
 
 export function allocateAcross(
-  bill: LinkBill, transactions: { id: string; amount_rsd: number; amount?: number; currency?: string | null }[],
+  bill: LinkBill,
+  // The rows arrive with their sign and their kind: a refund (a direct expense
+  // with a minus) is money that came back, so it is given no share.
+  transactions: {
+    id: string; amount_rsd: number; amount?: number; currency?: string | null
+    type?: string | null; tx_subtype?: string | null
+  }[],
 ): { links: AllocatedLink[]; covered: number; left: number; unused: string[] } {
   const unused: string[] = []
   const links: AllocatedLink[] = []
@@ -39,6 +49,7 @@ export function allocateAcross(
   let leftOwn = round2(bill.amount)
   let leftEur = round2(bill.amount_eur)
   for (const t of transactions) {
+    if (isRefundRow(t)) { unused.push(t.id); continue }
     if (leftRsd <= 0.005) { unused.push(t.id); continue }
     // In the bill's own currency the transaction pays its own figure: two
     // booking rates of one currency must not leave a dinar remainder.

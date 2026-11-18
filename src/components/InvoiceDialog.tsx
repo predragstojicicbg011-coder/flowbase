@@ -19,6 +19,7 @@ import { DIALOG, chrome } from './dialogTheme'
 import SearchableSelect from './SearchableSelect'
 import { reallocateInvoiceLinks } from '../services/writeOrder'
 import { allocateAcross } from '../services/multiLink'
+import { isRefundRow } from '../services/refund'
 import {
   chooseAccount, carriedAccountOf, defaultAccount, sameAccountNumber,
 } from '../services/partnerAccountChoice'
@@ -774,7 +775,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     const load = async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('id, transaction_date, is_advance, amount, amount_rsd, amount_eur, currency, pl_category, pl_subcategory, department, revenue_stream, project_id, dept_split_type, tags, note, exchange_rate, eur_rate, is_indexed, banks(id,name), partners(id,name)')
+        .select('id, type, tx_subtype, transaction_date, is_advance, amount, amount_rsd, amount_eur, currency, pl_category, pl_subcategory, department, revenue_stream, project_id, dept_split_type, tags, note, exchange_rate, eur_rate, is_indexed, banks(id,name), partners(id,name)')
         .eq('company_id', companyId).eq('type', 'direct').eq('status', 'posted')
         .order('transaction_date', { ascending: false }).limit(150)
       if (error) console.error('transactions load error:', error)
@@ -953,7 +954,11 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   useEffect(() => { if (invoice && departments.length > 0) { const dept = departments.find(d => d.name === invoice.department); if (dept) setDeptId(dept.id) } }, [invoice, departments])
 
   const filteredPartners = partners.filter(p => !partnerSearch || p.name.toLowerCase().includes(partnerSearch.toLowerCase()))
-  const filteredDirectTx = directTransactions.filter(tx => {
+  // A refund is money that came back; it paid no bill, so it is never offered
+  // as a payment. `directTransactions` itself stays whole, so a refund that is
+  // already linked still resolves in `linkedTxs` and can be unlinked.
+  const offerableTx = directTransactions.filter(tx => !isRefundRow(tx))
+  const filteredDirectTx = offerableTx.filter(tx => {
     if (!reconcileSearch) return true
     return (tx.partners?.name || '').toLowerCase().includes(reconcileSearch.toLowerCase()) ||
       (tx.pl_category || '').toLowerCase().includes(reconcileSearch.toLowerCase()) ||
@@ -968,7 +973,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const linkAllocation = (bookedAmounts: BookAmounts | null) => bookedAmounts && linkedTxs.length > 0
     ? allocateAcross(
         { amount: parseFloat(amount) || 0, currency: currency || 'RSD', ...bookedAmounts },
-        linkedTxs.map(t => ({ id: t.id, amount_rsd: Math.abs(Number(t.amount_rsd) || 0), amount: Math.abs(Number(t.amount) || 0), currency: t.currency })))
+        linkedTxs.map(t => ({ id: t.id, amount_rsd: Number(t.amount_rsd) || 0, amount: Number(t.amount) || 0, currency: t.currency, type: t.type, tx_subtype: t.tx_subtype })))
     : null
   const linkPreview = linkAllocation(book.amounts)
 
@@ -1050,6 +1055,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       const usedTxIds = (savedLinks?.links || []).map(l => l.transactionId)
       if (linkedTxId && usedTxIds.length === 0) {
         setSaving(false)
+        if (linkedTxs.length > 0 && linkedTxs.every(isRefundRow)) {
+          setSaveError('Povraćaj nije plaćanje i ne može da zatvori fakturu. Uklonite ga iz povezanih i sačuvajte ponovo.')
+          return
+        }
         setSaveError('Izabrane transakcije nisu učitane, pa račun nije vezan ni za jednu. Ništa nije sačuvano.')
         return
       }
@@ -1563,7 +1572,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: '13px', fontWeight: '500', color: DIALOG.accent }}>{t.partners?.name || '—'}</div>
                             <div style={{ fontSize: '11px', color: DIALOG.accent }}>{t.transaction_date} · {t.pl_category || '—'} · {t.banks?.name || '—'} · {fmtMoney(Math.abs(t.amount_rsd || 0), 'RSD')}</div>
-                            {linkPreview?.unused.includes(t.id) && <div style={{ fontSize: '10px', color: DIALOG.amber }}>nije potrebna — račun je već pokriven; neće biti vezana</div>}
+                            {linkPreview?.unused.includes(t.id) && <div style={{ fontSize: '10px', color: DIALOG.amber }}>{isRefundRow(t) ? 'Povraćaj nije plaćanje, pa se neće povezati.' : 'nije potrebna — račun je već pokriven; neće biti vezana'}</div>}
                           </div>
                           <button type="button" aria-label="Ukloni transakciju" style={s.unlinkBtn} onClick={() => unlinkOne(t.id)}>✕</button>
                         </div>
@@ -1585,7 +1594,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                   <>
                     <input style={{ ...s.input, margin: '8px 0', width: '100%', boxSizing: 'border-box' as const }}
                       value={reconcileSearch} onChange={e => setReconcileSearch(e.target.value)} placeholder="Pretraga po partneru, kategoriji, datumu ili iznosu…" />
-                    {directTransactions.length === 0 ? (
+                    {offerableTx.length === 0 ? (
                       <div style={{ fontSize: '12px', color: DIALOG.faint, padding: '8px', textAlign: 'center' as const }}>Ova firma još nema direktnih transakcija.</div>
                     ) : (
                       <div style={s.txList}>

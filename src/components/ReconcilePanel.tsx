@@ -11,6 +11,7 @@ import { DIALOG } from './dialogTheme'
 import { round2 as bookRound2 } from '../services/bookAmounts'
 import { fmtMoney } from '../utils/formatters'
 import { countOf } from '../utils/plural'
+import { isRefundRow } from '../services/refund'
 
 /** Display labels for the status and type keys a candidate row carries. */
 const STATUS_LABEL: Record<string, string> = {
@@ -105,8 +106,9 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
 
       // Candidates = open invoices for same company. None for an advance
       // (is_advance): it reaches a billing through advance_deducted only,
-      // and the database refuses the link.
-      if (tx?.company_id && !tx.is_advance) {
+      // and the database refuses the link. None for a refund either: money
+      // that came back paid no bill. Its existing links are read below.
+      if (tx?.company_id && !tx.is_advance && !isRefundRow(tx)) {
         const { data: invs } = await supabase
           .from('v_invoice_status')
           .select('*')
@@ -149,8 +151,9 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
           .eq('type', 'direct')
           .order('transaction_date', { ascending: false })
         // An advance is not a payment of any invoice (trigger
-        // invoice_transaction_links_not_advance): never a candidate.
-        setCandidates((txs || []).filter((t: any) => !t.is_advance))
+        // invoice_transaction_links_not_advance): never a candidate. Nor is a
+        // refund: it is money that came back, not a payment.
+        setCandidates((txs || []).filter((t: any) => !t.is_advance && !isRefundRow(t)))
       }
 
       // Existing links

@@ -289,3 +289,54 @@ describe('opened from the invoice instead of the payment', () => {
     expect(written()!.payload.allocated_amount).toBe(134561.52)
   })
 })
+
+describe('a refund is never offered as the payment of a bill', () => {
+  const refund = (over: Partial<any> = {}) => payment({
+    id: 'refund1', type: 'direct', tx_subtype: 'expense', amount: -134561.52, amount_rsd: -134561.52,
+    amount_eur: -1148.14, statement_number: '777', ...over,
+  })
+
+  it('lists the payment and not the refund of the same size, opened from the bill', async () => {
+    rows = {
+      transactions: [refund(), payment({ id: 'pay1', tx_subtype: 'expense', statement_number: '103' })],
+      v_invoice_status: [invoice()],
+      invoice_transaction_links: [],
+      invoices: [invoice()],
+    }
+    install()
+    panel('invoice', 'inv1')
+    expect(await screen.findAllByText('+ Poveži')).toHaveLength(1)
+    expect(screen.queryByText(/777/)).toBeNull()
+  })
+
+  it('offers no bill to a refund opened as the source, and asks for none', async () => {
+    rows = {
+      transactions: [refund()],
+      v_invoice_status: [invoice()],
+      invoice_transaction_links: [],
+      invoices: [invoice()],
+    }
+    install()
+    panel('transaction', 'refund1')
+    // Loaded = the loading line is gone; only then is a missing candidate meaningful.
+    await waitFor(() => expect(screen.queryByText('Učitavanje…')).toBeNull())
+    expect(screen.queryByText('+ Poveži')).toBeNull()
+    expect(calls.some(c => c.table === 'v_invoice_status')).toBe(false)
+  })
+
+  it('still shows the links a refund already has', async () => {
+    rows = {
+      transactions: [refund()],
+      v_invoice_status: [invoice()],
+      invoice_transaction_links: [{
+        id: 'l1', invoice_id: 'inv1', transaction_id: 'refund1', allocated_amount: 100,
+        allocated_amount_rsd: 100, invoices: { invoice_number: 'H-1278/2026', currency: 'RSD', amount: 134561.52 },
+      }],
+      invoices: [invoice()],
+    }
+    install()
+    panel('transaction', 'refund1')
+    expect(await screen.findByText('Već povezano')).toBeInTheDocument()
+    expect(screen.getByText(/raspoređeno/)).toBeInTheDocument()
+  })
+})

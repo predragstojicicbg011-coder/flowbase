@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import InvoiceDialog from './InvoiceDialog'
 
 // One bill closed by several direct transactions already in the books (a
@@ -9,6 +9,7 @@ import InvoiceDialog from './InvoiceDialog'
 const mockState = {
   tables: {} as Record<string, any[]>,
   writes: [] as { table: string; op: string; payload: any; ids?: string[] }[],
+  loaded: false,
 }
 
 function mockQuery(table: string) {
@@ -16,6 +17,7 @@ function mockQuery(table: string) {
   const result = () => {
     if (table === 'pl_categories') return { data: [{ id: 'c1', name: 'Bankarske usluge', type: 'expense', sort_order: 1 }], error: null }
     if (table === 'departments') return { data: [{ id: 'd1', name: 'Uprava', sort_order: 1 }], error: null }
+    if (table === 'transactions') mockState.loaded = true
     return { data: mockState.tables[table] || [], error: null }
   }
   const q: any = {}
@@ -59,7 +61,7 @@ jest.mock('./ProjectSelect', () => () => null)
 jest.mock('./PartnerDialog', () => () => null)
 
 const fee = (id: string, date: string, rsd: number) => ({
-  id, transaction_date: date, is_advance: false, amount: -rsd, amount_rsd: -rsd, amount_eur: -(rsd / 117.2), currency: 'RSD',
+  id, transaction_date: date, is_advance: false, type: 'direct', tx_subtype: 'expense', amount: rsd, amount_rsd: rsd, amount_eur: rsd / 117.2, currency: 'RSD',
   pl_category: 'Bankarske usluge', department: 'Uprava', banks: { id: 'b1', name: 'Banca Intesa' }, partners: { id: 'p1', name: 'Banca Intesa' },
 })
 
@@ -72,6 +74,7 @@ const draft = {
 beforeEach(() => {
   mockState.tables = { transactions: [fee('t1', '2026-10-05', 300), fee('t2', '2026-10-15', 450), fee('t3', '2026-10-25', 250)] }
   mockState.writes = []
+  mockState.loaded = false
 })
 
 const next = () => fireEvent.click(screen.getByText('Dalje'))
@@ -114,6 +117,70 @@ describe('one bill, several transactions', () => {
     await pick('2026-10-15')
     fireEvent.click(screen.getAllByLabelText('Ukloni transakciju')[0])
     expect(await screen.findByText(/Izabrano: 1 transakcija · 450,00 RSD/)).toBeInTheDocument()
+  })
+})
+
+describe('a refund is not a payment', () => {
+  const refund = { ...fee('t9', '2026-10-09', 1199.22), amount: -1199.22, amount_rsd: -1199.22, amount_eur: -(1199.22 / 117.2) }
+  const search = () => screen.getByPlaceholderText(/Pretraga po partneru/)
+
+  it('is not offered beside the payment of the same size, which is', async () => {
+    mockState.tables.transactions = [refund, fee('t1', '2026-10-05', 1199.22)]
+    render(<InvoiceDialog onClose={() => {}} invoice={draft} />)
+    expect(await screen.findByText(/^2026-10-05/)).toBeInTheDocument()
+    expect(screen.queryByText(/^2026-10-09/)).toBeNull()
+  })
+
+  it('is not found by searching for its amount', async () => {
+    mockState.tables.transactions = [refund, fee('t1', '2026-10-05', 1199.22)]
+    render(<InvoiceDialog onClose={() => {}} invoice={draft} />)
+    await screen.findByText(/^2026-10-05/)
+    fireEvent.change(search(), { target: { value: '1199.22' } })
+    expect(await screen.findByText(/^2026-10-05/)).toBeInTheDocument()
+    expect(screen.queryByText(/^2026-10-09/)).toBeNull()
+  })
+
+  it('is offered even when it is a revenue receipt of the same size', async () => {
+    mockState.tables.transactions = [{ ...fee('t8', '2026-10-08', 500), tx_subtype: 'revenue' }]
+    render(<InvoiceDialog onClose={() => {}} invoice={draft} />)
+    expect(await screen.findByText(/^2026-10-08/)).toBeInTheDocument()
+  })
+})
+
+describe('a refund that is already linked', () => {
+  // A refund cannot be picked, so the row is turned into one AFTER it has been
+  // linked: the same object stays in the dialog's state.
+  const linkThenTurnIntoRefund = async () => {
+    const row: any = { ...fee('t1', '2026-10-05', 1000), partners: null }
+    mockState.tables.transactions = [row]
+    render(<InvoiceDialog onClose={() => {}} invoice={draft} />)
+    await pick('2026-10-05')
+    row.amount = -1000; row.amount_rsd = -1000; row.amount_eur = -(1000 / 117.2)
+  }
+
+  it('says a refund is not a payment, not that the bill is already covered', async () => {
+    await linkThenTurnIntoRefund()
+    fireEvent.change(screen.getByPlaceholderText(/Pretraga po partneru/), { target: { value: 'x' } })
+    expect(await screen.findByText('Povraćaj nije plaćanje, pa se neće povezati.')).toBeInTheDocument()
+    expect(screen.queryByText(/nije potrebna/)).toBeNull()
+  })
+
+  it('stops the save with its own words and writes nothing', async () => {
+    await linkThenTurnIntoRefund()
+    next(); next(); next(); post()
+    expect(await screen.findByText('Povraćaj nije plaćanje i ne može da zatvori fakturu. Uklonite ga iz povezanih i sačuvajte ponovo.')).toBeInTheDocument()
+    expect(screen.queryByText(/nisu učitane/)).toBeNull()
+    expect(mockState.writes).toEqual([])
+  })
+})
+
+describe('only a refund in the company', () => {
+  it('shows the empty-list message', async () => {
+    mockState.tables.transactions = [{ ...fee('t9', '2026-10-09', 1199.22), amount: -1199.22, amount_rsd: -1199.22, amount_eur: -(1199.22 / 117.2) }]
+    render(<InvoiceDialog onClose={() => {}} invoice={draft} />)
+    await waitFor(() => expect(mockState.loaded).toBe(true))
+    await act(async () => {})
+    expect(screen.getByText('Ova firma još nema direktnih transakcija.')).toBeInTheDocument()
   })
 })
 

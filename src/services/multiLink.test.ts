@@ -47,3 +47,34 @@ describe('a transaction in the same currency as the bill', () => {
     expect(r.unused).toEqual(['t3'])
   })
 })
+
+describe('a refund is never a payment', () => {
+  const refund = { id: 'r1', type: 'direct', tx_subtype: 'expense', amount: -1199.22, amount_rsd: -1199.22, currency: 'RSD' }
+  const pay = { id: 'p1', type: 'direct', tx_subtype: 'expense', amount: 1199.22, amount_rsd: 1199.22, currency: 'RSD' }
+  const big = { amount: 1199.22, amount_rsd: 1199.22, amount_eur: 10.23, currency: 'RSD', exchange_rate: 1, eur_rate: 117.2 }
+
+  it('pays nothing and is named among those not used', () => {
+    const r = allocateAcross(big, [refund])
+    expect(r.links).toEqual([])
+    expect(r.unused).toEqual(['r1'])
+    expect(r.left).toBe(1199.22)
+  })
+
+  it('pays nothing in a foreign currency either', () => {
+    const r = allocateAcross({ ...big, currency: 'EUR', amount: 10.23 }, [{ ...refund, currency: 'RSD' }])
+    expect(r.links).toEqual([])
+    expect(r.unused).toEqual(['r1'])
+  })
+
+  it('beside a payment of the same size only the payment closes the bill', () => {
+    const r = allocateAcross(big, [refund, pay])
+    expect(r.links.map(l => l.transactionId)).toEqual(['p1'])
+    expect(r.left).toBe(0)
+    expect(r.unused).toEqual(['r1'])
+  })
+
+  it('leaves a negative row that is not a direct expense as it was', () => {
+    const r = allocateAcross(big, [{ id: 'x1', type: 'direct', tx_subtype: 'revenue', amount: -1199.22, amount_rsd: -1199.22, currency: 'RSD' }])
+    expect(r.links.map(l => l.transactionId)).toEqual(['x1'])
+  })
+})
