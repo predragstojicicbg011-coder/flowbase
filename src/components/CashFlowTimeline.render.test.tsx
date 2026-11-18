@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import fs from 'fs'
 import path from 'path'
 import CashFlowTimeline from './CashFlowTimeline'
@@ -136,5 +136,67 @@ describe('the geometry, which the palette validator says nothing about', () => {
     for (const r of Array.from(container.querySelectorAll('rect'))) {
       expect(Number(r.getAttribute('height') || 0)).toBeGreaterThanOrEqual(0)
     }
+  })
+})
+
+describe('a month whose refunds exceed its spending', () => {
+  const refundMonths = () => cashTimeline({
+    months: ['2026-08', '2026-09'], currentMonth: '2026-10',
+    actual: { '2026-08': { inflow: 1000, outflow: 500 }, '2026-09': { inflow: 0, outflow: -200 } },
+    projected: {}, position: null, currency: 'RSD',
+  })
+
+  // The hit area of the nth month: the group that carries the tooltip handlers.
+  const hover = (container: HTMLElement, nth: number) => {
+    const groups = Array.from(container.querySelectorAll('svg g[style]'))
+      .filter(g => g.querySelector('rect[fill="transparent"]'))
+    fireEvent.mouseMove(groups[nth])
+  }
+
+  it('draws no outflow bar and sizes nothing negative or NaN', () => {
+    const { container } = render(<CashFlowTimeline timeline={refundMonths()} dated={{}} />)
+    const red = Array.from(container.querySelectorAll('rect')).filter(r => r.getAttribute('fill') === '#FF5B5A')
+    // One outflow bar, August's. September's refunds outweigh its spending.
+    expect(red).toHaveLength(1)
+    for (const r of Array.from(container.querySelectorAll('rect'))) {
+      for (const a of ['x', 'y', 'width', 'height']) {
+        const v = Number(r.getAttribute(a))
+        expect(Number.isNaN(v)).toBe(false)
+        if (a === 'width' || a === 'height') expect(v).toBeGreaterThanOrEqual(0)
+      }
+    }
+  })
+
+  it('draws no hatch over an outflow bar that is not there', () => {
+    const t = cashTimeline({
+      months: ['2026-09'], currentMonth: '2026-09',
+      actual: { '2026-09': { inflow: 0, outflow: -200 } }, projected: {}, position: null, currency: 'RSD',
+    })
+    const { container } = render(<CashFlowTimeline timeline={t} dated={{}} />)
+    // Only the inflow bar is hatched.
+    expect(container.querySelectorAll('rect[fill="url(#cf-part)"]')).toHaveLength(1)
+  })
+
+  it('prints a negative outflow with exactly one sign, and the three rows add up', () => {
+    const { container } = render(<CashFlowTimeline timeline={refundMonths()} dated={{}} />)
+    hover(container, 1)
+    expect(screen.getByText('Odliv').parentElement!.textContent).toBe('Odliv+200,00 RSD')
+    expect(screen.getByText('Priliv').parentElement!.textContent).toBe('Priliv+0,00 RSD')
+    expect(screen.getByText('Višak').parentElement!.textContent).toBe('Višak200,00 RSD')
+    expect(document.body.textContent).not.toMatch(/−\+|\+−|−−|−-/)
+  })
+
+  it('prints an outflow of exactly zero with no sign, and a plain outflow with a minus', () => {
+    const zero = cashTimeline({
+      months: ['2026-09'], currentMonth: '2026-10',
+      actual: { '2026-09': { inflow: 0, outflow: 0 } }, projected: {}, position: null, currency: 'RSD',
+    })
+    const first = render(<CashFlowTimeline timeline={zero} dated={{}} />)
+    hover(first.container, 0)
+    expect(screen.getByText('Odliv').parentElement!.textContent).toBe('Odliv0,00 RSD')
+    first.unmount()
+    const second = render(<CashFlowTimeline timeline={refundMonths()} dated={{}} />)
+    hover(second.container, 0)
+    expect(screen.getByText('Odliv').parentElement!.textContent).toBe('Odliv−500,00 RSD')
   })
 })

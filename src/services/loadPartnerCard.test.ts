@@ -65,6 +65,20 @@ describe('loading a partner card', () => {
     expect(d.documents[0].amount_rsd).toBe(100)
     expect(d.payments[0].amount_rsd).toBe(50)
     expect(d.direct[0].amount_rsd).toBe(20)
+    expect(d.direct[0].direction).toBe('in')
+  })
+
+  it('lists an unlinked refund as money in, a plain expense as out, a revenue as in', async () => {
+    const d = await loadPartnerCard(fakeClient({
+      v_invoice_status: docs(1),
+      transactions: [
+        { id: 'r', transaction_date: '2026-10-03', amount_rsd: -140544, amount_eur: -1199.22, tx_subtype: 'expense', note: 'refund', banks: null },
+        { id: 'e', transaction_date: '2026-10-04', amount_rsd: 209000, amount_eur: 1784.4, tx_subtype: 'expense', note: null, banks: null },
+        { id: 'v', transaction_date: '2026-10-05', amount_rsd: 2344, amount_eur: 20, tx_subtype: 'revenue', note: null, banks: null },
+      ],
+    }, []), 'p1', 'co')
+    expect(d.direct.map(x => [x.id, x.direction, x.amount_rsd]))
+      .toEqual([['r', 'in', 140544], ['e', 'out', 209000], ['v', 'in', 2344]])
   })
 
   it('marks our invoice that SEF holds as stornoed, and nothing else', async () => {

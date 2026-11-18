@@ -156,11 +156,16 @@ export function cashTimeline(input: CashInput): CashTimeline {
       inflow = a.inflow; outflow = a.outflow; basis = 'actual'
     } else if (month === currentMonth) {
       // What has happened plus what is still expected of the rest of it.
-      // `remaining` never goes below zero: a month that has already outspent
-      // its own forecast has nothing left to expect, and subtracting past it
-      // would give the month a negative outflow.
+      // What is left of the plan never goes below zero: a month that has
+      // already outspent its own forecast has nothing left to expect.
+      // On the outflow side a refund in hand is counted, and what is left of
+      // the plan is the plan less what was actually SPENT: a negative actual
+      // (refunds outweighing spending) has spent none of it, so it takes
+      // nothing off the plan and the refund still reduces the month's total.
+      // For an actual at or above zero this is the plain rule. The inflow
+      // side has no such case (an inflow is never negative) and is unchanged.
       inflow = cents(a.inflow + Math.max(0, p.inflow - a.inflow))
-      outflow = cents(a.outflow + Math.max(0, p.outflow - a.outflow))
+      outflow = cents(a.outflow + Math.max(0, p.outflow - Math.max(a.outflow, 0)))
       basis = 'partial'
     } else {
       inflow = p.inflow; outflow = p.outflow; basis = 'projected'
@@ -288,18 +293,23 @@ export interface CashTx {
  * Those live in `passthrough`, a table this never reads, and the allowlist is
  * the second guard in case one ever reaches `transactions`.
  *
- * The amount is taken at its size whichever sign it arrives with: the ledger
- * books expenses positive in some places and negative in others, and adding a
- * negative to an outflow makes the month look cheaper than it was.
+ * A REFUND IS MONEY COMING BACK, AND IT IS NOT TAKEN AT ITS SIZE. A refund is
+ * a direct expense booked with a minus, so its outflow is negative and the
+ * month it lands in nets smaller: an expense of 1,784.40 and a refund of
+ * 1,199.22 are an outflow of 585.18. Every other shape (a revenue, a payment
+ * against a bill) is taken at its size whichever sign it arrives with.
  *
  * `currency` picks which book figure is read; a row with none is no movement.
  */
 export function cashMovement(tx: CashTx, currency: DisplayCurrency): { inflow: number; outflow: number } {
-  const amount = Math.abs(pickAmount(tx, currency) ?? 0)
+  const signed = pickAmount(tx, currency) ?? 0
+  const amount = Math.abs(signed)
   if (!amount) return { inflow: 0, outflow: 0 }
   const dir = cashDirection(tx)
   if (dir === 'in') return { inflow: amount, outflow: 0 }
-  if (dir === 'out') return { inflow: 0, outflow: amount }
+  if (dir === 'out') {
+    return { inflow: 0, outflow: tx.type === 'direct' && tx.tx_subtype === 'expense' ? signed : amount }
+  }
   return { inflow: 0, outflow: 0 }
 }
 
@@ -329,6 +339,17 @@ export function cashDirection(tx: Pick<CashTx, 'type' | 'tx_subtype'>): 'in' | '
   }
   if (tx.type === 'invoice_payment') return tx.tx_subtype === 'revenue' ? 'in' : 'out'
   return null
+}
+
+/**
+ * Whether a listed transaction reads as money coming in: its direction is
+ * 'in', or it is a refund (a direct expense booked with a minus), which is
+ * money that came back. `amount` is the figure the row prints, in the
+ * transaction's own currency; its sign is the refund's sign in every currency.
+ */
+export function cashRowIsIn(tx: Pick<CashTx, 'type' | 'tx_subtype'> & { amount?: number | null }): boolean {
+  if (cashDirection(tx) === 'in') return true
+  return tx.type === 'direct' && tx.tx_subtype === 'expense' && (Number(tx.amount) || 0) < 0
 }
 
 

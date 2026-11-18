@@ -189,7 +189,7 @@ export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPick
                   <>
                     <div style={st.tipHead}>{monthTick(r.month)} · {BASIS_WORD[r.basis]}</div>
                     <div style={st.tipRow}><span>Priliv</span><b style={{ color: IN }}>+{money2(r.inflow)}</b></div>
-                    <div style={st.tipRow}><span>Odliv</span><b style={{ color: OUT }}>−{money2(r.outflow)}</b></div>
+                    <div style={st.tipRow}><span>Odliv</span><b style={{ color: OUT }}>{r.outflow < 0 ? '+' : r.outflow > 0 ? '−' : ''}{money2(Math.abs(r.outflow))}</b></div>
                     <div style={st.tipRow}>
                       <span>{r.net >= 0 ? 'Višak' : 'Manjak'}</span>
                       <b>{money2(Math.abs(r.net))}</b>
@@ -235,15 +235,22 @@ export default function CashFlowTimeline({ timeline, dated, datedIn = {}, onPick
                 <rect x={cx - bw - 1} y={yOf(r.inflow)} width={bw}
                   height={Math.max(1, mid - yOf(r.inflow))} rx={4}
                   fill={IN} opacity={r.basis === 'projected' ? 0.5 : 1} />
-                <rect x={cx + 1} y={mid} width={bw}
-                  height={Math.max(1, yOf(-r.outflow) - mid)} rx={4}
-                  fill={OUT} opacity={r.basis === 'projected' ? 0.5 : 1} />
+                {/* A month whose refunds outweigh its spending has no outflow
+                    to draw: a bar needs a size above zero, so none, and no
+                    minimum-height sliver in its place. */}
+                {r.outflow > 0 && (
+                  <rect x={cx + 1} y={mid} width={bw}
+                    height={Math.max(1, yOf(-r.outflow) - mid)} rx={4}
+                    fill={OUT} opacity={r.basis === 'projected' ? 0.5 : 1} />
+                )}
                 {r.basis === 'partial' && (
                   <>
                     <rect x={cx - bw - 1} y={yOf(r.inflow)} width={bw}
                       height={Math.max(1, mid - yOf(r.inflow))} rx={4} fill="url(#cf-part)" />
-                    <rect x={cx + 1} y={mid} width={bw}
-                      height={Math.max(1, yOf(-r.outflow) - mid)} rx={4} fill="url(#cf-part)" />
+                    {r.outflow > 0 && (
+                      <rect x={cx + 1} y={mid} width={bw}
+                        height={Math.max(1, yOf(-r.outflow) - mid)} rx={4} fill="url(#cf-part)" />
+                    )}
                   </>
                 )}
                 <text x={cx} y={H - 26} textAnchor="middle" fontSize={10}

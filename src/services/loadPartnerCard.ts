@@ -91,10 +91,18 @@ export async function loadPartnerCard(client: any, partnerId: string, companyId:
       })),
     usage: (usage || []).map((u: any) => ({ final_invoice_id: u.final_invoice_id, advance_invoice_id: u.advance_invoice_id, amount_rsd: Number(u[`amount_${c}`]) || 0 })),
     coverage: (coverage || []).map((c: any) => ({ proforma_id: c.proforma_id, amount: Number(c.amount) || 0 })),
-    direct: (direct || []).filter((t: any) => !linkedTx.has(t.id)).map((t: any) => ({
-      id: t.id, date: t.transaction_date, amount_rsd: Math.abs(Number(t[`amount_${c}`]) || 0),
-      bank: t.banks?.name ?? null, note: t.note ?? null, direction: t.tx_subtype === 'revenue' ? 'in' : 'out',
-    })),
+    // An unlinked direct payment shows its size; the direction is what carries
+    // the sign. A refund (an expense booked with a minus) is money that came
+    // back, so on the card it is money in, not a payment out.
+    direct: (direct || []).filter((t: any) => !linkedTx.has(t.id)).map((t: any) => {
+      const figure = Number(t[`amount_${c}`]) || 0
+      const isRefund = t.tx_subtype === 'expense' && figure < 0
+      return {
+        id: t.id, date: t.transaction_date, amount_rsd: Math.abs(figure),
+        bank: t.banks?.name ?? null, note: t.note ?? null,
+        direction: t.tx_subtype === 'revenue' || isRefund ? 'in' : 'out',
+      }
+    }),
     withDocs,
   }
 }

@@ -1,5 +1,5 @@
 import {
-  cashDirection, cashMovement, cashTimeline, datedByMonth, monthsAround, monthsEndingAt, previousMonth,
+  cashDirection, cashMovement, cashRowIsIn, cashTimeline, datedByMonth, monthsAround, monthsEndingAt, previousMonth,
   type CashInput,
 } from './cashTimeline'
 
@@ -231,9 +231,75 @@ describe('what counts as money moving', () => {
       .toEqual({ inflow: 0, outflow: 0 })
   })
 
-  it('takes an amount at its size whichever sign it arrives with', () => {
-    expect(cashMovement({ type: 'direct', tx_subtype: 'expense', amount_rsd: -500 }, 'RSD').outflow)
-      .toBe(500)
+  it('a refund makes the outflow smaller', () => {
+    expect(cashMovement({ type: 'direct', tx_subtype: 'expense', amount_rsd: -500 }, 'RSD'))
+      .toEqual({ inflow: 0, outflow: -500 })
+    // A month holding an expense and a refund nets to the difference.
+    const month = [1784.4, -1199.22]
+      .map(a => cashMovement({ type: 'direct', tx_subtype: 'expense', amount_rsd: a }, 'RSD'))
+      .reduce((t, m) => ({ inflow: t.inflow + m.inflow, outflow: t.outflow + m.outflow }),
+        { inflow: 0, outflow: 0 })
+    expect(month.inflow).toBe(0)
+    expect(month.outflow).toBeCloseTo(585.18, 2)
+  })
+
+  it('a refund is read from the figure of the display currency', () => {
+    expect(cashMovement({ type: 'direct', tx_subtype: 'expense', amount_rsd: -2344, amount_eur: -20 }, 'EUR'))
+      .toEqual({ inflow: 0, outflow: -20 })
+  })
+
+  it('still takes a payment against a bill, and a revenue receipt, at their size', () => {
+    expect(cashMovement({ type: 'invoice_payment', tx_subtype: 'expense', amount_rsd: -500 }, 'RSD'))
+      .toEqual({ inflow: 0, outflow: 500 })
+    expect(cashMovement({ type: 'direct', tx_subtype: 'revenue', amount_rsd: -500 }, 'RSD'))
+      .toEqual({ inflow: 500, outflow: 0 })
+  })
+
+  it('a month whose refunds exceed its spending carries a true net outflow, never NaN', () => {
+    const t = cashTimeline({
+      months: ['2026-08', '2026-09'], currentMonth: '2026-09',
+      actual: { '2026-08': { inflow: 0, outflow: -300 }, '2026-09': { inflow: 0, outflow: -300 } },
+      projected: { '2026-09': { inflow: 0, outflow: 100 } }, position: null, currency: 'RSD',
+    })
+    expect(t.months[0].outflow).toBe(-300)
+    expect(t.months[0].net).toBe(300)
+    for (const m of t.months) expect(Number.isNaN(m.outflow + m.net)).toBe(false)
+  })
+
+  it('the month in progress counts a refund in hand, and the plan less what was spent is what is left', () => {
+    const current = (actualOut: number, plannedOut: number) => cashTimeline({
+      months: ['2026-08', '2026-09'], currentMonth: '2026-09',
+      actual: { '2026-09': { inflow: 0, outflow: actualOut } },
+      projected: { '2026-09': { inflow: 0, outflow: plannedOut } },
+      position: null, currency: 'RSD',
+    }).months[1]
+    expect(current(-300, 0)).toMatchObject({ outflow: -300, net: 300 })
+    expect(current(-300, 100).outflow).toBe(-200)
+    expect(current(700, 2000).outflow).toBe(2000)
+    expect(current(700, 500).outflow).toBe(700)
+  })
+
+  it('in the month in progress the net and the closing balance agree on a refund', () => {
+    const t = cashTimeline({
+      months: ['2026-08', '2026-09'], currentMonth: '2026-09',
+      actual: { '2026-09': { inflow: 0, outflow: -300 } },
+      projected: { '2026-09': { inflow: 0, outflow: 0 } },
+      position: { amount: 1000, asOf: '2026-09-01' },
+      postedAfterReading: { inflow: 0, outflow: -300 },
+      currency: 'RSD',
+    })
+    const [aug, sep] = t.months
+    expect(sep.net).toBe(300)
+    expect(sep.closing).toBe(1300)
+    expect((sep.closing as number) - (aug.closing as number)).toBe(sep.net)
+  })
+
+  it('a row reads as money in when it is a revenue, a receipt, or a refund, and as out otherwise', () => {
+    expect(cashRowIsIn({ type: 'direct', tx_subtype: 'expense', amount: -500 })).toBe(true)
+    expect(cashRowIsIn({ type: 'direct', tx_subtype: 'expense', amount: 500 })).toBe(false)
+    expect(cashRowIsIn({ type: 'direct', tx_subtype: 'revenue', amount: 500 })).toBe(true)
+    expect(cashRowIsIn({ type: 'invoice_payment', tx_subtype: 'expense', amount: -500 })).toBe(false)
+    expect(cashRowIsIn({ type: 'invoice_payment', tx_subtype: 'revenue', amount: 500 })).toBe(true)
   })
 
   it('reads the EUR figure in the EUR view, and nothing where a row has none', () => {

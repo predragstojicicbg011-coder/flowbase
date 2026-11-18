@@ -8,7 +8,7 @@ import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import CashFlowTimeline from '../components/CashFlowTimeline'
 import CashPositionDialog from '../components/CashPositionDialog'
 import { loadCashTimeline, type LoadedCashTimeline } from '../services/loadCashTimeline'
-import { cashDirection, previousMonth } from '../services/cashTimeline'
+import { cashDirection, cashRowIsIn, previousMonth } from '../services/cashTimeline'
 import { monthLongLabel, capitalize } from '../utils/months'
 import { countOf } from '../utils/plural'
 import { useSystemCategories } from '../contexts/SystemCategoriesContext'
@@ -384,7 +384,9 @@ export default function CashFlow() {
                       </thead>
                       <tbody>
                         {transactions.slice(0, 15).map(tx => {
-                          const isIn = cashDirection(tx) === 'in'
+                          // A refund (a direct expense booked with a minus) is
+                          // money that came back: it reads as money in.
+                          const isIn = cashRowIsIn(tx)
                           return (
                             <tr key={tx.id} style={s.dataRow}>
                               <td style={s.td}>{tx.transaction_date}</td>
