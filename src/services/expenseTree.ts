@@ -38,6 +38,7 @@
 
 import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { OVERHEAD_LABEL } from './projects'
+import { drawn } from './drawn'
 
 export type Branch = 'pl' | 'department' | 'project'
 export type Side = 'expense' | 'revenue'
@@ -249,17 +250,31 @@ export function totalOf(nodes: TreeNode[]): number {
   return nodes.reduce((s, n) => s + n.amount, 0)
 }
 
+export { drawn }
+
 /**
- * What a picture may draw of a figure: the figure when it is above zero,
- * otherwise nothing.
+ * What every depth of the tree is divided by to give a share: the sum of the
+ * figures above zero at that depth, indexed by depth (0 is the roots).
  *
- * A refund is an expense with a minus, so a node, month or cell can net to zero
- * or below. The table keeps it with its minus; a width, a height, the numerator
- * of a share or the maximum of a scale takes this instead. Null, undefined and
- * NaN are nothing as well.
+ * A share is of what is drawn, taken level by level, so no row can pass 100%
+ * however a refund nets a sibling, and the positive rows of one depth add up to
+ * 100. With no refunds this is exactly the old share of the total.
  */
-export function drawn(n: number | null | undefined): number {
-  return typeof n === 'number' && n > 0 ? n : 0
+export function shareBases(nodes: TreeNode[]): number[] {
+  const bases: number[] = []
+  const walk = (list: TreeNode[], depth: number) => {
+    for (const n of list) {
+      bases[depth] = (bases[depth] || 0) + drawn(n.amount)
+      walk(n.children, depth + 1)
+    }
+  }
+  walk(nodes, 0)
+  return bases
+}
+
+/** A figure over its base, in percent; null when either is not above zero. */
+export function shareOf(amount: number, base: number | null | undefined): number | null {
+  return amount > 0 && typeof base === 'number' && base > 0 ? (amount / base) * 100 : null
 }
 
 export function flatten(nodes: TreeNode[]): TreeNode[] {

@@ -102,7 +102,9 @@ function AreaChart({ months, revenues, expenses }: { months: string[]; revenues:
   const n = months.length
 
   const xPos = (i: number) => padL + (i / Math.max(n - 1, 1)) * chartW
-  const yPos = (v: number) => padT + (1 - v / max) * chartH
+  // A month at or below zero sits on the baseline: nothing is drawn under it.
+  // The tooltip keeps the signed figure.
+  const yPos = (v: number) => padT + (1 - drawn(v) / max) * chartH
 
   const revRef = useRef<SVGPolylineElement | null>(null)
   const expRef = useRef<SVGPolylineElement | null>(null)
@@ -145,12 +147,12 @@ function AreaChart({ months, revenues, expenses }: { months: string[]; revenues:
         ))}
 
         {/* Area fills — they fade in behind the lines that draw over them. */}
-        <path d={expArea} fill="url(#expGrad)" className="mf-fade" style={{ animationDelay: '600ms' }} />
+        <path d={expArea} fill="url(#expGrad)" data-testid="expenses-area" className="mf-fade" style={{ animationDelay: '600ms' }} />
         <path d={revArea} fill="url(#revGrad)" className="mf-fade" style={{ animationDelay: '600ms' }} />
 
         {/* Lines. Each draws itself once, and each measures its own length —
             a dash pattern guessed at leaves a gap that never closes. */}
-        <polyline ref={expRef} className="mf-draw" points={expPts} fill="none"
+        <polyline ref={expRef} className="mf-draw" data-testid="expenses-line" points={expPts} fill="none"
           stroke="#FF5B5A" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" opacity="0.8" />
         <polyline ref={revRef} className="mf-draw" points={revPts} fill="none"
           stroke="#00D47E" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
@@ -167,7 +169,7 @@ function AreaChart({ months, revenues, expenses }: { months: string[]; revenues:
               <>
                 <line x1={xPos(i)} y1={padT} x2={xPos(i)} y2={padT + chartH} stroke="rgba(255,255,255,0.10)" strokeWidth="1" strokeDasharray="3,2" />
                 <circle cx={xPos(i)} cy={yPos(revenues[i])} r="4" fill="#00D47E" stroke="#0D1B2C" strokeWidth="2" />
-                <circle cx={xPos(i)} cy={yPos(expenses[i])} r="4" fill="#FF5B5A" stroke="#0D1B2C" strokeWidth="2" />
+                <circle cx={xPos(i)} cy={yPos(expenses[i])} r="4" data-testid="expenses-dot" fill="#FF5B5A" stroke="#0D1B2C" strokeWidth="2" />
                 {/* Tooltip */}
                 <rect x={Math.max(Math.min(xPos(i) - 70, W - padR - 140), padL)} y={padT + 4} width="140" height="42" rx="6" fill="#0D1B2A" opacity="0.88" />
                 <text x={Math.max(Math.min(xPos(i), W - padR - 70), padL + 70)} y={padT + 17} textAnchor="middle" fontSize="9.5" fill="#5DCAA5" fontFamily="system-ui" fontWeight="600">{m}</text>
@@ -180,7 +182,7 @@ function AreaChart({ months, revenues, expenses }: { months: string[]; revenues:
               y={padT}
               width={chartW / Math.max(n - 1, 1)}
               height={chartH}
-              fill="transparent"
+              fill="transparent" data-testid={`month-zone-${m}`}
               style={{ cursor: 'crosshair' }}
               onMouseEnter={() => setHovered(i)}
               onMouseLeave={() => setHovered(null)}
@@ -222,7 +224,11 @@ function DonutChart({ segments }: { segments: { label: string; value: number; co
     const x2 = cx + r * Math.cos(endRad)
     const y2 = cy + r * Math.sin(endRad)
     const largeArc = sweep > 180 ? 1 : 0
-    const d = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`
+    // One slice that is the whole circle has the same start and end point, and an
+    // arc from a point to itself draws nothing: two half arcs draw the ring.
+    const d = sweep >= 359.999
+      ? `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx} ${cy + r} A ${r} ${r} 0 1 1 ${cx} ${cy - r} Z`
+      : `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`
     angle += sweep
     return { ...seg, d, pct, sweep }
   })

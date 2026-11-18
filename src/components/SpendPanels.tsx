@@ -241,8 +241,7 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
               const bin = byRow ? rowBin(v, r.max, HEAT.length) : binOf(v, grid.bins)
               const fill = bin < 0 ? HEAT_EMPTY : HEAT[Math.min(bin, HEAT.length - 1)]
               return (
-                <rect key={months[i]} role="img"
-                  aria-label={`${r.label}, ${monthLabel(months[i], true)}`}
+                <rect key={months[i]} data-testid={`heat-cell-${r.label}-${months[i]}`}
                   x={labelW + cellW * i} y={y}
                   width={Math.max(cellW - GAP, 1)} height={ROW - GAP}
                   rx="3" fill={fill}
@@ -271,8 +270,8 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
               {shortMoney(r.total)}
             </text>
             <text x={w - 4} y={y + ROW / 2 + 11} textAnchor="end" fontSize="8.5" fill={C.faint}
-              aria-label={`${r.label}, udeo u ukupnom`}>
-              {r.total > 0 && grandTotal > 0 ?`${(r.total / grandTotal * 100).toFixed(1).replace('.', ',')}%` : ''}
+              data-testid={`heat-share-${r.label}`}>
+              {r.total > 0 && grandTotal > 0 ? `${(r.total / grandTotal * 100).toFixed(1).replace('.', ',')}%` : ''}
             </text>
           </g>
         )

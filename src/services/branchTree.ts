@@ -27,7 +27,7 @@
 // its open children, which is what makes a branch read as a branch rather than
 // as a list with lines drawn on it.
 
-import { drawn } from './expenseTree'
+import { drawn } from './drawn'
 
 export interface BranchNode {
   key: string

@@ -3,7 +3,7 @@ import {
   withComparison, topMovers, paretoCut, pathFor, monthsIn,
   isExpenseRow, isRevenueRow, rowsFor, byDateDesc, UNASSIGNED, PlEntry,
   contributionsFor, contributesTo, contributionTo, projectRootOf,
-  UNKNOWN_PROJECT, BRANCHES, Branch, drawn,
+  UNKNOWN_PROJECT, BRANCHES, Branch, drawn, shareBases, shareOf,
 } from './expenseTree'
 import { OVERHEAD_LABEL } from './projects'
 
@@ -350,6 +350,60 @@ describe('what a picture may draw', () => {
     expect(drawn(null)).toBe(0)
     expect(drawn(undefined)).toBe(0)
     expect(drawn(NaN)).toBe(0)
+  })
+})
+
+describe('the share of a row', () => {
+  const sum = (xs: (number | null)[]) => xs.reduce<number>((s, x) => s + (x ?? 0), 0)
+
+  it('is over the figures above zero, and a node at or below zero has none', () => {
+    const t = buildTree([
+      e({ amount_rsd: 900, pl_category: 'A' }),
+      e({ amount_rsd: -200, pl_category: 'B' }),
+      e({ amount_rsd: 50, pl_category: 'C' }), e({ amount_rsd: -50, pl_category: 'C' }),
+    ], 'pl', 'RSD')
+    const base = shareBases(t)[0]
+    expect(base).toBe(900)
+    expect(t.map(n => shareOf(n.amount, base))).toEqual([100, null, null])
+  })
+
+  it('is never over 100 for a child beside a larger refund under the same root', () => {
+    const t = buildTree([
+      e({ amount_rsd: 900, pl_category: 'A', pl_subcategory: 'bought' }),
+      e({ amount_rsd: -400, pl_category: 'A', pl_subcategory: 'returned' }),
+    ], 'pl', 'RSD')
+    const bases = shareBases(t)
+    expect(t[0].amount).toBe(500)
+    const [bought, returned] = t[0].children
+    expect(shareOf(bought.amount, bases[1])).toBe(100)   // never 180
+    expect(shareOf(returned.amount, bases[1])).toBeNull()
+    expect(shareOf(t[0].amount, bases[0])).toBe(100)
+  })
+
+  it('adds up to 100 over the positive rows of every depth', () => {
+    const t = buildTree([
+      e({ amount_rsd: 600, pl_category: 'A', pl_subcategory: 'a1' }),
+      e({ amount_rsd: 200, pl_category: 'A', pl_subcategory: 'a2' }),
+      e({ amount_rsd: -100, pl_category: 'A', pl_subcategory: 'a3' }),
+      e({ amount_rsd: 300, pl_category: 'B', pl_subcategory: 'b1' }),
+    ], 'pl', 'RSD')
+    const bases = shareBases(t)
+    expect(bases).toEqual([1000, 1100])
+    const at = (d: number) => flatten(t).filter(n => n.depth === d).map(n => shareOf(n.amount, bases[d]))
+    expect(sum(at(0))).toBeCloseTo(100, 9)
+    expect(sum(at(1))).toBeCloseTo(100, 9)
+  })
+
+  it('is the old share of the total when nothing is refunded', () => {
+    const t = buildTree([e({ amount_rsd: 750, pl_category: 'A' }), e({ amount_rsd: 250, pl_category: 'B' })], 'pl', 'RSD')
+    expect(t.map(n => shareOf(n.amount, shareBases(t)[0]))).toEqual([75, 25])
+  })
+
+  it('has none without a base above zero', () => {
+    expect(shareOf(10, 0)).toBeNull()
+    expect(shareOf(10, undefined)).toBeNull()
+    expect(shareOf(0, 100)).toBeNull()
+    expect(shareBases([])).toEqual([])
   })
 })
 

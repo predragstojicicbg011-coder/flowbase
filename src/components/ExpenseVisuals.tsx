@@ -447,7 +447,7 @@ function TrendChart({ series, w, h, normalized, onTip, onSelect, tree, muted }: 
               const y0 = y(acc), y1 = y(acc + v)
               acc += v
               return (
-                <rect key={k} role="img" aria-label={`${k}, ${monthLabel(pt.month, crossesYear)}`}
+                <rect key={k} data-testid={`band-${k}-${pt.month}`}
                   x={cx(i) - barW / 2} y={y1} width={barW} height={Math.max(y0 - y1, 0.6)}
                   fill={colorFor(k, ki)} opacity={muted && muted !== k ? 0.16 : 0.88}
                   style={{ cursor: 'pointer', transition: 'opacity 120ms ease' }}
@@ -546,7 +546,9 @@ function BridgeChart({ steps, w, h, onTip, onSelect, priorLabel, periodLabel }: 
               <line x1={cx(i) + barW / 2} x2={cx(i + 1) - barW / 2} y1={y(after)} y2={y(after)}
                 stroke={C.faint} strokeWidth="1" strokeDasharray="3 3" />
             )}
-            <rect
+            {/* An anchor that is a net at or below zero draws nothing; its figure
+                is still printed above the axis, signed. */}
+            {(!anchor || st.end > 0) && <rect data-testid={`bridge-${st.kind}`}
               x={cx(i) - barW / 2} y={y0} width={barW} height={Math.max(y1 - y0, 2)}
               rx="2" fill={fill(st.kind)} opacity={anchor ? 0.9 : 0.8}
               style={{ cursor: st.key ? 'pointer' : 'default' }}
@@ -566,7 +568,7 @@ function BridgeChart({ steps, w, h, onTip, onSelect, priorLabel, periodLabel }: 
                     {st.key && <TipRow label="" value="kliknite za detalje" dim />}
                   </>
                 ),
-              })} />
+              })} />}
             {/* A truncated axis makes the two anchors look further apart than
                 they are. The break glyph is the conventional way to say so on
                 the bar itself, not only in a footnote. */}

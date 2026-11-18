@@ -24,12 +24,12 @@ describe('summaryRows', () => {
   ]
 
   it('writes a parent directly above its own children', () => {
-    const rows = summaryRows(tree, 'department', 1000, never)
+    const rows = summaryRows(tree, 'department', never)
     expect(rows.map(r => r['Stavka'])).toEqual(['Marketing', 'Office', 'Figma'])
   })
 
   it('puts each level in the column it actually stands for, not a numbered slot', () => {
-    const [, , leaf] = summaryRows(tree, 'department', 1000, never)
+    const [, , leaf] = summaryRows(tree, 'department', never)
     expect(leaf['Sektor']).toBe('Marketing')
     expect(leaf).not.toHaveProperty('Podsektor')
     expect(leaf).not.toHaveProperty('Opis troška')
@@ -37,44 +37,59 @@ describe('summaryRows', () => {
   })
 
   it('maps the same path to different columns in the other branch', () => {
-    const [, , leaf] = summaryRows(tree, 'pl', 1000, never)
+    const [, , leaf] = summaryRows(tree, 'pl', never)
     expect(leaf['P&L kategorija']).toBe('Marketing')
     expect(leaf['P&L potkategorija']).toBe('Office')
     expect(leaf['Sektor']).toBe('')
   })
 
   it('carries a node its whole ancestry, so a row reads on its own', () => {
-    const [, mid] = summaryRows(tree, 'pl', 1000, never)
+    const [, mid] = summaryRows(tree, 'pl', never)
     expect(mid['P&L kategorija']).toBe('Marketing')
     expect(mid['P&L potkategorija']).toBe('Office')
   })
 
-  it('reports the share of the total', () => {
-    const [root, mid] = summaryRows(tree, 'department', 2000, never)
-    expect(root['% od ukupnog']).toBe(50)
-    expect(mid['% od ukupnog']).toBe(30)
+  it('reports the share of what is above zero at the same depth', () => {
+    const two = [
+      node({ label: 'Marketing', path: ['Marketing'], amount: 750 }),
+      node({ label: 'Office', path: ['Office'], amount: 250 }),
+    ]
+    const rows = summaryRows(two, 'department', never)
+    expect(rows.map(r => r['% od ukupnog'])).toEqual([75, 25])
   })
 
-  it('does not divide by a zero total', () => {
-    expect(summaryRows(tree, 'department', 0, never)[0]['% od ukupnog']).toBe(0)
+  it('leaves the cell empty for a node at or below zero, and never writes a share over 100', () => {
+    const signed = [
+      node({
+        label: 'Marketing', path: ['Marketing'], amount: 500,
+        children: [
+          node({ label: 'Bought', path: ['Marketing', 'Bought'], amount: 900 }),
+          node({ label: 'Returned', path: ['Marketing', 'Returned'], amount: -400 }),
+        ],
+      }),
+      node({ label: 'Refunds', path: ['Refunds'], amount: -200 }),
+      node({ label: 'Nothing', path: ['Nothing'], amount: 0 }),
+    ]
+    const by = Object.fromEntries(summaryRows(signed, 'department', never).map(r => [r['Stavka'], r['% od ukupnog']]))
+    expect(by).toEqual({ Marketing: 100, Bought: 100, Returned: '', Refunds: '', Nothing: '' })
   })
 
   it('leaves the change blank rather than writing a percentage it does not have', () => {
-    const [, mid] = summaryRows(tree, 'department', 1000, never)
+    const [, mid] = summaryRows(tree, 'department', never)
     expect(mid['Promena %']).toBe('')
   })
 
   it('lists a hidden line and marks it, rather than dropping it', () => {
-    const rows = summaryRows(tree, 'department', 1000, k => k === 'Marketing|Office')
+    const rows = summaryRows(tree, 'department', k => k === 'Marketing|Office')
     expect(rows).toHaveLength(3)
     expect(rows.find(r => r['Stavka'] === 'Office')!['Isključeno']).toBe('da')
     expect(rows.find(r => r['Stavka'] === 'Marketing')!['Isključeno']).toBe('')
   })
 
   it('names the branch on every row, so two sheets can be concatenated', () => {
-    expect(summaryRows(tree, 'pl', 1000, never).every(r => r['Grana'] === 'P&L')).toBe(true)
-    expect(summaryRows(tree, 'department', 1000, never).every(r => r['Grana'] === 'Sektor')).toBe(true)
-    expect(summaryRows(tree, 'project', 1000, never).every(r => r['Grana'] === 'Projekat')).toBe(true)
+    expect(summaryRows(tree, 'pl', never).every(r => r['Grana'] === 'P&L')).toBe(true)
+    expect(summaryRows(tree, 'department', never).every(r => r['Grana'] === 'Sektor')).toBe(true)
+    expect(summaryRows(tree, 'project', never).every(r => r['Grana'] === 'Projekat')).toBe(true)
   })
 
   /**
@@ -83,7 +98,7 @@ describe('summaryRows', () => {
    * sheets can sit in one file without a level meaning two different things.
    */
   it('gives the project branch its own first column', () => {
-    const [root, mid, leaf] = summaryRows(tree, 'project', 1000, never)
+    const [root, mid, leaf] = summaryRows(tree, 'project', never)
     expect(root['Projekat']).toBe('Marketing')
     expect(leaf['Projekat']).toBe('Marketing')
     expect(mid['P&L kategorija']).toBe('Office')
@@ -92,7 +107,7 @@ describe('summaryRows', () => {
   })
 
   it('numbers the level from one, not from zero', () => {
-    const rows = summaryRows(tree, 'department', 1000, never)
+    const rows = summaryRows(tree, 'department', never)
     expect(rows.map(r => r['Nivo'])).toEqual([1, 2, 3])
   })
 })
@@ -212,8 +227,8 @@ describe('BRANCH_LEVELS', () => {
 
   it('leaves the Project column blank on the other branches', () => {
     const t = [node({ label: 'X', path: ['X'] })]
-    expect(summaryRows(t, 'pl', 1, never)[0]['Projekat']).toBe('')
-    expect(summaryRows(t, 'department', 1, never)[0]['Projekat']).toBe('')
+    expect(summaryRows(t, 'pl', never)[0]['Projekat']).toBe('')
+    expect(summaryRows(t, 'department', never)[0]['Projekat']).toBe('')
   })
 })
 

@@ -56,9 +56,13 @@ export function monthlySeries(
     const values: Record<string, number> = {}
     for (const n of top) values[n.label] = n.monthly[month] || 0
     if (rest.length > 0) {
-      values[OTHER] = rest.reduce((s, n) => s + (n.monthly[month] || 0), 0)
+      // A tail category that nets below zero draws nothing; it must not
+      // subtract from the others folded into the same band.
+      values[OTHER] = rest.reduce((s, n) => s + drawn(n.monthly[month]), 0)
     }
-    const total = Object.values(values).reduce((s, v) => s + v, 0)
+    // The net is printed, so it is the signed sum of every category, not of the
+    // bands as drawn.
+    const total = ranked.reduce((s, n) => s + (n.monthly[month] || 0), 0)
     const stack = Object.values(values).reduce((s, v) => s + drawn(v), 0)
     return { month, values, total, stack }
   })
@@ -495,10 +499,12 @@ export function heatGrid(
   const rows = kept.map(rowOf)
 
   if (rest.length > 0) {
-    const values = months.map(m => rest.reduce((sum, n) => sum + (n.monthly[m] || 0), 0))
+    // Folded lines add what they draw: one netting below zero takes nothing off
+    // another, in a cell or in the row's total.
+    const values = months.map(m => rest.reduce((sum, n) => sum + drawn(n.monthly[m]), 0))
     rows.push({
       key: `__other__`, label: OTHER, parent: [], path: [],
-      values, total: rest.reduce((sum, n) => sum + n.amount, 0),
+      values, total: rest.reduce((sum, n) => sum + drawn(n.amount), 0),
       max: Math.max(0, ...values.map(drawn)), node: null,
     })
   }

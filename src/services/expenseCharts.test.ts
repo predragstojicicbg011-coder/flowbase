@@ -606,6 +606,24 @@ describe('a figure at or below zero is in the table and not in the picture', () 
     expect(paretoSeries(buildTree([e({ amount_rsd: -40 })], 'pl', 'RSD'))).toEqual([])
   })
 
+  it('folds the tail into Ostalo by what it draws: a refund-netted tail category takes nothing off another', () => {
+    const t = buildTree([
+      e({ amount_rsd: 900, pl_category: 'A', pl_subcategory: 'A1', pl_date: '2026-08-05' }),
+      e({ amount_rsd: 300, pl_category: 'B', pl_subcategory: 'B1', pl_date: '2026-08-05' }),
+      e({ amount_rsd: -200, pl_category: 'C', pl_subcategory: 'C1', pl_date: '2026-08-05' }),
+    ], 'pl', 'RSD')
+    const s = monthlySeries(t, ['2026-08'], 1)
+    expect(s.keys).toEqual(['A', OTHER])
+    expect(s.points[0].values[OTHER]).toBe(300)       // not 300 - 200
+    expect(s.points[0].total).toBe(1000)              // the signed net stays a net
+    expect(s.points[0].stack).toBe(1200)
+    const g = heatGrid(t, ['2026-08'], 1, 1)
+    const other = g.rows.find(r => r.label === OTHER)!
+    expect(other.values).toEqual([300])
+    expect(other.total).toBe(300)
+    expect(other.max).toBe(300)
+  })
+
   it('treats a cell at or below zero as nothing, and keeps it out of the scale maximum', () => {
     const g = heatGrid(tree, months, 1)
     const a = g.rows.find(r => r.label === 'A1')!

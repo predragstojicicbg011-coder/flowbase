@@ -26,7 +26,7 @@
 // Everything here is a pure function of rows in and rows out, so it is tested
 // directly. Fetching lives in the page; `xlsx` is never imported here.
 
-import { projectRootOf, type Branch, type ComparedNode, type PlEntry } from './expenseTree'
+import { projectRootOf, shareBases, shareOf, type Branch, type ComparedNode, type PlEntry } from './expenseTree'
 import type { DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 
 /** The classification levels, in the order they are written out. */
@@ -49,7 +49,7 @@ export interface SummaryRow {
   'Prethodni iznos': number
   'Promena': number
   'Promena %': number | ''
-  '% od ukupnog': number
+  '% od ukupnog': number | ''
   'Broj transakcija': number
   'Isključeno': string
 }
@@ -88,11 +88,11 @@ export const BRANCH_NAME: Record<Branch, string> = {
 export function summaryRows(
   nodes: ComparedNode[],
   branch: Branch,
-  total: number,
   isExcluded: (key: string) => boolean,
 ): SummaryRow[] {
   const levels = BRANCH_LEVELS[branch]
   const out: SummaryRow[] = []
+  const bases = shareBases(nodes)
 
   const walk = (list: ComparedNode[]) => {
     for (const n of list) {
@@ -102,6 +102,7 @@ export function summaryRows(
         'Sektor': '',
       }
       n.path.forEach((seg, i) => { if (levels[i]) cls[levels[i]] = seg })
+      const share = shareOf(n.amount, bases[n.depth])
 
       out.push({
         'Grana': BRANCH_NAME[branch],
@@ -115,7 +116,9 @@ export function summaryRows(
         'Prethodni iznos': money2(n.priorAmount),
         'Promena': money2(n.delta),
         'Promena %': n.deltaPct === null ? '' : pct1(n.deltaPct),
-        '% od ukupnog': total > 0 ? pct1((n.amount / total) * 100) : 0,
+        // Over what is above zero at the node's own depth, as on screen; a node at
+        // or below zero has no share and the cell stays empty.
+        '% od ukupnog': share === null ? '' : pct1(share),
         'Broj transakcija': n.count,
         'Isključeno': isExcluded(n.key) ? 'da' : '',
       })

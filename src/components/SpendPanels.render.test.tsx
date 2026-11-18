@@ -253,10 +253,10 @@ describe('a period that holds a refund', () => {
 
   it('stacks no column for a category at or below zero, and measures nothing below the axis', () => {
     const { container } = render(deckFor('pl', REFUNDED, []))
-    expect(screen.queryAllByLabelText(/^Povracaj, /)).toHaveLength(0)
+    expect(screen.queryAllByTestId(/^band-Povracaj-/)).toHaveLength(0)
     // Marketing is drawn in July only: its August is a refund.
-    expect(screen.getAllByLabelText(/^Marketing, /)).toHaveLength(1)
-    expect(screen.getAllByLabelText(/^General Business, /)).toHaveLength(1)
+    expect(screen.getAllByTestId(/^band-Marketing-/)).toHaveLength(1)
+    expect(screen.getAllByTestId(/^band-General Business-/)).toHaveLength(1)
     expectSaneGeometry(container)
   })
 
@@ -266,24 +266,24 @@ describe('a period that holds a refund', () => {
       e({ amount_rsd: 0, pl_category: 'Nula', pl_subcategory: 'Nista', pl_date: '2026-08-15' }),
     ], []))
     expect(screen.getByText('Nema troškova u ovom periodu.')).toBeInTheDocument()
-    expect(screen.queryAllByLabelText(/^Povracaj, /)).toHaveLength(0)
+    expect(screen.queryAllByTestId(/^band-Povracaj-/)).toHaveLength(0)
     expectSaneGeometry(container)
   })
 
   it('shows the same period as percent of the month without a share above 100', () => {
     const { container } = render(deckFor('pl', REFUNDED, []))
     fireEvent.click(screen.getByLabelText('Prikaži kao % meseca'))
-    expect(screen.queryAllByLabelText(/^Povracaj, /)).toHaveLength(0)
+    expect(screen.queryAllByTestId(/^band-Povracaj-/)).toHaveLength(0)
     expectSaneGeometry(container)
   })
 
   it('paints a negative heatmap cell as nothing, the same as an empty one', () => {
     const { container } = render(deckFor('pl', REFUNDED, []))
     fireEvent.click(screen.getByText('Sve stavke'))
-    const fill = (name: RegExp) => screen.getByLabelText(name).getAttribute('fill')
-    const refundMonth = fill(/^Ads, avg/)
-    const emptyMonth = fill(/^Software, jul/)
-    const boughtMonth = fill(/^Ads, jul/)
+    const fill = (name: string) => screen.getByTestId(name).getAttribute('fill')
+    const refundMonth = fill('heat-cell-Ads-2026-08')
+    const emptyMonth = fill('heat-cell-Software-2026-07')
+    const boughtMonth = fill('heat-cell-Ads-2026-07')
     expect(refundMonth).toBe(emptyMonth)
     expect(boughtMonth).not.toBe(emptyMonth)
     expectSaneGeometry(container)
@@ -293,9 +293,9 @@ describe('a period that holds a refund', () => {
     render(deckFor('pl', REFUNDED, []))
     fireEvent.click(screen.getByText('Sve stavke'))
     // The refund line is in the table with its minus; it has no share.
-    const line = screen.getByLabelText('Vracena oprema, udeo u ukupnom')
+    const line = screen.getByTestId('heat-share-Vracena oprema')
     expect(line.textContent).toBe('')
-    expect(screen.getByLabelText('Ads, udeo u ukupnom').textContent).toBe('71,4%')
+    expect(screen.getByTestId('heat-share-Ads').textContent).toBe('71,4%')
   })
 
   it('draws the concentration curve to 100 over the lines above zero', () => {
@@ -311,5 +311,42 @@ describe('a period that holds a refund', () => {
     fireEvent.click(screen.getByText('Sastav'))
     expect(screen.getByLabelText(/^Marketing,/)).toBeInTheDocument()
     expect(screen.queryByLabelText(/^Povracaj,/)).not.toBeInTheDocument()
+  })
+})
+
+describe('the bridge when the period nets below zero', () => {
+  const NET_REFUND: PlEntry[] = [
+    e({ amount_rsd: -150, pl_category: 'Povracaj', pl_subcategory: 'Vracena oprema', pl_date: '2026-08-14' }),
+  ]
+
+  it('draws no bar for an end anchor at or below zero, and still prints its minus', () => {
+    const { container } = render(deckFor('pl', NET_REFUND, PRIOR))
+    fireEvent.click(screen.getByText('Most'))
+    expect(screen.getByTestId('bridge-start')).toBeInTheDocument()
+    expect(screen.queryByTestId('bridge-end')).not.toBeInTheDocument()
+    expect(container.textContent).toContain('-150')
+    expectSaneGeometry(container)
+  })
+
+  it('draws the end anchor when the period is above zero', () => {
+    render(deckFor('pl', ROWS, PRIOR))
+    fireEvent.click(screen.getByText('Most'))
+    expect(screen.getByTestId('bridge-end')).toBeInTheDocument()
+  })
+})
+
+describe('the folded Ostalo row of the heatmap', () => {
+  it('adds only what its lines draw', () => {
+    // Fourteen rows are kept; a fifteenth line nets below zero and a sixteenth is positive.
+    const many: PlEntry[] = Array.from({ length: 14 }, (_, i) =>
+      e({ amount_rsd: 1000 - i, pl_category: 'K', pl_subcategory: `Linija ${i}`, pl_date: '2026-08-02' }))
+    many.push(e({ amount_rsd: 20, pl_category: 'K', pl_subcategory: 'Rep plus', pl_date: '2026-08-03' }))
+    many.push(e({ amount_rsd: -500, pl_category: 'K', pl_subcategory: 'Rep minus', pl_date: '2026-08-04' }))
+    render(deckFor('pl', many, []))
+    fireEvent.click(screen.getByText('Sve stavke'))
+    // The folded cell is the 20 of the positive line, not 20 - 500; it is the
+    // only cell of its row that is not empty, so the row carries 20 of the 13.929 drawn.
+    expect(screen.getByTestId('heat-share-Ostalo').textContent).toBe('0,1%')
+    expect(screen.getByTestId('heat-cell-Ostalo-2026-08')).toBeInTheDocument()
   })
 })

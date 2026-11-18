@@ -15,7 +15,7 @@ import { KeyFigures, ChartDeck } from '../components/ExpenseVisuals'
 import {
   buildTree, withComparison, paretoCut, flatten, findNode,
   contributesTo, BRANCHES, BRANCH_LABEL, BRANCH_COLUMNS,
-  adjustedTotal, excludedTotal, totalOf, monthsIn, isExpenseRow, drawn,
+  adjustedTotal, excludedTotal, totalOf, monthsIn, isExpenseRow, drawn, shareBases, shareOf,
   Branch, PlEntry, ComparedNode, UNASSIGNED,
 } from '../services/expenseTree'
 import {
@@ -191,14 +191,13 @@ export default function ExpenseAnalysis() {
   const compared = useMemo(() => withComparison(tree, priorTree), [tree, priorTree])
 
   const total = useMemo(() => totalOf(tree), [tree])
-  // A share is a figure over the sum of the figures above zero, so no row reads
-  // as a negative share or as more than 100%: a category netting below zero
-  // keeps its minus in the Iznos column and has no share of the spend.
-  const shareBase = useMemo(() => tree.reduce((s, n) => s + drawn(n.amount), 0), [tree])
-  // Null for a node that is not above zero: it is not part of the picture, so
-  // it has no share and the table prints a dash.
-  const shareOf = (amount: number): number | null =>
-    shareBase > 0 && amount > 0 ? (amount / shareBase) * 100 : null
+  // A share is a figure over the sum of the figures above zero AT ITS OWN DEPTH,
+  // so no row reads as a negative share or as more than 100%: a category netting
+  // below zero keeps its minus in the Iznos column and has no share of the spend.
+  // Null for a node that is not above zero, and the table prints a dash.
+  const bases = useMemo(() => shareBases(tree), [tree])
+  const shareOfNode = (n: { amount: number; depth: number }): number | null =>
+    shareOf(n.amount, bases[n.depth])
   const adjusted = useMemo(() => adjustedTotal(tree, hidden), [tree, hidden])
   const excluded = useMemo(() => excludedTotal(tree, hidden), [tree, hidden])
   const priorTotal = useMemo(() => totalOf(priorTree), [priorTree])
@@ -207,8 +206,10 @@ export default function ExpenseAnalysis() {
   const monthlyTotals = useMemo(
     () => months.map(m => tree.reduce((sum, n) => sum + (n.monthly[m] || 0), 0)),
     [tree, months])
+  // The denominator of "x od N": the same lines the concentration cut counts,
+  // those above zero.
   const leafCount = useMemo(
-    () => flatten(tree).filter(n => n.children.length === 0).length,
+    () => flatten(tree).filter(n => n.children.length === 0 && n.amount > 0).length,
     [tree])
 
   // The two branches always tie by construction. What the strip is really for
@@ -246,7 +247,7 @@ export default function ExpenseAnalysis() {
   }
 
   const selectedNode = selected ? findNode(tree, selected) : null
-  const selectedShare = selectedNode ? shareOf(selectedNode.amount) : null
+  const selectedShare = selectedNode ? shareOfNode(selectedNode) : null
   // Unsorted: only the length is read here, and `buildEntryItems` now sorts its
   // own input before capping, so a pre-sort would change nothing but the cost.
   //
@@ -343,7 +344,7 @@ export default function ExpenseAnalysis() {
       ]
       for (const [b, sheet] of SHEETS) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
-          summaryRows(treeFor(b), b, total, isExcluded)), sheet)
+          summaryRows(treeFor(b), b, isExcluded)), sheet)
       }
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(entries), 'Stavke')
 
@@ -365,7 +366,7 @@ export default function ExpenseAnalysis() {
     nodes.filter(matchesSearch).flatMap(n => {
       const isHidden = hidden.has(n.key)
       const isOpen = expanded.has(n.key) || (!!search.trim() && n.children.length > 0)
-      const share = shareOf(n.amount)
+      const share = shareOfNode(n)
       const spark = months.map(m => n.monthly[m] || 0)
       const sparkMax = Math.max(1, ...spark.map(drawn))
 

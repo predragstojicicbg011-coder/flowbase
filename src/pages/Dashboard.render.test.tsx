@@ -500,3 +500,42 @@ describe('the expense structure when a category nets below zero', () => {
     expect(slices()).toHaveLength(0)
   })
 })
+
+describe('the donut with one slice left', () => {
+  it('draws the whole ring when one category is above zero beside one netting below', async () => {
+    ;(global as any).__db.v_pl_entries = [
+      pl({ tx_type: 'expense', amount_rsd: 400000, pl_date: '2026-04-20', pl_category: 'Materijal', pl_subcategory: 'Beton' }),
+      pl({ tx_type: 'expense', amount_rsd: -50000, pl_date: '2026-04-21', pl_category: 'Povracaj', pl_subcategory: 'Vracen alat' }),
+    ]
+    await show()
+    await waitFor(() => expect(screen.queryAllByLabelText(/^Isečak: /)).toHaveLength(1))
+    const only = screen.getByLabelText('Isečak: Materijal')
+    expect(Number(only.getAttribute('data-sweep'))).toBeCloseTo(360, 1)
+    // Two half arcs, so the ring is there to be seen and not a point.
+    expect((only.getAttribute('d') || '').match(/A /g)).toHaveLength(2)
+  })
+})
+
+describe('the revenue and expense chart when a month nets below zero', () => {
+  const BASELINE = 10 + 140 - 10 - 28   // padT + chartH of the chart
+
+  it('puts no expense point under the baseline, and the tooltip keeps the minus', async () => {
+    ;(global as any).__db.v_pl_entries.push(
+      pl({ tx_type: 'expense', amount_rsd: -200, pl_date: '2026-06-10', pl_category: 'Povracaj', pl_subcategory: 'Vracen alat' }),
+    )
+    await show()
+    await waitFor(() => expect(screen.getByTestId('expenses-line')).toBeInTheDocument())
+    const ys = (screen.getByTestId('expenses-line').getAttribute('points') || '')
+      .split(' ').map(p => Number(p.split(',')[1]))
+    expect(ys.length).toBeGreaterThan(1)
+    for (const y of ys) {
+      expect(Number.isFinite(y)).toBe(true)
+      expect(y).toBeLessThanOrEqual(BASELINE + 1e-9)
+    }
+    expect(screen.getByTestId('expenses-area').getAttribute('d') || '').not.toMatch(/NaN/)
+
+    fireEvent.mouseEnter(screen.getByTestId('month-zone-jun'))
+    expect(Number(screen.getByTestId('expenses-dot').getAttribute('cy'))).toBeLessThanOrEqual(BASELINE + 1e-9)
+    expect(screen.getByText(/^Troškovi: -200$/)).toBeInTheDocument()
+  })
+})
