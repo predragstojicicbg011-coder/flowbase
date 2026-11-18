@@ -109,10 +109,80 @@ i uključi „Ovo je povraćaj“.
   `Povraćaj se knjiži kao jednokratan — ne ulazi u procene narednih meseci.`
 - Rečnik (`docs/recnik.md`) dobija stavku: `Refund (money back from a supplier) | Povraćaj`.
 
+## Izgrađeno, i šta je presuđeno u toku izrade (18–19.11.2026)
+
+Sve iznad je dizajn kako je odobren. Ovde je zapisano gde ga je izrada
+precizirala ili ispravila; gde se razlikuju, važi ovaj odeljak.
+
+**D2/D8, stavke podele.** Stavke podele povraćaja su takođe jednokratne
+(`cf_type = 'one_time'`), jer pogled P&L-a čita tip novčanog toka stavke pre
+roditeljevog, pa bi negativna ponavljajuća stavka ušla u procenu.
+
+**D3, šta je izbor.** Pored klika na karticu podtipa, „Trošak“ biraju i:
+ukucane stavke podele, primenjeno brzo popunjavanje i svako razvrstavanje u
+delu Trošak (kategorija, potkategorija, sektor). Izbor vrste prihoda i izbor
+projekta ne biraju ništa. Pravilo važi za svaki tip; u praksi menja samo
+direktne stavke i otplatu kredita (ukucana u uplatu čuva se kao prihod, kako
+je i uvoz upisuje; ništa je ne sabira). Podtip plaćanja fakture se i dalje
+određuje po fakturi.
+
+**D4, ponovno otvaranje.** Storno iz zarada se ne može otvoriti u ručnom unosu
+izvoda (zarade ne upisuju izvod), a u transakciji se može sačuvati tek kad mu
+se izabere banka, jer je nema. Sačuvan povraćaj zadržava znak pri čuvanju bez
+izmene u svakom stanju, i kad je vezan za fakturu; tada mu se prekidač
+prikazuje. Izmena izvoda ne menja iznos, stranu, podtip, valutu ni datum
+stavke koja je podeljena na više troškova: čuvanje se odbija i upućuje na
+transakciju, jer izmena izvoda nikad nije upisivala stavke podele, a P&L čita
+stavke. U pregledu uvoza polja isplate i uplate ne primaju ukucan minus.
+
+**D6, udeli i slike.** Udeo je u zbiru pozitivnih iznosa *istog nivoa* stabla,
+pa nijedan red ne prelazi 100%, a pozitivni redovi nivoa daju 100; bez
+povraćaja to je stari „udeo u ukupnom“. Čvor na nuli ili ispod nje ima crtu
+umesto udela. Pareto i broj stavki računaju samo pozitivne listove; udeo
+neklasifikovanog je u zbiru pozitivnih sektora; „Ostalo“ crta zbir svojih
+pozitivnih članova, a ispisuje neto. Krofna sa jednim isečkom crta pun prsten.
+Jedna funkcija, `drawn()` (`src/services/drawn.ts`), kaže šta slika sme da
+crta. Kolona udela u Excel izvozu prati isto pravilo.
+
+**D7, novčani tok.** Tekući mesec na vremenskoj liniji je
+`stvarno + max(0, planirano − max(stvarno, 0))`. Mesec čiji je odliv na nuli
+ili ispod nje nema stub odliva, a iznos se ispisuje sa jednim znakom. U listi
+transakcija na Novčanom toku povraćaj se čita kao priliv (`+`, zeleno,
+`📥 Povraćaj`); zbirovi strane su već bili neto.
+
+**D9, izgled.** Pregled pre čuvanja u transakciji ispisuje „RSD (knjiženo)“ i
+„EUR“ sa minusom, kako će biti proknjiženo, a tip kao
+`Direktna (trošak) · Povraćaj`; objašnjenje stoji ispod prekidača i kad je
+isključen. Negativno ostvarenje u budžetu je zeleno, sa minusom. Poslednje
+transakcije na Kontrolnoj tabli nose oznaku.
+
+**D10, još dve rečenice na ekranu** za povraćaj koji je već vezan za fakturu:
+`Povraćaj nije plaćanje, pa se neće povezati.` i
+`Povraćaj nije plaćanje i ne može da zatvori fakturu. Uklonite ga iz povezanih i sačuvajte ponovo.`
+Uz to i rečenica kojom izmena izvoda odbija podeljenu stavku:
+`Stavka N je podeljena na više troškova, pa se njen iznos, valuta i datum ovde ne menjaju. Otvorite tu transakciju iz Glavne knjige i izmenite je tamo.`
+
+**D12, ispravka.** P&L analiza → izmena i Glavna knjiga → Izmeni otvaraju
+transakciju; „Ovo je povraćaj“, pa čuvanje. Podeljene stavke se otvaraju samo
+iz Glavne knjige (u pregledu stavki P&L-a i budžeta ih nema, kao i pre).
+Transakcija ne čuva red bez P&L kategorije, sektora i banke; zaključan period
+odbija čuvanje.
+
+**Šta se menja za postojeće podatke kad klijent ovo pusti u rad** (samo tamo
+gde negativni troškovi već postoje: storna iz zarada i knjižna odobrenja u
+P&L-u): P&L analiza postaje neto i slaže se sa Kontrolnom tablom, Izveštajima
+i Budžetom; stavka na nuli ili ispod nje ima crtu umesto udela i ne crta se;
+storna su zelena sa oznakom „Povraćaj“ u pregledu stavki i u Glavnoj knjizi;
+u listi na Novčanom toku storno se čita kao `+`; na vremenskoj liniji storno
+smanjuje odliv meseca; ćelija budžeta ispod nule prikazuje iznos umesto crte;
+negativan direktan trošak se više ne nudi kao plaćanje fakture.
+
 ## Čega ovde nema
 
 Ogledalo na strani prihoda (isplata proknjižena kao prihod); filter „iznos
 od / do“ u Glavnoj knjizi koji poredi sa znakom; knjižna odobrenja na
-fakturama van P&L-a; tekst „preostalo / višak“ u podeli knjižnog odobrenja.
-Sve ostaje kako je bilo. Razlike prema Mintflow-u: FlowBase nema podelu po
+fakturama van P&L-a. Sve to ostaje kako je bilo. Tekst „preostalo / višak“ u
+podeli i rečenica koja odbija podelu koja se ne slaže ipak su ispravljeni
+(`b32fee8`), i za knjižna odobrenja: smer se čita po veličinama i ne ispisuje
+se minus. Razlike prema Mintflow-u: FlowBase nema podelu po
 vrednosti, karticu Simulacija ni AI predlog, pa tih delova nema ni ovde.
