@@ -50,6 +50,10 @@ import {
   ADVANCE_BADGE_STYLE, ADVANCE_LABEL, doubleCountHint, effectiveAdvance, paymentSubtypeFor, showsLegacyAdvance, whyAdvanceNotSavable,
 } from '../services/advanceReceipt'
 import { countOf } from '../utils/plural'
+import {
+  booked as signedFigure, bookedAmounts, isRefundRow,
+  REFUND_SWITCH, REFUND_SWITCH_NOTE, REFUND_ONE_TIME_NOTE, REFUND_CASH_FLOW,
+} from '../services/refund'
 
 /** Display labels for the stored tag keys; the keys stay as they are in the data. */
 const TAG_LABEL: Record<string, string> = {
@@ -126,6 +130,16 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       ? 'passthrough'
       : ((transaction.type as TxType) || 'direct')
 
+  /**
+   * Is the row being edited a refund — a direct expense stored with a minus?
+   *
+   * The form holds magnitudes, so what this row was read with has its minus
+   * taken off where it is read (the amount, the split lines) and put back by
+   * the save while "Ovo je povraćaj" stays on. See services/refund.ts.
+   */
+  const storedRefund: boolean = rowType === 'direct' && rowTable === 'transactions'
+    && !transaction?.is_advance && isRefundRow(transaction)
+
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -181,6 +195,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   // services/advanceReceipt.ts.
   const [isAdvanceFlag, setIsAdvanceFlag] = useState<boolean>(!!transaction?.is_advance)
   const advance = effectiveAdvance(txType, directSubtype, isAdvanceFlag)
+  /**
+   * "Ovo je povraćaj": money came back from the supplier, and this direct
+   * expense is booked with a minus so it reduces the expense it is filed
+   * under. Only ever honoured through `bookAsRefund` below, which also asks
+   * that the row still be a direct expense; every control that makes it
+   * something else turns this off as well, so no minus is carried along.
+   */
+  const [isRefund, setIsRefund] = useState(false)
   const [linkedInvoices, setLinkedInvoices] = useState<LinkedInvoice[]>([])
   /**
    * The invoices this payment closed when the dialog opened.
@@ -341,10 +363,16 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     if (!rowId) { setSplitLines([]); return }
     let cancelled = false
     loadSplits(supabase, 'transaction', rowId).then(rows => {
-      if (!cancelled) setSplitLines(linesFrom(rows as any, n => `line-${n}`))
+      if (cancelled) return
+      const lines = linesFrom(rows as any, n => `line-${n}`)
+      // A refund's lines are stored with its minus; they are typed, checked
+      // and shown as magnitudes, and the save puts the minus back.
+      setSplitLines(storedRefund
+        ? lines.map(l => ({ ...l, amount: signedFigure(l.amount, -1) }))
+        : lines)
     })
     return () => { cancelled = true }
-  }, [rowId])
+  }, [rowId, storedRefund])
 
   /**
    * Why the split cannot be posted, or null. Guards the button too.
@@ -359,6 +387,24 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     : null
 
   const splitActive = txType === 'direct' && splitLines.length > 0
+
+  /**
+   * Whether "Ovo je povraćaj" is offered at all: on a direct expense that is
+   * not an advance and not linked to a bill. A payment against a bill closes
+   * it; it is not money back from a supplier.
+   *
+   * A STORED REFUND IS ALWAYS OFFERED IT, links or not. Its figures are shown
+   * as magnitudes, so hiding the switch would let an untouched save write the
+   * row back positive. Shown, it keeps its minus unless somebody turns it off.
+   */
+  const refundOffered = txType === 'direct' && directSubtype === 'expense' && !advance
+    && (linkedInvoices.length === 0 || storedRefund)
+  /**
+   * Whether this save books a refund — the ONE decision every write reads.
+   * Every figure the form shows, checks and converts stays the magnitude
+   * typed; the minus is put only on what the row writes (services/refund.ts).
+   */
+  const bookAsRefund = isRefund && refundOffered
 
   /** Lines changed in the editor: the project moves between the payment and
    *  its lines by one rule (splitProjectChange) — never on both at once. */
@@ -539,7 +585,11 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     setDirectSubtype(transaction.tx_subtype || 'expense')
     setIsAdvanceFlag(!!transaction.is_advance)
     setNote(transaction.note || '')
-    setAmount(transaction.amount?.toString() || '')
+    // A refund opens with its switch on and its figures as magnitudes, which
+    // is what the form types and checks; the save puts the minus back.
+    setIsRefund(storedRefund)
+    const read = (n: number | null | undefined) => (storedRefund ? signedFigure(n, -1) : n)
+    setAmount(read(transaction.amount)?.toString() || '')
     setExRate(transaction.exchange_rate?.toString() || '')
     setEurRate(transaction.eur_rate?.toString() || '')
     setIsIndexed(transaction.is_indexed || false)
@@ -555,12 +605,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     setRefNum(transaction.reference_number || '')
     setCfType(transaction.cf_type || '')
     setCfFrequency(transaction.cf_frequency || 'monthly')
-    setCfNextMonthEst(transaction.cf_next_month_est?.toString() || '')
+    setCfNextMonthEst(read(transaction.cf_next_month_est)?.toString() || '')
     setCfAccrualFrom(transaction.cf_accrual_from || '')
     setCfAccrualTo(transaction.cf_accrual_to || '')
     setCfCapexMonths(transaction.cf_capex_months?.toString() || '')
     setCfReimbursableDate(transaction.cf_reimbursable_date || '')
-  }, [transaction, rowType])
+  }, [transaction, rowType, storedRefund])
 
   useEffect(() => {
     if (transaction && plCategories.length > 0) {
@@ -987,6 +1037,11 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       // An advance is a direct revenue receipt, but cash and a liability —
       // never P&L (CHECK transactions_advance_shape).
       const plImpact = isDirectWithPL && !advance
+      // Everything above is a magnitude, as typed and as booked. A refund
+      // writes the same figures with a minus — the amount and both book
+      // figures together, never the two rates. Anything else writes exactly
+      // what it wrote before.
+      const writtenBook = bookAsRefund ? bookedAmounts(booked, -1) : booked
 
       const payload = {
         company_id: companyId || null, bank_id: bankId || null,
@@ -998,9 +1053,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         tx_subtype: txType === 'direct' ? directSubtype
           : txType === 'invoice_payment' ? paymentSubtypeFor(linkedInvoices.map(l => l.type)) : null,
         is_advance: advance,
-        currency, amount: parseFloat(amount),
+        currency, amount: bookAsRefund ? signedFigure(parseFloat(amount), -1) as number : parseFloat(amount),
         exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
-        amount_rsd: booked.amount_rsd, amount_eur: booked.amount_eur,
+        amount_rsd: writtenBook.amount_rsd, amount_eur: writtenBook.amount_eur,
         is_indexed: isIndexed, pl_impact: plImpact,
         pl_category: isDirectWithPL ? (plCatName || null) : null,
         pl_subcategory: isDirectWithPL ? (plSubName || null) : null,
@@ -1022,6 +1077,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         cf_accrual_to: cfType === 'accrual' ? (cfAccrualTo || null) : null,
         cf_capex_months: cfType === 'capex' ? (cfCapexMonths ? parseInt(cfCapexMonths) : null) : null,
         cf_reimbursable_date: cfType === 'reimbursable' ? (cfReimbursableDate || null) : null,
+        // A refund is one-time and is never carried into a future month
+        // (D2). Overwrites the seven keys above in place; adds nothing.
+        ...(bookAsRefund ? REFUND_CASH_FLOW : {}),
         account_number: accNum || null, model: model || null,
         reference_number: refNum || null, note: note || null,
         tags: tags.length > 0 ? tags : null, status: 'posted',
@@ -1258,11 +1316,20 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         // After, because a split names the payment it belongs to and there is
         // no id to name until the insert comes back. An invoice payment never
         // carries one: it closes a bill classified when it was raised.
+        //
+        // A refund's split is saved against the signed row — all three
+        // figures negative, since the last line is the remainder of each —
+        // and every line carries its minus: typed as magnitudes, stored as
+        // the row is.
         {
           const outcome = await saveSplits(
             supabase, 'transaction', txId,
-            { amount: parseFloat(amount) || 0, currency, ...booked },
-            txType === 'direct' ? splitLines : [])
+            bookAsRefund
+              ? { amount: signedFigure(parseFloat(amount) || 0, -1) as number, currency, ...writtenBook }
+              : { amount: parseFloat(amount) || 0, currency, ...booked },
+            txType !== 'direct' ? []
+              : bookAsRefund ? splitLines.map(l => ({ ...l, amount: signedFigure(l.amount, -1) }))
+              : splitLines)
           if (!outcome.ok) {
             setSaving(false)
             setPostError(outcome.message)
@@ -1512,6 +1579,13 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
   const cfPanel = (
     <div style={s.section}>
       <div style={s.sectionTitle}>Klasifikacija novčanog toka</div>
+      {/* A refund is one-time, always (D2): no choice is offered, and the
+          save writes REFUND_CASH_FLOW whatever is held below. */}
+      {bookAsRefund ? (
+        <div style={{ fontSize: '12px', color: DIALOG.dim, background: DIALOG.raised, borderRadius: '8px', padding: '10px 12px', lineHeight: 1.55 }}>
+          {REFUND_ONE_TIME_NOTE}
+        </div>
+      ) : (<>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '8px' }}>
         {[
           { id: 'recurring', label: '🔁 Ponavljajući', sub: 'Mesečno/kvart./god.' },
@@ -1605,6 +1679,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           Jednokratni trošak — neće ući u procene za naredne mesece.
         </div>
       )}
+      </>)}
     </div>
   )
 
@@ -1862,7 +1937,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               <div style={s.section}>
                 <div style={s.sectionTitle}>Tip transakcije <span style={s.req}>*</span></div>
                 <div style={{ ...s.typeGrid, gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
-                  <div style={{ ...s.typeCard, ...(txType === 'invoice_payment' ? s.typeCardPayment : {}) }} onClick={() => setTxType('invoice_payment')}>
+                  <div style={{ ...s.typeCard, ...(txType === 'invoice_payment' ? s.typeCardPayment : {}) }} onClick={() => { setTxType('invoice_payment'); setIsRefund(false) }}>
                     <div style={{ fontSize: '24px', marginBottom: '6px' }}>💳</div>
                     <div style={s.typeCardTitle}>Plaćanje fakture</div>
                     <div style={s.typeCardSub}>Zatvara jednu ili više otvorenih faktura. Bez novog uticaja na P&L.</div>
@@ -1872,12 +1947,12 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                     <div style={s.typeCardTitle}>Direktna transakcija</div>
                     <div style={s.typeCardSub}>Faktura ne postoji niti će postojati. Direktno utiče na P&L.</div>
                   </div>
-                  <div style={{ ...s.typeCard, ...(txType === 'passthrough' ? { border: '2px solid ' + DIALOG.amber, background: DIALOG.amberFill } : {}) }} onClick={() => setTxType('passthrough')}>
+                  <div style={{ ...s.typeCard, ...(txType === 'passthrough' ? { border: '2px solid ' + DIALOG.amber, background: DIALOG.amberFill } : {}) }} onClick={() => { setTxType('passthrough'); setIsRefund(false) }}>
                     <div style={{ fontSize: '24px', marginBottom: '6px' }}>🔄</div>
                     <div style={s.typeCardTitle}>Prolazna stavka</div>
                     <div style={s.typeCardSub}>Novac u prolazu — bez uticaja na P&L. Uparene UPLATA i ISPLATA.</div>
                   </div>
-                  <div style={{ ...s.typeCard, ...(txType === 'credit_payment' ? { border: '2px solid #4EA8FF', background: DIALOG.blueFill } : {}) }} onClick={() => { setTxType('credit_payment'); resetCredit() }}>
+                  <div style={{ ...s.typeCard, ...(txType === 'credit_payment' ? { border: '2px solid #4EA8FF', background: DIALOG.blueFill } : {}) }} onClick={() => { setTxType('credit_payment'); setIsRefund(false); resetCredit() }}>
                     <div style={{ fontSize: '24px', marginBottom: '6px' }}>🏦</div>
                     <div style={s.typeCardTitle}>Otplata kredita</div>
                     <div style={s.typeCardSub}>Zatvara rate kredita. Označava ih kao plaćene u Kreditima.</div>
@@ -2170,8 +2245,24 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                     <div style={s.sectionTitle}>Podtip</div>
                     <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                       <div style={{ ...s.typeChip, ...(directSubtype === 'expense' ? s.typeChipExpense : {}) }} onClick={() => setDirectSubtype('expense')}>📤 Trošak</div>
-                      <div style={{ ...s.typeChip, ...(directSubtype === 'revenue' ? s.typeChipRevenue : {}) }} onClick={() => setDirectSubtype('revenue')}>📥 Prihod</div>
+                      <div style={{ ...s.typeChip, ...(directSubtype === 'revenue' ? s.typeChipRevenue : {}) }} onClick={() => { setDirectSubtype('revenue'); setIsRefund(false) }}>📥 Prihod</div>
                     </div>
+                    {/* Money that came back from the supplier, filed under the
+                        expense it reduces. Typed as a magnitude like any other
+                        amount; the minus is the save's. */}
+                    {refundOffered && (
+                      <div style={{ marginTop: '4px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: DIALOG.text, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={isRefund} onChange={e => setIsRefund(e.target.checked)}
+                            style={{ accentColor: DIALOG.accent, cursor: 'pointer' }} />
+                          {REFUND_SWITCH}
+                        </label>
+                        {/* Read before it is turned on, so it is always there. */}
+                        <div style={{ fontSize: '11.5px', color: isRefund ? DIALOG.accent : DIALOG.dim, margin: '4px 0 0 24px', lineHeight: 1.55 }}>
+                          {REFUND_SWITCH_NOTE}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {directSubtype === 'expense' && (
@@ -2328,7 +2419,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                         <div style={{ ...s.infoBox, background: DIALOG.amberFill, borderColor: DIALOG.amber, color: DIALOG.amber, marginBottom: '12px', fontSize: '11.5px', lineHeight: 1.5 }}>
                           {hint}{' '}
                           <span style={{ textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}
-                            onClick={() => setTxType('invoice_payment')}>Prebaci na plaćanje fakture</span>
+                            onClick={() => { setTxType('invoice_payment'); setIsRefund(false) }}>Prebaci na plaćanje fakture</span>
                         </div>
                       ) : null
                     })()}
@@ -2405,7 +2496,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   ['Banka', banks.find(b => b.id === bankId)?.name || '—'],
                   ['Partner', showNewPartner ? newPartnerName : (partners.find(p => p.id === partnerId)?.name || partnerSearch || '—')],
                   ['Datum', txDate],
-                  ['Tip', txType === 'invoice_payment' ? 'Plaćanje fakture' : txType === 'credit_payment' ? 'Otplata kredita' : txType === 'passthrough' ? 'Prolazna stavka' : advance ? `${ADVANCE_LABEL} (bez uticaja na bilans uspeha)` : `Direktna (${directSubtype === 'revenue' ? 'prihod' : 'trošak'})`],
+                  ['Tip', txType === 'invoice_payment' ? 'Plaćanje fakture' : txType === 'credit_payment' ? 'Otplata kredita' : txType === 'passthrough' ? 'Prolazna stavka' : advance ? `${ADVANCE_LABEL} (bez uticaja na bilans uspeha)` : bookAsRefund ? 'Direktna (trošak) · Povraćaj' : `Direktna (${directSubtype === 'revenue' ? 'prihod' : 'trošak'})`],
                   ...(advance ? [['Projekat', projectLabelById(projects, projectId)]] : []),
                 ]},
                 ...(txType === 'invoice_payment' && linkedInvoices.length > 0 ? [{ title: 'Povezane fakture', rows: linkedInvoices.map(l => [`${l.partner_name} (${l.invoice_number})`, `raspoređeno ${formatMoney(l.allocated_own || 0, allocationCurrency(l))}`]) }] : []),
@@ -2413,7 +2504,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   ['P&L kategorija', plCatName || '—'],
                   ['Sektor', deptName || '—'],
                   ['Projekat', splitActive ? 'Po stavkama podele' : projectLabelById(projects, projectId)],
-                  ['Novčani tok', cfLabel()],
+                  // What the save writes for a refund, whatever is held below.
+                  ['Novčani tok', bookAsRefund ? 'Jednokratni' : cfLabel()],
                 ]}] : []),
                 { title: 'Iznosi', rows: [
                   ['Originalni iznos', amount ? fmtMoney(parseFloat(amount), currency) : '—'],
@@ -2425,12 +2517,16 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                 <div key={sec.title} style={s.reviewSection}>
                   <div style={s.reviewTitle}>{sec.title}</div>
                   <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: '13px' }}>
+                    {/* The browser inserts a tbody anyway; written out, React
+                        builds the same tree the page shows. */}
+                    <tbody>
                     {sec.rows.map(([k, v]) => (
                       <tr key={k}>
                         <td style={{ color: DIALOG.dim, padding: '5px 0', width: '45%', borderBottom: '0.5px solid ' + DIALOG.borderSoft }}>{k}</td>
                         <td style={{ fontWeight: '500', color: DIALOG.text, padding: '5px 0', borderBottom: '0.5px solid ' + DIALOG.borderSoft }}>{v}</td>
                       </tr>
                     ))}
+                    </tbody>
                   </table>
                 </div>
               ))}
@@ -2474,9 +2570,13 @@ const s: Record<string, React.CSSProperties> = {
   stepsBar: { display: 'flex', alignItems: 'center', padding: '0.75rem 1.5rem', borderBottom: '0.5px solid ' + DIALOG.border, gap: 0, overflowX: 'auto' },
   stepItem: { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', padding: '4px 8px', borderRadius: '8px', whiteSpace: 'nowrap' as const },
   stepNum: { width: '22px', height: '22px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '500', background: DIALOG.raised, color: DIALOG.dim, border: '0.5px solid ' + DIALOG.border, flexShrink: 0 },
-  stepActive: { background: DIALOG.accent, color: DIALOG.onAccent, borderColor: DIALOG.accent },
-  stepDone: { background: DIALOG.accentFill, color: DIALOG.accent, borderColor: DIALOG.accent },
-  stepError: { background: DIALOG.redFill, color: DIALOG.red, borderColor: DIALOG.red },
+  // The full `border`, not `borderColor`: `stepNum` sets the shorthand, and a
+  // dot that loses its state on a step change would otherwise drop a longhand
+  // out from under it (React warns, and the colour can stick). Same width and
+  // style as `stepNum`, so each dot looks exactly as before.
+  stepActive: { background: DIALOG.accent, color: DIALOG.onAccent, border: '0.5px solid ' + DIALOG.accent },
+  stepDone: { background: DIALOG.accentFill, color: DIALOG.accent, border: '0.5px solid ' + DIALOG.accent },
+  stepError: { background: DIALOG.redFill, color: DIALOG.red, border: '0.5px solid ' + DIALOG.red },
   stepLabel: { fontSize: '12px', color: DIALOG.dim },
   stepDiv: { width: '20px', height: '0.5px', background: DIALOG.border, flexShrink: 0 },
   validationBanner: { display: 'flex', alignItems: 'flex-start', gap: '10px', background: DIALOG.redFill, borderBottom: '0.5px solid ' + DIALOG.redSoft, padding: '10px 1.5rem', color: DIALOG.red },
