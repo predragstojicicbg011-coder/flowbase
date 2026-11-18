@@ -1042,6 +1042,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       // figures together, never the two rates. Anything else writes exactly
       // what it wrote before.
       const writtenBook = bookAsRefund ? bookedAmounts(booked, -1) : booked
+      const writtenAmount = bookAsRefund ? signedFigure(parseFloat(amount), -1) as number : parseFloat(amount)
 
       const payload = {
         company_id: companyId || null, bank_id: bankId || null,
@@ -1053,7 +1054,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         tx_subtype: txType === 'direct' ? directSubtype
           : txType === 'invoice_payment' ? paymentSubtypeFor(linkedInvoices.map(l => l.type)) : null,
         is_advance: advance,
-        currency, amount: bookAsRefund ? signedFigure(parseFloat(amount), -1) as number : parseFloat(amount),
+        currency, amount: writtenAmount,
         exchange_rate: booked.exchange_rate, eur_rate: booked.eur_rate,
         amount_rsd: writtenBook.amount_rsd, amount_eur: writtenBook.amount_eur,
         is_indexed: isIndexed, pl_impact: plImpact,
@@ -1325,7 +1326,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
           const outcome = await saveSplits(
             supabase, 'transaction', txId,
             bookAsRefund
-              ? { amount: signedFigure(parseFloat(amount) || 0, -1) as number, currency, ...writtenBook }
+              ? { amount: writtenAmount, currency, ...writtenBook }
               : { amount: parseFloat(amount) || 0, currency, ...booked },
             txType !== 'direct' ? []
               : bookAsRefund ? splitLines.map(l => ({ ...l, amount: signedFigure(l.amount, -1) }))
@@ -1906,8 +1907,11 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               <div style={s.convRow}>
                 <div><div style={s.convLabel}>Originalni iznos</div><div style={s.convVal}>{amount ? fmtMoney(parseFloat(amount), currency) : '—'}</div></div>
                 <div style={{ fontSize: '20px', color: DIALOG.faint, alignSelf: 'flex-end', paddingBottom: '4px' }}>→</div>
-                <div><div style={s.convLabel}>RSD (knjiženo)</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'}</div></div>
-                <div><div style={s.convLabel}>EUR</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(amountEur, 'EUR') : '—'}</div></div>
+                {/* A stored refund is already marked one here, so its book
+                    figures are shown as they will be booked: with the minus.
+                    A new row is marked on the next step; the review shows it. */}
+                <div><div style={s.convLabel}>RSD (knjiženo)</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(storedRefund && bookAsRefund ? -amountRsd : amountRsd, 'RSD') : '—'}</div></div>
+                <div><div style={s.convLabel}>EUR</div><div style={{ ...s.convVal, color: DIALOG.accent }}>{book.amounts ? fmtMoney(storedRefund && bookAsRefund ? -amountEur : amountEur, 'EUR') : '—'}</div></div>
               </div>
             </div>
           )}
@@ -2510,8 +2514,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                 { title: 'Iznosi', rows: [
                   ['Originalni iznos', amount ? fmtMoney(parseFloat(amount), currency) : '—'],
                   ['Kurs', book.amounts ? `${fmtNum(book.amounts.exchange_rate, 4)} RSD/${currency} · EUR ${fmtNum(book.amounts.eur_rate, 4)} (${rateSource || 'ručno'})` : 'nije dostupno'],
-                  ['RSD (knjiženo)', book.amounts ? fmtMoney(amountRsd, 'RSD') : '—'],
-                  ['EUR', book.amounts ? fmtMoney(amountEur, 'EUR') : '—'],
+                  // As they will be booked: a refund's two book figures carry
+                  // its minus. The original amount above stays what was typed.
+                  ['RSD (knjiženo)', book.amounts ? fmtMoney(bookAsRefund ? -amountRsd : amountRsd, 'RSD') : '—'],
+                  ['EUR', book.amounts ? fmtMoney(bookAsRefund ? -amountEur : amountEur, 'EUR') : '—'],
                 ]},
               ].map(sec => (
                 <div key={sec.title} style={s.reviewSection}>

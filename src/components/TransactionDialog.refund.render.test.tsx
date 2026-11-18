@@ -4,6 +4,7 @@ import TransactionDialog from './TransactionDialog'
 import {
   REFUND_SWITCH, REFUND_SWITCH_NOTE, REFUND_ONE_TIME_NOTE, REFUND_CASH_FLOW,
 } from '../services/refund'
+import { fmtMoney } from '../utils/formatters'
 
 // ── A direct expense marked "Ovo je povraćaj" ───────────────────────────────
 //
@@ -262,6 +263,17 @@ const turnSwitch = (on: boolean) => {
 const subtype = (label: '📤 Trošak' | '📥 Prihod') =>
   fireEvent.click(within(screen.getByText('Podtip').parentElement as HTMLElement).getByText(label))
 
+/** The value beside a label in the review table. */
+const reviewValue = (label: string) => {
+  const cellOf = screen.getAllByText(label).find(el => el.tagName === 'TD')
+  expect(cellOf).toBeTruthy()
+  return (cellOf!.nextElementSibling as HTMLElement).textContent
+}
+
+/** A figure in the conversion row of the amount step, under its label. */
+const stepTwoValue = (label: string) =>
+  (screen.getByText(label).nextElementSibling as HTMLElement).textContent
+
 const SAVE = /^(Proknjiži transakciju|Sačuvaj izmene)$/
 const DONE = /^Transakcija je (proknjižena|izmenjena)\.$/
 
@@ -313,6 +325,45 @@ const storedLine = (id: string, order: number, amount: number, rsd: number, eur:
   project_id: null, cf_type: null, note: null,
 })
 
+/** The split lines as sent to the database (without the ids the mock gives them). */
+const splitPayloadsWritten = () =>
+  wrote('pl_splits').flatMap((w: any) => ([] as any[]).concat(w.payload))
+
+/** The two stored lines of the 1199.22 row, positive. */
+const positiveLines = () => [
+  storedLine('s1', 0, 1000, 1000, 8.53),
+  storedLine('s2', 1, 199.22, 199.22, 1.7),
+]
+/** The same two lines stored as a refund. */
+const negativeLines = () => [
+  storedLine('s1', 0, -1000, -1000, -8.53),
+  storedLine('s2', 1, -199.22, -199.22, -1.7),
+]
+/** Split rows with the three figures negated, everything else as it was. */
+const negated = (rows: any[]) => rows.map(r => ({
+  ...r, amount: -r.amount, amount_rsd: -r.amount_rsd, amount_eur: -r.amount_eur,
+}))
+
+/**
+ * What an ordinary edit of this row writes, nothing changed: the update and
+ * the split lines (when `lines` are stored with it). Leaves the database as
+ * it found it, so the same row can be opened again.
+ */
+const ordinaryEditOf = async (row: Record<string, unknown>, lines: any[] = []) => {
+  db().rows.transactions = [row]
+  db().rows.pl_splits = lines
+  await openStored(row)
+  if (lines.length > 0) await waitFor(() => expect(mockSplitEditor.props.lines).toHaveLength(lines.length))
+  await save()
+  const payload = theUpdate()
+  const splits = splitPayloadsWritten()
+  cleanup()
+  db().writes.length = 0
+  mockSplitEditor.props = null
+  return { payload, splits }
+}
+const ordinaryUpdateOf = async (row: Record<string, unknown>) => (await ordinaryEditOf(row)).payload
+
 /** The stored row closes a supplier bill. */
 const linkABill = () => {
   db().rows.invoice_transaction_links = [{
@@ -349,6 +400,11 @@ describe('nova direktna transakcija', () => {
 
     goTo('Pregled')
     expect(screen.getByText('Direktna (trošak) · Povraćaj')).toBeInTheDocument()
+    // The booked figures as they will be booked; the typed amount as typed.
+    expect(reviewValue('Originalni iznos')).toBe(fmtMoney(1199.22, 'RSD'))
+    expect(reviewValue('RSD (knjiženo)')).toBe(fmtMoney(-1199.22, 'RSD'))
+    expect(reviewValue('EUR')).toBe(fmtMoney(-10.23, 'EUR'))
+    expect(reviewValue('Originalni iznos')).not.toContain('-')
     await save()
 
     const tx = theInsert()
@@ -381,6 +437,9 @@ describe('nova direktna transakcija', () => {
     expect(screen.getByText('↩️ Refundacija')).toBeInTheDocument()
     goTo('Pregled')
     expect(screen.getByText('Direktna (trošak)')).toBeInTheDocument()
+    expect(reviewValue('Originalni iznos')).toBe(fmtMoney(1199.22, 'RSD'))
+    expect(reviewValue('RSD (knjiženo)')).toBe(fmtMoney(1199.22, 'RSD'))
+    expect(reviewValue('EUR')).toBe(fmtMoney(10.23, 'EUR'))
     await save()
 
     const tx = theInsert()
@@ -463,21 +522,16 @@ describe('nova direktna transakcija', () => {
 // ── 5, 6: editing a stored row, both ways (D12) ─────────────────────────────
 
 describe('izmena sacuvanog reda', () => {
-  /** The update an ordinary edit of this row writes, nothing changed. */
-  const ordinaryUpdateOf = async (row: Record<string, unknown>) => {
-    db().rows.transactions = [row]
-    await openStored(row)
-    await save()
-    const payload = theUpdate()
-    cleanup()
-    db().writes.length = 0
-    return payload
-  }
-
   it('sacuvan red bez izmene upisuje nazad ono sa cim je procitan', async () => {
     const row = storedRow({ cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: 1199.22 })
     await openStored(row)
     expect(refundSwitch()!.checked).toBe(false)
+    goTo('Iznos i valuta')
+    expect(stepTwoValue('RSD (knjiženo)')).toBe(fmtMoney(1199.22, 'RSD'))
+    expect(stepTwoValue('EUR')).toBe(fmtMoney(10.23, 'EUR'))
+    goTo('Pregled')
+    expect(reviewValue('RSD (knjiženo)')).toBe(fmtMoney(1199.22, 'RSD'))
+    expect(reviewValue('EUR')).toBe(fmtMoney(10.23, 'EUR'))
     await save()
 
     const p = theUpdate()
@@ -493,6 +547,13 @@ describe('izmena sacuvanog reda', () => {
     expect(mockSplitEditor.props.parent.amount).toBe(1199.22)
     goTo('Iznos i valuta')
     expect((screen.getByPlaceholderText('0.00') as HTMLInputElement).value).toBe('1199.22')
+    // Already a refund here, so the book figures carry the minus they will be booked with.
+    expect(stepTwoValue('Originalni iznos')).toBe(fmtMoney(1199.22, 'RSD'))
+    expect(stepTwoValue('RSD (knjiženo)')).toBe(fmtMoney(-1199.22, 'RSD'))
+    expect(stepTwoValue('EUR')).toBe(fmtMoney(-10.23, 'EUR'))
+    goTo('Pregled')
+    expect(reviewValue('RSD (knjiženo)')).toBe(fmtMoney(-1199.22, 'RSD'))
+    expect(reviewValue('EUR')).toBe(fmtMoney(-10.23, 'EUR'))
   })
 
   it('5b. sacuvan povracaj, prekidac iskljucen i sacuvan, pozitivan je i nista drugo se ne menja', async () => {
@@ -539,60 +600,58 @@ describe('izmena sacuvanog reda', () => {
   })
 
   it('5e. sacuvan pozitivan trosak podeljen na stavke: prekidac stavlja minus i na stavke', async () => {
-    db().rows.pl_splits = [
-      storedLine('s1', 0, 1000, 1000, 8.53),
-      storedLine('s2', 1, 199.22, 199.22, 1.7),
-    ]
-    const ordinary = await ordinaryUpdateOf(storedRow())
-    expect(splitRowsWritten()).toEqual([])
-    db().rows.pl_splits = [
-      storedLine('s1', 0, 1000, 1000, 8.53),
-      storedLine('s2', 1, 199.22, 199.22, 1.7),
-    ]
+    const ordinary = await ordinaryEditOf(storedRow(), positiveLines())
+    expect(ordinary.splits.map((r: any) => r.amount)).toEqual([1000, 199.22])
+    db().rows.pl_splits = positiveLines()
 
     await openStored(storedRow())
     await waitFor(() => expect(mockSplitEditor.props.lines).toHaveLength(2))
     turnSwitch(true)
     await save()
 
-    expect(theUpdate()).toEqual({ ...ordinary, ...REFUND_FIGURES, ...REFUND_CASH_FLOW })
-    const rows = splitRowsWritten()
+    expect(theUpdate()).toEqual({ ...ordinary.payload, ...REFUND_FIGURES, ...REFUND_CASH_FLOW })
+    const rows = splitPayloadsWritten()
+    expect(rows).toEqual(negated(ordinary.splits))
     expect(rows.map((r: any) => r.amount)).toEqual([-1000, -199.22])
     expect(rows.map((r: any) => r.amount_rsd)).toEqual([-1000, -199.22])
     expect(rows.map((r: any) => r.amount_eur)).toEqual([-8.53, -1.7])
   })
 
   it('5f. sacuvan povracaj sa stavkama otvara velicine, a iskljucen upisuje pozitivno', async () => {
+    const ordinary = await ordinaryEditOf(storedRow(), positiveLines())
+
     db().rows.transactions = [storedRow(REFUND_FIGURES)]
-    db().rows.pl_splits = [
-      storedLine('s1', 0, -1000, -1000, -8.53),
-      storedLine('s2', 1, -199.22, -199.22, -1.7),
-    ]
+    db().rows.pl_splits = negativeLines()
     await openStored(storedRow(REFUND_FIGURES))
     await waitFor(() => expect(mockSplitEditor.props.lines).toHaveLength(2))
     expect(mockSplitEditor.props.lines.map((l: any) => l.amount)).toEqual([1000, 199.22])
     turnSwitch(false)
     await save()
 
-    expect(theUpdate()).toMatchObject({ amount: 1199.22, amount_rsd: 1199.22, amount_eur: 10.23 })
-    expect(splitRowsWritten().map((r: any) => r.amount)).toEqual([1000, 199.22])
-    expect(splitRowsWritten().map((r: any) => r.amount_eur)).toEqual([8.53, 1.7])
+    expect(theUpdate()).toEqual(ordinary.payload)
+    expect(ordinary.payload).toMatchObject({ amount: 1199.22, amount_rsd: 1199.22, amount_eur: 10.23 })
+    const rows = splitPayloadsWritten()
+    expect(rows).toEqual(ordinary.splits)
+    expect(rows.map((r: any) => r.amount)).toEqual([1000, 199.22])
+    expect(rows.map((r: any) => r.amount_rsd)).toEqual([1000, 199.22])
+    expect(rows.map((r: any) => r.amount_eur)).toEqual([8.53, 1.7])
   })
 
   it('5g. sacuvan povracaj sa stavkama, sacuvan bez izmene, zadrzava svaki minus', async () => {
+    const ordinary = await ordinaryEditOf(storedRow(), positiveLines())
+
     db().rows.transactions = [storedRow(REFUND_FIGURES)]
-    db().rows.pl_splits = [
-      storedLine('s1', 0, -1000, -1000, -8.53),
-      storedLine('s2', 1, -199.22, -199.22, -1.7),
-    ]
+    db().rows.pl_splits = negativeLines()
     await openStored(storedRow(REFUND_FIGURES))
     await waitFor(() => expect(mockSplitEditor.props.lines).toHaveLength(2))
     await save()
 
-    expect(theUpdate()).toMatchObject({ ...REFUND_FIGURES, ...REFUND_CASH_FLOW })
-    expect(splitRowsWritten().map((r: any) => r.amount)).toEqual([-1000, -199.22])
-    expect(splitRowsWritten().map((r: any) => r.amount_rsd)).toEqual([-1000, -199.22])
-    expect(splitRowsWritten().map((r: any) => r.amount_eur)).toEqual([-8.53, -1.7])
+    expect(theUpdate()).toEqual({ ...ordinary.payload, ...REFUND_FIGURES, ...REFUND_CASH_FLOW })
+    const rows = splitPayloadsWritten()
+    expect(rows).toEqual(negated(ordinary.splits))
+    expect(rows.map((r: any) => r.amount)).toEqual([-1000, -199.22])
+    expect(rows.map((r: any) => r.amount_rsd)).toEqual([-1000, -199.22])
+    expect(rows.map((r: any) => r.amount_eur)).toEqual([-8.53, -1.7])
   })
 
   it('6. Review Focus 3: storno iz zarada otvoren i sacuvan bez izmene vraca se isti', async () => {
@@ -763,20 +822,23 @@ describe('sacuvan red vezan za fakturu', () => {
 
   it('povracaj zadrzava znak: prikazan ukljucen, a upis bez izmene nosi svaki minus', async () => {
     linkABill()
+    // The same linked row stored positive, edited and saved as it is.
+    const ordinary = await ordinaryEditOf(storedRow(), positiveLines())
+
     db().rows.transactions = [storedRow(REFUND_FIGURES)]
-    db().rows.pl_splits = [
-      storedLine('s1', 0, -1000, -1000, -8.53),
-      storedLine('s2', 1, -199.22, -199.22, -1.7),
-    ]
+    db().rows.pl_splits = negativeLines()
     await openStored(storedRow(REFUND_FIGURES))
     await waitFor(() => expect(mockSplitEditor.props.lines).toHaveLength(2))
     // The links are read by now: they are what would hide the switch.
     expect(refundSwitch()!.checked).toBe(true)
     await save()
 
-    expect(theUpdate()).toMatchObject({ ...REFUND_FIGURES, ...REFUND_CASH_FLOW })
-    expect(splitRowsWritten().map((r: any) => r.amount)).toEqual([-1000, -199.22])
-    expect(splitRowsWritten().map((r: any) => r.amount_eur)).toEqual([-8.53, -1.7])
+    expect(theUpdate()).toEqual({ ...ordinary.payload, ...REFUND_FIGURES, ...REFUND_CASH_FLOW })
+    const rows = splitPayloadsWritten()
+    expect(rows).toEqual(negated(ordinary.splits))
+    expect(rows.map((r: any) => r.amount)).toEqual([-1000, -199.22])
+    expect(rows.map((r: any) => r.amount_rsd)).toEqual([-1000, -199.22])
+    expect(rows.map((r: any) => r.amount_eur)).toEqual([-8.53, -1.7])
   })
 })
 
