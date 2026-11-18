@@ -23,6 +23,7 @@ import { fetchAllPages, fetchByIds } from '../utils/fetchAllPages'
 import { invoicesWithDocuments } from './sef/invoiceDocuments'
 import { voidedLabel } from './sef/salesDraft'
 import type { CardCoverage, CardDirect, CardDocument, CardPayment, CardUsage } from './partnerCard'
+import { isRefundRow } from './refund'
 
 export interface PartnerCardData {
   documents: CardDocument[]
@@ -57,7 +58,9 @@ export async function loadPartnerCard(client: any, partnerId: string, companyId:
     fetchByIds<any>(proformaIds, chunk => client.from('advance_coverage').select('proforma_id, amount').in('proforma_id', chunk)),
     fetchAllPages<any>((from, to) =>
       scoped(client.from('transactions')
-        .select(`id, transaction_date, amount_${c}, tx_subtype, note, deleted_at, banks!transactions_bank_id_fkey(name)`)
+        // `type`, `amount` and `amount_rsd` are what the refund rule reads
+        // (services/refund.ts), whichever currency the card is in.
+        .select(`id, transaction_date, type, amount, amount_rsd${c === 'rsd' ? '' : `, amount_${c}`}, tx_subtype, note, deleted_at, banks!transactions_bank_id_fkey(name)`)
         .eq('partner_id', partnerId).eq('type', 'direct').is('deleted_at', null))
         .order('transaction_date', { ascending: true }).order('id').range(from, to)),
     invoicesWithDocuments(client, ids),
@@ -96,7 +99,7 @@ export async function loadPartnerCard(client: any, partnerId: string, companyId:
     // back, so on the card it is money in, not a payment out.
     direct: (direct || []).filter((t: any) => !linkedTx.has(t.id)).map((t: any) => {
       const figure = Number(t[`amount_${c}`]) || 0
-      const isRefund = t.tx_subtype === 'expense' && figure < 0
+      const isRefund = isRefundRow(t)
       return {
         id: t.id, date: t.transaction_date, amount_rsd: Math.abs(figure),
         bank: t.banks?.name ?? null, note: t.note ?? null,

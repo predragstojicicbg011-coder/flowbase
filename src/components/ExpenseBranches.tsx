@@ -4,7 +4,6 @@ import {
   branchPath, keysToDepth, layoutBranches, type BranchNode,
 } from '../services/branchTree'
 import type { CostBehaviour } from '../services/cfoMetrics'
-import { drawn } from '../services/expenseTree'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
 import { countOf } from '../utils/plural'
@@ -58,9 +57,10 @@ export interface ExpenseBranchNode extends BranchNode {
   children?: ExpenseBranchNode[]
 }
 
-// A branch carries a magnitude, in the viewer's display currency — the roots
-// handed in were summed in it; this only names it.
-const moneyIn = (currency: string, dp: number) => (n: number) => fmtMoney(Math.abs(n), currency, dp)
+// In the viewer's display currency: the roots handed in were summed in it;
+// this only names it. A drawn node is never below zero (branchTree drops it),
+// and the net in the header keeps its minus.
+const moneyIn = (currency: string, dp: number) => (n: number) => fmtMoney(n, currency, dp)
 const pct = (n: number) => `${(n * 100).toFixed(1).replace('.', ',')}%`
 
 const ROW = 34
@@ -155,8 +155,9 @@ export default function ExpenseBranches({
 
   const w = Math.max(Math.max(420, width), (deepest + 1) * COL + 40)
   const H = Math.max(120, layout.height + 14)
-  // What the picture draws: a root at or below zero is in the table, not here.
-  const total = roots.reduce((s, n) => s + drawn(n.amount), 0)
+  // A printed total is a net, as the page's is: every root with its sign. The
+  // picture still draws only what is above zero (drawn, in branchTree).
+  const net = roots.reduce((s, n) => s + (Number(n.amount) || 0), 0)
 
   const toggle = (key: string) => setOpen(prev => {
     const next = new Set(prev)
@@ -186,7 +187,7 @@ export default function ExpenseBranches({
             onClick={() => setOpen(keysToDepth(roots, TWO_LEVELS))}>Dva nivoa</button>
         </div>
         <span style={deck.hint}>
-          {monthLabel} · {money(total)}
+          {monthLabel} · {money(net)}
           {layout.hidden > 0 && ` · ${countOf(layout.hidden, 'stavka sklopljena', 'stavke sklopljene', 'stavki sklopljeno')}`}
         </span>
       </div>

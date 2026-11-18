@@ -30,6 +30,11 @@ export interface LineAmounts {
  * always a point and there is nothing to guess. The emptiness that decides
  * whether the opposite is cleared is the TEXT's, not the number's: `0` is
  * something typed, and it clears the other side like any other figure.
+ *
+ * A person types a magnitude: which way the money went is the box it is typed
+ * into, and a refund's minus is the application's (services/refund.ts). A
+ * typed minus is therefore not taken, exactly as text that is not a number is
+ * not. Figures read from the file do not pass through here.
  */
 export function editedAmounts(
   side: 'debit' | 'credit',
@@ -37,7 +42,7 @@ export function editedAmounts(
   current: LineAmounts,
 ): LineAmounts {
   const n = typed === '' ? null : Number(typed)
-  const value = n !== null && Number.isFinite(n) ? n : null
+  const value = n !== null && Number.isFinite(n) && n >= 0 && !Object.is(n, -0) ? n : null
   const other = typed === '' ? current : { debit: null, credit: null }
   return side === 'debit'
     ? { debit: value, credit: other.credit }

@@ -17,6 +17,7 @@ import { countOf } from '../utils/plural'
 import { isReceivable } from '../services/revenue'
 import { receivableTotals } from '../services/receivables'
 import { drawn } from '../services/expenseTree'
+import { isRefundRow, REFUND_TAG } from '../services/refund'
 import { homeLedgerFigures, roleHeadingOf, type PrincipalHeading } from '../services/homeLedgerFigures'
 import { rowsToMap, roleDef, SETTINGS_PATH, type SystemCategoryRow } from '../services/systemCategories'
 import {
@@ -448,7 +449,7 @@ export default function Dashboard() {
 
       // ── Recent activity ──
       let actQ = supabase.from('transactions')
-        .select('transaction_date,type,amount,currency,amount_rsd,amount_eur,partners!transactions_partner_id_fkey(name),companies!transactions_company_id_fkey(name)')
+        .select('transaction_date,type,tx_subtype,amount,currency,amount_rsd,amount_eur,partners!transactions_partner_id_fkey(name),companies!transactions_company_id_fkey(name)')
         .order('transaction_date', { ascending: false }).limit(5)
       if (companyId) actQ = actQ.eq('company_id', companyId)
       const { data: actData } = await actQ
@@ -807,7 +808,11 @@ export default function Dashboard() {
                             {t.type === 'invoice_payment' ? 'plać. fakture' : t.type === 'direct' ? 'direktna' : t.type}
                           </span>
                         </td>
-                        <td style={{ padding: '8px 8px 8px 0', fontWeight: '500', color: '#DCE9F6', whiteSpace: 'nowrap' as const }}>{fmtMoney(t.amount || 0, t.currency || 'RSD')}</td>
+                        <td style={{ padding: '8px 8px 8px 0', fontWeight: '500', color: '#DCE9F6', whiteSpace: 'nowrap' as const }}>
+                          {fmtMoney(t.amount || 0, t.currency || 'RSD')}
+                          {/* Said in words beside its minus, as the ledger says it. */}
+                          {isRefundRow(t) && <span style={{ fontSize: '10px', fontWeight: '500', padding: '2px 7px', borderRadius: '20px', marginLeft: '6px', background: 'rgba(0,212,126,0.12)', color: '#00D47E' }}>{REFUND_TAG}</span>}
+                        </td>
                         <td style={{ padding: '8px 0', fontWeight: '500', color: '#00D47E', whiteSpace: 'nowrap' as const }}>{format(pick(t))}</td>
                       </tr>
                     ))}

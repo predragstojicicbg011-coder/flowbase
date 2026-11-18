@@ -305,6 +305,22 @@ describe('Review Focus 2: a refund split over P and L lines', () => {
   })
 })
 
+describe('a minus typed into the review', () => {
+  it('is not taken, so the line never becomes a negative expense outside the refund path', async () => {
+    await importOneRow(refundLine())
+    await openRow(/Povracaj za reklamaciju/)
+    await makeItAnExpense()
+    const uplata = screen.getByText('Uplata', { selector: 'label' }).nextElementSibling as HTMLInputElement
+    expect(uplata.value).toBe('1199.22')
+    expect(screen.getByText('Povraćaj')).toBeInTheDocument()
+
+    fireEvent.change(uplata, { target: { value: '-1199.22' } })
+    expect(uplata.value).toBe('')
+    expect(screen.queryByText('Povraćaj')).toBeNull()
+    expect(reviewAmount().textContent).not.toContain('-1.199,22')
+  })
+})
+
 describe('a debit line', () => {
   it('booked as an expense is written exactly as before', async () => {
     await importOneRow(costLine)

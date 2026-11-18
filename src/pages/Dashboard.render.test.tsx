@@ -1,7 +1,8 @@
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import Dashboard from './Dashboard'
 import { fmtMoney } from '../utils/formatters'
+import { REFUND_TAG } from '../services/refund'
 
 /**
  * ─── The home page, wired ───────────────────────────────────────────────────
@@ -537,5 +538,32 @@ describe('the revenue and expense chart when a month nets below zero', () => {
     fireEvent.mouseEnter(screen.getByTestId('month-zone-jun'))
     expect(Number(screen.getByTestId('expenses-dot').getAttribute('cy'))).toBeLessThanOrEqual(BASELINE + 1e-9)
     expect(screen.getByText(/^Troškovi: -200$/)).toBeInTheDocument()
+  })
+})
+
+describe('the recent transactions', () => {
+  it('tags a refund beside its figure, as the ledger does, and nothing else', async () => {
+    ;(global as any).__db.transactions = [
+      {
+        transaction_date: '2026-11-04', type: 'direct', tx_subtype: 'expense', company_id: 'comp-1',
+        amount: -1199.22, currency: 'RSD', amount_rsd: -1199.22, amount_eur: -10.25,
+        partners: { name: 'Izmišljena Papirnica doo' },
+      },
+      {
+        transaction_date: '2026-11-03', type: 'direct', tx_subtype: 'expense', company_id: 'comp-1',
+        amount: 1784.4, currency: 'RSD', amount_rsd: 1784.4, amount_eur: 15.25,
+        partners: { name: 'Primer Dobavljac doo' },
+      },
+    ]
+    await show()
+    const recent = screen.getByText('Poslednje transakcije').parentElement!.parentElement as HTMLElement
+    await waitFor(() => expect(recent).toHaveTextContent('Izmišljena Papirnica doo'))
+
+    const rowOf = (name: string) => within(recent).getByText(name).closest('tr') as HTMLElement
+    // The first figure in the row is the amount in its own money; the display column follows it.
+    const figureCell = (name: string) => within(rowOf(name)).getAllByText(fmtMoney(-1199.22, 'RSD'))[0].closest('td') as HTMLElement
+    expect(within(figureCell('Izmišljena Papirnica doo')).getByText(REFUND_TAG)).toBeInTheDocument()
+    expect(within(rowOf('Primer Dobavljac doo')).queryByText(REFUND_TAG)).toBeNull()
+    expect(within(recent).getAllByText(REFUND_TAG)).toHaveLength(1)
   })
 })

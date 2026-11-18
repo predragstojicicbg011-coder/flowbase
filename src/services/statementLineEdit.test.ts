@@ -35,8 +35,14 @@ describe('correcting the two amount fields of a bank line', () => {
     expect(editedAmounts('debit', 'abc', none)).toEqual({ debit: null, credit: null })
   })
 
-  it('reads a negative correction as typed', () => {
-    expect(editedAmounts('credit', '-12.5', none)).toEqual({ debit: null, credit: -12.5 })
+  /** A person types a magnitude: a minus is not taken, as text that is not a number is not. */
+  it('does not take a typed minus on either side', () => {
+    expect(editedAmounts('credit', '-12.5', none)).toEqual({ debit: null, credit: null })
+    expect(editedAmounts('debit', '-1199.22', { debit: 1199.22, credit: null }))
+      .toEqual({ debit: null, credit: null })
+    expect(editedAmounts('credit', '-1199.22', { debit: 1199.22, credit: null }))
+      .toEqual(editedAmounts('credit', 'abc', { debit: 1199.22, credit: null }))
+    expect(editedAmounts('debit', '-0', none)).toEqual({ debit: null, credit: null })
   })
 })
 

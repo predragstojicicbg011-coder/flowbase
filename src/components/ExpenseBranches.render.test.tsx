@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import ExpenseBranches, { type ExpenseBranchNode } from './ExpenseBranches'
 import { DisplayCurrencyProvider } from '../contexts/DisplayCurrencyContext'
+import { fmtMoney } from '../utils/formatters'
 
 // ─── Rendering the branches, and then looking at them ───────────────────────
 //
@@ -253,11 +254,22 @@ describe('a node at or below zero is not drawn', () => {
     expect(screen.queryByLabelText(/^Vracena stavka/)).not.toBeInTheDocument()
   })
 
-  it('heads the picture with the sum of what is drawn, not of magnitudes', () => {
-    // 900 plus the magnitude of -200 would read 1.100.
+  it('heads the picture with the signed net of the roots, as the page total is', () => {
+    // 900 - 200 + 0. The positive roots alone would read 900, and 900 plus
+    // the magnitude of -200 would read 1.100.
     const { container } = drawn()
-    expect(container.textContent).toContain('Oktobar 2026 · 900 RSD')
+    expect(container.textContent).toContain('Oktobar 2026 · 700 RSD')
+    expect(container.textContent).not.toContain('Oktobar 2026 · 900 RSD')
     expect(container.textContent).not.toContain('1.100')
+  })
+
+  it('prints a net below zero with its minus', () => {
+    const { container } = render(<ExpenseBranches monthLabel="Oktobar 2026"
+      roots={[leaf('Mala kategorija', 100), leaf('Neto povracaj', -300)]} start="twoLevels" />)
+    expect(container.textContent).toContain(`Oktobar 2026 · ${fmtMoney(-200, 'RSD', 0)}`)
+    expect(fmtMoney(-200, 'RSD', 0)).toContain('-')
+    // The one node drawn is still priced as what it carries.
+    expect(screen.getByLabelText(/^Mala kategorija, 100 RSD, 100,0%/)).toBeInTheDocument()
   })
 
   it('counts only the lines it can draw under a node', () => {

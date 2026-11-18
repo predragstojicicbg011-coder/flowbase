@@ -52,7 +52,7 @@ import {
 import { countOf } from '../utils/plural'
 import {
   booked as signedFigure, bookedAmounts, isRefundRow, refundSplitLines,
-  REFUND_SWITCH, REFUND_SWITCH_NOTE, REFUND_ONE_TIME_NOTE, REFUND_CASH_FLOW,
+  REFUND_TAG, REFUND_SWITCH, REFUND_SWITCH_NOTE, REFUND_ONE_TIME_NOTE, REFUND_CASH_FLOW,
 } from '../services/refund'
 
 /** Display labels for the stored tag keys; the keys stay as they are in the data. */
@@ -941,13 +941,14 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     return map[status] || { background: DIALOG.raised, color: DIALOG.dim }
   }
 
-  const cfLabel = () => {
-    if (!cfType) return '—'
-    if (cfType === 'recurring') return `Ponavljajući, ${cfFrequency === 'monthly' ? 'mesečno' : cfFrequency === 'quarterly' ? 'kvartalno' : cfFrequency === 'yearly' ? 'godišnje' : cfFrequency}`
-    if (cfType === 'one_time') return 'Jednokratni'
-    if (cfType === 'accrual') return `Razgraničenje ${cfAccrualFrom ? `${cfAccrualFrom} → ${cfAccrualTo}` : ''}`
-    if (cfType === 'capex') return `Kapitalni izdatak (${cfCapexMonths || '?'} mes.)`
-    if (cfType === 'reimbursable') return `Refundacija${cfReimbursableDate ? ` do ${cfReimbursableDate}` : ''}`
+  /** The cash-flow type in words: the one chosen, unless another is named. */
+  const cfLabel = (type: string = cfType) => {
+    if (!type) return '—'
+    if (type === 'recurring') return `Ponavljajući, ${cfFrequency === 'monthly' ? 'mesečno' : cfFrequency === 'quarterly' ? 'kvartalno' : cfFrequency === 'yearly' ? 'godišnje' : cfFrequency}`
+    if (type === 'one_time') return 'Jednokratni'
+    if (type === 'accrual') return `Razgraničenje ${cfAccrualFrom ? `${cfAccrualFrom} → ${cfAccrualTo}` : ''}`
+    if (type === 'capex') return `Kapitalni izdatak (${cfCapexMonths || '?'} mes.)`
+    if (type === 'reimbursable') return `Refundacija${cfReimbursableDate ? ` do ${cfReimbursableDate}` : ''}`
     return '—'
   }
 
@@ -2499,7 +2500,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   ['Banka', banks.find(b => b.id === bankId)?.name || '—'],
                   ['Partner', showNewPartner ? newPartnerName : (partners.find(p => p.id === partnerId)?.name || partnerSearch || '—')],
                   ['Datum', txDate],
-                  ['Tip', txType === 'invoice_payment' ? 'Plaćanje fakture' : txType === 'credit_payment' ? 'Otplata kredita' : txType === 'passthrough' ? 'Prolazna stavka' : advance ? `${ADVANCE_LABEL} (bez uticaja na bilans uspeha)` : bookAsRefund ? 'Direktna (trošak) · Povraćaj' : `Direktna (${directSubtype === 'revenue' ? 'prihod' : 'trošak'})`],
+                  ['Tip', txType === 'invoice_payment' ? 'Plaćanje fakture' : txType === 'credit_payment' ? 'Otplata kredita' : txType === 'passthrough' ? 'Prolazna stavka' : advance ? `${ADVANCE_LABEL} (bez uticaja na bilans uspeha)` : bookAsRefund ? `Direktna (trošak) · ${REFUND_TAG}` : `Direktna (${directSubtype === 'revenue' ? 'prihod' : 'trošak'})`],
                   ...(advance ? [['Projekat', projectLabelById(projects, projectId)]] : []),
                 ]},
                 ...(txType === 'invoice_payment' && linkedInvoices.length > 0 ? [{ title: 'Povezane fakture', rows: linkedInvoices.map(l => [`${l.partner_name} (${l.invoice_number})`, `raspoređeno ${formatMoney(l.allocated_own || 0, allocationCurrency(l))}`]) }] : []),
@@ -2508,7 +2509,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
                   ['Sektor', deptName || '—'],
                   ['Projekat', splitActive ? 'Po stavkama podele' : projectLabelById(projects, projectId)],
                   // What the save writes for a refund, whatever is held below.
-                  ['Novčani tok', bookAsRefund ? 'Jednokratni' : cfLabel()],
+                  ['Novčani tok', cfLabel(bookAsRefund ? REFUND_CASH_FLOW.cf_type : cfType)],
                 ]}] : []),
                 { title: 'Iznosi', rows: [
                   ['Originalni iznos', amount ? fmtMoney(parseFloat(amount), currency) : '—'],
