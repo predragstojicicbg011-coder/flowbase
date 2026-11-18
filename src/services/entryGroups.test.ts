@@ -94,16 +94,14 @@ describe('grouping a drill-down into months', () => {
     expect(groups.reduce((s, g) => s + g.count, 0)).toBe(6)
   })
 
-  it('totals magnitudes, the same arithmetic the tree above it uses', () => {
-    // `buildTree` sums the magnitude of each book figure, so the node total in the modal
-    // header is a total of magnitudes. A month that netted a refund off
-    // against the spend around it would print less than the header and the
-    // months would stop adding up to it.
+  it('totals with the sign, the same arithmetic the tree above it uses', () => {
+    // `buildTree` sums each signed book figure, so the node total in the modal
+    // header is a net. A month that netted a refund the same way adds up to it.
     const [g] = groupByMonth([
       row('a', '2026-09-01', 300),
       row('b', '2026-09-02', -100),
     ], 'RSD')
-    expect(g.total).toBe(400)
+    expect(g.total).toBe(200)
     expect(g.count).toBe(2)
   })
 

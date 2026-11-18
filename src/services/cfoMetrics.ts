@@ -88,7 +88,7 @@ export function monthlyTrend(
     const amount = pickAmount(e, currency) ?? 0
     if (!amount) continue
     if (REVENUE_TYPES.includes(e.tx_type || '')) rev.set(mk, (rev.get(mk) || 0) + amount)
-    else if (EXPENSE_TYPES.includes(e.tx_type || '')) exp.set(mk, (exp.get(mk) || 0) + Math.abs(amount))
+    else if (EXPENSE_TYPES.includes(e.tx_type || '')) exp.set(mk, (exp.get(mk) || 0) + amount)
   }
 
   return months.map(month => {

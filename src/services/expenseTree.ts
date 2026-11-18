@@ -185,17 +185,17 @@ export interface Contribution {
  * Everywhere a row belongs in a branch, and for how much: one contribution
  * carrying the whole row, on every branch.
  *
- * `Math.abs`: an expense is shown as a positive cost whichever sign it was
- * stored with.
+ * The amount keeps the row's sign: an expense total is a net, so a refund
+ * (a negative row) takes its figure off the cost it was booked under.
  */
 export function contributionsFor(e: PlEntry, branch: Branch, currency: DisplayCurrency): Contribution[] {
-  return [{ path: pathFor(e, branch), amount: Math.abs(bookAmount(e, currency)) }]
+  return [{ path: pathFor(e, branch), amount: bookAmount(e, currency) }]
 }
 
 /** Whether a row puts any money under `path` — the drill-down's predicate. */
 export function contributesTo(e: PlEntry, branch: Branch, path: string[], currency: DisplayCurrency): boolean {
   return contributionsFor(e, branch, currency).some(
-    c => c.amount > 0 && path.every((seg, i) => c.path[i] === seg))
+    c => c.amount !== 0 && path.every((seg, i) => c.path[i] === seg))
 }
 
 /** How much of a row sits under `path`: the whole row, or nothing. */

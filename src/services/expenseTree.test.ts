@@ -160,10 +160,34 @@ describe('buildTree — the two branches must tie', () => {
     expect(t[0].monthly).toEqual({ '2026-07': 10, '2026-08': 50 })
   })
 
-  it('ignores zero amounts and treats negatives as magnitude', () => {
-    const t = buildTree([e({ amount_rsd: 0 }), e({ amount_rsd: -40 })], 'pl', 'RSD')
-    expect(totalOf(t)).toBe(40)
-    expect(t[0].count).toBe(1)
+  it('ignores zero amounts and takes a negative off', () => {
+    const t = buildTree([e({ amount_rsd: 100 }), e({ amount_rsd: -40 }), e({ amount_rsd: 0 })], 'pl', 'RSD')
+    expect(totalOf(t)).toBe(60)
+    expect(t[0].count).toBe(2)
+  })
+
+  it('a charge and its refund under one subcategory come to the difference', () => {
+    const rows = [
+      e({ amount_rsd: 1784.40, amount_eur: 15.2 }),
+      e({ amount_rsd: -1199.22, amount_eur: -10.2 }),
+    ]
+    const rsd = buildTree(rows, 'pl', 'RSD')
+    expect(rsd[0].children[0].amount).toBeCloseTo(585.18, 2)
+    expect(rsd[0].children[0].count).toBe(2)
+    const eur = buildTree(rows, 'pl', 'EUR')
+    expect(eur[0].children[0].amount).toBeCloseTo(5, 2)
+    expect(eur[0].children[0].count).toBe(2)
+    for (const r of rows) {
+      expect(contributesTo(r, 'pl', ['Professional and Production Services', 'LinkedIn Account Rentals'], 'RSD')).toBe(true)
+      expect(contributesTo(r, 'pl', ['Professional and Production Services', 'LinkedIn Account Rentals'], 'EUR')).toBe(true)
+    }
+  })
+
+  it('a charge and an equal refund leave a node that exists and is zero', () => {
+    const t = buildTree([e({ amount_rsd: 100 }), e({ amount_rsd: -100 })], 'pl', 'RSD')
+    expect(t).toHaveLength(1)
+    expect(t[0].children[0].amount).toBe(0)
+    expect(t[0].children[0].count).toBe(2)
   })
 
   it('sums each row’s own EUR figure in the EUR view, never a converted total', () => {
@@ -354,9 +378,9 @@ describe('the project branch', () => {
     expect(total(lines, 'project')).toBe(1000)
   })
 
-  it('shows an expense as a cost whichever sign it was stored with', () => {
+  it('a refund on a project reduces that project', () => {
     expect(roots([e({ amount_rsd: -800, project_id: 'p1', project_name: 'Zgrada A' })]))
-      .toEqual({ 'Zgrada A': 800 })
+      .toEqual({ 'Zgrada A': -800 })
   })
 
   it('places a row with no category under Unassigned inside its project', () => {
@@ -380,7 +404,7 @@ describe('the project branch', () => {
     ]
     const totals = BRANCHES.map(b => total(rows, b))
     for (const t of totals) expect(t).toBeCloseTo(totals[0], 6)
-    expect(totals[0]).toBe(2450)
+    expect(totals[0]).toBe(2210)
   })
 })
 

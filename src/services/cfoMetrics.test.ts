@@ -21,14 +21,13 @@ describe('twelve months of in and out', () => {
     expect(t[0]).toMatchObject({ revenue: 1500, expenses: 900, result: 600 })
   })
 
-  it('takes an expense at its size whichever sign it arrives with', () => {
-    // The ledger books expenses positive in some places and negative in
-    // others, and adding a negative to an expense total makes the month look
-    // cheaper than it was.
+  it('takes a refund off the month it lands in', () => {
+    // An expense total is a net: a negative row is money handed back.
     const t = monthlyTrend([
-      { pl_date: '2026-01-14', amount_rsd: -900, tx_type: 'expense' },
+      { pl_date: '2026-01-14', amount_rsd: 1000, tx_type: 'expense' },
+      { pl_date: '2026-01-20', amount_rsd: -900, tx_type: 'expense' },
     ], 'RSD', ['2026-01'])
-    expect(t[0].expenses).toBe(900)
+    expect(t[0].expenses).toBe(100)
   })
 
   it('MARKS THE MONTH THAT IS STILL RUNNING rather than dropping or hiding it', () => {

@@ -113,13 +113,10 @@ export function groupByMonth<T extends DatedRow>(rows: T[], currency: DisplayCur
       key,
       label: monthLabel(key),
       count: list.length,
-      // The MAGNITUDE, because that is what the tree these rows were selected
-      // from sums — `buildTree` adds the magnitude of each book figure. Summing the signed
-      // value instead makes a month holding one refund come out short of the
-      // figure in the modal header by twice that refund, and a reader who adds
-      // the months up and misses the header total has no way to find out why.
-      // The two have to be the same arithmetic or they are two numbers.
-      total: list.reduce((s, r) => s + Math.abs(amountOf(r, currency)), 0),
+      // Signed, because the tree these rows were selected from sums the
+      // signed book figure — `buildTree` nets a refund off the cost. The two
+      // have to be the same arithmetic or they are two numbers.
+      total: list.reduce((s, r) => s + amountOf(r, currency), 0),
       rows: [...list].sort(byRowDateDesc(currency)),
     }))
 }
