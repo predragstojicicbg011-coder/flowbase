@@ -86,7 +86,7 @@ beforeEach(() => {
   ;(global as any).crypto = { randomUUID: () => `batch-${++n}` }
   Object.assign(mockState.tables, {
     banks: [{ id: 'b1', name: 'Raiffeisen RSD', company_id: 'co', currency: 'RSD' }],
-    partners: [{ id: 'p1', name: 'Papirnica Zvezda doo' }],
+    partners: [{ id: 'p1', name: 'Izmišljena Papirnica doo' }],
     partner_accounts: [],
     pl_categories: [{ id: 'c1', name: 'Kancelarija', sort_order: 1 }],
     pl_subcategories: [], dept_subcategories: [], expense_descriptions: [],
@@ -103,12 +103,12 @@ const line = (cols: Record<number, string>) => Array.from({ length: 18 }, (_, i)
 /** Money back from the supplier: a credit line. */
 const refundLine = (ccy = 'RSD') => line({
   1: '12.11.2026', 2: '44', 3: ccy, 6: '1.199,22',
-  11: 'Papirnica Zvezda doo', 12: 'Povracaj za reklamaciju',
+  11: 'Izmišljena Papirnica doo', 12: 'Povracaj za reklamaciju',
 })
 /** An ordinary payment to the supplier: a debit line. */
 const costLine = line({
   1: '05.11.2026', 2: '43', 3: 'RSD', 5: '1.784,40',
-  11: 'Papirnica Zvezda doo', 12: 'Toneri i papir',
+  11: 'Izmišljena Papirnica doo', 12: 'Toneri i papir',
 })
 
 const importOneRow = async (body: string) => {
@@ -229,7 +229,7 @@ describe('a credit line', () => {
   })
 })
 
-describe('Review Focus 1: a refund in euros', () => {
+describe('a refund in euros', () => {
   it('is negative in its own money, in dinars and in euros, and both rates stay positive', async () => {
     await importOneRow(refundLine('EUR'))
     await openRow(/Povracaj za reklamaciju/)
@@ -247,7 +247,7 @@ describe('Review Focus 1: a refund in euros', () => {
   })
 })
 
-describe('Review Focus 2: a refund split over P and L lines', () => {
+describe('a refund split over P and L lines', () => {
   const lineOf = (key: string, amount: number) => ({
     key, amount, pl_category: 'Kancelarija', pl_subcategory: '', department: 'Uprava',
     project_id: null, cf_type: '', note: '',

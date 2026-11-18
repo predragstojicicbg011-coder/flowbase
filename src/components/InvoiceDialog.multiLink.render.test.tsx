@@ -140,7 +140,7 @@ describe('a refund is not a payment', () => {
     expect(screen.queryByText(/^2026-10-09/)).toBeNull()
   })
 
-  it('is offered even when it is a revenue receipt of the same size', async () => {
+  it('a revenue row of the same size is not mistaken for a refund', async () => {
     mockState.tables.transactions = [{ ...fee('t8', '2026-10-08', 500), tx_subtype: 'revenue' }]
     render(<InvoiceDialog onClose={() => {}} invoice={draft} />)
     expect(await screen.findByText(/^2026-10-08/)).toBeInTheDocument()

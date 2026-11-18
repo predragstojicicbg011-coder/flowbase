@@ -331,9 +331,9 @@ describe('an uplata filed as an expense is a refund', () => {
   })
 })
 
-// ── Review Focus 1: the three figures go together ───────────────────────────
+// ── The three figures go together ───────────────────────────────────────────
 
-describe('Review Focus 1: a refund keeps all three figures negative', () => {
+describe('a refund keeps all three figures negative', () => {
   it('in dinars', async () => {
     await openDialog()
     describeRow()
@@ -598,9 +598,9 @@ describe('a typed minus', () => {
   })
 })
 
-// ── Review Focus 5 and 3: a statement reopened ──────────────────────────────
+// ── A statement reopened ────────────────────────────────────────────────────
 
-describe('Review Focus 5 and 3: a statement holding a refund and a storno, reopened', () => {
+describe('a statement holding a refund and a storno, reopened and saved', () => {
   const BATCH = 'batch-old'
   const stored = (over: Record<string, unknown>): any => ({
     import_batch_id: BATCH, transaction_date: DATE, partner_id: null, statement_number: '7',
@@ -675,7 +675,7 @@ describe('Review Focus 5 and 3: a statement holding a refund and a storno, reope
     expect([refund.amount, refund.amount_rsd, refund.amount_eur]).toEqual([-1100, -1100, -9.39])
   })
 
-  it('Review Focus 1 on the edit save: a refund in euros keeps all three figures negative', async () => {
+  it('on the edit save a refund in euros keeps all three figures negative', async () => {
     const EUR_REFUND = stored({
       id: 'tx-refund', note: 'Povracaj za reklamaciju', tx_subtype: 'expense', currency: 'EUR',
       amount: -1199.22, amount_rsd: -140548.58, amount_eur: -1199.22, exchange_rate: EUR_RATE,

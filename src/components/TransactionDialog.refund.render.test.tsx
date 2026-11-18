@@ -382,8 +382,8 @@ const linkABill = () => {
 
 // ── 1, 2, 3: a new direct expense ───────────────────────────────────────────
 
-describe('nova direktna transakcija', () => {
-  it('1. oznacena kao povracaj upisuje se sa minusom u sva tri iznosa i kao jednokratna', async () => {
+describe('a new direct transaction', () => {
+  it('1. marked as a refund is written with a minus in all three figures and as one-time', async () => {
     await openNewDirect('1199.22')
     await classify()
     expect(refundSwitch()!.checked).toBe(false)
@@ -426,7 +426,7 @@ describe('nova direktna transakcija', () => {
     expect(tx.cf_next_month_est).toBeNull()
   })
 
-  it('2. bez prekidaca upisuje se tacno kao do sada, sa izabranim novcanim tokom', async () => {
+  it('2. without the switch is written exactly as before, with the cash-flow type chosen', async () => {
     await openNewDirect('1199.22')
     await classify()
     expect(screen.getByText(REFUND_SWITCH)).toBeInTheDocument()
@@ -452,7 +452,7 @@ describe('nova direktna transakcija', () => {
     expect(tx.cf_accrual_from).toBeNull()
   })
 
-  it.each(['0', ''])('3. iznos %p sa ukljucenim prekidacem se odbija i nista se ne upisuje', async (typed) => {
+  it.each(['0', ''])('3. an amount of %p with the switch on is refused and nothing is written', async (typed) => {
     await openNewDirect(typed)
     await classify()
     turnSwitch(true)
@@ -462,7 +462,7 @@ describe('nova direktna transakcija', () => {
     expect(db().writes).toHaveLength(0)
   })
 
-  it('3b. ukucan minus sa ukljucenim prekidacem se odbija i nista se ne upisuje', async () => {
+  it('3b. a typed minus with the switch on is refused and nothing is written', async () => {
     await openNewDirect('-1199.22')
     await classify()
     turnSwitch(true)
@@ -472,7 +472,7 @@ describe('nova direktna transakcija', () => {
     expect(db().writes).toHaveLength(0)
   })
 
-  it('4. Review Focus 2: stavke podele kucane pozitivno upisuju se negativno uz roditelja sa znakom', async () => {
+  it('4. split lines typed positive are written negative, beside a signed parent', async () => {
     await openNewDirect('1199.22')
     turnSwitch(true)
     typeSplit([line('a', 1000), line('b', 199.22)])
@@ -492,7 +492,7 @@ describe('nova direktna transakcija', () => {
     expect(rows.every((r: any) => r.source_id === wrote('transactions')[0].rows[0].id)).toBe(true)
   })
 
-  it('4b. bez prekidaca iste stavke se upisuju pozitivno, kao do sada', async () => {
+  it('4b. without the switch the same lines are written positive, as before', async () => {
     await openNewDirect('1199.22')
     typeSplit([line('a', 1000), line('b', 199.22)])
     await save()
@@ -524,7 +524,7 @@ describe('nova direktna transakcija', () => {
     expect(rows.map((r: any) => r.cf_type)).toEqual(['recurring', null])
   })
 
-  it('8. Review Focus 1: povracaj u EUR ima sva tri iznosa negativna i oba kursa pozitivna', async () => {
+  it('8. a refund in euros has all three figures negative and both rates positive', async () => {
     await openNewDirect('1199.22', 'b2')
     await classify()
     turnSwitch(true)
@@ -543,8 +543,8 @@ describe('nova direktna transakcija', () => {
 
 // ── 5, 6: editing a stored row, both ways (D12) ─────────────────────────────
 
-describe('izmena sacuvanog reda', () => {
-  it('sacuvan red bez izmene upisuje nazad ono sa cim je procitan', async () => {
+describe('editing a stored row', () => {
+  it('a stored row saved unchanged writes back what it was read with', async () => {
     const row = storedRow({ cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: 1199.22 })
     await openStored(row)
     expect(refundSwitch()!.checked).toBe(false)
@@ -561,7 +561,7 @@ describe('izmena sacuvanog reda', () => {
     expect(p).toEqual(asStored)
   })
 
-  it('5a. sacuvan povracaj se otvara sa ukljucenim prekidacem i velicinom u polju', async () => {
+  it('5a. a stored refund opens with the switch on and its magnitude in the field', async () => {
     await openStored(storedRow(REFUND_FIGURES))
     expect(refundSwitch()!.checked).toBe(true)
     expect(screen.getByText(REFUND_SWITCH_NOTE)).toBeInTheDocument()
@@ -578,7 +578,7 @@ describe('izmena sacuvanog reda', () => {
     expect(reviewValue('EUR')).toBe(fmtMoney(-10.23, 'EUR'))
   })
 
-  it('5b. sacuvan povracaj, prekidac iskljucen i sacuvan, pozitivan je i nista drugo se ne menja', async () => {
+  it('5b. a stored refund saved with the switch off is positive and nothing else changes', async () => {
     const ordinary = await ordinaryUpdateOf(storedRow())
 
     await openStored(storedRow(REFUND_FIGURES))
@@ -589,7 +589,7 @@ describe('izmena sacuvanog reda', () => {
     expect(p).toEqual(ordinary)
   })
 
-  it('5c. sacuvan pozitivan trosak, prekidac ukljucen i sacuvan, dobija minus i nista drugo se ne menja', async () => {
+  it('5c. a stored positive cost saved with the switch on gets a minus and nothing else changes', async () => {
     const recurring = { cf_type: 'recurring', cf_frequency: 'monthly', cf_next_month_est: 1199.22 }
     const ordinary = await ordinaryUpdateOf(storedRow(recurring))
 
@@ -604,7 +604,7 @@ describe('izmena sacuvanog reda', () => {
     expect(refund).toEqual({ ...ordinary, ...REFUND_FIGURES, ...REFUND_CASH_FLOW })
   })
 
-  it('5d. Review Focus 1: isto u EUR, sva tri iznosa negativna i oba kursa pozitivna', async () => {
+  it('5d. the same in euros: all three figures negative and both rates positive', async () => {
     const ordinary = await ordinaryUpdateOf(storedRow(EUR_ROW))
 
     await openStored(storedRow(EUR_ROW))
@@ -621,7 +621,7 @@ describe('izmena sacuvanog reda', () => {
     expect(refund.eur_rate).toBe(117.2)
   })
 
-  it('5e. sacuvan pozitivan trosak podeljen na stavke: prekidac stavlja minus i na stavke', async () => {
+  it('5e. a stored positive cost split into lines: the switch puts the minus on the lines too', async () => {
     const ordinary = await ordinaryEditOf(storedRow(), positiveLines())
     expect(ordinary.splits.map((r: any) => r.amount)).toEqual([1000, 199.22])
     db().rows.pl_splits = positiveLines()
@@ -639,7 +639,7 @@ describe('izmena sacuvanog reda', () => {
     expect(rows.map((r: any) => r.amount_eur)).toEqual([-8.53, -1.7])
   })
 
-  it('5f. sacuvan povracaj sa stavkama otvara velicine, a iskljucen upisuje pozitivno', async () => {
+  it('5f. a stored refund with lines opens them as magnitudes, and with the switch off writes them positive', async () => {
     const ordinary = await ordinaryEditOf(storedRow(), positiveLines())
 
     db().rows.transactions = [storedRow(REFUND_FIGURES)]
@@ -659,7 +659,7 @@ describe('izmena sacuvanog reda', () => {
     expect(rows.map((r: any) => r.amount_eur)).toEqual([8.53, 1.7])
   })
 
-  it('5g. sacuvan povracaj sa stavkama, sacuvan bez izmene, zadrzava svaki minus', async () => {
+  it('5g. a stored refund with lines, saved unchanged, keeps every minus', async () => {
     const ordinary = await ordinaryEditOf(storedRow(), positiveLines())
 
     db().rows.transactions = [storedRow(REFUND_FIGURES)]
@@ -676,7 +676,7 @@ describe('izmena sacuvanog reda', () => {
     expect(rows.map((r: any) => r.amount_eur)).toEqual([-8.53, -1.7])
   })
 
-  it('6. Review Focus 3: storno iz zarada otvoren i sacuvan bez izmene vraca se isti', async () => {
+  it('6. a payroll storno opened and saved unchanged goes back as it was', async () => {
     const storno = storedRow({
       amount: -50, amount_rsd: -50, amount_eur: -0.43,
       pl_category: 'Zarade', note: 'Storno neto zarade',
@@ -702,8 +702,8 @@ describe('izmena sacuvanog reda', () => {
 
 // ── 7: the switch belongs to a direct expense only ─────────────────────────
 
-describe('7. prekidac pripada samo direktnom trosku', () => {
-  it('izbor prihoda ga gasi i upis je obican prihod sa pozitivnim iznosom', async () => {
+describe('7. the switch belongs to a direct expense only', () => {
+  it('choosing revenue turns it off and writes an ordinary revenue with a positive amount', async () => {
     await openNewDirect('1199.22')
     await classify()
     turnSwitch(true)
@@ -725,7 +725,7 @@ describe('7. prekidac pripada samo direktnom trosku', () => {
     expect(tx.cf_accrual_from).toBeNull()
   })
 
-  it('posle prihoda nazad na trosak prekidac je iskljucen i upis je pozitivan', async () => {
+  it('back to expense after revenue the switch is off and the write is positive', async () => {
     await openNewDirect('1199.22')
     await classify()
     turnSwitch(true)
@@ -744,7 +744,7 @@ describe('7. prekidac pripada samo direktnom trosku', () => {
     ['Plaćanje fakture'],
     ['Prolazna stavka'],
     ['Otplata kredita'],
-  ])('kartica %s ga gasi: nazad na direktnu, upis je pozitivan', async (card) => {
+  ])('the %s card turns it off: back on direct, the write is positive', async (card) => {
     await openNewDirect('1199.22')
     await classify()
     turnSwitch(true)
@@ -761,7 +761,7 @@ describe('7. prekidac pripada samo direktnom trosku', () => {
     expect(tx.cf_type).toBe('recurring')
   })
 
-  it('prolazna stavka posle ukljucenog prekidaca upisuje se pozitivno', async () => {
+  it('a pass-through after the switch was on is written positive', async () => {
     await openNewDirect('1199.22')
     turnSwitch(true)
     fireEvent.click(screen.getByText('Prolazna stavka'))
@@ -774,7 +774,7 @@ describe('7. prekidac pripada samo direktnom trosku', () => {
     expect(pt.amount_eur).toBe(10.23)
   })
 
-  it('sacuvan povracaj pretvoren u placanje fakture upisuje se kao obicno placanje, bez minusa', async () => {
+  it('a stored refund turned into an invoice payment is written as an ordinary payment, with no minus', async () => {
     linkABill()
     db().rows.transactions = [storedRow(REFUND_FIGURES)]
     await openStored(storedRow(REFUND_FIGURES))
@@ -792,7 +792,7 @@ describe('7. prekidac pripada samo direktnom trosku', () => {
     expect(p.cf_accrual_from).toBeNull()
   })
 
-  it('Prebaci na placanje fakture upisuje obicno placanje sa pozitivnim iznosom', async () => {
+  it('switching to an invoice payment writes an ordinary payment with a positive amount', async () => {
     db().rows.v_invoice_status = [{
       id: 'inv-9', company_id: 'co', document_type: 'invoice', type: 'revenue', partner_id: 'p1',
       partner_name: 'Kupac Primer doo', invoice_number: 'IF-9/2026', invoice_date: '2026-11-01',
@@ -832,8 +832,8 @@ describe('7. prekidac pripada samo direktnom trosku', () => {
 
 // ── A stored row linked to a bill ───────────────────────────────────────────
 
-describe('sacuvan red vezan za fakturu', () => {
-  it('pozitivnom direktnom trosku prekidac se ne nudi i upis ostaje pozitivan', async () => {
+describe('a stored row linked to a bill', () => {
+  it('a positive direct cost is not offered the switch and its write stays positive', async () => {
     linkABill()
     await openStored(storedRow())
     expect(refundSwitch()).toBeNull()
@@ -842,7 +842,7 @@ describe('sacuvan red vezan za fakturu', () => {
     expect(theUpdate()).toMatchObject({ amount: 1199.22, amount_rsd: 1199.22, amount_eur: 10.23 })
   })
 
-  it('povracaj zadrzava znak: prikazan ukljucen, a upis bez izmene nosi svaki minus', async () => {
+  it('a refund keeps its sign: shown on, and saved unchanged it carries every minus', async () => {
     linkABill()
     // The same linked row stored positive, edited and saved as it is.
     const ordinary = await ordinaryEditOf(storedRow(), positiveLines())
@@ -866,7 +866,7 @@ describe('sacuvan red vezan za fakturu', () => {
 
 // ── A template saved from the form ──────────────────────────────────────────
 
-describe('sablon sacuvan iz forme', () => {
+describe('a template saved from the form', () => {
   const templateFrom = async (refund: boolean) => {
     await openNewDirect('1199.22')
     await classify()
@@ -882,7 +882,7 @@ describe('sablon sacuvan iz forme', () => {
     return row
   }
 
-  it('povracaj cuva isti sablon kao obican trosak: bez iznosa, bez znaka i bez oznake povracaja', async () => {
+  it('a refund saves the same template as an ordinary cost: no amount, no sign and no refund mark', async () => {
     const plain = await templateFrom(false)
     const refund = await templateFrom(true)
     expect(refund).toEqual(plain)
