@@ -248,14 +248,20 @@ describe('Review Focus 1: a refund in euros', () => {
 })
 
 describe('Review Focus 2: a refund split over P and L lines', () => {
+  const lineOf = (key: string, amount: number) => ({
+    key, amount, pl_category: 'Kancelarija', pl_subcategory: '', department: 'Uprava',
+    project_id: null, cf_type: '', note: '',
+  })
+  const splitWrite = () => {
+    const write = mockState.writes.find(w => w.table === 'pl_splits' && w.op === 'insert')
+    expect(write).toBeTruthy()
+    return write!.payload as any[]
+  }
+
   it('lines typed positive are written negative, against a parent negative in all three figures', async () => {
     await importOneRow(refundLine())
     await openRow(/Povracaj za reklamaciju/)
     await makeItAnExpense()
-    const lineOf = (key: string, amount: number) => ({
-      key, amount, pl_category: 'Kancelarija', pl_subcategory: '', department: 'Uprava',
-      project_id: null, cf_type: '', note: '',
-    })
     await waitFor(() => expect(mockProps.split).toBeTruthy())
     act(() => { mockProps.split.onChange([lineOf('a', 1000), lineOf('b', 199.22)]) })
     await acceptAndPost()
@@ -270,6 +276,32 @@ describe('Review Focus 2: a refund split over P and L lines', () => {
     // The last line is the remainder: the euros add up to the row.
     const eur = splits.reduce((s, r) => s + r.amount_eur, 0)
     expect(Math.round(eur * 100) / 100).toBe(theTransaction().amount_eur)
+  })
+
+  it('every line of a refund is written one-time, a recurring one included', async () => {
+    await importOneRow(refundLine())
+    await openRow(/Povracaj za reklamaciju/)
+    await makeItAnExpense()
+    await waitFor(() => expect(mockProps.split).toBeTruthy())
+    act(() => { mockProps.split.onChange([{ ...lineOf('a', 1000), cf_type: 'recurring' }, lineOf('b', 199.22)]) })
+    await acceptAndPost()
+
+    const splits = splitWrite()
+    expect(splits.map(r => r.amount)).toEqual([-1000, -199.22])
+    expect(splits.map(r => r.amount_rsd)).toEqual([-1000, -199.22])
+    expect(splits.map(r => r.cf_type)).toEqual(['one_time', 'one_time'])
+  })
+
+  it('an ordinary cost split the same way keeps each line cash-flow type', async () => {
+    await importOneRow(costLine)
+    await openRow(/Toneri i papir/)
+    await waitFor(() => expect(mockProps.split).toBeTruthy())
+    act(() => { mockProps.split.onChange([{ ...lineOf('a', 1000), cf_type: 'recurring' }, lineOf('b', 784.4)]) })
+    await acceptAndPost()
+
+    const splits = splitWrite()
+    expect(splits.map(r => r.amount)).toEqual([1000, 784.4])
+    expect(splits.map(r => r.cf_type)).toEqual(['recurring', null])
   })
 })
 

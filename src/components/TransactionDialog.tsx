@@ -51,7 +51,7 @@ import {
 } from '../services/advanceReceipt'
 import { countOf } from '../utils/plural'
 import {
-  booked as signedFigure, bookedAmounts, isRefundRow,
+  booked as signedFigure, bookedAmounts, isRefundRow, refundSplitLines,
   REFUND_SWITCH, REFUND_SWITCH_NOTE, REFUND_ONE_TIME_NOTE, REFUND_CASH_FLOW,
 } from '../services/refund'
 
@@ -1320,8 +1320,8 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         //
         // A refund's split is saved against the signed row — all three
         // figures negative, since the last line is the remainder of each —
-        // and every line carries its minus: typed as magnitudes, stored as
-        // the row is.
+        // and every line carries its minus and is one-time: typed as
+        // magnitudes, stored as the row is (refundSplitLines).
         {
           const outcome = await saveSplits(
             supabase, 'transaction', txId,
@@ -1329,8 +1329,7 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
               ? { amount: writtenAmount, currency, ...writtenBook }
               : { amount: parseFloat(amount) || 0, currency, ...booked },
             txType !== 'direct' ? []
-              : bookAsRefund ? splitLines.map(l => ({ ...l, amount: signedFigure(l.amount, -1) }))
-              : splitLines)
+              : refundSplitLines(splitLines, bookAsRefund ? -1 : 1))
           if (!outcome.ok) {
             setSaving(false)
             setPostError(outcome.message)

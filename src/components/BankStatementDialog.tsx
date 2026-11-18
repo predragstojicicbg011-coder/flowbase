@@ -45,7 +45,7 @@ import {
   invoiceStatus, rowAmount, rowLine, type RowSeed, type RowSource,
 } from '../services/statementEdit'
 import {
-  isRefundLine, bookedSign, booked, bookedAmounts,
+  isRefundLine, bookedSign, booked, bookedAmounts, refundSplitLines,
   REFUND_TAG, REFUND_LINE_NOTE, REFUND_ONE_TIME_NOTE, REFUND_CASH_FLOW,
 } from '../services/refund'
 import { fetchAllPartners } from '../services/allPartners'
@@ -141,6 +141,12 @@ interface StatementRow {
    * one would count the cost twice.
    */
   stored_split: boolean
+  /**
+   * What a reopened row was loaded with, as the grid held it then; null for a
+   * row typed in now. A split row's figure, side and subtype are compared
+   * against it on save (see handleSaveEdit).
+   */
+  seed: RowSeed | null
   /** The stored receipt was saved as an old project advance (is_advance): only then is that flag offered. */
   stored_advance: boolean
   /** Book the leftover against this invoice as a currency difference. */
@@ -192,7 +198,7 @@ function makeRow(defaultCurrency = 'RSD', date = ''): StatementRow {
     tx_type: 'direct', tx_subtype: 'expense', subtype_chosen: false,
     pt_direction: 'out', pt_period: new Date().toISOString().slice(0, 7),
     linked_invoice_id: '', fx_book: false, fx_script_id: '',
-    pl_splits: [], stored_split: false, stored_advance: false,
+    pl_splits: [], stored_split: false, seed: null, stored_advance: false,
     pl_category_id: '', pl_category_name: '',
     pl_subcategory_id: '', pl_subcategory_name: '',
     department_id: '', department_name: '',
@@ -701,6 +707,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       const loaded = seeds.map(seed => ({
         ...makeRow(seed.currency),
         ...seed,
+        seed,
         ...resolveLookupIds(seed),
         // What it is was decided when it was posted; typing a new figure
         // into it must not reclassify it.
@@ -1112,11 +1119,10 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
         // The split is the row's own amount in parts, all three figures signed
         // together (the last line is the remainder, so a parent with one
         // figure positive would not add up). Lines are typed as magnitudes and
-        // carry the row's sign; a non-refund passes its own lines through.
+        // carry the row's sign and its one-time rule (refundSplitLines); a
+        // non-refund passes its own lines through.
         const splitParent = { amount: bookedAmount, currency: cur, ...bookedBook }
-        const splitLines = isRefund
-          ? row.pl_splits.map(l => ({ ...l, amount: booked(l.amount, sign) }))
-          : row.pl_splits
+        const splitLines = refundSplitLines(row.pl_splits, sign)
 
         // Refused before the row is written rather than after. A statement
         // posts many rows in a loop, and a split that cannot be stored would
@@ -1507,6 +1513,30 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
     if (misplaced.length > 0) {
       setError('Proknjižena stavka ne može da se promeni u taj tip transakcije. Uklonite je i unesite novu.')
       return
+    }
+    // A split row's lines are neither loaded nor written here, and the P&L
+    // reads those lines, not the row. Its amount, side or subtype changed here
+    // would leave the lines saying the opposite of the row (the database
+    // checks the balance only when the lines are written), so the whole save
+    // is refused: that change is made in the transaction, which re-signs the
+    // lines. Compared with what was loaded, in the row's own currency, to the
+    // cent. Its note, partner or date may still change.
+    {
+      const cents = (n: number) => Math.round(n * 100)
+      const changed = (r: StatementRow): boolean => {
+        if (!r.stored_split || !r.seed) return false
+        const now = rowAmount(r)
+        const then = rowAmount(r.seed)
+        return cents(now.amount) !== cents(then.amount)
+          || now.isExpense !== then.isExpense
+          || (r.currency || defaultCurrency) !== (r.seed.currency || defaultCurrency)
+          || r.tx_subtype !== r.seed.tx_subtype
+      }
+      const idx = rows.findIndex(r => !r.locked && changed(r))
+      if (idx >= 0) {
+        setError(`Stavka ${idx + 1} je podeljena na više troškova, pa se njen iznos ovde ne menja. Otvorite tu transakciju iz Glavne knjige i izmenite je tamo.`)
+        return
+      }
     }
 
     setPosting(true); setError(''); setNotice('')

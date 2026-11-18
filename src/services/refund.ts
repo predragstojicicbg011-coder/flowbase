@@ -56,6 +56,21 @@ export function bookedAmounts<T extends { amount_rsd: number | null; amount_eur:
   return { ...book, amount_rsd: booked(book.amount_rsd, sign), amount_eur: booked(book.amount_eur, sign) }
 }
 
+/**
+ * The split lines of a row as they are written. A refund's lines are typed as
+ * magnitudes and carry its minus, and each is one-time like the refund itself
+ * (D2, D8): a line otherwise keeps its own cash-flow type, and the P&L view
+ * reads the line's type before the parent's, so a negative recurring line
+ * would be carried into the forecast. Anything else gets its own array back.
+ */
+export function refundSplitLines<T extends { amount: number | null; cf_type?: string | null }>(
+  lines: T[],
+  sign: 1 | -1,
+): T[] {
+  if (sign === 1) return lines
+  return lines.map(l => ({ ...l, amount: booked(l.amount, sign), cf_type: 'one_time' }))
+}
+
 /** A stored row that is a refund: a direct expense transaction with a minus. */
 export function isRefundRow(row: {
   type?: string | null; tx_subtype?: string | null

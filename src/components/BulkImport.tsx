@@ -43,7 +43,7 @@ import {
 } from '../services/expenseSplit'
 import { saveSplits } from '../services/saveSplits'
 import {
-  isRefundLine, bookedSign, booked, bookedAmounts,
+  isRefundLine, bookedSign, booked, bookedAmounts, refundSplitLines,
   REFUND_TAG, REFUND_LINE_NOTE, REFUND_ONE_TIME_NOTE, REFUND_CASH_FLOW,
 } from '../services/refund'
 import { linkAmountsFromOwn } from '../services/invoiceLinks'
@@ -1255,11 +1255,10 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
       // The split is the row's own amount in parts, all three figures signed
       // together (the last line is the remainder, so a parent with one figure
       // positive would not add up). Lines are typed as magnitudes and carry
-      // the row's sign; a non-refund passes its own lines through untouched.
+      // the row's sign and its one-time rule (refundSplitLines); a non-refund
+      // passes its own lines through untouched.
       const splitParent = { amount: bookedAmount, currency: p.currency, ...bookedBook }
-      const splitLines = isRefund
-        ? row.override_pl_splits.map(l => ({ ...l, amount: booked(l.amount, sign) }))
-        : row.override_pl_splits
+      const splitLines = refundSplitLines(row.override_pl_splits, sign)
 
       // Refused before the row is written rather than after. An import posts
       // seventy rows in a loop, and a split that cannot be stored would leave

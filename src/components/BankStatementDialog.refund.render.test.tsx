@@ -409,6 +409,38 @@ describe('a refund split over P and L lines', () => {
     expect(splitRows().map(r => r.amount)).toEqual([-1000, -199.22])
   })
 
+  it('every line of a refund is written one-time, a recurring one included', async () => {
+    await openDialog()
+    describeRow()
+    typeUplata('1199.22')
+    toggleRow()
+    subtype('📤 Trošak')
+    await waitFor(() => expect(mockProps.split).toBeTruthy())
+    typeSplit([{ ...lineOf('a', 1000), cf_type: 'recurring' }, lineOf('b', 199.22)])
+    await post()
+
+    expect(screen.getByText('Izvod je proknjižen.')).toBeInTheDocument()
+    const splits = splitRows()
+    expect(splits.map(r => r.amount)).toEqual([-1000, -199.22])
+    expect(splits.map(r => r.amount_rsd)).toEqual([-1000, -199.22])
+    expect(splits.map(r => r.cf_type)).toEqual(['one_time', 'one_time'])
+  })
+
+  it('an ordinary cost split the same way keeps each line cash-flow type', async () => {
+    await openDialog()
+    describeRow()
+    typeIsplata('1199.22')
+    toggleRow()
+    await waitFor(() => expect(mockProps.split).toBeTruthy())
+    typeSplit([{ ...lineOf('a', 1000), cf_type: 'recurring' }, lineOf('b', 199.22)])
+    await post()
+
+    expect(screen.getByText('Izvod je proknjižen.')).toBeInTheDocument()
+    const splits = splitRows()
+    expect(splits.map(r => r.amount)).toEqual([1000, 199.22])
+    expect(splits.map(r => r.cf_type)).toEqual(['recurring', null])
+  })
+
   it('lines that do not add up are refused before anything is written', async () => {
     await openDialog()
     describeRow()
@@ -605,7 +637,7 @@ describe('Review Focus 5 and 3: a statement holding a refund and a storno, reope
     }
     mockState.tables.import_logs = [log]
     render(<BankStatementDialog onClose={() => {}} onImported={() => {}} editLog={log} />)
-    await waitFor(() => expect(cell('Opis', 0).value).toBe('Povracaj za reklamaciju'))
+    await waitFor(() => expect(cell('Opis', 0).value).toBe(transactions[0].note))
   }
 
   const save = async () => {
@@ -713,5 +745,82 @@ describe('Review Focus 5 and 3: a statement holding a refund and a storno, reope
     expect(Object.keys(cost).sort()).toEqual(Object.keys(refund).filter(k => ![
       'cf_accrual_from', 'cf_accrual_to', 'cf_capex_months', 'cf_reimbursable_date',
     ].includes(k)).sort())
+  })
+
+  // ── A row split over P&L lines is changed in the transaction, not here ──
+  //
+  // The statement editor never loads or writes a row's split lines, and the
+  // P&L reads those lines. A split row's amount, side or subtype changed here
+  // would leave the lines saying the opposite of the row, so the save is
+  // refused whole and points to the transaction.
+  describe('a stored split expense', () => {
+    const SPLIT = stored({
+      id: 'tx-split', note: 'Toneri i papir', tx_subtype: 'expense',
+      amount: 1199.22, amount_rsd: 1199.22, amount_eur: 10.23,
+      pl_category: null, department: null,
+    })
+    const REFUSED = 'Stavka 1 je podeljena na više troškova, pa se njen iznos ovde ne menja. '
+      + 'Otvorite tu transakciju iz Glavne knjige i izmenite je tamo.'
+    const reopenSplit = async () => {
+      mockState.tables.pl_splits = [
+        { id: 'sp-1', source: 'transaction', source_id: 'tx-split', amount: 1000 },
+        { id: 'sp-2', source: 'transaction', source_id: 'tx-split', amount: 199.22 },
+      ]
+      await reopen([SPLIT, COST])
+    }
+
+    it('saved untouched, is written back unchanged and its lines are not written', async () => {
+      await reopenSplit()
+      await save()
+
+      expect(screen.getByText(/Izvod je sačuvan/)).toBeInTheDocument()
+      expect(updateOf('tx-split')).toMatchObject({
+        tx_subtype: 'expense', amount: 1199.22, amount_rsd: 1199.22, amount_eur: 10.23, project_id: null,
+      })
+      expect(mockState.writes.filter(w => w.table === 'pl_splits')).toHaveLength(0)
+    })
+
+    it('its figure moved to Uplata is refused whole and nothing is written', async () => {
+      await reopenSplit()
+      typeUplata('1199.22', 0)
+      await save()
+
+      expect(warning()).toBe(REFUSED)
+      expect(screen.queryByText(/Izvod je sačuvan/)).toBeNull()
+      expect(mockState.writes).toHaveLength(0)
+    })
+
+    it('its amount changed is refused whole and nothing is written', async () => {
+      await reopenSplit()
+      typeIsplata('1100', 0)
+      await save()
+
+      expect(warning()).toBe(REFUSED)
+      expect(mockState.writes).toHaveLength(0)
+    })
+
+    it('only its note changed still saves', async () => {
+      await reopenSplit()
+      fireEvent.change(cell('Opis', 0), { target: { value: 'Toneri, papir i fascikle' } })
+      await save()
+
+      expect(screen.getByText(/Izvod je sačuvan/)).toBeInTheDocument()
+      expect(updateOf('tx-split')).toMatchObject({
+        note: 'Toneri, papir i fascikle', amount: 1199.22, amount_rsd: 1199.22, amount_eur: 10.23,
+      })
+      expect(mockState.writes.filter(w => w.table === 'pl_splits')).toHaveLength(0)
+    })
+
+    it('an unsplit row beside it can still be turned into a refund', async () => {
+      await reopenSplit()
+      typeUplata('12500', 1)
+      await save()
+
+      expect(screen.getByText(/Izvod je sačuvan/)).toBeInTheDocument()
+      expect(updateOf('tx-cost')).toMatchObject({
+        tx_subtype: 'expense', amount: -12500, amount_rsd: -12500, amount_eur: -106.66, cf_type: 'one_time',
+      })
+      expect(updateOf('tx-split')).toMatchObject({ amount: 1199.22, amount_rsd: 1199.22 })
+    })
   })
 })

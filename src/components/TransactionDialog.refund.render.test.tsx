@@ -339,9 +339,9 @@ const negativeLines = () => [
   storedLine('s1', 0, -1000, -1000, -8.53),
   storedLine('s2', 1, -199.22, -199.22, -1.7),
 ]
-/** Split rows with the three figures negated, everything else as it was. */
+/** Split rows as a refund writes them: the three figures negated and one-time, everything else as it was. */
 const negated = (rows: any[]) => rows.map(r => ({
-  ...r, amount: -r.amount, amount_rsd: -r.amount_rsd, amount_eur: -r.amount_eur,
+  ...r, amount: -r.amount, amount_rsd: -r.amount_rsd, amount_eur: -r.amount_eur, cf_type: 'one_time',
 }))
 
 /**
@@ -500,6 +500,28 @@ describe('nova direktna transakcija', () => {
     expect(theInsert().amount).toBe(1199.22)
     expect(splitRowsWritten().map((r: any) => r.amount)).toEqual([1000, 199.22])
     expect(splitRowsWritten().map((r: any) => r.amount_eur)).toEqual([8.53, 1.7])
+  })
+
+  it('4c. every split line of a refund is written one-time, a recurring one included', async () => {
+    await openNewDirect('1199.22')
+    turnSwitch(true)
+    typeSplit([{ ...line('a', 1000), cf_type: 'recurring' }, line('b', 199.22)])
+    await save()
+
+    const rows = splitRowsWritten()
+    expect(rows.map((r: any) => r.amount)).toEqual([-1000, -199.22])
+    expect(rows.map((r: any) => r.amount_rsd)).toEqual([-1000, -199.22])
+    expect(rows.map((r: any) => r.cf_type)).toEqual(['one_time', 'one_time'])
+  })
+
+  it('4d. without the switch the same lines keep each its own cash-flow type', async () => {
+    await openNewDirect('1199.22')
+    typeSplit([{ ...line('a', 1000), cf_type: 'recurring' }, line('b', 199.22)])
+    await save()
+
+    const rows = splitRowsWritten()
+    expect(rows.map((r: any) => r.amount)).toEqual([1000, 199.22])
+    expect(rows.map((r: any) => r.cf_type)).toEqual(['recurring', null])
   })
 
   it('8. Review Focus 1: povracaj u EUR ima sva tri iznosa negativna i oba kursa pozitivna', async () => {

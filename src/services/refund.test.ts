@@ -1,6 +1,6 @@
 import {
   isRefundLine, bookedSign, booked, bookedAmounts, isRefundRow, REFUND_CASH_FLOW,
-  REFUND_TAG, REFUND_LINE_NOTE, REFUND_SWITCH, REFUND_SWITCH_NOTE, REFUND_ONE_TIME_NOTE,
+  REFUND_TAG, REFUND_LINE_NOTE, REFUND_SWITCH, REFUND_SWITCH_NOTE, REFUND_ONE_TIME_NOTE, refundSplitLines,
 } from './refund'
 
 const credit = { debit: null, credit: 1199.22 }
@@ -85,5 +85,30 @@ describe('the words and the cash-flow fields', () => {
       cf_type: 'one_time', cf_frequency: null, cf_next_month_est: null,
       cf_accrual_from: null, cf_accrual_to: null, cf_capex_months: null, cf_reimbursable_date: null,
     })
+  })
+})
+
+describe('refundSplitLines', () => {
+  const lines = [
+    { key: 'a', amount: 1000 as number | null, cf_type: 'recurring', note: 'prva', project_id: 'p1' },
+    { key: 'b', amount: 199.22 as number | null, cf_type: '', note: 'druga', project_id: null },
+  ]
+
+  it('returns the same array for an ordinary cost', () => {
+    expect(refundSplitLines(lines, 1)).toBe(lines)
+  })
+
+  it('negates every amount and makes every line one-time for a refund', () => {
+    const out = refundSplitLines(lines, -1)
+    expect(out).not.toBe(lines)
+    expect(out.map(l => l.amount)).toEqual([-1000, -199.22])
+    expect(out.map(l => l.cf_type)).toEqual(['one_time', 'one_time'])
+    // The input is left as it was.
+    expect(lines.map(l => [l.amount, l.cf_type])).toEqual([[1000, 'recurring'], [199.22, '']])
+  })
+
+  it('keeps a null amount null and every other field untouched', () => {
+    const out = refundSplitLines([{ key: 'c', amount: null, cf_type: 'recurring', note: 'treca', project_id: 'p2' }], -1)
+    expect(out).toEqual([{ key: 'c', amount: null, cf_type: 'one_time', note: 'treca', project_id: 'p2' }])
   })
 })
