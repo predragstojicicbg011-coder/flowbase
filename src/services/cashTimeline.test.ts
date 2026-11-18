@@ -302,6 +302,12 @@ describe('what counts as money moving', () => {
     expect(cashRowIsIn({ type: 'invoice_payment', tx_subtype: 'revenue', amount: 500 })).toBe(true)
   })
 
+  it('reads a refund by the same rule as isRefundRow, whichever figure carries the minus', () => {
+    expect(cashRowIsIn({ type: 'direct', tx_subtype: 'expense', amount: -5, amount_rsd: -590 })).toBe(true)
+    expect(cashRowIsIn({ type: 'direct', tx_subtype: 'expense', amount_rsd: -590 })).toBe(true)
+    expect(cashRowIsIn({ type: 'direct', tx_subtype: 'expense', amount: -5, amount_rsd: 590 })).toBe(false)
+  })
+
   it('reads the EUR figure in the EUR view, and nothing where a row has none', () => {
     const tx = { type: 'direct', tx_subtype: 'revenue', amount_rsd: 117200, amount_eur: 1000 }
     expect(cashMovement(tx, 'EUR')).toEqual({ inflow: 1000, outflow: 0 })

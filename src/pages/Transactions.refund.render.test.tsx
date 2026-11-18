@@ -68,17 +68,6 @@ const openTransactions = async (rows: any[]) => {
   await screen.findByText(rows[0].note)
 }
 
-// The page's own tab styles mix `borderBottom` with `borderBottomColor`, so React warns on
-// every tab switch. That is the page, not this test: only that one message is swallowed.
-const realError = console.error
-beforeAll(() => {
-  console.error = (...args: any[]) => {
-    if (args.map(String).join(' ').includes('a style property during rerender')) return
-    realError(...args)
-  }
-})
-afterAll(() => { console.error = realError })
-
 const rowOf = (note: string) => screen.getByText(note).closest('tr') as HTMLElement
 
 describe('a refund in the General Ledger', () => {

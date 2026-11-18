@@ -38,6 +38,7 @@ import { fmtMoney } from '../utils/formatters'
 import { monthLongLabel, srDate } from '../utils/months'
 import { pickAmount, type DisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { isReceivable } from './revenue'
+import { isRefundRow } from './refund'
 
 export type MonthKey = string
 
@@ -344,12 +345,14 @@ export function cashDirection(tx: Pick<CashTx, 'type' | 'tx_subtype'>): 'in' | '
 /**
  * Whether a listed transaction reads as money coming in: its direction is
  * 'in', or it is a refund (a direct expense booked with a minus), which is
- * money that came back. `amount` is the figure the row prints, in the
- * transaction's own currency; its sign is the refund's sign in every currency.
+ * money that came back. Whether a row is a refund is decided in one place,
+ * `isRefundRow`, so this list and the badge on it cannot disagree.
  */
-export function cashRowIsIn(tx: Pick<CashTx, 'type' | 'tx_subtype'> & { amount?: number | null }): boolean {
+export function cashRowIsIn(
+  tx: Pick<CashTx, 'type' | 'tx_subtype'> & { amount?: number | null; amount_rsd?: number | null },
+): boolean {
   if (cashDirection(tx) === 'in') return true
-  return tx.type === 'direct' && tx.tx_subtype === 'expense' && (Number(tx.amount) || 0) < 0
+  return isRefundRow(tx)
 }
 
 

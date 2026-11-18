@@ -1049,7 +1049,7 @@ const s: Record<string, React.CSSProperties> = {
   summarySub: { fontSize: '11px', color: '#7A9BB8' },
   tabBar: { display: 'flex', alignItems: 'center', borderBottom: '0.5px solid rgba(255,255,255,0.075)', marginBottom: '1rem' },
   tab: { fontFamily: 'system-ui,sans-serif', fontSize: '13px', padding: '10px 18px', border: 'none', background: 'transparent', color: '#7A9BB8', cursor: 'pointer', borderBottom: '2px solid transparent', marginBottom: '-0.5px', display: 'flex', alignItems: 'center', gap: '6px' },
-  tabActive: { color: '#DCE9F6', borderBottomColor: '#00D47E', fontWeight: '500' },
+  tabActive: { color: '#DCE9F6', borderBottom: '2px solid #00D47E', fontWeight: '500' },
   tabCount: { fontSize: '10px', fontWeight: '500', padding: '1px 6px', borderRadius: '10px', background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.30)' },
   tabCountActive: { background: 'rgba(0,212,126,0.12)', color: '#00D47E' },
   filterBar: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1rem', flexWrap: 'wrap' as const },

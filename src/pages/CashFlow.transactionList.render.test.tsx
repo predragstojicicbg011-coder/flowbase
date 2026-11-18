@@ -31,7 +31,21 @@ jest.mock('../supabase', () => {
   return { supabase: { from: (table: string) => chain(table) } }
 })
 
-const thisMonth = new Date().toISOString().slice(0, 7)
+// The page opens on the current month, so the clock is pinned: the test does not
+// depend on the day it runs.
+const FIXED_NOW = Date.UTC(2026, 10, 18, 12, 0, 0)
+const RealDate = Date
+class FixedDate extends RealDate {
+  constructor(...args: any[]) {
+    if (args.length === 0) super(FIXED_NOW)
+    else super(...(args as [any]))
+  }
+  static now() { return FIXED_NOW }
+}
+beforeAll(() => { ;(global as any).Date = FixedDate })
+afterAll(() => { ;(global as any).Date = RealDate })
+
+const thisMonth = '2026-11'
 
 const tx = (id: string, partner: string, type: string, subtype: string, amount: number) => ({
   id, type, tx_subtype: subtype, is_advance: false, status: 'posted',
@@ -49,6 +63,8 @@ const openPage = async () => {
       tx('t1', 'Kupac Primer', 'direct', 'revenue', 5000),
       tx('t2', 'Dobavljac Primer', 'direct', 'expense', 3000),
       tx('t3', 'Povratnik Primer', 'direct', 'expense', -1000),
+      // Only the dinar figure carries the minus; the badge still reads it as a refund.
+      { ...tx('t4', 'Samo Dinari Primer', 'direct', 'expense', 7), amount: 7, amount_rsd: -590 },
     ],
   }
   render(<CashFlow />)
@@ -73,6 +89,13 @@ describe('the list of recent transactions in the cash flow', () => {
     expect(within(refund).queryByText(/Direktna isplata/)).not.toBeInTheDocument()
   })
 
+  it('reads a row with only the dinar figure negative as in, with the refund badge', async () => {
+    await openPage()
+    const row = rowOf('Samo Dinari Primer')
+    expect(within(row).getByText('📥 Povraćaj')).toBeInTheDocument()
+    expect(within(row).getByText(/^\+7,00/)).toBeInTheDocument()
+  })
+
   it('dresses the refund badge in the in colour and the expense badge in the out colour', async () => {
     await openPage()
     const refundBadge = within(rowOf('Povratnik Primer')).getByText('📥 Povraćaj')
@@ -83,7 +106,7 @@ describe('the list of recent transactions in the cash flow', () => {
 
   it('totals the outflow as the expense less the refund', async () => {
     await openPage()
-    expect(cardValue('Ukupni odlivi')).toHaveTextContent('2.000 RSD')
+    expect(cardValue('Ukupni odlivi')).toHaveTextContent('1.410 RSD')
     expect(cardValue('Ukupni prilivi')).toHaveTextContent('5.000 RSD')
   })
 })

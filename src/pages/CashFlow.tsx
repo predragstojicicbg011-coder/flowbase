@@ -390,7 +390,7 @@ export default function CashFlow() {
                           const isIn = cashRowIsIn(tx)
                           // The refund reads as money in, so its badge says so in the
                           // in colour; an advance is never a refund.
-                          const isRefund = isIn && !tx.is_advance && isRefundRow(tx)
+                          const isRefund = !tx.is_advance && isRefundRow(tx)
                           const inBadge = isRefund || (tx.type === 'direct' && tx.tx_subtype === 'revenue')
                           return (
                             <tr key={tx.id} style={s.dataRow}>
