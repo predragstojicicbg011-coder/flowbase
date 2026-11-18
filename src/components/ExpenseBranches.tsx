@@ -4,6 +4,7 @@ import {
   branchPath, keysToDepth, layoutBranches, type BranchNode,
 } from '../services/branchTree'
 import type { CostBehaviour } from '../services/cfoMetrics'
+import { drawn } from '../services/expenseTree'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
 import { countOf } from '../utils/plural'
@@ -154,7 +155,8 @@ export default function ExpenseBranches({
 
   const w = Math.max(Math.max(420, width), (deepest + 1) * COL + 40)
   const H = Math.max(120, layout.height + 14)
-  const total = roots.reduce((s, n) => s + Math.abs(n.amount), 0)
+  // What the picture draws: a root at or below zero is in the table, not here.
+  const total = roots.reduce((s, n) => s + drawn(n.amount), 0)
 
   const toggle = (key: string) => setOpen(prev => {
     const next = new Set(prev)
@@ -209,7 +211,7 @@ export default function ExpenseBranches({
 
           {layout.nodes.map(n => {
             const tone = BEHAVIOUR[(n.node as ExpenseBranchNode).behaviour]
-            const under = (n.node.children || []).filter(c => Math.abs(c.amount) > 0).length
+            const under = (n.node.children || []).filter(c => c.amount > 0).length
             return (
               <g key={n.key}
                 role="button" tabIndex={0}

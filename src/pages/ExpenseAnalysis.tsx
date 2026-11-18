@@ -15,7 +15,7 @@ import { KeyFigures, ChartDeck } from '../components/ExpenseVisuals'
 import {
   buildTree, withComparison, paretoCut, flatten, findNode,
   contributesTo, BRANCHES, BRANCH_LABEL, BRANCH_COLUMNS,
-  adjustedTotal, excludedTotal, totalOf, monthsIn, isExpenseRow,
+  adjustedTotal, excludedTotal, totalOf, monthsIn, isExpenseRow, drawn,
   Branch, PlEntry, ComparedNode, UNASSIGNED,
 } from '../services/expenseTree'
 import {
@@ -191,6 +191,14 @@ export default function ExpenseAnalysis() {
   const compared = useMemo(() => withComparison(tree, priorTree), [tree, priorTree])
 
   const total = useMemo(() => totalOf(tree), [tree])
+  // A share is a figure over the sum of the figures above zero, so no row reads
+  // as a negative share or as more than 100%: a category netting below zero
+  // keeps its minus in the Iznos column and has no share of the spend.
+  const shareBase = useMemo(() => tree.reduce((s, n) => s + drawn(n.amount), 0), [tree])
+  // Null for a node that is not above zero: it is not part of the picture, so
+  // it has no share and the table prints a dash.
+  const shareOf = (amount: number): number | null =>
+    shareBase > 0 && amount > 0 ? (amount / shareBase) * 100 : null
   const adjusted = useMemo(() => adjustedTotal(tree, hidden), [tree, hidden])
   const excluded = useMemo(() => excludedTotal(tree, hidden), [tree, hidden])
   const priorTotal = useMemo(() => totalOf(priorTree), [priorTree])
@@ -215,6 +223,8 @@ export default function ExpenseAnalysis() {
       deptTotal: totalOf(deptTree),
       projectTotal: totalOf(buildTree(curExp, 'project', currency)),
       unassigned: deptTree.find(n => n.label === UNASSIGNED)?.amount || 0,
+      // What the department branch draws: the base of the unclassified share.
+      deptShareBase: deptTree.reduce((s, n) => s + drawn(n.amount), 0),
     }
   }, [curExp, currency])
   const unassigned = recon.unassigned
@@ -236,6 +246,7 @@ export default function ExpenseAnalysis() {
   }
 
   const selectedNode = selected ? findNode(tree, selected) : null
+  const selectedShare = selectedNode ? shareOf(selectedNode.amount) : null
   // Unsorted: only the length is read here, and `buildEntryItems` now sorts its
   // own input before capping, so a pre-sort would change nothing but the cost.
   //
@@ -354,9 +365,9 @@ export default function ExpenseAnalysis() {
     nodes.filter(matchesSearch).flatMap(n => {
       const isHidden = hidden.has(n.key)
       const isOpen = expanded.has(n.key) || (!!search.trim() && n.children.length > 0)
-      const share = total > 0 ? (n.amount / total) * 100 : 0
+      const share = shareOf(n.amount)
       const spark = months.map(m => n.monthly[m] || 0)
-      const sparkMax = Math.max(...spark, 1)
+      const sparkMax = Math.max(1, ...spark.map(drawn))
 
       const row = (
         <tr key={n.key}
@@ -390,7 +401,7 @@ export default function ExpenseAnalysis() {
             </div>
           </td>
           <td style={{ ...s.td, ...s.num, fontWeight: n.depth === 0 ? 600 : 400 }}>{money(n.amount)}</td>
-          <td style={{ ...s.td, ...s.num, color: '#7A9BB8' }}>{share.toFixed(1)}%</td>
+          <td style={{ ...s.td, ...s.num, color: '#7A9BB8' }}>{share === null ? '—' : `${share.toFixed(1)}%`}</td>
           <td style={{ ...s.td, ...s.num, color: '#7A9BB8' }}>{money(n.priorAmount)}</td>
           <td style={{ ...s.td, ...s.num, color: n.delta > 0 ? '#FF5B5A' : n.delta < 0 ? '#00D47E' : '#7A9BB8' }}>
             {n.delta === 0 ? '—' : money(n.delta)}
@@ -463,6 +474,7 @@ export default function ExpenseAnalysis() {
           adjusted={adjusted}
           excluded={excluded}
           unassigned={unassigned}
+          unassignedBase={recon.deptShareBase}
           reconciled={Math.abs(recon.plTotal - recon.deptTotal) < 0.01}
           months={months}
           monthlyTotals={monthlyTotals}
@@ -570,9 +582,11 @@ export default function ExpenseAnalysis() {
                 <span style={{ marginLeft: '12px', color: '#FF5B5A', fontWeight: '600', fontFamily: "'DM Mono', monospace" }}>
                   ukupno {money(selectedNode.amount)}
                 </span>
-                <span style={{ marginLeft: '10px' }}>
-                  {total > 0 ? ((selectedNode.amount / total) * 100).toFixed(1).replace('.', ',') : '0'}% od: {range.label}
-                </span>
+                {selectedShare !== null && (
+                  <span style={{ marginLeft: '10px' }}>
+                    {selectedShare.toFixed(1).replace('.', ',')}% od: {range.label}
+                  </span>
+                )}
               </>
             }
             footerLeft={
@@ -621,13 +635,14 @@ function Spark({ values, max, rising }: { values: number[]; max: number; rising:
   if (values.length === 1) {
     return (
       <svg width={W} height={H} style={{ display: 'block' }}>
-        <rect x={W / 2 - 3} y={H - 2 - (values[0] / max) * (H - 4)} width="6"
-          height={Math.max((values[0] / max) * (H - 4), 1)} fill={col} opacity="0.7" />
+        <rect x={W / 2 - 3} y={H - 2 - (drawn(values[0]) / max) * (H - 4)} width="6"
+          height={Math.max((drawn(values[0]) / max) * (H - 4), 1)} fill={col} opacity="0.7" />
       </svg>
     )
   }
   const x = (i: number) => (i / (values.length - 1)) * (W - 2) + 1
-  const y = (v: number) => H - 2 - (v / max) * (H - 5)
+  // A month at or below zero sits on the floor: nothing is drawn below the box.
+  const y = (v: number) => H - 2 - (drawn(v) / max) * (H - 5)
   const line = values.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
   return (
     <svg width={W} height={H} style={{ display: 'block' }}>

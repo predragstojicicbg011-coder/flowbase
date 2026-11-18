@@ -182,4 +182,40 @@ describe('counting what is under a node', () => {
   it('does not count a child worth nothing', () => {
     expect(countUnder({ key: 'p', label: 'p', amount: 10, children: [leaf('z', 0)] })).toBe(0)
   })
+
+  it('does not count a child below zero either', () => {
+    expect(countUnder({ key: 'p', label: 'p', amount: 10, children: [leaf('z', -4)] })).toBe(0)
+  })
+})
+
+describe('a node at or below zero is not drawn', () => {
+  const SIGNED: BranchNode[] = [
+    { key: 'pos', label: 'pos', amount: 900, children: [leaf('line', 900), leaf('refunded line', -50)] },
+    leaf('net refund', -200),
+    leaf('zero', 0),
+  ]
+  const opened = layoutBranches(SIGNED, new Set(['pos']), OPTS)
+
+  it('places neither the negative nor the zero node, nor a refunded line', () => {
+    expect(opened.nodes.map(n => n.key).sort()).toEqual(['line', 'pos'])
+  })
+
+  it('gives the positive node the whole, and every width is above zero and finite', () => {
+    expect(opened.nodes.find(n => n.key === 'pos')!.share).toBe(1)
+    expect(opened.links.length).toBeGreaterThan(0)
+    for (const l of opened.links) {
+      expect(Number.isFinite(l.width)).toBe(true)
+      expect(l.width).toBeGreaterThan(0)
+    }
+  })
+
+  it('has nothing to draw when everything is at or below zero', () => {
+    const l = layoutBranches([leaf('a', -5), leaf('b', 0)], new Set(), OPTS)
+    expect(l.nodes).toEqual([])
+    expect(l.height).toBe(0)
+  })
+
+  it('does not ask to open a node that is itself at or below zero', () => {
+    expect([...keysToDepth([{ key: 'p', label: 'p', amount: -10, children: [leaf('z', 4)] }], 2)]).toEqual([])
+  })
 })

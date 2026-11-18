@@ -249,6 +249,19 @@ export function totalOf(nodes: TreeNode[]): number {
   return nodes.reduce((s, n) => s + n.amount, 0)
 }
 
+/**
+ * What a picture may draw of a figure: the figure when it is above zero,
+ * otherwise nothing.
+ *
+ * A refund is an expense with a minus, so a node, month or cell can net to zero
+ * or below. The table keeps it with its minus; a width, a height, the numerator
+ * of a share or the maximum of a scale takes this instead. Null, undefined and
+ * NaN are nothing as well.
+ */
+export function drawn(n: number | null | undefined): number {
+  return typeof n === 'number' && n > 0 ? n : 0
+}
+
 export function flatten(nodes: TreeNode[]): TreeNode[] {
   const out: TreeNode[] = []
   const walk = (ns: TreeNode[]) => ns.forEach(n => { out.push(n); walk(n.children) })
@@ -364,7 +377,10 @@ export function paretoCut(nodes: TreeNode[], pct = 80): {
   total: number
   sharePct: number
 } {
-  const leaves = flatten(nodes).filter(n => n.children.length === 0)
+  // A leaf at or below zero (a refund that outweighs its charge) is in the
+  // table and not in the picture: it is no share of the spend, so it is not a
+  // line that "makes up" any of it, and it is left out of the total too.
+  const leaves = flatten(nodes).filter(n => n.children.length === 0 && n.amount > 0)
   leaves.sort((a, b) => b.amount - a.amount)
   const total = leaves.reduce((s, n) => s + n.amount, 0)
   const target = total * (pct / 100)

@@ -64,15 +64,15 @@ describe('monthlySeries', () => {
 
   it('reports a month with no spend as zero rather than skipping it', () => {
     const s = monthlySeries(tree, ['2026-06', ...months])
-    expect(s.points[0]).toEqual({ month: '2026-06', values: { A: 0, B: 0, C: 0 }, total: 0 })
+    expect(s.points[0]).toEqual({ month: '2026-06', values: { A: 0, B: 0, C: 0 }, total: 0, stack: 0 })
   })
 
   it('survives an empty tree', () => {
     expect(monthlySeries([], months)).toEqual({
       keys: [], max: 0,
       points: [
-        { month: '2026-07', values: {}, total: 0 },
-        { month: '2026-08', values: {}, total: 0 },
+        { month: '2026-07', values: {}, total: 0, stack: 0 },
+        { month: '2026-08', values: {}, total: 0, stack: 0 },
       ],
     })
   })
@@ -547,5 +547,75 @@ describe('branchRoots', () => {
   it('does not draw a branch carrying nothing', () => {
     const withZero = buildTree([e({ amount_rsd: 0, pl_category: 'Ghost' })], 'pl', 'RSD')
     expect(branchRoots(withZero, months)).toEqual([])
+  })
+
+  it('does not draw a branch that nets below zero, nor a line under it', () => {
+    const signed = buildTree([
+      e({ amount_rsd: 900, pl_category: 'Office', pl_subcategory: 'Rent' }),
+      e({ amount_rsd: 100, pl_category: 'Office', pl_subcategory: 'Rent' }),
+      e({ amount_rsd: -200, pl_category: 'Office', pl_subcategory: 'Chairs' }),
+      e({ amount_rsd: 300, pl_category: 'Marketing', pl_subcategory: 'Ads' }),
+      e({ amount_rsd: -500, pl_category: 'Marketing', pl_subcategory: 'Ads' }),
+    ], 'pl', 'RSD')
+    const roots = branchRoots(signed, months)
+    expect(roots.map(r => r.label)).toEqual(['Office'])
+    expect(roots[0].children!.map(c => c.label)).toEqual(['Rent'])
+  })
+})
+
+describe('a figure at or below zero is in the table and not in the picture', () => {
+  const months = ['2026-07', '2026-08']
+  // Category A nets 900 in July and -150 in August; B is 300 in August; C nets -200 over the period.
+  const tree = buildTree([
+    e({ amount_rsd: 900, pl_category: 'A', pl_subcategory: 'A1', pl_date: '2026-07-05' }),
+    e({ amount_rsd: -150, pl_category: 'A', pl_subcategory: 'A1', pl_date: '2026-08-05' }),
+    e({ amount_rsd: 300, pl_category: 'B', pl_subcategory: 'B1', pl_date: '2026-08-09' }),
+    e({ amount_rsd: -200, pl_category: 'C', pl_subcategory: 'C1', pl_date: '2026-08-09' }),
+  ], 'pl', 'RSD')
+
+  it('keeps the signed net of a month, and stacks only the bands above zero', () => {
+    const s = monthlySeries(tree, months)
+    const aug = s.points[1]
+    expect(aug.total).toBe(-50)         // 300 - 150 - 200, printed as it is
+    expect(aug.stack).toBe(300)         // only B is drawn
+    expect(s.points[0].stack).toBe(900)
+  })
+
+  it('scales the axis to the tallest stack, never to a net', () => {
+    expect(monthlySeries(tree, months).max).toBe(900)
+  })
+
+  it('has no height at all when every band is at or below zero', () => {
+    const none = buildTree([e({ amount_rsd: -40 })], 'pl', 'RSD')
+    const s = monthlySeries(none, ['2026-08'])
+    expect(s.max).toBe(0)
+    expect(s.points[0].stack).toBe(0)
+    expect(s.points[0].total).toBe(-40)
+  })
+
+  it('leaves a line that nets below zero off the curve, which still ends at 100 and never falls', () => {
+    const p = paretoSeries(tree)
+    expect(p.map(x => x.label)).toEqual(['A1', 'B1'])
+    expect(p[p.length - 1].cumulativePct).toBeCloseTo(100, 6)
+    for (let i = 1; i < p.length; i++) {
+      expect(p[i].cumulativePct).toBeGreaterThanOrEqual(p[i - 1].cumulativePct)
+    }
+  })
+
+  it('returns no curve when nothing is above zero', () => {
+    expect(paretoSeries(buildTree([e({ amount_rsd: -40 })], 'pl', 'RSD'))).toEqual([])
+  })
+
+  it('treats a cell at or below zero as nothing, and keeps it out of the scale maximum', () => {
+    const g = heatGrid(tree, months, 1)
+    const a = g.rows.find(r => r.label === 'A1')!
+    expect(a.values).toEqual([900, -150])
+    expect(binOf(a.values[1], g.bins)).toBe(-1)
+    expect(rowBin(a.values[1], a.max)).toBe(-1)
+    expect(a.max).toBe(900)
+    const c = g.rows.find(r => r.label === 'C1')!
+    expect(c.max).toBe(0)
+    expect(g.max).toBe(900)
+    expect(g.bins.every(b => b > 0)).toBe(true)
   })
 })

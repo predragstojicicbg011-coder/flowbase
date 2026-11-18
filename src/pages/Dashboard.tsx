@@ -16,6 +16,7 @@ import { MONTHS_SHORT_SR } from '../utils/months'
 import { countOf } from '../utils/plural'
 import { isReceivable } from '../services/revenue'
 import { receivableTotals } from '../services/receivables'
+import { drawn } from '../services/expenseTree'
 import { homeLedgerFigures, roleHeadingOf, type PrincipalHeading } from '../services/homeLedgerFigures'
 import { rowsToMap, roleDef, SETTINGS_PATH, type SystemCategoryRow } from '../services/systemCategories'
 import {
@@ -201,14 +202,17 @@ function AreaChart({ months, revenues, expenses }: { months: string[]; revenues:
 
 // ── Donut Chart ───────────────────────────────────────────
 function DonutChart({ segments }: { segments: { label: string; value: number; color: string }[] }) {
-  const total = segments.reduce((s, seg) => s + seg.value, 0)
+  // A category netting at or below zero (a refund outweighing its charge) gets
+  // no slice; the legend beside the donut still lists it, with its minus. The
+  // rest are shares of what is above zero, so together they make the circle.
+  const total = segments.reduce((s, seg) => s + drawn(seg.value), 0)
   if (!total) return <div style={{ width: 120, height: 120, borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
   const r = 45
   const cx = 60
   const cy = 60
   let angle = -90
 
-  const arcs = segments.map(seg => {
+  const arcs = segments.filter(seg => seg.value > 0).map(seg => {
     const pct = seg.value / total
     const sweep = pct * 360
     const startRad = (angle * Math.PI) / 180
@@ -220,13 +224,14 @@ function DonutChart({ segments }: { segments: { label: string; value: number; co
     const largeArc = sweep > 180 ? 1 : 0
     const d = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`
     angle += sweep
-    return { ...seg, d, pct }
+    return { ...seg, d, pct, sweep }
   })
 
   return (
     <svg width={120} height={120} viewBox="0 0 120 120">
       {arcs.map((arc, i) => (
-        <path key={i} d={arc.d} fill={arc.color} fillOpacity="0.9" stroke="#0D1B2C" strokeWidth="1.5" />
+        <path key={i} d={arc.d} fill={arc.color} fillOpacity="0.9" stroke="#0D1B2C" strokeWidth="1.5"
+          role="img" aria-label={`Isečak: ${arc.label}`} data-sweep={arc.sweep.toFixed(2)} />
       ))}
       <circle cx={cx} cy={cy} r={28} fill="#0D1B2C" />
       <text x={cx} y={cy - 4} textAnchor="middle" fontSize="10" fill="#7A9BB8" fontFamily="system-ui">TROŠKOVI</text>

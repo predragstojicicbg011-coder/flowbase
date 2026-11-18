@@ -219,3 +219,97 @@ describe('the legend is a control', () => {
     expect(picked).toEqual(['Marketing'])
   })
 })
+
+// ── A figure at or below zero is in the table and not in the picture ─────────
+//
+// A refund is an expense with a minus, so a category, a month or a cell can net
+// to zero or below. Every panel below is drawn from such a period.
+
+/** Every measure on every shape is a finite number that is not below zero. */
+function expectSaneGeometry(container: HTMLElement) {
+  for (const el of Array.from(container.querySelectorAll('svg rect, svg circle, svg path'))) {
+    for (const a of ['width', 'height', 'r']) {
+      const v = el.getAttribute(a)
+      if (v === null || v.endsWith('%')) continue
+      expect(Number.isFinite(Number(v))).toBe(true)
+      expect(Number(v)).toBeGreaterThanOrEqual(0)
+    }
+    for (const a of ['x', 'y', 'cx', 'cy']) {
+      const v = el.getAttribute(a)
+      if (v !== null) expect(Number.isFinite(Number(v))).toBe(true)
+    }
+    expect(el.getAttribute('d') || '').not.toMatch(/NaN|Infinity/)
+  }
+}
+
+describe('a period that holds a refund', () => {
+  // Ads: 900 in July, a refund of 150 in August. The refund category nets -200.
+  const REFUNDED: PlEntry[] = [
+    e({ amount_rsd: 900, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-07-10' }),
+    e({ amount_rsd: -150, pl_category: 'Marketing', pl_subcategory: 'Ads', pl_date: '2026-08-10' }),
+    e({ amount_rsd: 300, pl_category: 'General Business', pl_subcategory: 'Software', pl_date: '2026-08-12' }),
+    e({ amount_rsd: -200, pl_category: 'Povracaj', pl_subcategory: 'Vracena oprema', pl_date: '2026-08-14' }),
+  ]
+
+  it('stacks no column for a category at or below zero, and measures nothing below the axis', () => {
+    const { container } = render(deckFor('pl', REFUNDED, []))
+    expect(screen.queryAllByLabelText(/^Povracaj, /)).toHaveLength(0)
+    // Marketing is drawn in July only: its August is a refund.
+    expect(screen.getAllByLabelText(/^Marketing, /)).toHaveLength(1)
+    expect(screen.getAllByLabelText(/^General Business, /)).toHaveLength(1)
+    expectSaneGeometry(container)
+  })
+
+  it('draws nothing and says so when every figure is at or below zero', () => {
+    const { container } = render(deckFor('pl', [
+      e({ amount_rsd: -150, pl_category: 'Povracaj', pl_subcategory: 'Vracena oprema', pl_date: '2026-08-14' }),
+      e({ amount_rsd: 0, pl_category: 'Nula', pl_subcategory: 'Nista', pl_date: '2026-08-15' }),
+    ], []))
+    expect(screen.getByText('Nema troškova u ovom periodu.')).toBeInTheDocument()
+    expect(screen.queryAllByLabelText(/^Povracaj, /)).toHaveLength(0)
+    expectSaneGeometry(container)
+  })
+
+  it('shows the same period as percent of the month without a share above 100', () => {
+    const { container } = render(deckFor('pl', REFUNDED, []))
+    fireEvent.click(screen.getByLabelText('Prikaži kao % meseca'))
+    expect(screen.queryAllByLabelText(/^Povracaj, /)).toHaveLength(0)
+    expectSaneGeometry(container)
+  })
+
+  it('paints a negative heatmap cell as nothing, the same as an empty one', () => {
+    const { container } = render(deckFor('pl', REFUNDED, []))
+    fireEvent.click(screen.getByText('Sve stavke'))
+    const fill = (name: RegExp) => screen.getByLabelText(name).getAttribute('fill')
+    const refundMonth = fill(/^Ads, avg/)
+    const emptyMonth = fill(/^Software, jul/)
+    const boughtMonth = fill(/^Ads, jul/)
+    expect(refundMonth).toBe(emptyMonth)
+    expect(boughtMonth).not.toBe(emptyMonth)
+    expectSaneGeometry(container)
+  })
+
+  it('gives a heatmap line that nets below zero no share of the total', () => {
+    render(deckFor('pl', REFUNDED, []))
+    fireEvent.click(screen.getByText('Sve stavke'))
+    // The refund line is in the table with its minus; it has no share.
+    const line = screen.getByLabelText('Vracena oprema, udeo u ukupnom')
+    expect(line.textContent).toBe('')
+    expect(screen.getByLabelText('Ads, udeo u ukupnom').textContent).toBe('71,4%')
+  })
+
+  it('draws the concentration curve to 100 over the lines above zero', () => {
+    const { container } = render(deckFor('pl', REFUNDED, []))
+    fireEvent.click(screen.getByText('Koncentracija'))
+    expect(screen.queryByText('Vracena oprema')).not.toBeInTheDocument()
+    expect(screen.getByText('Ads')).toBeInTheDocument()
+    expectSaneGeometry(container)
+  })
+
+  it('draws no branch for a category at or below zero', () => {
+    render(deckFor('pl', REFUNDED, []))
+    fireEvent.click(screen.getByText('Sastav'))
+    expect(screen.getByLabelText(/^Marketing,/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Povracaj,/)).not.toBeInTheDocument()
+  })
+})

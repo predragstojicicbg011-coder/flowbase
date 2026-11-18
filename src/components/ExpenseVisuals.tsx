@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import {
-  TreeNode, ComparedNode, Branch,
+  TreeNode, ComparedNode, Branch, drawn,
 } from '../services/expenseTree'
 import {
   C, deck, useWidth, colorFor, MUTED, Empty, TipHead, TipRow, type Tip,
@@ -49,6 +49,8 @@ interface KeyFigureProps {
   adjusted: number
   excluded: number
   unassigned: number
+  /** What the department branch draws (the sum of its figures above zero): the base of the unclassified share. */
+  unassignedBase: number
   reconciled: boolean
   months: string[]
   monthlyTotals: number[]
@@ -65,7 +67,9 @@ export function KeyFigures(p: KeyFigureProps) {
   const changePct = p.priorTotal > 0 ? (change / p.priorTotal) * 100 : null
   const active = p.monthlyTotals.filter(v => v > 0)
   const runRate = active.length > 0 ? active.reduce((s, v) => s + v, 0) / active.length : 0
-  const unassignedPct = p.total > 0 ? (p.unassigned / p.total) * 100 : 0
+  // The share of what is drawn: the figure over the sum of the figures above
+  // zero, so it is never negative and never above 100.
+  const unassignedPct = p.unassignedBase > 0 ? (drawn(p.unassigned) / p.unassignedBase) * 100 : 0
 
   return (
     <div style={kf.grid}>
@@ -150,15 +154,17 @@ function Sparkline({ values, months }: { values: number[]; months: string[] }) {
   const [ref, w] = useWidth(320)
   const h = 34
   if (values.length < 2) return <div ref={ref} style={{ height: h, marginTop: '10px' }} />
-  const max = Math.max(...values, 1)
+  // A month that nets to zero or below sits on the floor of the line.
+  const max = Math.max(1, ...values.map(drawn))
   const x = (i: number) => (i / (values.length - 1)) * (w - 2) + 1
-  const y = (v: number) => h - 3 - (v / max) * (h - 8)
+  const y = (v: number) => h - 3 - (drawn(v) / max) * (h - 8)
   const line = values.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
   const area = `${line} L${x(values.length - 1).toFixed(1)},${h} L${x(0).toFixed(1)},${h} Z`
   const last = values.length - 1
   return (
     <div ref={ref} style={{ marginTop: '10px' }}>
-      <svg width="100%" height={h} style={{ display: 'block', overflow: 'visible' }}>
+      <svg width="100%" height={h} style={{ display: 'block', overflow: 'visible' }}
+        role="img" aria-label="Ukupni troškovi po mesecima">
         <defs>
           <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={C.accent} stopOpacity="0.28" />
@@ -415,7 +421,7 @@ function TrendChart({ series, w, h, normalized, onTip, onSelect, tree, muted }: 
   const keyOf = (label: string) => tree.find(t => t.label === label)?.key || null
 
   const totalLine = series.points
-    .map((pt, i) => `${i === 0 ? 'M' : 'L'}${cx(i).toFixed(1)},${y(normalized ? 100 : pt.total).toFixed(1)}`)
+    .map((pt, i) => `${i === 0 ? 'M' : 'L'}${cx(i).toFixed(1)},${y(normalized ? 100 : drawn(pt.total)).toFixed(1)}`)
     .join(' ')
 
   return (
@@ -430,7 +436,8 @@ function TrendChart({ series, w, h, normalized, onTip, onSelect, tree, muted }: 
       ))}
 
       {series.points.map((pt, i) => {
-        const scale = normalized ? (pt.total > 0 ? 100 / pt.total : 0) : 1
+        // Percent of what is stacked: a month's net can be below its columns.
+        const scale = normalized ? (pt.stack > 0 ? 100 / pt.stack : 0) : 1
         let acc = 0
         return (
           <g key={pt.month}>
@@ -440,7 +447,7 @@ function TrendChart({ series, w, h, normalized, onTip, onSelect, tree, muted }: 
               const y0 = y(acc), y1 = y(acc + v)
               acc += v
               return (
-                <rect key={k}
+                <rect key={k} role="img" aria-label={`${k}, ${monthLabel(pt.month, crossesYear)}`}
                   x={cx(i) - barW / 2} y={y1} width={barW} height={Math.max(y0 - y1, 0.6)}
                   fill={colorFor(k, ki)} opacity={muted && muted !== k ? 0.16 : 0.88}
                   style={{ cursor: 'pointer', transition: 'opacity 120ms ease' }}
@@ -451,7 +458,7 @@ function TrendChart({ series, w, h, normalized, onTip, onSelect, tree, muted }: 
                       <>
                         <TipHead>{k}</TipHead>
                         <TipRow label={monthLabel(pt.month, true)} value={money(pt.values[k] || 0)} />
-                        <TipRow label="udeo u mesecu" value={`${pt.total > 0 ? ((pt.values[k] || 0) / pt.total * 100).toFixed(1).replace('.', ',') : '0'}%`} dim />
+                        <TipRow label="udeo u mesecu" value={`${pt.stack > 0 ? ((pt.values[k] || 0) / pt.stack * 100).toFixed(1).replace('.', ',') : '0'}%`} dim />
                       </>
                     ),
                   })} />
@@ -471,7 +478,7 @@ function TrendChart({ series, w, h, normalized, onTip, onSelect, tree, muted }: 
           <path d={totalLine} fill="none" stroke={C.text} strokeWidth="1.5" opacity="0.55"
             strokeDasharray="4 3" strokeLinejoin="round" />
           {series.points.map((pt, i) => (
-            <circle key={pt.month} cx={cx(i)} cy={y(pt.total)} r="3" fill={C.bgDeep} stroke={C.text} strokeWidth="1.3" opacity="0.8" />
+            <circle key={pt.month} cx={cx(i)} cy={y(drawn(pt.total))} r="3" fill={C.bgDeep} stroke={C.text} strokeWidth="1.3" opacity="0.8" />
           ))}
         </>
       )}

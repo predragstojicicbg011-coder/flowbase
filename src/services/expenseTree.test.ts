@@ -3,7 +3,7 @@ import {
   withComparison, topMovers, paretoCut, pathFor, monthsIn,
   isExpenseRow, isRevenueRow, rowsFor, byDateDesc, UNASSIGNED, PlEntry,
   contributionsFor, contributesTo, contributionTo, projectRootOf,
-  UNKNOWN_PROJECT, BRANCHES, Branch,
+  UNKNOWN_PROJECT, BRANCHES, Branch, drawn,
 } from './expenseTree'
 import { OVERHEAD_LABEL } from './projects'
 
@@ -316,6 +316,52 @@ describe('paretoCut', () => {
     expect(p.cutoff).toBe(0)
     expect(p.total).toBe(0)
     expect(p.sharePct).toBe(0)
+  })
+
+  it('leaves out a line at or below zero, and counts the share of what is above it', () => {
+    const rows = [
+      e({ amount_rsd: 900, pl_subcategory: 'big' }),
+      e({ amount_rsd: 100, pl_subcategory: 'small' }),
+      e({ amount_rsd: 300, pl_subcategory: 'refunded' }),
+      e({ amount_rsd: -500, pl_subcategory: 'refunded' }),
+      e({ amount_rsd: 50, pl_subcategory: 'nil' }),
+      e({ amount_rsd: -50, pl_subcategory: 'nil' }),
+    ]
+    const p = paretoCut(buildTree(rows, 'pl', 'RSD'), 100)
+    expect(p.leaves.map(l => l.label)).toEqual(['big', 'small'])
+    expect(p.total).toBe(1000)
+    expect(p.sharePct).toBeCloseTo(100, 6)
+  })
+})
+
+describe('what a picture may draw', () => {
+  it('is the figure when it is above zero', () => {
+    expect(drawn(900)).toBe(900)
+    expect(drawn(0.5)).toBe(0.5)
+  })
+
+  it('is nothing at zero or below it', () => {
+    expect(drawn(0)).toBe(0)
+    expect(drawn(-200)).toBe(0)
+    expect(drawn(-0.01)).toBe(0)
+  })
+
+  it('is nothing for what is not a number', () => {
+    expect(drawn(null)).toBe(0)
+    expect(drawn(undefined)).toBe(0)
+    expect(drawn(NaN)).toBe(0)
+  })
+})
+
+describe('a month that holds a refund', () => {
+  it('keeps the signed net in the month, and in the node', () => {
+    const t = buildTree([
+      e({ amount_rsd: 300, pl_date: '2026-07-05' }),
+      e({ amount_rsd: -500, pl_date: '2026-08-05' }),
+      e({ amount_rsd: 100, pl_date: '2026-08-20' }),
+    ], 'pl', 'RSD')
+    expect(t[0].monthly).toEqual({ '2026-07': 300, '2026-08': -400 })
+    expect(t[0].amount).toBe(-100)
   })
 })
 

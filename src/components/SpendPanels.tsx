@@ -4,6 +4,7 @@ import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { fmtMoney } from '../utils/formatters'
 import { countOf } from '../utils/plural'
 import { niceMax, shortMoney, monthLabel, OTHER } from '../services/expenseCharts'
+import { drawn } from '../services/expenseTree'
 import {
   moverBars, moverScale, heatGrid, binOf, rowBin,
 } from '../services/expenseCharts'
@@ -202,8 +203,11 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
   const chars = Math.floor(labelW / 6.6)
   const crossesYear = new Set(months.map(m => m.slice(0, 4))).size > 1
 
-  const grandTotal = grid.rows.reduce((s, r) => s + r.total, 0)
-  const monthTotals = months.map((_, i) => grid.rows.reduce((s, r) => s + r.values[i], 0))
+  // A share is of the figures above zero: a cell or a line at or below zero is
+  // in the table and not in the picture, and nothing here is negative or over 100.
+  const grandTotal = grid.rows.reduce((s, r) => s + drawn(r.total), 0)
+  const monthTotals = months.map((_, i) => grid.rows.reduce((s, r) => s + drawn(r.values[i]), 0))
+  const rowTotals = grid.rows.map(r => r.values.reduce((s, v) => s + drawn(v), 0))
 
   return (
     <svg width="100%" height={h} style={{ display: 'block' }}>
@@ -237,7 +241,8 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
               const bin = byRow ? rowBin(v, r.max, HEAT.length) : binOf(v, grid.bins)
               const fill = bin < 0 ? HEAT_EMPTY : HEAT[Math.min(bin, HEAT.length - 1)]
               return (
-                <rect key={months[i]}
+                <rect key={months[i]} role="img"
+                  aria-label={`${r.label}, ${monthLabel(months[i], true)}`}
                   x={labelW + cellW * i} y={y}
                   width={Math.max(cellW - GAP, 1)} height={ROW - GAP}
                   rx="3" fill={fill}
@@ -251,9 +256,9 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
                         {r.parent.length > 0 && <TipRow label="" value={r.parent.join(' › ')} dim />}
                         <TipRow label={monthLabel(months[i], true)} value={money(v)} />
                         <TipRow label="udeo u mesecu"
-                          value={monthTotals[i] > 0 ? `${(v / monthTotals[i] * 100).toFixed(1).replace('.', ',')}%` : '—'} dim />
+                          value={v > 0 && monthTotals[i] > 0 ? `${(v / monthTotals[i] * 100).toFixed(1).replace('.', ',')}%` : '—'} dim />
                         <TipRow label="od godišnjeg iznosa stavke"
-                          value={r.total > 0 ? `${(v / r.total * 100).toFixed(1).replace('.', ',')}%` : '—'} dim />
+                          value={v > 0 && rowTotals[ri] > 0 ? `${(v / rowTotals[ri] * 100).toFixed(1).replace('.', ',')}%` : '—'} dim />
                         <TipRow label="njen najveći mesec" value={money(r.max)} dim />
                       </>
                     ),
@@ -265,8 +270,9 @@ export function HeatChart({ tree, months, depth, limit, byRow, w, onTip, onSelec
               fill={C.text} fontFamily="'DM Mono', monospace">
               {shortMoney(r.total)}
             </text>
-            <text x={w - 4} y={y + ROW / 2 + 11} textAnchor="end" fontSize="8.5" fill={C.faint}>
-              {grandTotal > 0 ? `${(r.total / grandTotal * 100).toFixed(1).replace('.', ',')}%` : ''}
+            <text x={w - 4} y={y + ROW / 2 + 11} textAnchor="end" fontSize="8.5" fill={C.faint}
+              aria-label={`${r.label}, udeo u ukupnom`}>
+              {r.total > 0 && grandTotal > 0 ?`${(r.total / grandTotal * 100).toFixed(1).replace('.', ',')}%` : ''}
             </text>
           </g>
         )

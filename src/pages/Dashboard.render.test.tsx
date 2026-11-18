@@ -462,3 +462,41 @@ describe('review fixes: the date and the labels', () => {
     await cardSays('Neto dobit / gubitak', 'Otplaćena glavnica (po izvodima)')
   })
 })
+
+describe('the expense structure when a category nets below zero', () => {
+  const donutCard = () => screen.getByText('Struktura troškova').parentElement!.parentElement as HTMLElement
+  const slices = () => screen.queryAllByLabelText(/^Isečak: /)
+
+  const withRefund = (amount: number) => (global as any).__db.v_pl_entries.push(
+    pl({ tx_type: 'expense', amount_rsd: amount, pl_date: '2026-04-20', pl_category: 'Povracaj', pl_subcategory: 'Vracen alat' }),
+  )
+
+  it('draws no slice for it, and the rest together make a whole circle', async () => {
+    withRefund(-50000)
+    await show()
+    await waitFor(() => expect(donutCard()).toHaveTextContent(rsd(20000)))
+    expect(screen.queryByLabelText('Isečak: Povracaj')).not.toBeInTheDocument()
+    expect(slices().map(s => s.getAttribute('aria-label')).sort())
+      .toEqual(['Isečak: Finansiranje', 'Isečak: Materijal'])
+    const sweeps = slices().map(s => Number(s.getAttribute('data-sweep')))
+    for (const sw of sweeps) expect(sw).toBeGreaterThan(0)
+    expect(sweeps.reduce((a, b) => a + b, 0)).toBeCloseTo(360, 1)
+    for (const s of slices()) expect(s.getAttribute('d')).not.toMatch(/NaN|Infinity/)
+  })
+
+  it('still lists it in the legend, with its minus', async () => {
+    withRefund(-50000)
+    await show()
+    await waitFor(() => expect(donutCard()).toHaveTextContent('Povracaj'))
+    expect(donutCard()).toHaveTextContent(rsd(-50000))
+  })
+
+  it('draws no slice at all when every category is at or below zero, and lists them', async () => {
+    ;(global as any).__db.v_pl_entries = [
+      pl({ tx_type: 'expense', amount_rsd: -50000, pl_date: '2026-04-20', pl_category: 'Povracaj', pl_subcategory: 'Vracen alat' }),
+    ]
+    await show()
+    await waitFor(() => expect(donutCard()).toHaveTextContent(rsd(-50000)))
+    expect(slices()).toHaveLength(0)
+  })
+})

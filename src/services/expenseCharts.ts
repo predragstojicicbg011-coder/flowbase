@@ -9,7 +9,7 @@
 //   bridgeSteps    which lines caused the change, and by how much (bridge)
 //   paretoSeries   how few lines are worth arguing about          (concentration)
 
-import { TreeNode, ComparedNode } from './expenseTree'
+import { TreeNode, ComparedNode, drawn } from './expenseTree'
 import { FIXED_BELOW_VARIATION, MONTHS_TO_JUDGE, type CostBehaviour } from './cfoMetrics'
 import type { BranchNode } from './branchTree'
 import { MONTHS_SHORT_SR } from '../utils/months'
@@ -21,7 +21,11 @@ export const OTHER = 'Ostalo'
 export interface MonthlyPoint {
   month: string
   values: Record<string, number>
+  /** The month's net: every band, a refund's minus included. */
   total: number
+  /** What the columns draw: the bands above zero only. A band at or below zero
+   *  is in the table and not in the picture. */
+  stack: number
 }
 
 export interface MonthlySeries {
@@ -55,10 +59,11 @@ export function monthlySeries(
       values[OTHER] = rest.reduce((s, n) => s + (n.monthly[month] || 0), 0)
     }
     const total = Object.values(values).reduce((s, v) => s + v, 0)
-    return { month, values, total }
+    const stack = Object.values(values).reduce((s, v) => s + drawn(v), 0)
+    return { month, values, total, stack }
   })
 
-  return { keys, points, max: Math.max(0, ...points.map(p => p.total)) }
+  return { keys, points, max: Math.max(0, ...points.map(p => p.stack)) }
 }
 
 // ── Period-over-period bridge ───────────────────────────────────────────────
@@ -145,12 +150,15 @@ export function paretoSeries(nodes: TreeNode[], limit = 20): ParetoPoint[] {
   })
   walk(nodes)
 
-  leaves.sort((a, b) => b.amount - a.amount)
-  const total = leaves.reduce((s, n) => s + n.amount, 0)
+  // Only a leaf above zero is a share of the spend: a net refund is in the
+  // table and not on the curve, so the curve still ends at 100 and never falls.
+  const above = leaves.filter(n => n.amount > 0)
+  above.sort((a, b) => b.amount - a.amount)
+  const total = above.reduce((s, n) => s + n.amount, 0)
   if (total <= 0) return []
 
   let running = 0
-  return leaves.slice(0, limit).map(n => {
+  return above.slice(0, limit).map(n => {
     running += n.amount
     return {
       label: n.label,
@@ -480,7 +488,7 @@ export function heatGrid(
     const values = months.map(m => n.monthly[m] || 0)
     return {
       key: n.key, label: n.label, parent: n.path.slice(0, -1), path: n.path,
-      values, total: n.amount, max: Math.max(...values, 0), node: n,
+      values, total: n.amount, max: Math.max(0, ...values.map(drawn)), node: n,
     }
   }
 
@@ -491,7 +499,7 @@ export function heatGrid(
     rows.push({
       key: `__other__`, label: OTHER, parent: [], path: [],
       values, total: rest.reduce((sum, n) => sum + n.amount, 0),
-      max: Math.max(...values, 0), node: null,
+      max: Math.max(0, ...values.map(drawn)), node: null,
     })
   }
 
@@ -499,7 +507,7 @@ export function heatGrid(
   return {
     rows, months,
     bins: quantileEdges(cells, 5),
-    max: Math.max(...cells, 0),
+    max: Math.max(0, ...cells.map(drawn)),
     folded: rest.length,
   }
 }

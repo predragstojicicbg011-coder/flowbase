@@ -27,6 +27,8 @@
 // its open children, which is what makes a branch read as a branch rather than
 // as a list with lines drawn on it.
 
+import { drawn } from './expenseTree'
+
 export interface BranchNode {
   key: string
   label: string
@@ -87,7 +89,9 @@ export interface BranchOptions {
   top?: number
 }
 
-const amountOf = (n: BranchNode): number => Math.abs(Number(n.amount) || 0)
+// A figure at or below zero is drawn as nothing: a refund can net a node below
+// zero, and the table keeps it with its minus while the picture does not.
+const amountOf = (n: BranchNode): number => drawn(Number(n.amount))
 
 /**
  * Where every open node sits, and how thick the branch into it is.

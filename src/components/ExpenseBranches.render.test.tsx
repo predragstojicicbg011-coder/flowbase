@@ -231,3 +231,58 @@ describe('the geometry, which the layout tests cannot see', () => {
     expect(Number(svgOf(container).getAttribute('height'))).toBeGreaterThan(shut)
   })
 })
+
+describe('a node at or below zero is not drawn', () => {
+  const SIGNED: ExpenseBranchNode[] = [
+    {
+      key: 'pos', label: 'Pozitivna kategorija', amount: 900, behaviour: 'fixed',
+      children: [leaf('Pozitivna stavka', 900), leaf('Vracena stavka', -50)],
+    },
+    leaf('Neto povracaj', -200),
+    leaf('Nulta kategorija', 0),
+  ]
+
+  const drawn = () =>
+    render(<ExpenseBranches monthLabel="Oktobar 2026" roots={SIGNED} start="twoLevels" />)
+
+  it('shows the positive node at 100% and nothing for the negative or the zero', () => {
+    drawn()
+    expect(screen.getByLabelText(/^Pozitivna kategorija, 900 RSD, 100,0%/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Neto povracaj/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Nulta kategorija/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Vracena stavka/)).not.toBeInTheDocument()
+  })
+
+  it('heads the picture with the sum of what is drawn, not of magnitudes', () => {
+    // 900 plus the magnitude of -200 would read 1.100.
+    const { container } = drawn()
+    expect(container.textContent).toContain('Oktobar 2026 · 900 RSD')
+    expect(container.textContent).not.toContain('1.100')
+  })
+
+  it('counts only the lines it can draw under a node', () => {
+    drawn()
+    expect(screen.getByLabelText(/^Pozitivna kategorija,.*1 stavka/)).toBeInTheDocument()
+  })
+
+  it('has no negative, missing or infinite measure in the SVG', () => {
+    const { container } = drawn()
+    const svg = container.querySelector('svg[role="img"]')!
+    for (const el of Array.from(svg.querySelectorAll('rect, path'))) {
+      for (const a of ['width', 'height', 'stroke-width']) {
+        const v = el.getAttribute(a)
+        if (v === null) continue
+        expect(Number.isFinite(Number(v))).toBe(true)
+        expect(Number(v)).toBeGreaterThanOrEqual(0)
+      }
+      expect(el.getAttribute('d') || '').not.toMatch(/NaN|Infinity/)
+    }
+  })
+
+  it('says there is nothing to draw when everything is at or below zero', () => {
+    render(<ExpenseBranches monthLabel="Oktobar 2026" roots={[leaf('Neto povracaj', -200), leaf('Nulta', 0)]}
+      emptyText="Nema troskova za crtanje." />)
+    expect(screen.getByText('Nema troskova za crtanje.')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Neto povracaj/)).not.toBeInTheDocument()
+  })
+})
