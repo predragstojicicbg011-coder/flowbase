@@ -141,6 +141,39 @@ describe('the sum control', () => {
   })
 })
 
+describe('the sum control for a negative parent', () => {
+  // A credit note opened in the bill dialog: the amount and its lines carry a
+  // minus. Short and over are read on the magnitudes, and the remainder is
+  // printed without a minus.
+  const open = () => {
+    render(<Host amount={-120000} />)
+    fireEvent.click(screen.getByText(/Podeli na više troškova/))
+  }
+
+  it('calls lines that fall short of it short', () => {
+    open()
+    fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '-50000' } })
+    expect(amounts()).toEqual(['-60000', '-50000'])
+    expect(screen.getByText(/preostalo 10\.000,00 RSD/)).toBeInTheDocument()
+    expect(screen.queryByText(/višak/)).not.toBeInTheDocument()
+  })
+
+  it('calls lines that go past it over', () => {
+    open()
+    fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '-100000' } })
+    expect(screen.getByText(/višak 40\.000,00 RSD/)).toBeInTheDocument()
+    expect(screen.queryByText(/preostalo/)).not.toBeInTheDocument()
+  })
+
+  it('adds a line holding what is unaccounted for, with the parent sign', () => {
+    open()
+    fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '-20000' } })
+    fireEvent.click(screen.getByText(/Dodaj stavku/))
+    expect(amounts()).toEqual(['-60000', '-20000', '-40000'])
+    expect(screen.getByText('✓ usklađeno')).toBeInTheDocument()
+  })
+})
+
 describe('adding and removing lines', () => {
   const open = () => {
     render(<Host />)

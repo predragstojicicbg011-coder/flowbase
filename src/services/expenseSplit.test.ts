@@ -97,6 +97,36 @@ describe('why a split cannot be saved', () => {
     expect(whySplitNotSavable(parent, [line({ amount: 400 }), line({ amount: 600 })]))
       .toBeNull()
   })
+
+  // Pinned word for word: the sentences for an ordinary positive payment.
+  it('prints a positive payment that is short exactly as it always has', () => {
+    expect(whySplitNotSavable(parent, [line({ amount: 400 }), line({ amount: 500 })]))
+      .toBe('Stavke iznose 900,00, a ukupno je 1.000,00 — 100,00 nije raspoređeno.')
+  })
+
+  it('prints a positive payment that is over exactly as it always has', () => {
+    expect(whySplitNotSavable(parent, [line({ amount: 600 }), line({ amount: 500 })]))
+      .toBe('Stavke iznose 1.100,00, što je 100,00 VIŠE od iznosa koji se deli (1.000,00).')
+  })
+})
+
+describe('why a negative split cannot be saved', () => {
+  // A refund or a credit note: the parent and its lines carry a minus the
+  // person never typed. The sentence reads the direction on the magnitudes
+  // and prints magnitudes.
+  const refund = { amount: -1199.22 }
+
+  it('calls lines that fall short of a negative parent short, without a minus', () => {
+    const why = whySplitNotSavable(refund, [line({ amount: -1000 }), line({ amount: -100 })])
+    expect(why).toBe('Stavke iznose 1.100,00, a ukupno je 1.199,22 — 99,22 nije raspoređeno.')
+    expect(why).not.toContain('-')
+  })
+
+  it('calls lines that go past a negative parent over, without a minus', () => {
+    const why = whySplitNotSavable(refund, [line({ amount: -1000 }), line({ amount: -300 })])
+    expect(why).toBe('Stavke iznose 1.300,00, što je 100,78 VIŠE od iznosa koji se deli (1.199,22).')
+    expect(why).not.toContain('-')
+  })
 })
 
 describe('absorbing the remainder', () => {

@@ -120,6 +120,9 @@ export default function SplitEditor({
 
   const total = sumOf(lines)
   const left = remainderOf(parent, lines)
+  // Short or over is read on the magnitudes: under a negative parent (a
+  // credit note) a negative `left` is what is still unaccounted for.
+  const short = left * ((parent.amount || 0) < 0 ? -1 : 1) > 0
   const balanced = isBalanced(parent, lines)
   const why = whySplitNotSavable(parent, lines)
 
@@ -298,7 +301,7 @@ export default function SplitEditor({
             ...lines,
             // The new line opens holding whatever is unaccounted for, which is
             // the amount it is about to be given nine times out of ten.
-            { ...emptyLine(makeKey()), amount: left > 0 ? left : null },
+            { ...emptyLine(makeKey()), amount: short ? left : null },
           ])}>
           ＋ Dodaj stavku
         </button>
@@ -317,8 +320,8 @@ export default function SplitEditor({
           }}>
             {balanced
               ? '✓ usklađeno'
-              : left > 0
-                ? `preostalo ${money(left, parent.currency)}`
+              : short
+                ? `preostalo ${money(Math.abs(left), parent.currency)}`
                 : `višak ${money(Math.abs(left), parent.currency)}`}
           </span>
           {!balanced && (

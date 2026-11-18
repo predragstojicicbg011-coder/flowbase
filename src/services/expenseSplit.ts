@@ -135,13 +135,18 @@ export function whySplitNotSavable(
       + 'već stavka koju treba ukloniti.'
   }
 
+  // Short or over is read on the magnitudes: for a negative parent (a refund,
+  // a credit note) a positive `left` means the lines went PAST it. The
+  // sentence prints magnitudes too — the person typed no minus.
   const left = remainderOf(parent, lines)
   if (Math.abs(left) > SPLIT_TOLERANCE) {
-    return left > 0
-      ? `Stavke iznose ${fmtNum(sumOf(lines))}, a ukupno je `
-        + `${fmtNum(parent.amount || 0)} — ${fmtNum(Math.abs(left))} nije raspoređeno.`
-      : `Stavke iznose ${fmtNum(sumOf(lines))}, što je `
-        + `${fmtNum(Math.abs(left))} VIŠE od iznosa koji se deli (${fmtNum(parent.amount || 0)}).`
+    const lines$ = fmtNum(Math.abs(sumOf(lines)))
+    const total$ = fmtNum(Math.abs(parent.amount || 0))
+    return left * sign > 0
+      ? `Stavke iznose ${lines$}, a ukupno je `
+        + `${total$} — ${fmtNum(Math.abs(left))} nije raspoređeno.`
+      : `Stavke iznose ${lines$}, što je `
+        + `${fmtNum(Math.abs(left))} VIŠE od iznosa koji se deli (${total$}).`
   }
 
   return null
