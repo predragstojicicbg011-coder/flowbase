@@ -142,6 +142,13 @@ describe('holidayName', () => {
     expect(byDate['2026-11-11']).toBe('Dan primirja u Prvom svetskom ratu')
   })
 
+  it('reads the day of 2027 carried over from Sunday 2 May, as the migration names it', () => {
+    // 20261120090000: 2 May 2027 is a Sunday and 3 May is Easter Monday, so
+    // Labour Day's second day moves to Tuesday 4 May.
+    expect(holidayName({ name: 'Празник рада, други дан, замена' }))
+      .toBe('Praznik rada (drugi dan, prenet neradni dan)')
+  })
+
   it('transliterates a name it does not know, and leaves Latin alone', () => {
     expect(holidayName({ name: 'Видовдан' })).toBe('Vidovdan')
     expect(holidayName({ name: 'Đurđevdan' })).toBe('Đurđevdan')
