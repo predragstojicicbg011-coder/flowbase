@@ -19,7 +19,7 @@ const card = buildPartnerCard({
 }, { from: '2026-10-01', to: '2026-10-31' })
 
 const html = partnerCardPrintHtml({
-  company: { full_legal_name: 'Milinković Company doo', address: 'Ulica 1', city: 'Beograd', pib: '100000001' },
+  company: { full_legal_name: 'Firma Alfa doo', address: 'Ulica 1', city: 'Beograd', pib: '100000001' },
   partner: { name: 'Beton & Plus doo', tax_id: '100000004', address: 'Put 2', city: 'Novi Sad' },
   period: { from: '2026-10-01', to: '2026-10-31' },
   card,
@@ -29,7 +29,7 @@ const html = partnerCardPrintHtml({
 describe('the printed partner card', () => {
   it('names both sides, the period and the day it was made', () => {
     expect(html).toContain('<title>Kartica partnera — Beton &amp; Plus doo</title>')
-    expect(html).toContain('Milinković Company doo')
+    expect(html).toContain('Firma Alfa doo')
     expect(html).toContain('PIB 100000001')
     expect(html).toContain('Beton &amp; Plus doo')
     expect(html).toContain('PIB 100000004')

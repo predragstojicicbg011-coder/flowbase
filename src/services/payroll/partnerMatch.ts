@@ -11,13 +11,13 @@
 //
 // Partners are companies and people in one table, and people are flagged. An
 // employee's partner is therefore looked for among the flagged ones only —
-// which is what stops `Dejan` the employee being matched to `Dejan d.o.o.`
+// which is what stops `Osoba A` the employee being matched to `Osoba A d.o.o.`
 // the supplier, a mistake that would put a salary on a company's account and
 // look perfectly ordinary in every report.
 //
 // ── Names are compared as sets of words, with the accents folded ────────────
 //
-// `Jeličić Branislav` in one table and `Branislav Jelicic` in the other are the
+// `Osoba Ć` in one table and `C Osoba` in the other are the
 // same person twice: payroll exports carry the surname first, and half the
 // partner records were typed without diacritics. Comparing the strings finds
 // neither. Comparing sorted, accent-folded words finds both.

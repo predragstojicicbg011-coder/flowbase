@@ -32,11 +32,11 @@
 // applied, prorated by the hours the salary covers.
 //
 // Applying a prorated ceiling unconditionally is the mistake this replaces.
-// Milosavljević Đuro worked 72 hours in September and was paid a large one-off,
-// grossing to 569,091.70 — well under the monthly limit, so MPP charged his
-// contributions on all of it. Prorated by his hours the ceiling came to
-// 299,790, capping a man who should never have been capped and understating
-// his gross by 59,546 dinars.
+// Person A worked 72 hours in September and was paid a large one-off,
+// grossing to 569,091.70 — well under the monthly limit, so MPP charged their
+// contributions on all of it. Prorated by their hours the ceiling came to
+// 299,790, capping somebody who should never have been capped and understating
+// their gross by 59,546 dinars.
 
 import {
   salaryLine, otherIncomeLine,

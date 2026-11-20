@@ -41,9 +41,9 @@ describe('projectShares', () => {
   it('REFUSES more project hours than worked hours rather than scaling them', () => {
     const r = projectShares(
       [{ project_id: 'a', hours: 120 }, { project_id: 'b', hours: 60 }],
-      { worked: 168, paid: 168 }, 'Petrović Marko')
+      { worked: 168, paid: 168 }, 'Osoba A')
     expect(r.shares).toEqual([])
-    expect(r.error).toMatch(/Petrović Marko: 180 sati .* samo 168 .* 12 previše/)
+    expect(r.error).toMatch(/Osoba A: 180 sati .* samo 168 .* 12 previše/)
   })
 
   it('refuses project hours in a month with no paid hours', () => {

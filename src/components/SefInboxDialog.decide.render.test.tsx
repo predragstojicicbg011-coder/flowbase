@@ -93,9 +93,9 @@ describe('deciding on SEF from the inbox', () => {
     mockState.invoke.mockImplementation(async () => {
       mockState.rows = [row({
         sef_decision: 'accepted', sef_status: 'Approved',
-        sef_decided_at: '2026-10-18T10:00:00Z', sef_decided_by_name: 'Ana Anić',
+        sef_decided_at: '2026-10-18T10:00:00Z', sef_decided_by_name: 'Osoba A',
       })]
-      return { data: { ok: true, decision: 'accepted', sef_status: 'Approved', decided_at: '2026-10-18T10:00:00Z', decided_by_name: 'Ana Anić' }, error: null }
+      return { data: { ok: true, decision: 'accepted', sef_status: 'Approved', decided_at: '2026-10-18T10:00:00Z', decided_by_name: 'Osoba A' }, error: null }
     })
     await show()
     fireEvent.click(screen.getByText('Prihvati na SEF-u'))
@@ -104,7 +104,7 @@ describe('deciding on SEF from the inbox', () => {
     expect(mockState.invoke).toHaveBeenCalledTimes(1)
     expect(mockState.invoke).toHaveBeenCalledWith('sef-decide', { body: { inbox_id: 'r1', accepted: true, comment: '' } })
     expect(screen.getByRole('status')).toHaveTextContent(/SEF status: Approved/)
-    expect(screen.getByText(/Prihvaćeno na SEF-u .*Ana Anić/)).toBeInTheDocument()
+    expect(screen.getByText(/Prihvaćeno na SEF-u .*Osoba A/)).toBeInTheDocument()
     // Final: nothing more is offered.
     expect(screen.queryByText('Odbij na SEF-u')).not.toBeInTheDocument()
     expect(screen.queryByText('Prihvati na SEF-u')).not.toBeInTheDocument()

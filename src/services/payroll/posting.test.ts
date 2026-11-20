@@ -21,7 +21,7 @@ const MAPPING: UnitMapping[] = [
 ]
 
 const employee = (over: Partial<EmployeeRow> = {}): EmployeeRow => ({
-  id: 'e1', company_id: 'c1', code: 'E002', full_name: 'Gavrilov Dejan',
+  id: 'e1', company_id: 'c1', code: 'E002', full_name: 'Osoba A',
   organisational_unit: 'GRAD - Gradilište', hired_on: null,
   seniority_from: '2020-03-04', left_on: null, note: null, deleted_at: null, ...over,
 })
@@ -372,7 +372,7 @@ describe('a salary carries no sub-sector and no cost description', () => {
     }
     const net = p.invoices.find(i => i.kind === 'net')!
     expect(net.department).toBe('Development')
-    expect(net.note).toContain('Gavrilov Dejan')
+    expect(net.note).toContain('Osoba A')
   })
 })
 
@@ -381,12 +381,12 @@ describe('where a retained deduction is cancelled', () => {
     // Six are named "Privatno zdravstveno osiguranje <person>" and one
     // "Osigurani članovi porodice …" — all cover somebody's family.
     const { plan: a } = plan(
-      [person({ deductions: [deduction({ label: 'Privatno zdravstveno osiguranje Lena Gavrilov' })] })],
+      [person({ deductions: [deduction({ label: 'Privatno zdravstveno osiguranje Osoba B' })] })],
       { e1: sheet({ regular_hours: FUND }) })
     expect(a.transactions[0].pl_subcategory).toBe('Privatno zdravstveno osiguranje')
 
     const { plan: b } = plan(
-      [person({ deductions: [deduction({ label: 'Osigurani članovi porodice Jovana' })] })],
+      [person({ deductions: [deduction({ label: 'Osigurani članovi porodice Osoba C' })] })],
       { e1: sheet({ regular_hours: FUND }) })
     expect(b.transactions[0].pl_subcategory).toBe('Privatno zdravstveno osiguranje')
   })
@@ -395,7 +395,7 @@ describe('where a retained deduction is cancelled', () => {
     // It used to fall back to a Mintflow name; FlowBase's P&L is the owner's own.
     expect(retainedRoleFor('Nešto novo')).toBe('payroll_retained_fallback')
     expect(retainedRoleFor('Fitpass mesečna članarina')).toBe('payroll_fitpass')
-    expect(retainedRoleFor('Osigurani članovi porodice Jovana')).toBe('payroll_health_insurance')
+    expect(retainedRoleFor('Osigurani članovi porodice Osoba C')).toBe('payroll_health_insurance')
   })
 })
 

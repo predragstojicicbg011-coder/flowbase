@@ -37,7 +37,7 @@ jest.mock('../supabase', () => ({
 
 const configured = [{
   configured: true, environment: 'production', last4: '5a18',
-  set_at: '2026-10-18T18:15:00Z', set_by_name: 'Ana', company_id: 'c1', company_name: 'Firma doo',
+  set_at: '2026-10-18T18:15:00Z', set_by_name: 'Osoba A', company_id: 'c1', company_name: 'Firma doo',
 }]
 
 beforeEach(() => {
@@ -54,7 +54,7 @@ describe('the SEF key card', () => {
   it('shows a member the status only', async () => {
     mockState.status = configured
     render(<SefSettingsTab canEdit={false} canSetKey={false} />)
-    expect(await screen.findByText(/Ključ je podešen \(…5a18\), produkcija — postavio Ana, 18\.10\.2026\. 20:15/)).toBeInTheDocument()
+    expect(await screen.findByText(/Ključ je podešen \(…5a18\), produkcija — postavio Osoba A, 18\.10\.2026\. 20:15/)).toBeInTheDocument()
     expect(screen.queryByLabelText('SEF API ključ')).not.toBeInTheDocument()
     expect(screen.queryByText('Sačuvaj ključ')).not.toBeInTheDocument()
     expect(screen.queryByText('Proveri vezu')).not.toBeInTheDocument()

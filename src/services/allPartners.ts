@@ -8,7 +8,7 @@ import { fetchAllPages } from '../utils/fetchAllPages'
 // and the Partners page reported "1000" as a total that happened to be the
 // limit rather than the count.
 //
-// It surfaced through payroll. `Hajduk Milica` was in the book, flagged as an
+// It surfaced through payroll. `Person A` was in the book, flagged as an
 // individual, and the posting panel reported that nobody of that name was in
 // Partners — because the panel's query had NO ORDER AT ALL, so the thousand
 // rows it received were an arbitrary thousand, different run to run. An

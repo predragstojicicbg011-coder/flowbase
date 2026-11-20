@@ -79,10 +79,10 @@ const round2 = (n: number): number => Math.round(n * 100) / 100
  * looking at one run cannot know.
  *
  * This engine used to prorate the monthly ceiling and apply it to every run
- * unconditionally. Milosavljević Đuro's September is what that costs: 72 hours
+ * unconditionally. Person A's September is what that costs: 72 hours
  * and a large one-off payment, grossing to 569,091.70 — comfortably under the
- * monthly 732,820, so MPP charged his contributions on all of it. Prorated,
- * the ceiling came to 299,790 and this capped him there, understating his
+ * monthly 732,820, so MPP charged their contributions on all of it. Prorated,
+ * the ceiling came to 299,790 and this capped them there, understating their
  * gross by 59,546 dinars on a line that looked entirely ordinary.
  *
  * Leaving it undefined means no limit, which is the safe default now that the
@@ -203,7 +203,7 @@ export function contributionBase(gross: number, limits?: BaseLimits): number {
  *
  * So it solves the simple one, asks whether the answer is actually inside the
  * limits, and re-solves against the fixed base if it is not. Two shapes, and
- * using the first where the second applies is how Stevanović Strahinja's
+ * using the first where the second applies is how Person B's
  * September came out at 922,821 instead of 873,444 — fifty thousand dinars of
  * gross, on a line that looks entirely ordinary.
  */

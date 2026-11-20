@@ -31,7 +31,7 @@ const COEFFICIENTS: Record<string, number> = {
 
 
 const employee = (over: Partial<EmployeeRow> = {}): EmployeeRow => ({
-  id: 'e1', company_id: 'c1', code: 'E002', full_name: 'Gavrilov Dejan',
+  id: 'e1', company_id: 'c1', code: 'E002', full_name: 'Osoba A',
   organisational_unit: 'UPR', hired_on: null, seniority_from: '2020-03-04',
   left_on: null, note: null, deleted_at: null, ...over,
 })
@@ -97,7 +97,7 @@ describe('a month of work and annual leave', () => {
 
   it('produces one line for the person, carrying both', () => {
     const lines = run(mixed, 'regular').salaries
-    expect(lines.map(s => s.name)).toEqual(['Gavrilov Dejan'])
+    expect(lines.map(s => s.name)).toEqual(['Osoba A'])
     expect(lines[0].categories.map(c => c.field)).toEqual(['regular_hours', 'vacation_hours'])
   })
 
@@ -115,7 +115,7 @@ describe('a month of work and annual leave', () => {
 describe('who lands in which run', () => {
   it('puts everybody in the one salary run', () => {
     const other = person({
-      employee: employee({ id: 'e2', full_name: 'Đinić Dejan' }),
+      employee: employee({ id: 'e2', full_name: 'Osoba B' }),
       contract: contract({ employee_id: 'e2' }),
     })
     const r = runsFor(input({
@@ -129,7 +129,7 @@ describe('who lands in which run', () => {
   it('names somebody with no timesheet instead of calculating them as zero', () => {
     const r = runsFor(input({ timesheets: {} }))
     expect(r.problems).toHaveLength(1)
-    expect(r.problems[0].name).toBe('Gavrilov Dejan')
+    expect(r.problems[0].name).toBe('Osoba A')
     expect(r.problems[0].why).toContain('Nema evidencije radnog vremena')
   })
 

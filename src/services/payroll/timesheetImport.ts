@@ -234,8 +234,8 @@ export function parseWorkbook(
 /**
  * A name reduced to what two spellings of it have in common.
  *
- * Diacritics stripped, order ignored, case ignored. "Djurovic Teodor" and
- * "Đurović Teodor Viktor" still do not match — one has a middle name and the
+ * Diacritics stripped, order ignored, case ignored. "Djosobic I" and
+ * "Đosobić I J" still do not match — one has a middle name and the
  * other transliterates — and that is correct: a guess that pairs the wrong two
  * people puts one person's hours on another's salary, and both would look
  * plausible. Those are linked by hand once and the link is remembered.

@@ -20,8 +20,8 @@ const emp = (o: Partial<EmployeeObligation> & { employee_name: string }): Employ
 })
 
 const two = [
-  emp({ employee_name: 'Ana Ilić', tax: 120.50, contributionsEmployee: 340.10, contributionsEmployer: 410.00 }),
-  emp({ employee_name: 'Marko Petrović', department_name: 'Sales Expenses',
+  emp({ employee_name: 'Osoba A', tax: 120.50, contributionsEmployee: 340.10, contributionsEmployer: 410.00 }),
+  emp({ employee_name: 'Osoba B', department_name: 'Sales Expenses',
         tax: 95.25, contributionsEmployee: 280.00, contributionsEmployer: 330.40 }),
 ]
 
@@ -40,9 +40,9 @@ describe('obligationRows', () => {
   })
 
   it('labels the row with the employee', () => {
-    const ana = obligationRows(two, CLASSES).filter(r => r.label === 'Ana Ilić')
-    expect(ana).toHaveLength(3)
-    expect(ana.map(r => r.pl_subcategory).sort())
+    const osobaA = obligationRows(two, CLASSES).filter(r => r.label === 'Osoba A')
+    expect(osobaA).toHaveLength(3)
+    expect(osobaA.map(r => r.pl_subcategory).sort())
       .toEqual([SUBCATEGORY.employer, SUBCATEGORY.employee, SUBCATEGORY.tax].sort())
   })
 
@@ -72,7 +72,7 @@ describe('the filing rounding adjustment', () => {
     expect(rows).toHaveLength(6)
     const carrier = rows.find(r => r.carriesRounding)!
     expect(carrier.component).toBe('employer')
-    expect(carrier.employee_name).toBe('Ana Ilić')     // 410.00 is the largest
+    expect(carrier.employee_name).toBe('Osoba A')     // 410.00 is the largest
     expect(carrier.amount).toBeCloseTo(413.33, 2)
   })
 
@@ -132,15 +132,15 @@ describe('what the expense report then shows', () => {
 describe('employeesMissingDepartment', () => {
   it('names anyone who would post without a department', () => {
     expect(employeesMissingDepartment([
-      { employee_name: 'Ana Ilić', department_name: 'Sales Expenses' },
-      { employee_name: 'Marko Petrović', department_name: null },
-      { employee_name: 'Jelena Milosavljević', department_name: '   ' },
-    ])).toEqual(['Marko Petrović', 'Jelena Milosavljević'])
+      { employee_name: 'Osoba A', department_name: 'Sales Expenses' },
+      { employee_name: 'Osoba B', department_name: null },
+      { employee_name: 'Osoba C', department_name: '   ' },
+    ])).toEqual(['Osoba B', 'Osoba C'])
   })
 
   it('says nothing when everyone is placed', () => {
     expect(employeesMissingDepartment([
-      { employee_name: 'Ana', department_name: 'Sales Expenses' },
+      { employee_name: 'Osoba D', department_name: 'Sales Expenses' },
     ])).toEqual([])
   })
 
@@ -163,7 +163,7 @@ describe('obligationClassesFrom', () => {
   })
 
   it('puts each component under its own category as well as its sub-category', () => {
-    const rows = obligationRows([emp({ employee_name: 'Ana', tax: 10, contributionsEmployer: 5 })], {
+    const rows = obligationRows([emp({ employee_name: 'Osoba D', tax: 10, contributionsEmployer: 5 })], {
       ...CLASSES, employer: { pl_category: 'Doprinosi', pl_subcategory: 'Poslodavac' },
     })
     expect(rows.map(r => [r.pl_category, r.pl_subcategory])).toEqual([

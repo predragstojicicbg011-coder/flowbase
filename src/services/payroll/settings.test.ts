@@ -117,7 +117,7 @@ describe('ratesFor', () => {
   })
 
   it('accepts a rate of exactly zero as a value, not as absent', () => {
-    // Unemployment on the employer's side is 0 at Kalemar, and reading
+    // Unemployment on the employer's side is 0 at Firma Alfa, and reading
     // that as "missing" would refuse every real month.
     expect(ratesFor(SEED_2026, '2026-08-01').unemploymentEmployer).toBe(0)
     expect(missingFor(SEED_2026, '2026-08-01')).toEqual([])

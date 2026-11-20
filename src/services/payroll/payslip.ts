@@ -1,7 +1,7 @@
 // ─── The payslip, as MPP lays it out ────────────────────────────────────────
 //
 // Built against a real one: "Обрачун зараде и накнаде — Team Regular 2026-08",
-// Radović Vladimir. Every figure below was checked against that sheet, and
+// Person A. Every figure below was checked against that sheet, and
 // the two places worth knowing about are the ones that are not obvious.
 //
 // THE PARTS ARE A PRESENTATION, NOT A SECOND CALCULATION. MPP shows a gross

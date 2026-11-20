@@ -22,13 +22,13 @@ describe('deciding on SEF', () => {
   it('accepts, and says what SEF answered', async () => {
     const { client, invoke } = clientAnswering({ data: {
       ok: true, decision: 'accepted', sef_status: 'Approved', invoice_number: 'F-1',
-      decided_at: '2026-10-18T10:00:00Z', decided_by_name: 'Ana',
+      decided_at: '2026-10-18T10:00:00Z', decided_by_name: 'Osoba A',
     } })
     const r = await decideOnSef(client, { inboxId: 'row-1', accepted: true })
     expect(invoke).toHaveBeenCalledWith('sef-decide', { body: { inbox_id: 'row-1', accepted: true, comment: '' } })
     expect(r).toEqual({
       ok: true, decision: 'accepted', sefStatus: 'Approved', invoiceNumber: 'F-1',
-      decidedAt: '2026-10-18T10:00:00Z', decidedByName: 'Ana', warning: null,
+      decidedAt: '2026-10-18T10:00:00Z', decidedByName: 'Osoba A', warning: null,
     })
   })
 

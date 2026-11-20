@@ -18,7 +18,7 @@
 // account from `Salary expenses`, and a chart of accounts that lets them be
 // one is a chart of accounts that will eventually hold both.
 //
-// Accents are NOT folded. `Radović` and `Radovic` are two spellings of one
+// Accents are NOT folded. `Osobić` and `Osobic` are two spellings of one
 // person to a human and two different strings to everyone else, and quietly
 // treating them as one would merge employees on a rule nobody asked for. That
 // is a decision for whoever is looking at the list, not for an insert.

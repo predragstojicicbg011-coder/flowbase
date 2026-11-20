@@ -48,10 +48,10 @@ describe('the key status', () => {
   it('maps the row sef_key_status returns', () => {
     expect(mapSefKeyStatus([{
       configured: true, environment: 'production', last4: '5a18',
-      set_at: '2026-10-18T18:15:00Z', set_by_name: 'Ana', company_id: 'c1', company_name: 'Firma doo',
+      set_at: '2026-10-18T18:15:00Z', set_by_name: 'Osoba A', company_id: 'c1', company_name: 'Firma doo',
     }])).toEqual({
       configured: true, environment: 'production', last4: '5a18',
-      setAt: '2026-10-18T18:15:00Z', setByName: 'Ana', companyId: 'c1', companyName: 'Firma doo',
+      setAt: '2026-10-18T18:15:00Z', setByName: 'Osoba A', companyId: 'c1', companyName: 'Firma doo',
     })
   })
   it('never keeps more than four characters, whatever comes back', () => {

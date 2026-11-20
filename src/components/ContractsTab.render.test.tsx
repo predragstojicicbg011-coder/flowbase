@@ -8,7 +8,7 @@ import type { EmployeeRow, ContractRow } from '../services/payroll/employees'
 jest.mock('../supabase', () => ({ supabase: {} }))
 
 const employee = {
-  id: 'e1', full_name: 'Gavrilov Dejan', seniority_from: '2020-10-05',
+  id: 'e1', full_name: 'Osoba A', seniority_from: '2020-10-05',
 } as unknown as EmployeeRow
 
 const contract = (over: Partial<ContractRow> & { id: string; valid_from: string; valid_to: string | null }): ContractRow => ({

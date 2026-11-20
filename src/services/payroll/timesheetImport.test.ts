@@ -5,8 +5,8 @@ import {
 /**
  * A sheet in the shape the real export produces.
  *
- * Taken from `Gradiliste_full report_2026-09.xlsx`, worksheet "6.Stevanović
- * Strahinja": 168 hours worked, one day of annual leave, and the two duration
+ * Taken from `Gradiliste_full report_2026-09.xlsx`, its sixth worksheet (the name below
+ * is invented): 168 hours worked, one day of annual leave, and the two duration
  * formats side by side in the same block.
  */
 function sheet(over: {
@@ -24,7 +24,7 @@ function sheet(over: {
   // Spelled the way `xlsx` hands the cells over in the browser, which is what
   // production reads — verified against all twenty-four real September sheets.
   const o = {
-    name: 'Stevanović Strahinja',
+    name: 'Osoba Š',
     worked: '168:00',
     annual: '8:00 (days: 1)',
     sick: '00:00',
@@ -106,7 +106,7 @@ describe('hoursFrom', () => {
 
 describe('cleanName', () => {
   it('drops the phone number some rows carry', () => {
-    expect(cleanName('Popović Dragana [+381600000000]')).toBe('Popović Dragana')
+    expect(cleanName('Osoba V [+381600000000]')).toBe('Osoba V')
   })
 })
 
@@ -115,7 +115,7 @@ describe('parseSheet', () => {
     // The daily rows say "Annual leave [Whole day]" and carry 8 hours each.
     // Adding those as well would double every absence.
     const p = parseSheet(sheet())!
-    expect(p.name).toBe('Stevanović Strahinja')
+    expect(p.name).toBe('Osoba Š')
     expect(p.department).toBe('Gradilište')
     expect(p.workedHours).toBe(168)
     expect(p.annualLeaveHours).toBe(8)
@@ -171,35 +171,35 @@ describe('parseSheet', () => {
 describe('parseWorkbook', () => {
   it('reads every employee and says which sheets it skipped', () => {
     const file = parseWorkbook('Gradiliste_full report_2026-09.xlsx', [
-      { name: '1.Stevanović Strahinja', rows: sheet() },
-      { name: '2.Ristić Vladimir', rows: sheet({ name: 'Ristić Vladimir' }) },
+      { name: '1.Osoba Š', rows: sheet() },
+      { name: '2.Osoba O', rows: sheet({ name: 'Osoba O' }) },
       { name: 'Cover', rows: [['Nothing here']] },
     ])
     expect(file.employees.map(e => e.name))
-      .toEqual(['Stevanović Strahinja', 'Ristić Vladimir'])
+      .toEqual(['Osoba Š', 'Osoba O'])
     expect(file.skipped).toEqual(['Cover'])
   })
 })
 
 describe('nameKey', () => {
   it('sees through diacritics and word order', () => {
-    expect(nameKey('Stevanović Strahinja')).toBe(nameKey('Strahinja Stevanovic'))
-    expect(nameKey('Žarkov Stefan')).toBe(nameKey('Zarkov Stefan'))
-    expect(nameKey('Đukić Marina')).toBe(nameKey('Dukic Marina'))
+    expect(nameKey('Osoba Š')).toBe(nameKey('S Osoba'))
+    expect(nameKey('Osoba Ž')).toBe(nameKey('Osoba Z'))
+    expect(nameKey('Osobić Đ')).toBe(nameKey('Osobic D'))
   })
 
   it('does NOT pair a transliterated name with a different middle name', () => {
-    // "Djurovic Teodor" against "Đurović Teodor Viktor". Guessing here puts one
+    // "Djosobic I" against "Đosobić I J". Guessing here puts one
     // person's hours on another's salary, and both would look plausible.
-    expect(nameKey('Djurovic Teodor')).not.toBe(nameKey('Đurović Teodor Viktor'))
+    expect(nameKey('Djosobic I')).not.toBe(nameKey('Đosobić I J'))
   })
 })
 
 describe('matchEmployees', () => {
   const employees = [
-    { id: 'e1', full_name: 'Stevanović Strahinja' },
-    { id: 'e2', full_name: 'Đurović Teodor Viktor' },
-    { id: 'e3', full_name: 'Stevanović Bojan' },
+    { id: 'e1', full_name: 'Osoba Š' },
+    { id: 'e2', full_name: 'Đosobić I J' },
+    { id: 'e3', full_name: 'Osoba M' },
   ]
 
   it('matches on the name where it can', () => {
@@ -209,15 +209,15 @@ describe('matchEmployees', () => {
   })
 
   it('leaves one it cannot match, rather than guessing', () => {
-    const [m] = matchEmployees([parseSheet(sheet({ name: 'Djurovic Teodor' }))!], employees)
+    const [m] = matchEmployees([parseSheet(sheet({ name: 'Djosobic I' }))!], employees)
     expect(m.employeeId).toBeNull()
     expect(m.how).toBe('none')
   })
 
   it('uses a link somebody made, over its own comparison', () => {
     const [m] = matchEmployees(
-      [parseSheet(sheet({ name: 'Djurovic Teodor' }))!], employees,
-      { 'Djurovic Teodor': 'e2' })
+      [parseSheet(sheet({ name: 'Djosobic I' }))!], employees,
+      { 'Djosobic I': 'e2' })
     expect(m.employeeId).toBe('e2')
     expect(m.how).toBe('remembered')
   })
@@ -225,10 +225,10 @@ describe('matchEmployees', () => {
   it('refuses to choose between two people whose names reduce alike', () => {
     // A coin toss between two salaries is not a match.
     const twins = [
-      { id: 'a', full_name: 'Marko Marković' },
-      { id: 'b', full_name: 'Markovic Marko' },
+      { id: 'a', full_name: 'Osobić Y' },
+      { id: 'b', full_name: 'Y Osobic' },
     ]
-    const [m] = matchEmployees([parseSheet(sheet({ name: 'Marko Marković' }))!], twins)
+    const [m] = matchEmployees([parseSheet(sheet({ name: 'Osobić Y' }))!], twins)
     expect(m.employeeId).toBeNull()
   })
 })
@@ -261,22 +261,22 @@ describe('the real September files against the real register', () => {
   // typed by different people into different systems, and a pairing that is
   // wrong puts one person's hours on another person's salary.
   const IN_FILES = [
-    'Đinić Dejan', 'Vucinic Bojana', 'Milosavljevic Djuro', 'Jeličić Branislav',
-    'Milosavljević Andrija', 'Hajduk Milica', 'Popović Dragana [+381600000000]',
-    'Popović Vesna', 'Vasiljević Tanja', 'Bogdanić Velimir', 'Đukić Marina',
-    'Djurovic Teodor', 'Stevanović Bojan', 'Stevanović Strahinja', 'Marinković Radoslav',
-    'Ristić Vladimir', 'Petrović Dejan', 'Popović Vladimir', 'Tomić Zoran',
-    'Žarkov Stefan', 'Radović Vladimir', 'Gavrilov Dejan', 'Babin Goran',
-    'Grašić Dejan',
+    'Osoba K', 'Osoba C', 'Osoba Dj', 'Osoba Nj',
+    'Osoba L', 'Osoba R', 'Osoba V [+381600000000]',
+    'Osoba U', 'Osoba A', 'Osoba E', 'Osobić Đ',
+    'Djosobic I', 'Osoba M', 'Osoba Š', 'Osoba N',
+    'Osoba O', 'Osoba P', 'Osoba T', 'Osoba Lj',
+    'Osoba Ž', 'Osoba B', 'Osoba F', 'Osoba H',
+    'Osoba X',
   ]
   const IN_REGISTER = [
-    'Vasiljević Tanja', 'Radović Vladimir', 'Bogdanić Velimir', 'Gavrilov Dejan',
-    'Gavrilov Ivona', 'Babin Goran', 'Đurović Teodor Viktor', 'Đukić Marina',
-    'Đinić Dejan', 'Vučinić Bojana', 'Milosavljević Andrija', 'Milosavljević Đuro',
-    'Stevanović Bojan', 'Stevanović Strahinja', 'Marinković Radoslav', 'Ristić Vladimir',
-    'Petrović Dejan', 'Hajduk Milica', 'Popović Vladimir', 'Popović Vesna',
-    'Popović Dragana', 'Tomić Zoran', 'Jeličić Branislav', 'Grašić Dejan',
-    'Žarkov Stefan',
+    'Osoba A', 'Osoba B', 'Osoba E', 'Osoba F',
+    'Osoba G', 'Osoba H', 'Đosobić I J', 'Osobić Đ',
+    'Osoba K', 'Osoba Č', 'Osoba L', 'Osoba Đ',
+    'Osoba M', 'Osoba Š', 'Osoba N', 'Osoba O',
+    'Osoba P', 'Osoba R', 'Osoba T', 'Osoba U',
+    'Osoba V', 'Osoba Lj', 'Osoba Nj', 'Osoba X',
+    'Osoba Ž',
   ].map((full_name, i) => ({ id: `e${i}`, full_name }))
 
   const parsedFor = (name: string) => parseSheet(sheet({ name }))!
@@ -287,11 +287,11 @@ describe('the real September files against the real register', () => {
   })
 
   it('leaves exactly the two that genuinely differ', () => {
-    // "Djurovic Teodor" is missing a middle name and transliterates Đ; "Milosavljevic
-    // Djuro" writes đ as "dj" where the register writes it as the letter.
+    // "Djosobic I" is missing a middle name and transliterates Đ; "Osoba Dj"
+    // writes đ as "dj" where the register writes it as the letter.
     // Neither is a spelling difference this should paper over by itself.
     expect(matches.filter(m => !m.employeeId).map(m => m.parsed.name).sort())
-      .toEqual(['Djurovic Teodor', 'Milosavljevic Djuro'])
+      .toEqual(['Djosobic I', 'Osoba Dj'])
   })
 
   it('sees through the diacritics and the phone number on the rest', () => {
@@ -300,27 +300,27 @@ describe('the real September files against the real register', () => {
     // name is the plain one — which is also what a link would be remembered
     // under, and what a screen would show.
     expect(matches.some(m => m.parsed.name.includes('['))).toBe(false)
-    expect(by('Popović Dragana').employeeId).toBeTruthy()
-    expect(by('Vucinic Bojana').employeeId).toBeTruthy()
-    expect(by('Žarkov Stefan').employeeId).toBeTruthy()
+    expect(by('Osoba V').employeeId).toBeTruthy()
+    expect(by('Osoba C').employeeId).toBeTruthy()
+    expect(by('Osoba Ž').employeeId).toBeTruthy()
   })
 
   it('links the awkward two once, and then they stay linked', () => {
     const remembered = {
-      'Djurovic Teodor': 'e6',        // Đurović Teodor Viktor
-      'Milosavljevic Djuro': 'e11',    // Milosavljević Đuro
+      'Djosobic I': 'e6',        // Đosobić I J
+      'Osoba Dj': 'e11',    // Osoba Đ
     }
     const again = matchEmployees(IN_FILES.map(parsedFor), IN_REGISTER, remembered)
     expect(again.every(m => m.employeeId)).toBe(true)
   })
 
   it('notices that one person in the register has no timesheet at all', () => {
-    // Gavrilov Ivona. A payroll missing a person is the error this module
-    // exists to catch, so the roster names her rather than the import
+    // Osoba G. A payroll missing a person is the error this module
+    // exists to catch, so the roster names them rather than the import
     // pretending twenty-four is everybody.
     const matched = new Set(matches.map(m => m.employeeId))
     const without = IN_REGISTER.filter(e => !matched.has(e.id))
-    expect(without.map(e => e.full_name)).toContain('Gavrilov Ivona')
+    expect(without.map(e => e.full_name)).toContain('Osoba G')
   })
 })
 

@@ -60,7 +60,7 @@ Adresa odredišta:  RESAVSKA 23 I PA1 11000 Beograd </cbc:Note>
             <cbc:CompanyID>20000003</cbc:CompanyID>
           </cac:PartyLegalEntity>
           <cac:Contact>
-            <cbc:Name>Marko Marković</cbc:Name>
+            <cbc:Name>Osoba A</cbc:Name>
           </cac:Contact>
         </cac:Party>
       </cac:AccountingSupplierParty>
@@ -89,8 +89,8 @@ Adresa odredišta:  RESAVSKA 23 I PA1 11000 Beograd </cbc:Note>
             <cbc:CompanyID>20000001</cbc:CompanyID>
           </cac:PartyLegalEntity>
           <cac:Contact>
-            <cbc:Name>Jovana</cbc:Name>
-            <cbc:Telephone> 063/322-779</cbc:Telephone>
+            <cbc:Name>Osoba B</cbc:Name>
+            <cbc:Telephone> 060/000-000</cbc:Telephone>
           </cac:Contact>
         </cac:Party>
       </cac:AccountingCustomerParty>

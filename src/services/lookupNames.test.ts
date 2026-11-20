@@ -26,12 +26,12 @@ describe('foldName', () => {
   })
 
   /**
-   * Deliberately NOT folded. `Radović` and `Radovic` are one person to a
+   * Deliberately NOT folded. `Osobić` and `Osobic` are one person to a
    * human and two strings to everything else, and merging employees on a rule
    * nobody asked for is a worse fault than the one being prevented.
    */
   it('leaves accents alone, because they are not typing', () => {
-    expect(foldName('Radović')).not.toBe(foldName('Radovic'))
+    expect(foldName('Osobić')).not.toBe(foldName('Osobic'))
   })
 
   it('does not make two different accounts into one', () => {

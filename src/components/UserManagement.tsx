@@ -373,7 +373,7 @@ function InviteUserDialog({ onClose, onSaved }: { onClose: () => void; onSaved: 
             <div style={ds.sectionTitle}>Podaci o korisniku</div>
             <div style={ds.field}>
               <label style={ds.lbl}>Ime i prezime</label>
-              <input style={ds.input} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="npr. Marko Marković" />
+              <input style={ds.input} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="npr. Ime Prezime" />
             </div>
             <div style={{ ...ds.field, marginTop: '10px' }}>
               <label style={ds.lbl}>Email <span style={{ color: DIALOG.red }}>*</span></label>

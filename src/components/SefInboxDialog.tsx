@@ -758,7 +758,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     setDeclining(null); setError(''); setNotice(''); setRowError(null); setRowNotice(null)
   }
 
-  /** " 18.10.2026. 10:00 · Ana" — when and who, as far as it is known. */
+  /** " 18.10.2026. 10:00 · Osoba A" — when and who, as far as it is known. */
   const decidedBy = (row: SefRow) => {
     const parts = [row.sef_decided_at ? fmtMoment(row.sef_decided_at) : null, row.sef_decided_by_name].filter(Boolean)
     return parts.length ? ` ${parts.join(' · ')}` : ''

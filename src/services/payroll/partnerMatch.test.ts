@@ -12,24 +12,24 @@ const p = (id: string, name: string, is_individual: boolean | null = true): Part
 describe('personKey', () => {
   /** A payroll export puts the surname first; most partner records do not. */
   it('does not care which way round the name was typed', () => {
-    expect(personKey('Jeličić Branislav')).toBe(personKey('Branislav Jeličić'))
+    expect(personKey('Osoba Ć')).toBe(personKey('Ć Osoba'))
   })
 
   it('folds the accents half the partner records were typed without', () => {
-    expect(personKey('Jeličić Branislav')).toBe(personKey('Jelicic Branislav'))
-    expect(personKey('Đurađ Šipka')).toBe(personKey('Djuradj Sipka'))
+    expect(personKey('Osoba Ć')).toBe(personKey('Osoba C'))
+    expect(personKey('Osoba Đ Š')).toBe(personKey('Osoba Dj S'))
   })
 
   it('ignores case, punctuation and extra spaces', () => {
-    expect(personKey('  GAVRILOV,  dejan ')).toBe(personKey('Dejan Gavrilov'))
+    expect(personKey('  OSOBA,  b ')).toBe(personKey('B Osoba'))
   })
 
   it('keeps two different people apart', () => {
-    expect(personKey('Dejan Gavrilov')).not.toBe(personKey('Dejan Simonović'))
+    expect(personKey('B Osoba')).not.toBe(personKey('B Osobić'))
   })
 
   it('does not collapse a middle name into nothing', () => {
-    expect(personKey('Ana Marija Petrović')).not.toBe(personKey('Ana Petrović'))
+    expect(personKey('E F Osoba')).not.toBe(personKey('E Osoba'))
   })
 
   it('has nothing to say about an empty name', () => {
@@ -43,20 +43,20 @@ describe('personKey', () => {
    * rather than matched to the wrong person.
    */
   it('does not pretend to transliterate Cyrillic', () => {
-    expect(personKey('Дејан Гаврилов')).not.toBe(personKey('Dejan Gavrilov'))
+    expect(personKey('Б Особа')).not.toBe(personKey('B Osoba'))
   })
 })
 
 describe('matching an employee to a partner', () => {
   const book = [
-    p('i1', 'Branislav Jelicic'),
-    p('i2', 'Dejan Gavrilov'),
-    p('c1', 'Dejan Gavrilov PR', false),
-    p('c2', 'Zenit d.o.o.', false),
+    p('i1', 'C Osoba'),
+    p('i2', 'B Osoba'),
+    p('c1', 'B Osoba PR', false),
+    p('c2', 'Firma Alfa d.o.o.', false),
   ]
 
   it('finds the individual whose name is the same name', () => {
-    const m = matchEmployeeToPartner('Jeličić Branislav', book)
+    const m = matchEmployeeToPartner('Osoba Ć', book)
     expect(m.partnerId).toBe('i1')
     expect(m.reason).toBe('matched')
   })
@@ -66,7 +66,7 @@ describe('matching an employee to a partner', () => {
    * company's account, which looks perfectly ordinary in every report.
    */
   it('will not match an employee to a company of the same name', () => {
-    const m = matchEmployeeToPartner('Zenit', [p('c2', 'Zenit', false)])
+    const m = matchEmployeeToPartner('Firma Alfa', [p('c2', 'Firma Alfa', false)])
     expect(m.partnerId).toBeNull()
     expect(m.reason).toBe('not_individual')
     expect(m.candidates.map(c => c.id)).toEqual(['c2'])
@@ -75,8 +75,8 @@ describe('matching an employee to a partner', () => {
   /** Two people genuinely share a name, or one record is a duplicate. Either
    *  way, picking the first files a salary against somebody else. */
   it('refuses to choose when two individuals carry the name', () => {
-    const m = matchEmployeeToPartner('Dejan Gavrilov', [
-      p('i2', 'Dejan Gavrilov'), p('i3', 'Gavrilov Dejan'),
+    const m = matchEmployeeToPartner('B Osoba', [
+      p('i2', 'B Osoba'), p('i3', 'Osoba B'),
     ])
     expect(m.partnerId).toBeNull()
     expect(m.reason).toBe('ambiguous')
@@ -84,7 +84,7 @@ describe('matching an employee to a partner', () => {
   })
 
   it('is not confused by a company that merely looks similar', () => {
-    expect(matchEmployeeToPartner('Dejan Gavrilov', book).partnerId).toBe('i2')
+    expect(matchEmployeeToPartner('B Osoba', book).partnerId).toBe('i2')
   })
 
   it('says plainly when nobody carries the name', () => {
@@ -100,10 +100,10 @@ describe('matching an employee to a partner', () => {
 })
 
 describe('a whole run at once', () => {
-  const book = [p('i1', 'Branislav Jelicic'), p('i2', 'Dejan Gavrilov')]
+  const book = [p('i1', 'C Osoba'), p('i2', 'B Osoba')]
   const staff = [
-    { id: 'e1', name: 'Jeličić Branislav' },
-    { id: 'e2', name: 'Gavrilov Dejan' },
+    { id: 'e1', name: 'Osoba Ć' },
+    { id: 'e2', name: 'Osoba B' },
     { id: 'e3', name: 'Neko Nepoznat' },
   ]
 
@@ -122,27 +122,27 @@ describe('a whole run at once', () => {
 
   it('reports an unflagged partner as its own kind of problem', () => {
     const out = unmatchedEmployees(
-      [{ id: 'e9', name: 'Marko Marković' }],
-      [p('c9', 'Marko Marković', false)])
+      [{ id: 'e9', name: 'Osoba G' }],
+      [p('c9', 'Osoba G', false)])
     expect(out[0].reason).toBe('not_individual')
   })
 })
 
 describe('reading the employee out of a posted row', () => {
   it('finds the name on a net salary row', () => {
-    expect(employeeNameFromNote('2026-08 Standard — Net salary — Gavrilov Dejan [posting 4f2]'))
-      .toBe('Gavrilov Dejan')
+    expect(employeeNameFromNote('2026-08 Standard — Net salary — Osoba B [posting 4f2]'))
+      .toBe('Osoba B')
   })
 
   /** The net leg says what was forwarded to third parties after the name. */
   it('stops at the forwarding clause rather than swallowing it', () => {
-    expect(employeeNameFromNote('2026-08 — Net salary — Gavrilov Dejan, after 3000 forwarded [posting 4f2]'))
-      .toBe('Gavrilov Dejan')
+    expect(employeeNameFromNote('2026-08 — Net salary — Osoba B, after 3000 forwarded [posting 4f2]'))
+      .toBe('Osoba B')
   })
 
   it('reads a row that was written without a posting tag', () => {
-    expect(employeeNameFromNote('2026-08 — Net salary — Ana Marija Petrović'))
-      .toBe('Ana Marija Petrović')
+    expect(employeeNameFromNote('2026-08 — Net salary — E F Osoba'))
+      .toBe('E F Osoba')
   })
 
   /**
@@ -152,7 +152,7 @@ describe('reading the employee out of a posted row', () => {
    */
   it('says nothing about a row that is not somebody’s salary', () => {
     expect(employeeNameFromNote('2026-08 — Tax and contributions [posting 4f2]')).toBeNull()
-    expect(employeeNameFromNote('2026-08 — Retained deduction (storno): Loan — Gavrilov Dejan')).toBeNull()
+    expect(employeeNameFromNote('2026-08 — Retained deduction (storno): Loan — Osoba B')).toBeNull()
     expect(employeeNameFromNote('')).toBeNull()
     expect(employeeNameFromNote(null)).toBeNull()
   })
@@ -224,17 +224,17 @@ describe('deduction payees across a whole staff', () => {
 
 describe('classifying a posted row', () => {
   it('knows a salary from a tax obligation from a deduction', () => {
-    expect(classifyPostedNote('Payroll 2026-08 — Standard — Net salary — Gavrilov Dejan [posting 1]'))
-      .toEqual({ kind: 'employee', name: 'Gavrilov Dejan' })
+    expect(classifyPostedNote('Payroll 2026-08 — Standard — Net salary — Osoba B [posting 1]'))
+      .toEqual({ kind: 'employee', name: 'Osoba B' })
     expect(classifyPostedNote('Payroll 2026-08 — Standard — Tax and contributions [posting 1]'))
       .toEqual({ kind: 'tax' })
-    expect(classifyPostedNote('Payroll 2026-08 — Deduction forwarded: Generali — Gavrilov Dejan [posting 1]'))
-      .toEqual({ kind: 'deduction', label: 'Generali', employee: 'Gavrilov Dejan' })
+    expect(classifyPostedNote('Payroll 2026-08 — Deduction forwarded: Generali — Osoba B [posting 1]'))
+      .toEqual({ kind: 'deduction', label: 'Generali', employee: 'Osoba B' })
   })
 
   /** A row that is correct without a partner must not be given one. */
   it('leaves anything it does not recognise alone', () => {
-    expect(classifyPostedNote('Payroll 2026-08 — Retained deduction (storno): Laptop — Ana'))
+    expect(classifyPostedNote('Payroll 2026-08 — Retained deduction (storno): Laptop — Osoba H'))
       .toEqual({ kind: 'other' })
     expect(classifyPostedNote('Some invoice typed by hand')).toEqual({ kind: 'other' })
     expect(classifyPostedNote(null)).toEqual({ kind: 'other' })
@@ -291,7 +291,7 @@ describe('a deduction that names its payee by id', () => {
 
 describe('the month a posted row belongs to', () => {
   it('reads it off the note', () => {
-    expect(payrollMonthFromNote('Payroll 2026-09 — Standard — Net salary — Ana [posting 1]'))
+    expect(payrollMonthFromNote('Payroll 2026-09 — Standard — Net salary — Osoba H [posting 1]'))
       .toBe('2026-09')
   })
 
@@ -320,41 +320,41 @@ describe('the month a posted row belongs to', () => {
 
 describe('reading a note written in Serbian', () => {
   it('finds the name on a net salary row', () => {
-    expect(employeeNameFromNote('Zarade 2026-09 — Zarade — Neto zarada — Gavrilov Dejan [knjiženje 4f2]'))
-      .toBe('Gavrilov Dejan')
+    expect(employeeNameFromNote('Zarade 2026-09 — Zarade — Neto zarada — Osoba B [knjiženje 4f2]'))
+      .toBe('Osoba B')
   })
 
   it('stops at the forwarding clause rather than swallowing it', () => {
-    expect(employeeNameFromNote('Zarade 2026-09 — Zarade — Neto zarada — Gavrilov Dejan, nakon prosleđenih 3000 [knjiženje 4f2]'))
-      .toBe('Gavrilov Dejan')
+    expect(employeeNameFromNote('Zarade 2026-09 — Zarade — Neto zarada — Osoba B, nakon prosleđenih 3000 [knjiženje 4f2]'))
+      .toBe('Osoba B')
   })
 
   it('reads a row that was written without a posting tag', () => {
-    expect(employeeNameFromNote('Zarade 2026-09 — Neto zarada — Ana Marija Petrović'))
-      .toBe('Ana Marija Petrović')
+    expect(employeeNameFromNote('Zarade 2026-09 — Neto zarada — E F Osoba'))
+      .toBe('E F Osoba')
   })
 
   it('says nothing about a row that is not somebody’s salary', () => {
     expect(employeeNameFromNote('Zarade 2026-09 — Zarade — Porez i doprinosi [knjiženje 4f2]')).toBeNull()
-    expect(employeeNameFromNote('Zarade 2026-09 — Zadržana obustava (storno): Kredit — Gavrilov Dejan')).toBeNull()
+    expect(employeeNameFromNote('Zarade 2026-09 — Zadržana obustava (storno): Kredit — Osoba B')).toBeNull()
   })
 
   it('knows a salary from a tax obligation from a deduction', () => {
-    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Neto zarada — Gavrilov Dejan [knjiženje 1]'))
-      .toEqual({ kind: 'employee', name: 'Gavrilov Dejan' })
+    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Neto zarada — Osoba B [knjiženje 1]'))
+      .toEqual({ kind: 'employee', name: 'Osoba B' })
     expect(classifyPostedNote('Zarade 2026-09 — Zarade — Porez i doprinosi [knjiženje 1]'))
       .toEqual({ kind: 'tax' })
-    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Prosleđena obustava: Generali — Gavrilov Dejan [knjiženje 1]'))
-      .toEqual({ kind: 'deduction', label: 'Generali', employee: 'Gavrilov Dejan' })
+    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Prosleđena obustava: Generali — Osoba B [knjiženje 1]'))
+      .toEqual({ kind: 'deduction', label: 'Generali', employee: 'Osoba B' })
   })
 
   it('leaves a retained-deduction storno alone', () => {
-    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Zadržana obustava (storno): Laptop — Ana'))
+    expect(classifyPostedNote('Zarade 2026-09 — Zarade — Zadržana obustava (storno): Laptop — Osoba H'))
       .toEqual({ kind: 'other' })
   })
 
   it('reads the month off the note', () => {
-    expect(payrollMonthFromNote('Zarade 2026-09 — Zarade — Neto zarada — Ana [knjiženje 1]'))
+    expect(payrollMonthFromNote('Zarade 2026-09 — Zarade — Neto zarada — Osoba H [knjiženje 1]'))
       .toBe('2026-09')
     expect(payrollMonthFromNote('Zarade 2026-08 — Ostala primanja — Porez i doprinosi [knjiženje 2]'))
       .toBe('2026-08')
@@ -367,8 +367,8 @@ describe('the posting tag', () => {
   })
 
   it('is recognised in both spellings, and nowhere else', () => {
-    expect(hasPostingTag('Zarade 2026-09 — Zarade — Neto zarada — Ana [knjiženje 1]')).toBe(true)
-    expect(hasPostingTag('Payroll 2026-08 — Salaries — Net salary — Ana [posting 1]')).toBe(true)
+    expect(hasPostingTag('Zarade 2026-09 — Zarade — Neto zarada — Osoba H [knjiženje 1]')).toBe(true)
+    expect(hasPostingTag('Payroll 2026-08 — Salaries — Net salary — Osoba H [posting 1]')).toBe(true)
     expect(hasPostingTag('Kancelarijski materijal')).toBe(false)
     expect(hasPostingTag(null)).toBe(false)
   })

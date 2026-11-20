@@ -7,7 +7,7 @@ import {
 // ─── Real months, from the MPP exports ──────────────────────────────────────
 //
 // Every figure marked `export:` below was produced by Mali privredni savetnik
-// for Kalemar and is what this engine has to reproduce. Nothing is a
+// for Firma Alfa and is what this engine has to reproduce. Nothing is a
 // plausible number someone made up to make a test pass — if one of these
 // changes, either MPP changed or the engine is wrong, and both are worth
 // stopping for.
@@ -20,7 +20,7 @@ const R = RATES_2026
 const FULL = { monthHours: 168, workedHours: 168 }
 
 describe('A full month 2026-08', () => {
-  // Gavrilov Dejan, 117,358.60 contracted net.
+  // Osoba A, 117,358.60 contracted net.
   const line = salaryLine({ contractedNet: 117358.60, period: FULL }, R)
 
   it('grosses up to what MPP grossed up to', () => {
@@ -62,7 +62,7 @@ describe('Another full month 2026-08, end to end', () => {
 })
 
 describe('A part month 2026-08 — eight hours of a 168-hour fund', () => {
-  // Petrović Dejan: 352,075.80 contracted, 8 hours of this calculation.
+  // Osoba B: 352,075.80 contracted, 8 hours of this calculation.
   // The contract is NOT divided beforehand — the engine prorates it.
   const line = salaryLine(
     { contractedNet: 352075.80, period: { monthHours: 168, workedHours: 8 } }, R)
@@ -99,7 +99,7 @@ describe('the parts of a month add back up', () => {
 })
 
 describe('Trudničko bolovanje 30+ 2026-05 — entering through a gross', () => {
-  // Gavrilov Ivona, allowance from her own average: 83,283.37 a month.
+  // Osoba C, allowance from their own average: 83,283.37 a month.
   const line = sickLeaveLine(
     { monthlyAllowance: 83283.37, period: FULL, coefficient: 1 }, R)
 
@@ -219,9 +219,9 @@ describe('seniority, and what a contract amount means', () => {
   // was checked against all fourteen; these are kept as the regression because
   // they span the range — six years, four, and one.
   const AUGUST = [
-    { name: 'Gavrilov Dejan', years: 6, base: 114608.01, seniority: 2750.59, total: 117358.60 },
-    { name: 'Stevanović Bojan', years: 4, base: 323429.21, seniority: 5174.87, total: 328604.08 },
-    { name: 'Vasiljević Tanja', years: 1, base: 257160.28, seniority: 1028.64, total: 258188.92 },
+    { name: 'Osoba A', years: 6, base: 114608.01, seniority: 2750.59, total: 117358.60 },
+    { name: 'Osoba D', years: 4, base: 323429.21, seniority: 5174.87, total: 328604.08 },
+    { name: 'Osoba E', years: 1, base: 257160.28, seniority: 1028.64, total: 258188.92 },
   ]
 
   it.each(AUGUST)('splits the contract for $name the way MPP did', ({ years, base, seniority, total }) => {
@@ -264,20 +264,20 @@ describe('wholeYearsBetween', () => {
   // month. This is the evidence the rule rests on, so it is the test.
   const AUGUST_2026 = '2026-08-01'
   const FOURTEEN: [string, string, number][] = [
-    ['Gavrilov Dejan',        '2020-03-04', 6],
-    ['Marinković Radoslav',      '2020-05-18', 6],
-    ['Stevanović Bojan',    '2022-03-01', 4],
-    ['Stevanović Strahinja',  '2022-03-01', 4],
-    ['Popović Vladimir', '2022-03-01', 4],
-    ['Babin Goran',           '2022-03-01', 4],
-    ['Đurović Teodor Viktor', '2022-04-19', 4],
-    ['Žarkov Stefan',       '2023-01-16', 3],
-    ['Ristić Vladimir',     '2024-02-12', 2],
-    ['Bogdanić Velimir',      '2024-05-06', 2],
-    ['Petrović Dejan',      '2025-03-10', 1],
-    ['Tomić Zoran',    '2025-03-10', 1],
-    ['Đukić Marina',          '2025-05-05', 1],
-    ['Vasiljević Tanja',      '2025-06-02', 1],
+    ['Osoba A',        '2020-03-04', 6],
+    ['Osoba F',      '2020-05-18', 6],
+    ['Osoba D',    '2022-03-01', 4],
+    ['Osoba G',  '2022-03-01', 4],
+    ['Osoba H', '2022-03-01', 4],
+    ['Osoba I',           '2022-03-01', 4],
+    ['Osoba J', '2022-04-19', 4],
+    ['Osoba K',       '2023-01-16', 3],
+    ['Osoba L',     '2024-02-12', 2],
+    ['Osoba M',      '2024-05-06', 2],
+    ['Osoba B',      '2025-03-10', 1],
+    ['Osoba N',    '2025-03-10', 1],
+    ['Osoba O',          '2025-05-05', 1],
+    ['Osoba E',      '2025-06-02', 1],
   ]
 
   it.each(FOURTEEN)('credits %s with the years MPP did', (_name, from, years) => {

@@ -6,7 +6,7 @@
 //
 //   PAID LEAVE IS PAID. It was being left out of the salary altogether, so
 //   anybody who took a holiday was paid for the days they worked and nothing
-//   else. Tomić Zoran had seven days off in September and would have
+//   else. Osoba A had seven days off in September and would have
 //   been short about 113,000 dinars of gross.
 //
 // Some people's months were laid out on the sheet as two periods. Their
@@ -54,7 +54,7 @@ const COEFFICIENTS: Record<string, number> = {
 
 
 const employee = (over: Partial<EmployeeRow> = {}): EmployeeRow => ({
-  id: 'e1', company_id: 'c1', code: 'E003', full_name: 'Popović Vladimir',
+  id: 'e1', company_id: 'c1', code: 'E003', full_name: 'Osoba B',
   organisational_unit: 'GRAD - Gradilište', hired_on: null,
   seniority_from: '2022-03-01', left_on: null, note: null, deleted_at: null, ...over,
 })
@@ -92,7 +92,7 @@ const input = (over: Partial<RunInput> = {}): RunInput => ({
 
 const run = (r: ReturnType<typeof runsFor>, key: string) => r.runs.find(x => x.key === key)!
 
-describe('Popović Vladimir — 168 hours worked, 8 on leave', () => {
+describe('Osoba B — 168 hours worked, 8 on leave', () => {
   // His September figures are per period, from a month that split him across
   // two runs; they are checked through the engine below. Here, only what one
   // line for the month has to be.
@@ -121,9 +121,9 @@ describe('a whole month of leave is still a whole month', () => {
 })
 
 describe('one run, leave included', () => {
-  it('matches Grašić Dejan — 120 worked, 56 on leave, one line', () => {
+  it('matches Osoba C — 120 worked, 56 on leave, one line', () => {
     const plain = person(1500, {
-      employee: employee({ id: 'e1', full_name: 'Grašić Dejan' }),
+      employee: employee({ id: 'e1', full_name: 'Osoba C' }),
       contract: contract({ net_amount: 1500 }),
     })
     const r = runsFor(input({
@@ -175,7 +175,7 @@ describe('sick leave is paid at the coefficient the settings state', () => {
   })
 })
 
-describe('Gavrilov Dejan — the whole month worked', () => {
+describe('Osoba D — the whole month worked', () => {
   it('reproduces the gross and the net the sheet reports', () => {
     const r = runsFor(input({
       people: [person(1000, { contract: contract({ net_amount: 1000 }) })],
@@ -189,7 +189,7 @@ describe('Gavrilov Dejan — the whole month worked', () => {
 
 describe('the engine, used directly the way the sheet lays it out', () => {
   it('grosses two periods separately and they add back to the month', () => {
-    // Popović Vladimir's two periods, as the sheet grossed them.
+    // Osoba B's two periods, as the sheet grossed them.
     const contracted = Math.round(2600 * RATE * 100) / 100
     const worked = salaryLine({ contractedNet: contracted,
       period: { monthHours: FUND, workedHours: 168 } }, RATES_2026)
@@ -209,7 +209,7 @@ describe('the whole month adds up', () => {
   })
 })
 
-describe('Stevanović Strahinja — over the contribution ceiling', () => {
+describe('Osoba E — over the contribution ceiling', () => {
   // The one person at this company whose month passes 732,820. His September
   // is the whole reason the contribution base is a separate figure:
   //
@@ -269,12 +269,12 @@ describe('Stevanović Strahinja — over the contribution ceiling', () => {
   })
 
   describe('his month, as one run', () => {
-    const strahinja = person(5800, {
-      employee: employee({ id: 'e1', full_name: 'Stevanović Strahinja' }),
+    const osobaE = person(5800, {
+      employee: employee({ id: 'e1', full_name: 'Osoba E' }),
       contract: contract({ net_amount: 5800 }),
     })
     const r = runsFor(input({
-      people: [strahinja],
+      people: [osobaE],
       timesheets: { e1: sheet({ regular_hours: 168, vacation_hours: 8 }) },
     }))
     const line = run(r, 'regular').salaries[0].line
@@ -291,7 +291,7 @@ describe('Stevanović Strahinja — over the contribution ceiling', () => {
   })
 })
 
-describe('Milosavljević Đuro — under the ceiling, with a large one-off', () => {
+describe('Osoba F — under the ceiling, with a large one-off', () => {
   // September 2026, from his MPP payslip. He left on the 12th, worked 72 of
   // the month's 176 hours, and was paid 256,168.33 of compensation on top.
   //
@@ -303,22 +303,22 @@ describe('Milosavljević Đuro — under the ceiling, with a large one-off', () 
   const CONTRACTED = 352202.10        // 3,000 EUR at 117.4007
   const DAMAGES = 256168.33
 
-  const djuro = person(3000, {
-    employee: employee({ id: 'e1', full_name: 'Milosavljević Đuro', left_on: '2026-09-12' }),
+  const osobaF = person(3000, {
+    employee: employee({ id: 'e1', full_name: 'Osoba F', left_on: '2026-09-12' }),
     contract: contract({ net_amount: 3000 }),
     net: splitContractedNet(CONTRACTED, 3, 0.004),
     // 106.03 EUR of private health cover for his family, which his payslip
     // withholds as 12,448.00 at the month's rate.
     deductions: [{
       id: 'd1', employee_id: 'e1',
-      label: 'Privatno zdravstveno osiguranje Sara i Ljiljana Milosavljević',
-      goes_to: 'employer', payee: 'KALEMAR D.O.O.',
+      label: 'Privatno zdravstveno osiguranje Osoba G i Osoba H',
+      goes_to: 'employer', payee: 'FIRMA ALFA D.O.O.',
       amount: 106.03, currency: 'EUR', percent_of_net: null,
       valid_from: '2026-02-01', valid_to: '2026-09-12', is_active: true, note: null,
     }],
   })
   const r = runsFor(input({
-    people: [djuro],
+    people: [osobaF],
     timesheets: { e1: sheet({ regular_hours: 72 }) },
     additions: [{
       id: 'x1', employee_id: 'e1', month: '2026-09-01', kind: 'damages',
@@ -370,7 +370,7 @@ describe('Milosavljević Đuro — under the ceiling, with a large one-off', () 
     // The one month with a large one-off in it, so the only check that the
     // parts still add up once a bonus is among them.
     const slip = payslipFor(
-      run(r, 'regular').salaries[0], djuro, RATES_2026, 0.004, { EUR: RATE })
+      run(r, 'regular').salaries[0], osobaF, RATES_2026, 0.004, { EUR: RATE })
     const part = (label: string) => slip.parts.find(x => x.label === label)!
 
     expect(part('Redovan rad').gross).toBeCloseTo(201104.48, 1)
@@ -398,8 +398,8 @@ describe('Milosavljević Đuro — under the ceiling, with a large one-off', () 
 
   it('splits his contracted net the way the sheet does', () => {
     // 3 years of service, 1.20%: 348,025.79 of base and 4,176.31 of seniority.
-    expect(djuro.net.base).toBeCloseTo(348025.79, 1)
-    expect(djuro.net.seniority).toBeCloseTo(4176.31, 1)
+    expect(osobaF.net.base).toBeCloseTo(348025.79, 1)
+    expect(osobaF.net.seniority).toBeCloseTo(4176.31, 1)
   })
 })
 

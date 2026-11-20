@@ -1,6 +1,6 @@
 import { buildTkdis, cleanAccount, asciiUpper, tkdisFileName, tkdisBytes, type TkdisOrder } from './halcomTkdis'
 
-const payer = { account_number: '160-0000000123456-78', name: 'Milinković Company doo', city: 'Beograd' }
+const payer = { account_number: '160-0000000123456-78', name: 'Firma Alfa Ćošak doo', city: 'Beograd' }
 const order = (over: Partial<TkdisOrder> = {}): TkdisOrder => ({
   beneficiaryAccount: '205-0000000654321-11', beneficiaryName: 'Beton Plus d.o.o.', beneficiaryAddress: 'Šumadijska 5',
   beneficiaryCity: 'Čačak', purpose: 'UPLATA PO FAKTURI 12/2026', paymentCode: '221', amount: 1234.56,
@@ -47,7 +47,7 @@ describe('the Halcom TKDIS file', () => {
     const text = buildTkdis(payer, [order()], date)
     expect(text).toContain('CACAK')
     expect(text).toContain('SUMADIJSKA')
-    expect(text).toContain('MILINKOVIC')
+    expect(text).toContain('FIRMA ALFA COSAK')
     expect(Array.from(tkdisBytes(text)).filter(b => b === 0x0d)).toHaveLength(3)
     expect(asciiUpper('Đurđevdan čćšž')).toBe('DJURDJEVDAN CCSZ')
   })

@@ -80,7 +80,7 @@ describe('the labels', () => {
 // ─── In a run ───────────────────────────────────────────────────────────────
 
 const employee = (over: Partial<EmployeeRow> = {}): EmployeeRow => ({
-  id: 'e1', company_id: 'c1', code: 'E003', full_name: 'Popović Vladimir',
+  id: 'e1', company_id: 'c1', code: 'E003', full_name: 'Osoba A',
   organisational_unit: 'GRAD', hired_on: null, seniority_from: '2022-03-01',
   left_on: null, note: null, deleted_at: null, ...over,
 })
