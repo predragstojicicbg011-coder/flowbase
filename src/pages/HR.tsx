@@ -120,7 +120,8 @@ export default function HR() {
 
   /** The rate, the day its list is from, and whether that is the 20th's. */
   const rate = useMemo(
-    () => (quote ? rateForMonth(month, holidays, quote) : null), [quote, month, holidays])
+    () => (quote ? rateForMonth(month, holidays, quote, belgradeToday().slice(0, 7)) : null),
+    [quote, month, holidays])
 
   const seniorityCoefficient = numberFor(settings, 'seniority_coefficient', date)
   // A setting for the month wins; otherwise it is the weekdays, with the

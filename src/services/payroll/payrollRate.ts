@@ -47,15 +47,30 @@ export function twentiethBusinessDay(month: string, holidays: HolidayRow[]): str
   return day
 }
 
-/** The month's rate, from the answer to `getBookRates(rateDateFor(month))`. */
+/**
+ * The month's rate, from the answer to `getBookRates(rateDateFor(month))`.
+ *
+ * A MONTH ALREADY PAST counts as the 20th's on any usable answer. Its 20th
+ * has long been published, so whatever list the service answers with is the
+ * one there will ever be — and the strict comparison could fail for good: a
+ * 20th that walks back to a holiday the table does not hold (April 2025: the
+ * 20th a Sunday, Friday the 18th Good Friday) is answered with the 17th's
+ * list, and an answer without `date_from` has no day at all. Held to the
+ * strict rule such a month could never be posted, with a sentence promising
+ * a list that will never come. The running month (in Belgrade) and any later
+ * one keep the strict rule: their 20th's list may still be ahead.
+ */
 export function rateForMonth(
   month: string,
   holidays: HolidayRow[],
   answer: { eurRate: number; quotedOn?: string | null },
+  /** `YYYY-MM`, the running month in Belgrade (`belgradeToday().slice(0, 7)`). */
+  runningMonth: string,
 ): PayrollRate {
   const twentieth = twentiethBusinessDay(month, holidays)
   const quotedOn = answer.quotedOn ?? null
-  return { eur: answer.eurRate, quotedOn, ofTheTwentieth: quotedOn === twentieth, twentieth }
+  const past = month.slice(0, 7) < runningMonth.slice(0, 7)
+  return { eur: answer.eurRate, quotedOn, ofTheTwentieth: past || quotedOn === twentieth, twentieth }
 }
 
 // ─── What the pages say ─────────────────────────────────────────────────────

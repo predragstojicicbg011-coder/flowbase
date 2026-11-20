@@ -167,7 +167,8 @@ export default function Payroll() {
 
   /** The rate, the day its list is from, and whether that is the 20th's. */
   const rate = useMemo(
-    () => (quote ? rateForMonth(month, holidays, quote) : null), [quote, month, holidays])
+    () => (quote ? rateForMonth(month, holidays, quote, belgradeToday().slice(0, 7)) : null),
+    [quote, month, holidays])
 
   const seniorityCoefficient = numberFor(settings, 'seniority_coefficient', date)
   // Every absence is paid at the coefficient in force for THIS month, so a
@@ -217,8 +218,14 @@ export default function Payroll() {
    * posted only on the 20th's, or its invoices would carry another day's
    * conversion for good.
    */
-  const waitsForRate = rate && !rate.ofTheTwentieth && convertsForeignAmount(roster.people, additions)
-    ? postWaitsForTheTwentieth(rate) : null
+  const waitsForRate = useMemo(() => {
+    if (!rate || rate.ofTheTwentieth) return null
+    // This payroll's own: the additions are read for the month across every
+    // company, and another company's euro bonus must not hold this one back.
+    const onRoster = new Set(roster.people.map(p => p.employee.id))
+    const own = additions.filter(a => onRoster.has(a.employee_id))
+    return convertsForeignAmount(roster.people, own) ? postWaitsForTheTwentieth(rate) : null
+  }, [rate, roster, additions])
 
   const total = result ? grandTotal(result.runs) : null
   const blocking = (roster.problems.length + (result?.problems.length ?? 0)) > 0

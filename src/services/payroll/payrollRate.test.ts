@@ -28,23 +28,54 @@ describe('twentiethBusinessDay', () => {
 
 describe('rateForMonth', () => {
   it('a weekday 20th quoted on the 20th is the 20th\'s', () => {
-    expect(rateForMonth('2026-11', [], { eurRate: 117.2, quotedOn: '2026-11-20' }))
+    expect(rateForMonth('2026-11', [], { eurRate: 117.2, quotedOn: '2026-11-20' }, '2026-11'))
       .toEqual({ eur: 117.2, quotedOn: '2026-11-20', ofTheTwentieth: true, twentieth: '2026-11-20' })
   })
 
   it('a Saturday 20th quoted on the Friday is the 20th\'s', () => {
-    expect(rateForMonth('2026-06', [], { eurRate: 117.2, quotedOn: '2026-06-19' }).ofTheTwentieth).toBe(true)
+    expect(rateForMonth('2026-06', [], { eurRate: 117.2, quotedOn: '2026-06-19' }, '2026-06').ofTheTwentieth).toBe(true)
   })
 
   it('a list from the day before the 20th is not the 20th\'s', () => {
-    const r = rateForMonth('2026-04', [], { eurRate: 117.2, quotedOn: '2026-04-19' })
+    const r = rateForMonth('2026-04', [], { eurRate: 117.2, quotedOn: '2026-04-19' }, '2026-04')
     expect(r.ofTheTwentieth).toBe(false)
     expect(r.quotedOn).toBe('2026-04-19')
   })
 
-  it('a rate with no quoted day is never the 20th\'s', () => {
-    expect(rateForMonth('2026-11', [], { eurRate: 117.2 }))
+  it('a rate with no quoted day is never the 20th\'s in the running month', () => {
+    expect(rateForMonth('2026-11', [], { eurRate: 117.2 }, '2026-11'))
       .toEqual({ eur: 117.2, quotedOn: null, ofTheTwentieth: false, twentieth: '2026-11-20' })
+  })
+
+  it('the running month before its 20th\'s list is out is still not the 20th\'s', () => {
+    const r = rateForMonth('2026-11', [], { eurRate: 117.2, quotedOn: '2026-11-02' }, '2026-11')
+    expect(r.ofTheTwentieth).toBe(false)
+    expect(postWaitsForTheTwentieth(r)).toContain('Knjiženje je moguće kada NBS objavi taj kurs')
+  })
+
+  it('a future month is held to the strict rule as well', () => {
+    expect(rateForMonth('2026-12', [], { eurRate: 117.2, quotedOn: '2026-11-19' }, '2026-11')
+      .ofTheTwentieth).toBe(false)
+  })
+})
+
+describe('rateForMonth — a month already past', () => {
+  // A past month's 20th has long been published; whatever list the service
+  // answers with for it is the one there is. Holding it to the strict rule
+  // would refuse it for ever, with a sentence that can never come true.
+  it('April 2025: the 20th is a Sunday, Friday the 18th was Good Friday (no row for 2025), '
+    + 'the answer is the 17th\'s list — it counts as the 20th\'s', () => {
+    expect(twentiethBusinessDay('2025-04', [])).toBe('2025-04-18')
+    const r = rateForMonth('2025-04', [], { eurRate: 117.1, quotedOn: '2025-04-17' }, '2026-11')
+    expect(r.ofTheTwentieth).toBe(true)
+    expect(rateNotice(r)).toBeNull()
+    expect(rateBadge(r, n => n.toFixed(2))).toBe('1 EUR = 117.10 RSD, kurs NBS od 17.04.2025.')
+  })
+
+  it('a past month whose answer has no date_from counts as the 20th\'s', () => {
+    const r = rateForMonth('2026-10', [], { eurRate: 117.2 }, '2026-11')
+    expect(r.ofTheTwentieth).toBe(true)
+    expect(rateNotice(r)).toBeNull()
   })
 })
 
@@ -65,7 +96,7 @@ describe('rateForMonth over the service, payloads as it answers them', () => {
     })
   }
   const monthRate = async (month: string) =>
-    rateForMonth(month, [], await getBookRates(`${month}-20`))
+    rateForMonth(month, [], await getBookRates(`${month}-20`), month)
 
   it('a weekday 20th once published', async () => {
     answering('2026-11-20', '2026-11-20')
@@ -89,9 +120,9 @@ describe('rateForMonth over the service, payloads as it answers them', () => {
 
 describe('what the pages say', () => {
   const money = (n: number) => n.toFixed(2).replace('.', ',')
-  const notYet = rateForMonth('2026-11', [], { eurRate: 117.2, quotedOn: '2026-11-02' })
-  const twentieths = rateForMonth('2026-11', [], { eurRate: 117.2, quotedOn: '2026-11-20' })
-  const unknown = rateForMonth('2026-11', [], { eurRate: 117.2 })
+  const notYet = rateForMonth('2026-11', [], { eurRate: 117.2, quotedOn: '2026-11-02' }, '2026-11')
+  const twentieths = rateForMonth('2026-11', [], { eurRate: 117.2, quotedOn: '2026-11-20' }, '2026-11')
+  const unknown = rateForMonth('2026-11', [], { eurRate: 117.2 }, '2026-11')
 
   it('the badge names the day of the rate', () => {
     expect(rateBadge(twentieths, money)).toBe('1 EUR = 117,20 RSD, kurs NBS od 20.11.2026.')

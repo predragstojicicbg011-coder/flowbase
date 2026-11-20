@@ -605,8 +605,8 @@ describe('whether two names are plainly the same party', () => {
   })
 
   it('says no to two different parties', () => {
-    expect(looksLikeSameParty('Wiener Städtische osiguranje', 'Firma Alfa LLC')).toBe(false)
-    expect(looksLikeSameParty('Fitpass d.o.o.', 'Firma Alfa LLC')).toBe(false)
+    expect(looksLikeSameParty('Firma Beta osiguranje', 'Firma Alfa LLC')).toBe(false)
+    expect(looksLikeSameParty('Firma Gama d.o.o.', 'Firma Alfa LLC')).toBe(false)
   })
 
   it('says no when either side is missing', () => {
@@ -631,7 +631,7 @@ describe('a deduction forwarded to the company paying it', () => {
   })
 
   it('has nothing to say once a real recipient is named', () => {
-    expect(deductionWarning({ ...policy(), payee: 'Wiener Städtische osiguranje' },
+    expect(deductionWarning({ ...policy(), payee: 'Firma Beta osiguranje' },
       'Firma Alfa LLC')).toBeNull()
   })
 

@@ -4,6 +4,7 @@ import Payroll from './Payroll'
 import type { SavedRun } from '../services/payroll/savedRuns'
 import { RATE_BADGE, RATE_NOT_YET_THE_TWENTIETHS, POST_WAITS_FOR_THE_TWENTIETH } from '../services/payroll/payrollRate'
 import { fmtNum } from '../utils/formatters'
+import type { AdditionRow } from '../services/payroll/additions'
 
 // ── The page's world, invented: one company, one person on a round dinar
 //    contract, November 2026 with no holiday rows. Plain functions over
@@ -19,7 +20,14 @@ const state = {
   quotedOn: '2026-11-20' as string | undefined,
   /** The currency of the one contract. */
   contractCurrency: 'RSD',
+  /** Every addition of the month, of every company: fetchAdditions does not filter. */
+  additions: [] as AdditionRow[],
 }
+
+const addition = (employeeId: string, currency: string): AdditionRow => ({
+  id: `a-${employeeId}`, employee_id: employeeId, month: '2026-11-01', kind: 'bonus',
+  label: 'Bonus A', treatment: 'salary', amount: 100, currency, note: null,
+})
 
 const keptRun = (over: Partial<SavedRun> = {}): SavedRun => ({
   id: 'k-1', company_id: 'c-1', period_month: '2026-10-01', run_key: 'regular',
@@ -85,7 +93,7 @@ jest.mock('../services/payroll/holidays', () => ({
 jest.mock('../services/payroll/additions', () => ({
   __esModule: true,
   ...jest.requireActual('../services/payroll/additions'),
-  fetchAdditions: async () => [],
+  fetchAdditions: async () => state.additions,
 }))
 jest.mock('../services/payroll/savedRuns', () => ({
   __esModule: true,
@@ -114,6 +122,7 @@ beforeEach(() => {
   state.saves = 0
   state.quotedOn = '2026-11-20'
   state.contractCurrency = 'RSD'
+  state.additions = []
 })
 
 const readsSettled = async (n: number) => waitFor(() => expect(state.monthReads).toBe(n))
@@ -167,6 +176,8 @@ describe('the rate on the Payroll page', () => {
   it("a month all in dinars may be posted on any day's rate", async () => {
     state.quotedOn = '2026-11-02'
     render(<Payroll />)
+    // Only once the rate is on screen could a refusal exist at all.
+    expect(await screen.findByText(RATE_BADGE(fmtNum(117), '02.11.2026.'))).toBeInTheDocument()
     await screen.findByRole('button', { name: 'panel-posted-or-undone' })
     expect(screen.queryByTestId('panel-waits')).toBeNull()
   })
@@ -174,6 +185,48 @@ describe('the rate on the Payroll page', () => {
   it("a month with a euro contract waits for the 20th's rate to be posted", async () => {
     state.quotedOn = '2026-11-02'
     state.contractCurrency = 'EUR'
+    render(<Payroll />)
+    expect(await screen.findByTestId('panel-waits'))
+      .toHaveTextContent(POST_WAITS_FOR_THE_TWENTIETH('02.11.2026.', '20.11.2026.'))
+  })
+})
+
+describe('a month already past', () => {
+  it('April 2025, answered with the 17th\'s list (the 18th was Good Friday): a euro month may be posted', async () => {
+    state.quotedOn = '2025-04-17'
+    state.contractCurrency = 'EUR'
+    render(<Payroll />)
+    fireEvent.change(screen.getByDisplayValue('2026-11'), { target: { value: '2025-04' } })
+    expect(await screen.findByText(RATE_BADGE(fmtNum(117), '17.04.2025.'))).toBeInTheDocument()
+    await screen.findByRole('button', { name: 'panel-posted-or-undone' })
+    expect(screen.queryByTestId('panel-waits')).toBeNull()
+    expect(screen.queryByText(/još nije objavljen/)).toBeNull()
+  })
+
+  it('a past month whose answer has no date_from may be posted too', async () => {
+    state.quotedOn = undefined
+    state.contractCurrency = 'EUR'
+    render(<Payroll />)
+    fireEvent.change(screen.getByDisplayValue('2026-11'), { target: { value: '2026-10' } })
+    expect(await screen.findByText(RATE_BADGE(fmtNum(117), 'nepoznatog dana'))).toBeInTheDocument()
+    await screen.findByRole('button', { name: 'panel-posted-or-undone' })
+    expect(screen.queryByTestId('panel-waits')).toBeNull()
+  })
+})
+
+describe('the foreign-amount test looks only at this payroll', () => {
+  it('a euro addition of another company\'s employee does not hold a dinar month back', async () => {
+    state.quotedOn = '2026-11-02'
+    state.additions = [addition('e-9', 'EUR')]   // e-9 is in company B, not on this roster
+    render(<Payroll />)
+    expect(await screen.findByText(RATE_BADGE(fmtNum(117), '02.11.2026.'))).toBeInTheDocument()
+    await screen.findByRole('button', { name: 'panel-posted-or-undone' })
+    expect(screen.queryByTestId('panel-waits')).toBeNull()
+  })
+
+  it('a euro addition of this payroll\'s own employee does', async () => {
+    state.quotedOn = '2026-11-02'
+    state.additions = [addition('e-1', 'EUR'), addition('e-9', 'RSD')]
     render(<Payroll />)
     expect(await screen.findByTestId('panel-waits'))
       .toHaveTextContent(POST_WAITS_FOR_THE_TWENTIETH('02.11.2026.', '20.11.2026.'))
