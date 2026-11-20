@@ -106,7 +106,7 @@ export default function PayslipDialog({
 
           {/* ── зарада, порез и доприноси ────────────────────────────── */}
           <Section title="Zarada, porez i doprinosi"
-            columns={['Stopa', 'Ukupno']}>
+            columns={CHARGE_COLUMNS}>
             <ThreeRow n={1} label="Bruto zarada" a="" b={money(p.gross)} c="" bold />
             <ThreeRow n={2} label="Osnovica za doprinose" a="" b={money(p.contributionBase)} c=""
               highlight={Math.abs(p.contributionBase - p.gross) > 0.005} />
@@ -134,7 +134,7 @@ export default function PayslipDialog({
 
           {/* ── доприноси на терет послодавца ────────────────────────── */}
           <Section title="Doprinosi na teret poslodavca"
-            columns={['Stopa', 'Ukupno']}>
+            columns={CHARGE_COLUMNS}>
             <ThreeRow n={1} label="Doprinosi na teret poslodavca" a=""
               b={money(p.employerTotal)} c="" bold />
             {p.employerCharges.map(c => (
@@ -159,18 +159,25 @@ export default function PayslipDialog({
   )
 }
 
+/**
+ * The charge sections' headings: one per cell of a ThreeRow, so each sits over
+ * its own figures — the rate, the amount, and the third column (who a
+ * deduction goes to), which has no heading.
+ */
+const CHARGE_COLUMNS = ['Stopa', 'Ukupno', '']
+
 function Section({ title, columns, children }: {
   title: string
   columns?: string[]
   children: React.ReactNode
 }) {
   return (
-    <div style={s.section}>
+    <div style={s.section} data-payslip-section={title}>
       <div style={s.sectionHead}>
         <span style={s.sectionTitle}>{title}</span>
         {columns && (
           <span style={s.sectionCols}>
-            {columns.map(c => <span key={c} style={s.colHead}>{c}</span>)}
+            {columns.map((c, i) => <span key={i} style={s.colHead} data-payslip-heading="">{c}</span>)}
           </span>
         )}
       </div>
@@ -191,11 +198,11 @@ function Row({ n, label, value }: { n?: number; label: string; value: string }) 
 
 function TwoRow({ n, label, a, b }: { n?: number; label: string; a: string; b: string }) {
   return (
-    <div style={s.row}>
+    <div style={s.row} data-payslip-row="">
       <span style={s.num}>{n ?? ''}</span>
       <span style={s.label}>{label}</span>
-      <span style={s.cell}>{a}</span>
-      <span style={s.cell}>{b}</span>
+      <span style={s.cell} data-payslip-cell="">{a}</span>
+      <span style={s.cell} data-payslip-cell="">{b}</span>
     </div>
   )
 }
@@ -205,16 +212,16 @@ function ThreeRow({ n, label, a, b, c, bold, indent, highlight }: {
   bold?: boolean; indent?: boolean; highlight?: boolean
 }) {
   return (
-    <div style={{ ...s.row, ...(indent ? s.rowIndent : {}) }}>
+    <div style={{ ...s.row, ...(indent ? s.rowIndent : {}) }} data-payslip-row="">
       <span style={s.num}>{n ?? ''}</span>
       <span style={{ ...s.label, ...(bold ? s.strong : {}) }}>{label}</span>
-      <span style={s.cellNarrow}>{a}</span>
+      <span style={s.cellNarrow} data-payslip-cell="">{a}</span>
       <span style={{
         ...s.cell,
         ...(bold ? s.strong : {}),
         ...(highlight ? { color: '#C8A24A' } : {}),
-      }}>{b}</span>
-      {c !== undefined && <span style={{ ...s.cell, color: '#9D97FF' }}>{c}</span>}
+      }} data-payslip-cell="">{b}</span>
+      <span style={{ ...s.cell, color: '#9D97FF' }} data-payslip-cell="">{c}</span>
     </div>
   )
 }
@@ -222,6 +229,9 @@ function ThreeRow({ n, label, a, b, c, bold, indent, highlight }: {
 function Note({ children }: { children: React.ReactNode }) {
   return <div style={s.note}>{children}</div>
 }
+
+/** One gap for the headings and the rows, or the headings drift off their cells. */
+const ROW_GAP = '8px'
 
 const s: Record<string, React.CSSProperties> = {
   backdrop: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '24px' },
@@ -237,9 +247,9 @@ const s: Record<string, React.CSSProperties> = {
   section: { marginTop: '16px' },
   sectionHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '5px', marginBottom: '4px' },
   sectionTitle: { fontSize: '10px', fontWeight: '700', color: 'rgba(255,255,255,0.40)', textTransform: 'uppercase' as const, letterSpacing: '0.09em' },
-  sectionCols: { display: 'flex', gap: '0' },
+  sectionCols: { display: 'flex', gap: ROW_GAP },
   colHead: { fontSize: '9.5px', color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase' as const, letterSpacing: '0.07em', width: '110px', textAlign: 'right' as const },
-  row: { display: 'flex', alignItems: 'baseline', gap: '8px', padding: '3.5px 0', fontSize: '12.5px' },
+  row: { display: 'flex', alignItems: 'baseline', gap: ROW_GAP, padding: '3.5px 0', fontSize: '12.5px' },
   rowIndent: { paddingLeft: '18px', opacity: 0.85 },
   num: { width: '16px', fontSize: '10.5px', color: 'rgba(255,255,255,0.28)', flexShrink: 0 },
   label: { flex: 1, color: '#9FB6CC' },
