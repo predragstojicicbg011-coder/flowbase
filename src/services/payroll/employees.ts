@@ -169,7 +169,7 @@ export function endOfMonthFor(date: string): string {
  *
  * ANY POINT, not on the first of it. This asked about the first day and so
  * dropped anybody hired mid-month out of their own first month entirely:
- * Vučinić Bojana joined on the 7th of September, worked 144 hours, and was
+ * somebody joining on the 7th of September 2026 worked 144 hours and was
  * not on September's payroll at all. Their salary is prorated by the hours
  * they actually worked, so a part month is an ordinary thing that arrives with
  * the timesheet — there is nothing to decide, only somebody to include.

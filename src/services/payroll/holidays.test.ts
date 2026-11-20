@@ -157,18 +157,18 @@ describe('holidayName', () => {
 })
 
 describe('the fund for one person, when the month is not all theirs', () => {
-  it('gives Vučinić Bojana the 144 hours her own sheet states', () => {
-    // She joined on the 7th of September. The month is 176 and hers is 144 —
-    // and the export agrees: `Nominal hours 144`. Holding her to 176 reports
-    // 32 hours missing from a month that is complete, which is exactly the
-    // kind of complaint that teaches people to ignore the check.
+  it('gives Person B, joining on the 7th, the 144 hours of their own sheet', () => {
+    // Joining on the 7th of September: the month is 176 and theirs is 144.
+    // Holding them to 176 reports 32 hours missing from a month that is
+    // complete, which is exactly the kind of complaint that teaches people to
+    // ignore the check.
     const days = workingDaysBetween('2026-09', H2026, '2026-09-07', null)
     expect(days).toBe(18)
     expect(fundForEmployee(176, days, 22)).toBe(144)
   })
 
-  it('gives Milosavljević Đuro the part of September he was here for', () => {
-    // He left on the 12th: 9 working days of 22.
+  it('gives Person A, leaving on the 12th, the part of September they were here for', () => {
+    // Leaving on the 12th: 9 working days of 22.
     const days = workingDaysBetween('2026-09', H2026, null, '2026-09-12')
     expect(days).toBe(9)
     expect(fundForEmployee(176, days, 22)).toBe(72)

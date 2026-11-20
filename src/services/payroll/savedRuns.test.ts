@@ -13,7 +13,7 @@ const FUND = 176
 const RATE = 117.4007
 
 const employee = (over: Partial<EmployeeRow> = {}): EmployeeRow => ({
-  id: 'e1', company_id: 'c1', code: 'E003', full_name: 'Popović Vladimir',
+  id: 'e1', company_id: 'c1', code: 'E003', full_name: 'Osoba A',
   organisational_unit: 'GRAD', hired_on: null, seniority_from: '2022-03-01',
   left_on: null, note: null, deleted_at: null, ...over,
 })
@@ -62,7 +62,7 @@ describe('what a line keeps', () => {
   const [line] = linesOf(run, context())
 
   it('carries every figure the payslip prints', () => {
-    expect(line.employee_name).toBe('Popović Vladimir')
+    expect(line.employee_name).toBe('Osoba A')
     expect(line.hours).toBe(176)
     expect(line.month_hours).toBe(FUND)
     expect(line.gross).toBe(run.salaries[0].line.gross)

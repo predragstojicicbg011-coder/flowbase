@@ -12,7 +12,7 @@ const COEF = 0.004
 const RATES = { EUR: 117.3586 }
 
 const employee = (over: Partial<EmployeeRow> = {}): EmployeeRow => ({
-  id: 'e1', company_id: 'c1', code: 'E001', full_name: 'Petrović Ana',
+  id: 'e1', company_id: 'c1', code: 'E001', full_name: 'Osoba A',
   organisational_unit: 'Gradilište',
   hired_on: null, seniority_from: '2025-06-02', left_on: null, note: null,
   deleted_at: null, ...over,
@@ -146,7 +146,7 @@ describe('employeesForMonth', () => {
     const { people, problems } = employeesForMonth([employee()], [], [], input)
     expect(people).toEqual([])
     expect(problems).toHaveLength(1)
-    expect(problems[0].employee.full_name).toBe('Petrović Ana')
+    expect(problems[0].employee.full_name).toBe('Osoba A')
     expect(problems[0].why).toContain('Nijedan ugovor ne pokriva')
   })
 
@@ -237,7 +237,7 @@ describe('supersedeContract', () => {
 
 describe('rateDateFor', () => {
   it('takes the rate of the 20th, whichever day of the month is asked for', () => {
-    // Kalemar always converts at the 20th, so a run must not depend on
+    // The company always converts at the 20th, so a run must not depend on
     // the day somebody happened to open the page.
     expect(rateDateFor('2026-08')).toBe('2026-08-20')
     expect(rateDateFor('2026-08-01')).toBe('2026-08-20')
@@ -305,7 +305,7 @@ describe('employed, and not on this payroll', () => {
     const r = employeesForMonth([employee()], [contract()], [], sept, [], [absence()])
     expect(r.people).toEqual([])
     expect(r.offPayroll).toHaveLength(1)
-    expect(r.offPayroll[0].employee.full_name).toBe('Petrović Ana')
+    expect(r.offPayroll[0].employee.full_name).toBe('Osoba A')
     expect(r.offPayroll[0].absence.reason).toBe('maternity')
   })
 
@@ -409,7 +409,7 @@ describe('everybody employed lands in exactly one list', () => {
     // contract by definition, and used to appear nowhere in the list.
     const r = employeesForMonth([employee()], [], [], input)
     expect(census(r)).toEqual({ ids: ['e1'], unique: 1 })
-    expect(r.problems[0].employee.full_name).toBe('Petrović Ana')
+    expect(r.problems[0].employee.full_name).toBe('Osoba A')
   })
 
   it('places somebody off the payroll', () => {
@@ -446,11 +446,11 @@ describe('somebody who joined or left mid-month', () => {
   const SEPT = '2026-09-01'
   const input = { date: SEPT, seniorityCoefficient: COEF, rates: RATES }
 
-  // Vučinić Bojana joined on the 7th of September 2026 and worked 144 hours.
-  // She was not on September's payroll at all: everything here asked about the
-  // FIRST of the month, and she was not employed on it. Her contract and her
-  // cost allocation start on the 7th too, so even once she was included she
-  // would have arrived with neither of them.
+  // Somebody joining on the 7th of September 2026 worked 144 hours and was
+  // not on September's payroll at all: everything here asked about the FIRST
+  // of the month, and they were not employed on it. Their contract and cost
+  // allocation start on the 7th too, so even once included they would have
+  // arrived with neither of them.
   const joiner = employee({ hired_on: '2026-09-07', seniority_from: '2026-09-07' })
   const theirContract = contract({ valid_from: '2026-09-07', currency: 'RSD', net_amount: 99790 })
 
@@ -477,7 +477,7 @@ describe('somebody who joined or left mid-month', () => {
   })
 
   it('keeps somebody who left mid-month on that month', () => {
-    // Milosavljević Đuro left on the 12th and is paid for September.
+    // Somebody leaving on the 12th is paid for September.
     const leaver = employee({ left_on: '2026-09-12' })
     expect(employeesForMonth([leaver], [contract()], [], input).people).toHaveLength(1)
   })
@@ -595,49 +595,49 @@ describe('whether two names are plainly the same party', () => {
   it('sees through the legal form and the town', () => {
     // The register writes the company one way and the companies table
     // another. No exact comparison will ever say these are the same.
-    expect(looksLikeSameParty('KALEMAR D.O.O., Beograd', 'Kalemar LLC')).toBe(true)
+    expect(looksLikeSameParty('FIRMA ALFA D.O.O., Beograd', 'Firma Alfa LLC')).toBe(true)
   })
 
   it('does not eat the `ad` inside Beograd', () => {
     // `a.d.` is a legal form and `Beograd` ends in those two letters. Without
     // a word boundary the comparison mangles the very names it lines up.
-    expect(looksLikeSameParty('Beograd Fond', 'Kalemar LLC')).toBe(false)
+    expect(looksLikeSameParty('Beograd Fond', 'Firma Alfa LLC')).toBe(false)
   })
 
   it('says no to two different parties', () => {
-    expect(looksLikeSameParty('Wiener Städtische osiguranje', 'Kalemar LLC')).toBe(false)
-    expect(looksLikeSameParty('Fitpass d.o.o.', 'Kalemar LLC')).toBe(false)
+    expect(looksLikeSameParty('Wiener Städtische osiguranje', 'Firma Alfa LLC')).toBe(false)
+    expect(looksLikeSameParty('Fitpass d.o.o.', 'Firma Alfa LLC')).toBe(false)
   })
 
   it('says no when either side is missing', () => {
-    expect(looksLikeSameParty(null, 'Kalemar LLC')).toBe(false)
-    expect(looksLikeSameParty('Kalemar', null)).toBe(false)
-    expect(looksLikeSameParty('   ', 'Kalemar LLC')).toBe(false)
+    expect(looksLikeSameParty(null, 'Firma Alfa LLC')).toBe(false)
+    expect(looksLikeSameParty('Firma Alfa', null)).toBe(false)
+    expect(looksLikeSameParty('   ', 'Firma Alfa LLC')).toBe(false)
   })
 })
 
 describe('a deduction forwarded to the company paying it', () => {
   const policy = () => deduction({
     goes_to: 'third_party', amount: 57.8, currency: 'EUR',
-    payee: 'KALEMAR D.O.O., Beograd',
+    payee: 'FIRMA ALFA D.O.O., Beograd',
   })
 
   it('says so, because it would book a payable owed to itself', () => {
-    // The seven private health policies came out of the MPP register naming
-    // KALEMAR, because the register records who PAYS. Reclassified as
+    // Private health policies come out of the MPP register naming the
+    // employer, because the register records who PAYS. Reclassified as
     // forwarded on, the payee has to become whoever receives the money.
-    expect(deductionWarning(policy(), 'Kalemar LLC'))
+    expect(deductionWarning(policy(), 'Firma Alfa LLC'))
       .toMatch(/firma koja je isplaćuje/)
   })
 
   it('has nothing to say once a real recipient is named', () => {
     expect(deductionWarning({ ...policy(), payee: 'Wiener Städtische osiguranje' },
-      'Kalemar LLC')).toBeNull()
+      'Firma Alfa LLC')).toBeNull()
   })
 
   it('has nothing to say about a deduction that stays with the employer', () => {
     // There the payee IS this company, and that is the whole point of it.
-    expect(deductionWarning({ ...policy(), goes_to: 'employer' }, 'Kalemar LLC')).toBeNull()
+    expect(deductionWarning({ ...policy(), goes_to: 'employer' }, 'Firma Alfa LLC')).toBeNull()
   })
 
   it('stays quiet when nobody said who the payer is', () => {
@@ -652,7 +652,7 @@ describe('which company the payroll page should open on', () => {
   })
 
   it('PICKS NOTHING once a second company files', () => {
-    // Naming Kalemar in the code would be right today and wrong,
+    // Naming the company in the code would be right today and wrong,
     // silently, the morning a second company starts: the selector would keep
     // pointing at the first and a whole company's payroll would be a click
     // nobody knew to make.

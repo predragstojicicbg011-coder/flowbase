@@ -196,9 +196,9 @@ export function holidayName(h: Pick<HolidayRow, 'name'>): string {
  * Working days of a month, optionally only those inside a date range.
  *
  * Weekdays that are not public holidays. Used to prorate the hour fund for
- * somebody who joined or left mid-month — Đuro Milosavljević left on the 12th
- * of September 2026 and was here for 9 days of 22, Bojana Vučinić joined on
- * the 7th and was here for 18.
+ * somebody who joined or left mid-month — Person A, leaving on the 12th of
+ * September 2026, was here for 9 working days of 22; Person B, joining on the
+ * 7th, was here for 18.
  *
  * `from` and `to` are inclusive, and either may be null for open-ended.
  */
@@ -247,11 +247,11 @@ export function workingDaysFor(month: string, holidays: HolidayRow[]): {
  * The hour fund for ONE person, which is not the month's when they were not
  * here for all of it.
  *
- * Vučinić Bojana joined on the 7th of September. The month's fund is 176 and
- * hers is 144 — and the export agrees: her sheet says `Nominal hours 144`.
- * Reconciling her against 176 reports 32 hours missing on a month that is
- * complete, which is the kind of complaint that teaches people to ignore the
- * check entirely.
+ * Person B joins on the 7th of September 2026. The month's fund is 176 and
+ * theirs is 144 (18 working days of 22) — which is what their own timesheet
+ * states as nominal hours. Reconciling them against 176 reports 32 hours
+ * missing on a month that is complete, which is the kind of complaint that
+ * teaches people to ignore the check entirely.
  *
  * Prorated by WORKING DAYS rather than calendar days, so joining the day
  * before a weekend does not buy two days of fund.
