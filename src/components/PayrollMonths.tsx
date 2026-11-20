@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 import { fetchRuns, byMonth, type RunMonth } from '../services/payroll/savedRuns'
 import { RUN_LABELS, type RunKey } from '../services/payroll/runs'
@@ -19,26 +19,38 @@ import { monthShortLabel } from '../utils/months'
  * add up every line of every month to draw itself would be slow in the year it
  * matters and unusable in the year after.
  */
-export default function PayrollMonths({ companyId, current, onPick }: {
+export default function PayrollMonths({ companyId, current, onPick, reloadKey = 0 }: {
   companyId: string
   /** `YYYY-MM`, so the month being looked at is marked. */
   current: string
   onPick: (month: string) => void
+  /**
+   * Bumped by the page whenever a kept run changes under the list — after
+   * Recalculate, after a posting and after an undo — so the list reads again
+   * instead of showing a month as a draft that was just posted.
+   */
+  reloadKey?: number
 }) {
   const [months, setMonths] = useState<RunMonth[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (quietly: boolean) => {
     if (!companyId) { setMonths([]); setLoading(false); return }
-    setLoading(true); setError(null)
+    // A re-read keeps the list on screen; only the first read hides it.
+    if (!quietly) setLoading(true)
+    setError(null)
     try { setMonths(byMonth(await fetchRuns(supabase, companyId))) }
     catch (e: any) { setError(e.message) }
     setLoading(false)
   }, [companyId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(false) }, [load])
+  // Only on a bump: a change of company is the effect above's, read once.
+  const latest = useRef(load)
+  latest.current = load
+  useEffect(() => { if (reloadKey > 0) latest.current(true) }, [reloadKey])
 
   const money = (n: number) => fmtNum(n)
 

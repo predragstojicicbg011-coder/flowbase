@@ -86,6 +86,9 @@ export default function Payroll() {
   const [additions, setAdditions] = useState<AdditionRow[]>([])
   const [saved, setSaved] = useState<SavedRun[]>([])
   const [recalculating, setRecalculating] = useState<string | null>(null)
+  /** Bumped whenever a kept run changes, so the months list reads again. */
+  const [monthsKey, setMonthsKey] = useState(0)
+  const monthsChanged = () => setMonthsKey(k => k + 1)
   const [payslip, setPayslip] = useState<
     { line: SalaryRunLine; runLabel: string } | null>(null)
 
@@ -235,6 +238,7 @@ export default function Payroll() {
         monthHours: fund.monthHours, people: peopleById,
       }
       await saveRun(supabase, run, context)
+      monthsChanged()
       setSaved(await fetchRuns(supabase, companyId, month))
     } catch (e: any) {
       setError(e.message)
@@ -288,7 +292,8 @@ export default function Payroll() {
           <div style={s.totalBadge}>Fond sati: {fund.monthHours} h</div>
         </div>
 
-        <PayrollMonths companyId={companyId} current={month} onPick={setMonth} />
+        <PayrollMonths companyId={companyId} current={month} onPick={setMonth}
+          reloadKey={monthsKey} />
 
         <SystemCategoryNotice what="Zarade" roles={PAYROLL_ROLES}
           map={systemCategories.map} loading={systemCategories.loading} />
@@ -565,7 +570,7 @@ export default function Payroll() {
                 companyId={companyId}
                 exchangeRate={rate?.eur ?? null}
                 savedRuns={saved}
-                onPosted={load}
+                onPosted={() => { monthsChanged(); load() }}
               />
             )}
 

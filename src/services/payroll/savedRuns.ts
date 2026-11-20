@@ -209,6 +209,44 @@ export function alreadyPostedMessage(label: string, month: string): string {
     + 'obračun vraća u nacrt.'
 }
 
+// ─── Whether the kept run is the one on screen ──────────────────────────────
+
+/** How far a kept total may sit from the calculation: rounding, nothing more. */
+export const KEPT_TOLERANCE = 0.02
+
+export const NOT_KEPT = 'Ovaj obračun još nije izračunat i sačuvan. Kliknite „Ponovo obračunaj“ '
+  + 'iznad — knjiži se sačuvani obračun, a ne iznos izračunat usput.'
+
+export const KEPT_DIFFERS = (kept: string, now: string): string =>
+  `Sačuvani obračun iznosi ${kept}, a sada iznosi ${now}. Nešto se u međuvremenu promenilo; `
+  + 'ponovo obračunajte pre knjiženja da bi se knjiga i obračun slagali.'
+
+/**
+ * A posted run whose inputs have moved since. Recalculate is locked on it, so
+ * telling somebody to recalculate would send them to a button that refuses;
+ * the way back is undoing the posting first.
+ */
+export const POSTED_DIFFERS = (posted: string, now: string): string =>
+  `Proknjiženo je ${posted}, a sa današnjim podacima obračun iznosi ${now}. `
+  + 'Da biste ponovo obračunali, prvo poništite knjiženje.'
+
+/**
+ * What the posting panel says about a run's kept calculation, or `null` when
+ * there is nothing to say. WHAT LANDS IN THE LEDGER HAS TO BE THE THING THAT
+ * WAS KEPT: a draft that no longer agrees with the inputs is recalculated
+ * before posting, and a posted one that no longer agrees is undone first.
+ */
+export function keptWhy(
+  kept: SavedRun | null | undefined, run: PayrollRun, money: (n: number) => string,
+): string | null {
+  if (!kept) return NOT_KEPT
+  const drifted = Math.abs(Number(kept.total_cost) - run.totals.totalCost) > KEPT_TOLERANCE
+  if (!drifted) return null
+  const was = money(Number(kept.total_cost))
+  const now = money(run.totals.totalCost)
+  return kept.status === 'posted' ? POSTED_DIFFERS(was, now) : KEPT_DIFFERS(was, now)
+}
+
 /**
  * Write a calculated run, replacing whatever was there.
  *

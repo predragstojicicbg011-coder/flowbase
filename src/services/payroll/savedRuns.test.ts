@@ -1,5 +1,6 @@
 import {
   linesOf, headerOf, byMonth, saveRun, alreadyPostedMessage,
+  keptWhy, NOT_KEPT, KEPT_DIFFERS, POSTED_DIFFERS,
   type SaveContext, type SavedRun,
 } from './savedRuns'
 import { runsFor, type RunInput } from './runs'
@@ -245,5 +246,49 @@ describe('alreadyPostedMessage', () => {
     const m = alreadyPostedMessage('Salaries', '2026-09')
     expect(m).toContain('napisane fakture u glavnoj knjizi')
     expect(m).toContain('obrišite knjiženje')
+  })
+})
+
+describe('keptWhy — what the posting panel says about the kept run', () => {
+  const money = (n: number) => n.toFixed(2)
+  const run = runOf('regular')
+  const kept = (over: Partial<SavedRun>): SavedRun => ({
+    id: 'k', company_id: 'c1', period_month: '2026-09-01', run_key: 'regular',
+    label: 'Zarade', status: 'draft', exchange_rate: RATE, eur_rate: RATE,
+    month_hours: FUND, gross: 0, net: 0, income_tax: 0,
+    contributions_employee: 0, contributions_employer: 0,
+    total_cost: run.totals.totalCost, deductions_third_party: 0, deductions_employer: 0,
+    calculated_at: '', posted_at: null, note: null, ...over,
+  })
+  const drifted = run.totals.totalCost - 100
+
+  it('asks for a calculation when nothing is kept', () => {
+    expect(keptWhy(undefined, run, money)).toBe(NOT_KEPT)
+  })
+
+  it('says nothing about a draft that agrees', () => {
+    expect(keptWhy(kept({}), run, money)).toBeNull()
+  })
+
+  it('asks a drifted draft to be recalculated', () => {
+    expect(keptWhy(kept({ total_cost: drifted }), run, money))
+      .toBe(KEPT_DIFFERS(money(drifted), money(run.totals.totalCost)))
+  })
+
+  it('says nothing about a posted run that agrees', () => {
+    expect(keptWhy(kept({ status: 'posted' }), run, money)).toBeNull()
+  })
+
+  it('tells a drifted POSTED run to undo the posting first, never just to recalculate', () => {
+    const why = keptWhy(kept({ status: 'posted', total_cost: drifted }), run, money)
+    expect(why).toBe(POSTED_DIFFERS(money(drifted), money(run.totals.totalCost)))
+    expect(POSTED_DIFFERS('1.000,00', '1.100,00')).toBe(
+      'Proknjiženo je 1.000,00, a sa današnjim podacima obračun iznosi 1.100,00. '
+      + 'Da biste ponovo obračunali, prvo poništite knjiženje.')
+  })
+
+  it('tolerates two paras of rounding, as the posting check always has', () => {
+    expect(keptWhy(kept({ total_cost: run.totals.totalCost + 0.019 }), run, money)).toBeNull()
+    expect(keptWhy(kept({ total_cost: run.totals.totalCost + 0.03 }), run, money)).not.toBeNull()
   })
 })

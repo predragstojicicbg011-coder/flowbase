@@ -23,7 +23,7 @@ import {
 import type { PayrollRun } from '../services/payroll/runs'
 import type { EmployeeForMonth } from '../services/payroll/employees'
 import type { LedgerNames } from '../services/payroll/booking'
-import type { SavedRun } from '../services/payroll/savedRuns'
+import { keptWhy, type SavedRun } from '../services/payroll/savedRuns'
 import { fmtNum } from '../utils/formatters'
 import { countOf, plural } from '../utils/plural'
 import { srDate } from '../utils/months'
@@ -234,16 +234,9 @@ export default function PayrollPostingPanel({
       // way to be sure is to insist the two agree at the moment of posting:
       // if an input has moved since the last calculation they will not, and
       // Recalculate is the answer rather than a silent choice between two
-      // versions of the month.
+      // versions of the month — or, for a run already posted, Undo first.
       const kept = savedRuns.find(r => r.run_key === run.key)
-      const notKept = !kept
-        ? 'Ovaj obračun još nije izračunat i sačuvan. Kliknite „Ponovo obračunaj“ iznad — '
-          + 'knjiži se sačuvani obračun, a ne iznos izračunat usput.'
-        : Math.abs(Number(kept.total_cost) - run.totals.totalCost) > 0.02
-          ? `Sačuvani obračun iznosi ${fmtNum(Number(kept.total_cost))}, a sada iznosi `
-            + `${fmtNum(run.totals.totalCost)}. Nešto se u međuvremenu promenilo; ponovo `
-            + 'obračunajte pre knjiženja da bi se knjiga i obračun slagali.'
-          : null
+      const notKept = keptWhy(kept, run, fmtNum)
 
       out[run.key] = {
         plan,
