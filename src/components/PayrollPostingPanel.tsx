@@ -27,6 +27,7 @@ import type { SavedRun } from '../services/payroll/savedRuns'
 import { fmtNum } from '../utils/formatters'
 import { countOf, plural } from '../utils/plural'
 import { srDate } from '../utils/months'
+import { belgradeToday } from '../utils/today'
 import { getBookRates } from '../services/bookAmounts'
 import { fetchAllPartners } from '../services/allPartners'
 /** Two names for one person, compared the way the matcher compares them. */
@@ -61,7 +62,7 @@ export default function PayrollPostingPanel({
 }) {
   const [mapping, setMapping] = useState<UnitMapping[]>([])
   const [postings, setPostings] = useState<any[]>([])
-  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [paymentDate, setPaymentDate] = useState(() => belgradeToday())
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)

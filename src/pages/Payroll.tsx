@@ -34,6 +34,7 @@ import PayslipDialog from '../components/PayslipDialog'
 import { fmtNum } from '../utils/formatters'
 import { countOf } from '../utils/plural'
 import { srDate } from '../utils/months'
+import { belgradeToday } from '../utils/today'
 
 /**
  * The monthly calculations.
@@ -54,7 +55,7 @@ export default function Payroll() {
   const { companies, defaultCompany, showPicker } = useCompanies()
   const systemCategories = useSystemCategories()
   const [companyId, setCompanyId] = useState<string>('')
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [month, setMonth] = useState(() => belgradeToday().slice(0, 7))
   /**
    * Which run is expanded, and NONE of them to begin with.
    *

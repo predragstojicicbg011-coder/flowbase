@@ -7,6 +7,7 @@ import {
 } from '../services/payroll/settings'
 import { toLatin } from '../services/payroll/holidays'
 import { srDate } from '../utils/months'
+import { belgradeToday } from '../utils/today'
 import { countOf } from '../utils/plural'
 
 // ── Payroll settings ────────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ const GROUP_TITLES: Record<string, string> = {
 const GROUP_ORDER = ['rates', 'bases', 'hours', 'coefficients', 'configuration']
 
 /** The month whose figures the page is showing. */
-const thisMonth = () => new Date().toISOString().slice(0, 7)
+const thisMonth = () => belgradeToday().slice(0, 7)
 
 export default function PayrollSettingsTab({ canEdit }: { canEdit: boolean }) {
   const [rows, setRows] = useState<Row[]>([])

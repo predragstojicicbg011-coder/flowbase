@@ -21,6 +21,7 @@ import AdditionsTab from '../components/AdditionsTab'
 import { fmtLocal, fmtNum } from '../utils/formatters'
 import { countOf } from '../utils/plural'
 import { monthLongLabel, srDate } from '../utils/months'
+import { belgradeToday } from '../utils/today'
 
 /**
  * HR administration.
@@ -59,7 +60,7 @@ type Row =
 export default function HR() {
   const { companies, showPicker } = useCompanies()
   const [companyId, setCompanyId] = useState<string>('')
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [month, setMonth] = useState(() => belgradeToday().slice(0, 7))
 
   const [employees, setEmployees] = useState<EmployeeRow[]>([])
   const [contracts, setContracts] = useState<ContractRow[]>([])
