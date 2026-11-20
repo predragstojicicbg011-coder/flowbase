@@ -233,9 +233,22 @@ describe('getBookRates and toBookAmounts', () => {
       const date = /date=([\d-]+)/.exec(url)![1]
       const middle = rates[cur]
       if (middle == null) return { ok: false, status: 500, json: async () => ({ error: 'none' }) }
-      return { ok: true, status: 200, json: async () => ({ exchange_middle: middle, parity: 1, date }) }
+      return { ok: true, status: 200, json: async () => ({ exchange_middle: middle, parity: 1, date, date_from: date }) }
     })
   }
+
+  it('passes on the day the list applies from', async () => {
+    (global as any).fetch = jest.fn(async (url: string) => ({
+      ok: true, status: 200,
+      json: async () => ({
+        exchange_middle: /currency=eur/.test(url) ? 117.2 : 100.0, parity: 1,
+        date: '2026-11-20', date_from: '2026-11-02',
+      }),
+    }))
+    const r = await getBookRates('2026-11-20')
+    expect(r.date).toBe('2026-11-20')
+    expect(r.quotedOn).toBe('2026-11-02')
+  })
 
   it('returns both rates for the date', async () => {
     (global as any).fetch = nbs({ EUR: 117.17, USD: 100.42 })

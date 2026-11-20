@@ -392,6 +392,13 @@ export interface MonthInput {
   seniorityCoefficient: number
   /** The middle rate on the 20th, per currency. Only what is needed. */
   rates: Record<string, number>
+  /**
+   * For screens that need WHO is in the month and no money: HR's timesheet
+   * grid and Additions. A contract that cannot be turned into dinars keeps
+   * its person, with a net of zero, instead of becoming a problem. Never for
+   * anything that calculates or pays.
+   */
+  withoutRates?: boolean
 }
 
 export interface MonthRoster {
@@ -473,7 +480,8 @@ export function employeesForMonth(
       continue
     }
 
-    const dinars = amountInDinars(contract, input.rates)
+    const converted = amountInDinars(contract, input.rates)
+    const dinars = converted === null && input.withoutRates ? 0 : converted
     if (dinars === null) {
       problems.push({
         employee,

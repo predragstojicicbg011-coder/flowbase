@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { SkeletonRows } from '../components/motion'
-import { getRatesForDate } from '../services/currencyService'
+import { getBookRates, type BookRates } from '../services/bookAmounts'
 import { fetchSettings, monthStart, numberFor, type SettingRow } from '../services/payroll/settings'
 import {
   fetchEmployees, fetchContracts, fetchDeductions,
@@ -15,6 +15,9 @@ import {
 import {
   fetchHolidays, fundFor, workingDaysFor, type HolidayRow,
 } from '../services/payroll/holidays'
+import {
+  rateForMonth, rateBadge, rateNotice, RATE_WITHHELD,
+} from '../services/payroll/payrollRate'
 import EmployeeDialog from '../components/EmployeeDialog'
 import TimesheetGrid from '../components/TimesheetGrid'
 import AdditionsTab from '../components/AdditionsTab'
@@ -70,7 +73,8 @@ export default function HR() {
   const [settings, setSettings] = useState<SettingRow[]>([])
   const [holidays, setHolidays] = useState<HolidayRow[]>([])
 
-  const [rate, setRate] = useState<{ eur: number; date: string } | null>(null)
+  /** The rate service's answer for the month's 20th, as it came. */
+  const [quote, setQuote] = useState<BookRates | null>(null)
   const [rateError, setRateError] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(true)
@@ -107,12 +111,16 @@ export default function HR() {
   // The rate of the 20th, which is the one the payslips use.
   useEffect(() => {
     let cancelled = false
-    setRate(null); setRateError(null)
-    getRatesForDate(rateDateFor(month))
-      .then(r => { if (!cancelled) setRate({ eur: r.eurRsdRate, date: r.date }) })
+    setQuote(null); setRateError(null)
+    getBookRates(rateDateFor(month))
+      .then(r => { if (!cancelled) setQuote(r) })
       .catch(e => { if (!cancelled) setRateError(e.message || String(e)) })
     return () => { cancelled = true }
   }, [month])
+
+  /** The rate, the day its list is from, and whether that is the 20th's. */
+  const rate = useMemo(
+    () => (quote ? rateForMonth(month, holidays, quote) : null), [quote, month, holidays])
 
   const seniorityCoefficient = numberFor(settings, 'seniority_coefficient', date)
   // A setting for the month wins; otherwise it is the weekdays, with the
@@ -132,6 +140,23 @@ export default function HR() {
     },
     allocations, absences,
   ), [employees, contracts, deductions, date, seniorityCoefficient, rate,
+      allocations, absences])
+
+  /**
+   * The people whose hours and additions are kept, whether or not a rate
+   * could be had. Hours do not depend on money: a missing rate must not take
+   * anybody off the timesheet grid or Additions.
+   */
+  const peopleForHours = useMemo(() => employeesForMonth(
+    employees, contracts, deductions,
+    {
+      date,
+      seniorityCoefficient: seniorityCoefficient ?? 0,
+      rates: rate ? { EUR: rate.eur } : {},
+      withoutRates: true,
+    },
+    allocations, absences,
+  ).people, [employees, contracts, deductions, date, seniorityCoefficient, rate,
       allocations, absences])
 
   /**
@@ -219,12 +244,16 @@ export default function HR() {
           )}
           <div style={s.totalBadge}>
             {rate
-              ? `1 EUR = ${money(rate.eur)} RSD na dan ${srDate(rate.date)}`
+              ? rateBadge(rate, money)
               : rateError ? 'Nema kursa' : 'Učitavanje kursa…'}
           </div>
         </div>
 
         {error && <div style={s.error}>{error}</div>}
+
+        {rate && rateNotice(rate) && <div style={s.warn}>{rateNotice(rate)}</div>}
+
+        {rateError && tab !== 'people' && <div style={s.warn}>{RATE_WITHHELD}</div>}
 
         {rateError && (
           <div style={s.error}>
@@ -289,9 +318,9 @@ export default function HR() {
         )}
 
         {tab === 'additions' ? (
-          <AdditionsTab month={month} people={roster.people} eurRate={rate?.eur ?? null} />
+          <AdditionsTab month={month} people={peopleForHours} eurRate={rate?.eur ?? null} />
         ) : tab === 'hours' ? (
-          <TimesheetGrid people={roster.people} month={month} fund={fund}
+          <TimesheetGrid people={peopleForHours} month={month} fund={fund}
             workingDays={workingDaysFor(month, holidays)} />
         ) : (
         <>

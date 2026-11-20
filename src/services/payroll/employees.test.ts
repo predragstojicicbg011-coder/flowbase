@@ -158,6 +158,25 @@ describe('employeesForMonth', () => {
     expect(problems[0].why).toContain('pretpostavljenom kursu')
   })
 
+  it('withoutRates keeps the person, with no money, for screens that only need who is there', () => {
+    // HR's timesheet grid and Additions: hours do not depend on a rate, and a
+    // missing rate must not take anybody off them.
+    const { people, problems } = employeesForMonth(
+      [employee(), employee({ id: 'e2' })],
+      [contract(), contract({ id: 'k2', employee_id: 'e2', currency: 'RSD', net_amount: 100000 })],
+      [], { ...input, rates: {}, withoutRates: true })
+    expect(problems).toEqual([])
+    expect(people.map(p => p.employee.id)).toEqual(['e1', 'e2'])
+    expect(people[0].net.total).toBe(0)
+    expect(people[1].net.total).toBeCloseTo(100000, 2)
+  })
+
+  it('withoutRates changes nothing when the rate is there', () => {
+    const withRate = employeesForMonth([employee()], [contract()], [], input)
+    const kept = employeesForMonth([employee()], [contract()], [], { ...input, withoutRates: true })
+    expect(kept).toEqual(withRate)
+  })
+
   it('does not complain about somebody who had already left', () => {
     // No contract and no complaint — they are simply not on this payroll.
     const gone = employee({ left_on: '2026-03-31' })

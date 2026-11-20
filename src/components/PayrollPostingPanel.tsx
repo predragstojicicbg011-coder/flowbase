@@ -48,7 +48,7 @@ const personKeyEq = (a: string | null | undefined, b: string | null | undefined)
  * to fix a blocker is how a blocker becomes a habit of ignoring it.
  */
 export default function PayrollPostingPanel({
-  runs, people, month, companyId, exchangeRate, savedRuns, onPosted,
+  runs, people, month, companyId, exchangeRate, savedRuns, onPosted, waitsForRate = null,
 }: {
   runs: PayrollRun[]
   people: Record<string, EmployeeForMonth>
@@ -59,6 +59,12 @@ export default function PayrollPostingPanel({
   /** The kept calculations. Only a run that IS one can be posted. */
   savedRuns: SavedRun[]
   onPosted: () => void
+  /**
+   * Why nothing may be posted yet: the month converts an amount that is not
+   * in dinars, and its rate is not yet the 20th's. Null when nothing waits.
+   * A run already posted keeps its Undo and is not told this.
+   */
+  waitsForRate?: string | null
 }) {
   const [mapping, setMapping] = useState<UnitMapping[]>([])
   const [postings, setPostings] = useState<any[]>([])
@@ -237,16 +243,17 @@ export default function PayrollPostingPanel({
       // versions of the month — or, for a run already posted, Undo first.
       const kept = savedRuns.find(r => r.run_key === run.key)
       const notKept = keptWhy(kept, run, fmtNum)
+      const posted = postings.some(p => p.run_key === run.key)
 
       out[run.key] = {
         plan,
-        why: notKept ?? checkPlan(plan, ledger ?? undefined),
+        why: notKept ?? (posted ? null : waitsForRate) ?? checkPlan(plan, ledger ?? undefined),
         missing: unmappedUnits(run, people, mapping),
         runId: kept?.id ?? null,
       }
     }
     return out
-  }, [runs, month, people, mapping, exchangeRate, ledger, savedRuns,
+  }, [runs, month, people, mapping, exchangeRate, ledger, savedRuns, postings, waitsForRate,
       employeePartners, deductionPartners, taxPartner, projectHours, hoursBasis, system])
 
   /**

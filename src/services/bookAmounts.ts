@@ -28,7 +28,7 @@
 //
 // Functions:
 //
-//   getBookRates(date)                        → { date, eurRate, usdRate, source }
+//   getBookRates(date)                        → { date, quotedOn, eurRate, usdRate, source }
 //       NBS rates for a date (weekends step back to Friday, holidays up to
 //       three days in the edge function). Throws RateUnavailableError —
 //       "Kurs NBS nije dostupan za 03.10.2026." — rather than guess.
@@ -85,8 +85,14 @@ export function isDocumentCurrency(c: unknown): c is DocumentCurrency {
 }
 
 export interface BookRates {
-  /** The NBS list the rates are from — a Friday, when a Sunday was asked. */
+  /** The business day asked — a Friday, when a Sunday was asked. */
   date: string
+  /**
+   * The day the NBS lists apply from (`date_from`), which is earlier than
+   * `date` when the asked day has no list of its own yet. Absent when the
+   * answer did not say.
+   */
+  quotedOn?: string
   /** RSD per 1 EUR. */
   eurRate: number
   /** RSD per 1 USD. */
@@ -214,7 +220,7 @@ export async function getBookRates(date: string): Promise<BookRates> {
   const eurRate = usableRate(r.eurRsdRate)
   const usdRate = usableRate(r.usdRsdRate)
   if (eurRate === null || usdRate === null) throw nbsUnavailable(iso)
-  return { date: r.date, eurRate, usdRate, source: r.source }
+  return { date: r.date, quotedOn: r.quotedOn, eurRate, usdRate, source: r.source }
 }
 
 /** Fetch the day's rates and book the amount. */

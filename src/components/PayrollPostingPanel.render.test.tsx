@@ -60,9 +60,9 @@ const kept = (over: Partial<SavedRun> = {}): SavedRun => ({
   ...over,
 })
 
-const panel = (r: PayrollRun, savedRuns: SavedRun[]) => render(
+const panel = (r: PayrollRun, savedRuns: SavedRun[], waitsForRate: string | null = null) => render(
   <PayrollPostingPanel runs={[r]} people={{}} month="2026-11" companyId="c-1"
-    exchangeRate={null} savedRuns={savedRuns} onPosted={() => {}} />)
+    exchangeRate={null} savedRuns={savedRuns} onPosted={() => {}} waitsForRate={waitsForRate} />)
 
 beforeEach(() => { postings.current = [] })
 
@@ -82,5 +82,32 @@ describe('a kept run that no longer agrees with the inputs', () => {
     panel(run(1100), [kept({ total_cost: 1000 })])
     expect(await screen.findByText(KEPT_DIFFERS(fmtNum(1000), fmtNum(1100)))).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Proknjiži' })).toBeDisabled()
+  })
+})
+
+describe("a month that waits for the 20th's rate", () => {
+  const WAITS = 'Obračun koristi kurs od 02.11.2026., a ne kurs za 20.11.2026. '
+    + 'Knjiženje je moguće kada NBS objavi taj kurs.'
+
+  it('refuses Post and says why', async () => {
+    panel(run(1000), [kept({ total_cost: 1000 })], WAITS)
+    expect(await screen.findByText(WAITS)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Proknjiži' })).toBeDisabled()
+  })
+
+  it('offers Post once nothing waits', async () => {
+    panel(run(1000), [kept({ total_cost: 1000 })], null)
+    expect(await screen.findByRole('button', { name: 'Proknjiži' })).toBeEnabled()
+    expect(screen.queryByText(WAITS)).toBeNull()
+  })
+
+  it('says nothing of it beside a run already posted, which keeps its Undo', async () => {
+    postings.current = [{
+      id: 'p-1', run_key: 'regular', run_id: 'k-1', posted_on: '2026-11-05',
+      created_invoice_ids: [], created_transaction_ids: [],
+    }]
+    panel(run(1000), [kept({ status: 'posted', total_cost: 1000 })], WAITS)
+    expect(await screen.findByRole('button', { name: 'Poništi' })).toBeInTheDocument()
+    expect(screen.queryByText(WAITS)).toBeNull()
   })
 })

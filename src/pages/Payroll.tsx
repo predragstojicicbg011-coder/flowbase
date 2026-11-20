@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
 import { SkeletonRows } from '../components/motion'
-import { getBookRates } from '../services/bookAmounts'
+import { getBookRates, type BookRates } from '../services/bookAmounts'
 import { fetchSettings, monthStart, numberFor, ratesFor, type SettingRow } from '../services/payroll/settings'
 import {
   fetchEmployees, fetchContracts, fetchDeductions,
@@ -22,6 +22,9 @@ import {
   type PayrollRun, type RunKey, type SalaryRunLine,
 } from '../services/payroll/runs'
 import { fetchAdditions, type AdditionRow } from '../services/payroll/additions'
+import {
+  rateForMonth, rateBadge, rateNotice, postWaitsForTheTwentieth, convertsForeignAmount,
+} from '../services/payroll/payrollRate'
 import {
   saveRun, fetchRuns, type SavedRun, type SaveContext,
 } from '../services/payroll/savedRuns'
@@ -92,7 +95,8 @@ export default function Payroll() {
   const [payslip, setPayslip] = useState<
     { line: SalaryRunLine; runLabel: string } | null>(null)
 
-  const [rate, setRate] = useState<{ eur: number; date: string } | null>(null)
+  /** The rate service's answer for the month's 20th, as it came. */
+  const [quote, setQuote] = useState<BookRates | null>(null)
   const [rateError, setRateError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -154,12 +158,16 @@ export default function Payroll() {
 
   useEffect(() => {
     let cancelled = false
-    setRate(null); setRateError(null)
+    setQuote(null); setRateError(null)
     getBookRates(rateDateFor(month))
-      .then(r => { if (!cancelled) setRate({ eur: r.eurRate, date: r.date }) })
+      .then(r => { if (!cancelled) setQuote(r) })
       .catch(e => { if (!cancelled) setRateError(e.message || String(e)) })
     return () => { cancelled = true }
   }, [month])
+
+  /** The rate, the day its list is from, and whether that is the 20th's. */
+  const rate = useMemo(
+    () => (quote ? rateForMonth(month, holidays, quote) : null), [quote, month, holidays])
 
   const seniorityCoefficient = numberFor(settings, 'seniority_coefficient', date)
   // Every absence is paid at the coefficient in force for THIS month, so a
@@ -202,6 +210,15 @@ export default function Payroll() {
   }, [roster, timesheets, rates, fund, rate, month, coefficients, additions])
 
   const money = (n: number) => fmtNum(n)
+
+  /**
+   * Why Post waits, or null. A month that converts nothing into dinars does
+   * not depend on the rate and may be posted on any day's; one that does is
+   * posted only on the 20th's, or its invoices would carry another day's
+   * conversion for good.
+   */
+  const waitsForRate = rate && !rate.ofTheTwentieth && convertsForeignAmount(roster.people, additions)
+    ? postWaitsForTheTwentieth(rate) : null
 
   const total = result ? grandTotal(result.runs) : null
   const blocking = (roster.problems.length + (result?.problems.length ?? 0)) > 0
@@ -286,7 +303,7 @@ export default function Payroll() {
             </select>
           )}
           <div style={s.totalBadge}>
-            {rate ? `1 EUR = ${money(rate.eur)} RSD na dan ${srDate(rate.date)}`
+            {rate ? rateBadge(rate, money)
               : rateError ? 'Nema kursa' : 'Učitavanje kursa…'}
           </div>
           <div style={s.totalBadge}>Fond sati: {fund.monthHours} h</div>
@@ -305,6 +322,8 @@ export default function Payroll() {
             <b>Ovaj mesec ne može da se obračuna.</b> {rates.why}
           </div>
         )}
+
+        {rate && rateNotice(rate) && <div style={s.warn}>{rateNotice(rate)}</div>}
 
         {rateError && (
           <div style={s.error}>
@@ -569,6 +588,7 @@ export default function Payroll() {
                 month={month}
                 companyId={companyId}
                 exchangeRate={rate?.eur ?? null}
+                waitsForRate={waitsForRate}
                 savedRuns={saved}
                 onPosted={() => { monthsChanged(); load() }}
               />

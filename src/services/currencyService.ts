@@ -46,8 +46,13 @@ export interface ExchangeRate {
   rate: number
   /** The same number as `rate`; kept so older call sites compile. */
   rsdRate: number
-  /** The NBS list the rate came from (may be earlier than asked, over a weekend). */
+  /** The business day that was asked (a Friday, when a Saturday was). */
   date: string
+  /**
+   * The day the NBS list really applies from, from the answer's `date_from`.
+   * Absent when the answer did not say: the rate is then of an unknown day.
+   */
+  quotedOn?: string
   source: string
   /**
    * @deprecated Always false: nothing falls back to a made-up rate any more —
@@ -56,10 +61,21 @@ export interface ExchangeRate {
   isFallback: boolean
 }
 
-interface NbsQuote { rsdRate: number; date: string; source: string }
+interface NbsQuote { rsdRate: number; date: string; quotedOn?: string; source: string }
 
-// Successful quotes only. A failure is not cached, so the next try asks again.
+// Successful quotes only, and only a quote of the very day asked. A failure is
+// not cached, so the next try asks again; nor is a quote whose list is from an
+// earlier day (asked the 20th on the 3rd, the service answers with the 2nd's
+// list) or of a day it did not name — later the same session the asked day's
+// own list may be out, and the cache must not stand in for it.
 const rateCache: Map<string, NbsQuote> = new Map()
+
+/** A real calendar day written `YYYY-MM-DD`, or undefined. */
+export function validIsoDay(v: unknown): string | undefined {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return undefined
+  const d = new Date(`${v}T00:00:00Z`)
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v ? v : undefined
+}
 
 /** For tests. */
 export function clearRateCache(): void {
@@ -124,12 +140,16 @@ async function fetchNbsRate(currency: string, isoDate: string): Promise<NbsQuote
   }
 
   const rateDate = typeof data.date === 'string' && data.date ? data.date : isoDate
+  // `date` only ECHOES the day asked. The day the list applies from is
+  // `date_from`; without a real one the rate's day is unknown.
+  const quotedOn = validIsoDay(data.date_from)
   const quote: NbsQuote = {
     rsdRate: middle / parity,
     date: rateDate,
-    source: `NBS srednji kurs (kurs.resenje.org) za ${srDate(rateDate)}`,
+    quotedOn,
+    source: `NBS srednji kurs (kurs.resenje.org) za ${srDate(quotedOn ?? rateDate)}`,
   }
-  rateCache.set(key, quote)
+  if (quotedOn === isoDate) rateCache.set(key, quote)
   return quote
 }
 
@@ -158,6 +178,7 @@ export async function getRate(
     rate: quote.rsdRate,
     rsdRate: quote.rsdRate,
     date: quote.date,
+    quotedOn: quote.quotedOn,
     source: quote.source,
     isFallback: false,
   }
@@ -171,6 +192,11 @@ export async function getRatesForDate(date: string): Promise<{
   usdRsdRate: number
   eurRsdRate: number
   date: string
+  /**
+   * The day the lists apply from: the earlier of the two when EUR and USD
+   * differ, and absent when either answer did not name its day.
+   */
+  quotedOn?: string
   source: string
   /** @deprecated Always false; a missing rate throws instead. */
   isFallback: boolean
@@ -184,6 +210,8 @@ export async function getRatesForDate(date: string): Promise<{
     usdRsdRate: usd.rsdRate,
     eurRsdRate: eur.rsdRate,
     date: eur.date,
+    quotedOn: eur.quotedOn && usd.quotedOn
+      ? (eur.quotedOn < usd.quotedOn ? eur.quotedOn : usd.quotedOn) : undefined,
     source: eur.source,
     isFallback: false,
   }
