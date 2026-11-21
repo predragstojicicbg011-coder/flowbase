@@ -1,10 +1,12 @@
 import React from 'react'
-import { payslipFor } from '../services/payroll/payslip'
+import {
+  payslipFor, payslipSections, PAYSLIP_COST_LABEL,
+} from '../services/payroll/payslip'
 import type { SalaryRunLine } from '../services/payroll/runs'
 import type { EmployeeForMonth } from '../services/payroll/employees'
 import type { PayrollRates } from '../services/payroll/engine'
 import { fmtNum } from '../utils/formatters'
-import { monthLongLabel, srDate } from '../utils/months'
+import { monthLongLabel } from '../utils/months'
 import { PAYSLIP_TITLE, PAYSLIP_TITLE_PRELIMINARY } from '../services/payroll/preliminaryText'
 
 /**
@@ -36,14 +38,10 @@ export default function PayslipDialog({
   preliminary?: boolean
 }) {
   const p = payslipFor(line, person, rates, seniorityCoefficient, currencyRates)
+  // The rows the printed payslip carries too, from the one model.
+  const sections = payslipSections(p, person, currencyRates)
 
   const money = (n: number) => fmtNum(n)
-  const hours = (n: number | null) => (n === null ? '' : n.toLocaleString('sr-RS',
-    { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
-  const percent = (n: number) => n.toLocaleString('sr-RS',
-    { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-  const contract = person?.contract
 
   return (
     <div style={s.backdrop} onClick={onClose}>
@@ -68,86 +66,21 @@ export default function PayslipDialog({
             </div>
           </div>
 
-          {/* ── општи подаци ─────────────────────────────────────────── */}
-          <Section title="Opšti podaci">
-            <Row n={1} label="Ugovorena mesečna neto zarada, ukupno" value={money(p.contractedNet)} />
-            {contract && (
-              <Note>
-                {money(contract.net_amount)} {contract.currency}
-                {contract.currency !== 'RSD' && currencyRates[contract.currency]
-                  ? `, po kursu ${money(currencyRates[contract.currency])}`
-                  : ''}
-                {' '}od {srDate(contract.valid_from)}
-                {contract.valid_to ? ` do ${srDate(contract.valid_to)}` : ' nadalje'}
-              </Note>
-            )}
-            <Row n={2} label="Minuli rad, mesečno neto, sadržan u ugovorenom iznosu"
-              value={money(p.seniorityNet)} />
-            <Row n={3} label="Osnovna neto zarada za radno vreme" value={money(p.baseNet)} />
-            <Row n={4} label="Koeficijent minulog rada"
-              value={p.seniorityPercent === null ? '—'
-                : `${hours(p.serviceYears)}   ${percent(p.seniorityPercent)}`} />
-            <Row n={5} label="Sati u obračunu" value={hours(p.hours)} />
-            <Row n={6} label="Fond sati u mesecu" value={hours(p.monthHours)} />
-          </Section>
-
-          {/* ── цена сати ────────────────────────────────────────────── */}
-          <Section title="Cena rada po satu" columns={['Neto', 'Bruto']}>
-            <TwoRow n={1} label="Rad, po satu"
-              a={money(p.workPerHourNet)} b={money(p.workPerHourGross)} />
-            <TwoRow n={2} label="Naknada, po satu"
-              a={money(p.allowancePerHourNet)} b={money(p.allowancePerHourGross)} />
-          </Section>
-
-          {/* ── делови зараде ────────────────────────────────────────── */}
-          <Section title="Delovi zarade" columns={['Sati', 'Neto', 'Bruto']}>
-            {p.parts.map((part, i) => (
-              <ThreeRow key={part.label} n={i + 1} label={part.label}
-                a={hours(part.hours)} b={money(part.net)} c={money(part.gross)} />
-            ))}
-          </Section>
-
-          {/* ── зарада, порез и доприноси ────────────────────────────── */}
-          <Section title="Zarada, porez i doprinosi"
-            columns={CHARGE_COLUMNS}>
-            <ThreeRow n={1} label="Bruto zarada" a="" b={money(p.gross)} c="" bold />
-            <ThreeRow n={2} label="Osnovica za doprinose" a="" b={money(p.contributionBase)} c=""
-              highlight={Math.abs(p.contributionBase - p.gross) > 0.005} />
-            <ThreeRow n={3} label="Neoporezivi iznos" a="" b={money(p.taxFree)} c="" />
-            <ThreeRow n={4} label="Poreska osnovica" a="" b={money(p.taxBase)} c="" />
-            <ThreeRow n={5} label="Porez i doprinosi na teret zaposlenog" a=""
-              b={money(p.employeeTotal)} c="" bold />
-            {p.employeeCharges.map(c => (
-              <ThreeRow key={c.label} label={c.label} indent
-                a={percent(c.percent)} b={money(c.amount)} c="" />
-            ))}
-            <ThreeRow n={6} label="Neto zarada" a="" b={money(p.net)} c="" bold />
-            {p.deductionsTotal > 0 && (
-              <>
-                <ThreeRow n={7} label="Obustave" a="" b={money(p.deductionsTotal)} c="" bold />
-                {p.deductions.map(d => (
-                  <ThreeRow key={d.label} label={d.label} indent a=""
-                    b={money(d.amount)}
-                    c={d.goesTo === 'third_party' ? 'trećem licu' : ''} />
-                ))}
-                <ThreeRow n={8} label="Za isplatu" a="" b={money(p.netPaid)} c="" bold />
-              </>
-            )}
-          </Section>
-
-          {/* ── доприноси на терет послодавца ────────────────────────── */}
-          <Section title="Doprinosi na teret poslodavca"
-            columns={CHARGE_COLUMNS}>
-            <ThreeRow n={1} label="Doprinosi na teret poslodavca" a=""
-              b={money(p.employerTotal)} c="" bold />
-            {p.employerCharges.map(c => (
-              <ThreeRow key={c.label} label={c.label} indent
-                a={percent(c.percent)} b={money(c.amount)} c="" />
-            ))}
-          </Section>
+          {sections.map(sec => (
+            <Section key={sec.title} title={sec.title} columns={sec.columns}>
+              {sec.rows.map((r, i) => r.kind === 'note'
+                ? <Note key={`note-${i}`}>{r.text}</Note>
+                : sec.layout === 'one'
+                  ? <Row key={r.label} n={r.n} label={r.label} value={r.cells[0]} />
+                  : sec.layout === 'two'
+                    ? <TwoRow key={r.label} n={r.n} label={r.label} a={r.cells[0]} b={r.cells[1]} />
+                    : <ThreeRow key={r.label} n={r.n} label={r.label} a={r.cells[0]} b={r.cells[1]}
+                        c={r.cells[2]} bold={r.bold} indent={r.indent} highlight={r.highlight} />)}
+            </Section>
+          ))}
 
           <div style={s.costBox}>
-            <span>Ukupan trošak poslodavca za ovog zaposlenog u mesecu</span>
+            <span>{PAYSLIP_COST_LABEL}</span>
             <b>{money(p.totalCost)}</b>
           </div>
 
@@ -161,13 +94,6 @@ export default function PayslipDialog({
     </div>
   )
 }
-
-/**
- * The charge sections' headings: one per cell of a ThreeRow, so each sits over
- * its own figures — the rate, the amount, and the third column (who a
- * deduction goes to), which has no heading.
- */
-const CHARGE_COLUMNS = ['Stopa', 'Ukupno', '']
 
 function Section({ title, columns, children }: {
   title: string

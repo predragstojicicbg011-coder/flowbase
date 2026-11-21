@@ -26,6 +26,8 @@ import type { SalaryRunLine } from './runs'
 import { deductionAmount, type EmployeeForMonth } from './employees'
 import { amountInDinars } from './additions'
 import type { PayrollRates } from './engine'
+import { fmtNum } from '../../utils/formatters'
+import { srDate } from '../../utils/months'
 
 export interface PayslipPart {
   label: string
@@ -198,6 +200,121 @@ export function payslipFor(
 
     totalCost: l.totalCost,
   }
+}
+
+// ─── The payslip as rows, for the dialog and for the printed page ─────────
+//
+// ONE LIST OF ROWS, so the screen and the paper cannot disagree about what a
+// payslip says: every label and every formatted figure is decided here, and
+// `PayslipDialog` and `payrollPrint` only lay them out.
+
+/** A row: its number, its label and its cells, already formatted. */
+export type PayslipRowView =
+  | { kind: 'row'; n?: number; label: string; cells: string[]; bold?: boolean; indent?: boolean; highlight?: boolean }
+  | { kind: 'note'; text: string }
+
+export interface PayslipSectionView {
+  title: string
+  /** How many figure cells each row carries: one value, two, or a rate and two. */
+  layout: 'one' | 'two' | 'three'
+  /** One heading per figure cell. */
+  columns?: string[]
+  rows: PayslipRowView[]
+}
+
+/** Hours as the payslip shows them; blank where a part has none. */
+export const payslipHours = (n: number | null): string => (n === null ? '' : n.toLocaleString('sr-RS',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+
+/** A percentage as the payslip shows it. */
+export const payslipPercent = (n: number): string => n.toLocaleString('sr-RS',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+export const PAYSLIP_COST_LABEL = 'Ukupan trošak poslodavca za ovog zaposlenog u mesecu'
+
+/** Whether the contribution base is not the gross: the floor or the ceiling moved it. */
+export const baseDiffers = (base: number, gross: number): boolean => Math.abs(base - gross) > 0.005
+
+/** The third cell of a deduction forwarded to somebody else. */
+export const THIRD_PARTY = 'trećem licu'
+
+/**
+ * The charge sections' headings: one per cell of a three-cell row, so each
+ * sits over its own figures — the rate, the amount, and the third column (who
+ * a deduction goes to), which has no heading.
+ */
+export const CHARGE_COLUMNS = ['Stopa', 'Ukupno', '']
+
+/** Every section of the payslip, in the order MPP prints them. */
+export function payslipSections(
+  p: Payslip, person: EmployeeForMonth | undefined, currencyRates: Record<string, number>,
+): PayslipSectionView[] {
+  const money = (n: number) => fmtNum(n)
+  const contract = person?.contract
+  const row = (n: number | undefined, label: string, cells: string[],
+    o: { bold?: boolean; indent?: boolean; highlight?: boolean } = {}): PayslipRowView =>
+    ({ kind: 'row', n, label, cells, ...o })
+  const charge = (c: PayslipRate) => row(undefined, c.label,
+    [payslipPercent(c.percent), money(c.amount), ''], { indent: true })
+
+  const general: PayslipRowView[] = [
+    row(1, 'Ugovorena mesečna neto zarada, ukupno', [money(p.contractedNet)]),
+    ...(contract ? [{
+      kind: 'note' as const,
+      text: `${money(contract.net_amount)} ${contract.currency}`
+        + (contract.currency !== 'RSD' && currencyRates[contract.currency]
+          ? `, po kursu ${money(currencyRates[contract.currency])}` : '')
+        + ` od ${srDate(contract.valid_from)}`
+        + (contract.valid_to ? ` do ${srDate(contract.valid_to)}` : ' nadalje'),
+    }] : []),
+    row(2, 'Minuli rad, mesečno neto, sadržan u ugovorenom iznosu', [money(p.seniorityNet)]),
+    row(3, 'Osnovna neto zarada za radno vreme', [money(p.baseNet)]),
+    row(4, 'Koeficijent minulog rada', [p.seniorityPercent === null ? '—'
+      : `${payslipHours(p.serviceYears)}   ${payslipPercent(p.seniorityPercent)}`]),
+    row(5, 'Sati u obračunu', [payslipHours(p.hours)]),
+    row(6, 'Fond sati u mesecu', [payslipHours(p.monthHours)]),
+  ]
+
+  const salary: PayslipRowView[] = [
+    row(1, 'Bruto zarada', ['', money(p.gross), ''], { bold: true }),
+    row(2, 'Osnovica za doprinose', ['', money(p.contributionBase), ''],
+      { highlight: baseDiffers(p.contributionBase, p.gross) }),
+    row(3, 'Neoporezivi iznos', ['', money(p.taxFree), '']),
+    row(4, 'Poreska osnovica', ['', money(p.taxBase), '']),
+    row(5, 'Porez i doprinosi na teret zaposlenog', ['', money(p.employeeTotal), ''], { bold: true }),
+    ...p.employeeCharges.map(charge),
+    row(6, 'Neto zarada', ['', money(p.net), ''], { bold: true }),
+    ...(p.deductionsTotal > 0 ? [
+      row(7, 'Obustave', ['', money(p.deductionsTotal), ''], { bold: true }),
+      ...p.deductions.map(d => row(undefined, d.label,
+        ['', money(d.amount), d.goesTo === 'third_party' ? THIRD_PARTY : ''], { indent: true })),
+      row(8, 'Za isplatu', ['', money(p.netPaid), ''], { bold: true }),
+    ] : []),
+  ]
+
+  return [
+    { title: 'Opšti podaci', layout: 'one', rows: general },
+    {
+      title: 'Cena rada po satu', layout: 'two', columns: ['Neto', 'Bruto'],
+      rows: [
+        row(1, 'Rad, po satu', [money(p.workPerHourNet), money(p.workPerHourGross)]),
+        row(2, 'Naknada, po satu', [money(p.allowancePerHourNet), money(p.allowancePerHourGross)]),
+      ],
+    },
+    {
+      title: 'Delovi zarade', layout: 'three', columns: ['Sati', 'Neto', 'Bruto'],
+      rows: p.parts.map((part, i) => row(i + 1, part.label,
+        [payslipHours(part.hours), money(part.net), money(part.gross)])),
+    },
+    { title: 'Zarada, porez i doprinosi', layout: 'three', columns: CHARGE_COLUMNS, rows: salary },
+    {
+      title: 'Doprinosi na teret poslodavca', layout: 'three', columns: CHARGE_COLUMNS,
+      rows: [
+        row(1, 'Doprinosi na teret poslodavca', ['', money(p.employerTotal), ''], { bold: true }),
+        ...p.employerCharges.map(charge),
+      ],
+    },
+  ]
 }
 
 function perHour(amount: number, hours: number): number {
