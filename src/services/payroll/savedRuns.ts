@@ -22,6 +22,10 @@ import { firstOfMonth } from './timesheets'
 import { plural } from '../../utils/plural'
 import type { PayrollRun } from './runs'
 import type { EmployeeForMonth } from './employees'
+import {
+  PRELIMINARY, KEPT_KIND_DIFFERS, KEPT_RUN_EMPTY, RUN_HAS_POSTING, RUN_NOT_REMOVED,
+  type RunKind,
+} from './preliminaryText'
 
 export type RunStatus = 'draft' | 'posted'
 
@@ -46,6 +50,11 @@ export interface SavedRun {
   calculated_at: string
   posted_at: string | null
   note: string | null
+  /**
+   * Preliminary or regular (20261121090000). A row read before the column
+   * existed has none, and reads as regular — which every one of them was.
+   */
+  kind?: RunKind
 }
 
 export interface SavedRunLine {
@@ -90,6 +99,8 @@ export interface SaveContext {
   monthHours: number
   /** The roster, for the department each line posts to. */
   people: Record<string, EmployeeForMonth>
+  /** The month's kind, the same for every run of it. */
+  kind: RunKind
 }
 
 /** Every line a run would save, from what was just calculated. */
@@ -197,6 +208,7 @@ export function headerOf(run: PayrollRun, context: SaveContext) {
     total_cost: run.totals.totalCost,
     deductions_third_party: run.totals.deductionsThirdParty,
     deductions_employer: run.totals.deductionsEmployer,
+    kind: context.kind,
     calculated_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
@@ -230,21 +242,83 @@ export const POSTED_DIFFERS = (posted: string, now: string): string =>
   `Proknjiženo je ${posted}, a sa današnjim podacima obračun iznosi ${now}. `
   + 'Da biste ponovo obračunali, prvo poništite knjiženje.'
 
+/** The run card's line for a kept draft whose total no longer agrees. */
+export const KEPT_TOTAL_DIFFERS = (kept: string, now: string): string =>
+  `Sačuvani obračun iznosi ${kept}, a mesec sada iznosi ${now}. Nešto se u međuvremenu `
+  + 'promenilo — ponovo obračunajte pre knjiženja.'
+
+/** A kept run's kind; a row older than the column is regular. */
+export const kindOf = (r: Pick<SavedRun, 'kind'>): RunKind => r.kind ?? 'regular'
+
+/**
+ * How what is kept for a run stands against what is calculated now.
+ *
+ * In step needs the same total AND the same kind: a run kept as preliminary
+ * is not what a regular month would post, however the totals compare. A
+ * draft nobody falls into any more is `empty` rather than in step, so it can
+ * be removed instead of marking the month for ever. One tolerance for the
+ * page and the posting panel, so they cannot disagree at the edge.
+ */
+export type KeptState = 'none' | 'posted' | 'in_step' | 'stale_total' | 'stale_kind' | 'empty'
+
+export function keptState(
+  kept: SavedRun | null | undefined, run: PayrollRun, kind: RunKind,
+): KeptState {
+  if (!kept) return 'none'
+  if (kept.status === 'posted') return 'posted'
+  if (run.salaries.length + run.otherIncome.length === 0) return 'empty'
+  if (driftOf(kept, run) > KEPT_TOLERANCE) return 'stale_total'
+  if (kindOf(kept) !== kind) return 'stale_kind'
+  return 'in_step'
+}
+
+const driftOf = (kept: SavedRun, run: PayrollRun): number =>
+  Math.abs(Number(kept.total_cost) - run.totals.totalCost)
+
 /**
  * What the posting panel says about a run's kept calculation, or `null` when
  * there is nothing to say. WHAT LANDS IN THE LEDGER HAS TO BE THE THING THAT
- * WAS KEPT: a draft that no longer agrees with the inputs is recalculated
- * before posting, and a posted one that no longer agrees is undone first.
+ * WAS KEPT: a draft that no longer agrees with the inputs — in total or in
+ * kind — is recalculated before posting, and a posted one that no longer
+ * agrees is undone first.
  */
 export function keptWhy(
-  kept: SavedRun | null | undefined, run: PayrollRun, money: (n: number) => string,
+  kept: SavedRun | null | undefined, run: PayrollRun, kind: RunKind,
+  money: (n: number) => string,
 ): string | null {
-  if (!kept) return NOT_KEPT
-  const drifted = Math.abs(Number(kept.total_cost) - run.totals.totalCost) > KEPT_TOLERANCE
-  if (!drifted) return null
+  const state = keptState(kept, run, kind)
+  if (state === 'none' || !kept) return NOT_KEPT
   const was = money(Number(kept.total_cost))
   const now = money(run.totals.totalCost)
-  return kept.status === 'posted' ? POSTED_DIFFERS(was, now) : KEPT_DIFFERS(was, now)
+  if (state === 'posted') return driftOf(kept, run) > KEPT_TOLERANCE ? POSTED_DIFFERS(was, now) : null
+  if (state === 'empty') return KEPT_RUN_EMPTY
+  if (state === 'stale_total') return KEPT_DIFFERS(was, now)
+  if (state === 'stale_kind') return KEPT_KIND_DIFFERS(kindOf(kept), kind)
+  return null
+}
+
+/**
+ * Remove a kept run that nobody is in any more. Only a draft, and only while
+ * no posting row exists for it — by its id or by (company, month, run) —
+ * because between a posting's claim and its run's freeze the run is still a
+ * draft. The database refuses the same delete (`payroll_runs_delete_guard`).
+ */
+export async function removeRun(
+  client: any,
+  run: Pick<SavedRun, 'id' | 'company_id' | 'period_month' | 'run_key'>,
+): Promise<void> {
+  const byId = await client.from('payroll_postings').select('id')
+    .eq('run_id', run.id).limit(1)
+  const byKey = await client.from('payroll_postings').select('id')
+    .eq('company_id', run.company_id).eq('period_month', run.period_month)
+    .eq('run_key', run.run_key).limit(1)
+  if (byId.error || byKey.error) throw new Error(RUN_NOT_REMOVED)
+  if ((byId.data ?? []).length > 0 || (byKey.data ?? []).length > 0) {
+    throw new Error(RUN_HAS_POSTING)
+  }
+  const { data, error } = await client
+    .from('payroll_runs').delete().eq('id', run.id).eq('status', 'draft').select('id')
+  if (error || !data || data.length === 0) throw new Error(RUN_NOT_REMOVED)
 }
 
 /**
@@ -340,6 +414,8 @@ export interface RunMonth {
   runs: SavedRun[]
   posted: number
   draft: number
+  /** Runs kept as preliminary. */
+  preliminary: number
   totalCost: number
 }
 
@@ -355,9 +431,22 @@ export function byMonth(runs: SavedRun[]): RunMonth[] {
       runs: rs,
       posted: rs.filter(r => r.status === 'posted').length,
       draft: rs.filter(r => r.status === 'draft').length,
+      preliminary: rs.filter(r => kindOf(r) === 'preliminary').length,
       totalCost: round2(rs.reduce((s, r) => s + Number(r.total_cost || 0), 0)),
     }))
     .sort((a, b) => b.month.localeCompare(a.month))
+}
+
+/**
+ * What the months list says of a month: posted, how many of its runs are, and
+ * — said as well, never instead — that a run of it is kept as preliminary.
+ */
+export function monthBadge(m: RunMonth): string {
+  if (m.draft === 0 && m.posted > 0) return 'Proknjiženo'
+  const posted = m.posted > 0 ? `Proknjiženo ${m.posted} od ${m.runs.length}` : null
+  const preliminary = m.preliminary > 0 ? PRELIMINARY : null
+  if (posted && preliminary) return `${posted} · ${preliminary}`
+  return posted ?? preliminary ?? 'Nacrt'
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100

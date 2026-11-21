@@ -26,8 +26,13 @@ import {
   rateForMonth, rateBadge, rateNotice, postWaitsForTheTwentieth, convertsForeignAmount,
 } from '../services/payroll/payrollRate'
 import {
-  saveRun, fetchRuns, type SavedRun, type SaveContext,
+  saveRun, fetchRuns, keptState, kindOf, removeRun, KEPT_TOTAL_DIFFERS,
+  type SavedRun, type SaveContext,
 } from '../services/payroll/savedRuns'
+import { monthKind } from '../services/payroll/preliminaryHours'
+import {
+  KEPT_KIND_DIFFERS, KEPT_RUN_EMPTY, type RunKind,
+} from '../services/payroll/preliminaryText'
 import PayrollPostingPanel from '../components/PayrollPostingPanel'
 import SystemCategoryNotice from '../components/SystemCategoryNotice'
 import { useSystemCategories } from '../contexts/SystemCategoriesContext'
@@ -233,19 +238,27 @@ export default function Payroll() {
   const savedFor = (key: string) => saved.find(r => r.run_key === key) || null
 
   /**
+   * Preliminary or regular, for the whole month at once.
+   *
+   * Any month is preliminary while it waits for the 20th's rate (it converts
+   * an amount that is not in dinars, and its rate is an earlier day's).
+   */
+  const running = month === belgradeToday().slice(0, 7)
+  const kind: RunKind = monthKind({
+    running, onTemplate: 0, rateSettled: waitsForRate === null,
+  })
+
+  /**
    * Whether the saved run still says what the calculation says.
    *
    * THE ONE CONDITION FOR POSTING. What lands in the ledger has to be the
    * thing that was kept, and the only way to be sure of that is to insist the
-   * two agree at the moment of posting. If an input has moved since, they do
-   * not, and Recalculate is the answer rather than a silent choice between
-   * two versions of the month.
+   * two agree at the moment of posting — the same total and the same kind. If
+   * an input has moved since, they do not, and Recalculate is the answer
+   * rather than a silent choice between two versions of the month. One rule
+   * with the posting panel (`keptState`).
    */
-  const inStep = (run: PayrollRun) => {
-    const s = savedFor(run.key)
-    if (!s) return false
-    return Math.abs(Number(s.total_cost) - run.totals.totalCost) < 0.02
-  }
+  const stateOf = (run: PayrollRun) => keptState(savedFor(run.key), run, kind)
 
   const peopleById = useMemo(() => {
     const byId: Record<string, typeof roster.people[number]> = {}
@@ -257,11 +270,18 @@ export default function Payroll() {
     if (!companyId) { setError('Prvo izaberite jednu firmu.'); return }
     setRecalculating(run.key); setError(null)
     try {
-      const context: SaveContext = {
-        companyId, month, exchangeRate: rate?.eur ?? null, eurRate: rate?.eur ?? null,
-        monthHours: fund.monthHours, people: peopleById,
+      const kept = savedFor(run.key)
+      if (run.salaries.length + run.otherIncome.length === 0) {
+        // Nobody is in this run any more. What is kept from an earlier
+        // calculation is removed, or it would mark the month for ever.
+        if (kept && kept.status === 'draft') await removeRun(supabase, kept)
+      } else {
+        const context: SaveContext = {
+          companyId, month, exchangeRate: rate?.eur ?? null, eurRate: rate?.eur ?? null,
+          monthHours: fund.monthHours, people: peopleById, kind,
+        }
+        await saveRun(supabase, run, context)
       }
-      await saveRun(supabase, run, context)
       monthsChanged()
       setSaved(await fetchRuns(supabase, companyId, month))
     } catch (e: any) {
@@ -428,18 +448,19 @@ export default function Payroll() {
                     </div>
                   </button>
 
-                  {count > 0 && (
+                  {(count > 0 || savedFor(run.key)) && (
                     <div style={s.runState}>
                       {(() => {
                         const sv = savedFor(run.key)
-                        if (!sv) {
+                        const state = stateOf(run)
+                        if (!sv || state === 'none') {
                           return (
                             <span style={s.stateMuted}>
                               Još nije obračunato — za ovaj obračun ništa nije sačuvano
                             </span>
                           )
                         }
-                        if (sv.status === 'posted') {
+                        if (state === 'posted') {
                           return (
                             <span style={s.statePosted}>
                               Proknjiženo {sv.posted_at ? srDate(sv.posted_at) : ''} i zaključano.
@@ -448,16 +469,20 @@ export default function Payroll() {
                             </span>
                           )
                         }
-                        return inStep(run) ? (
+                        if (state === 'empty') {
+                          return <span style={s.stateStale}>{KEPT_RUN_EMPTY}</span>
+                        }
+                        if (state === 'stale_kind') {
+                          return <span style={s.stateStale}>{KEPT_KIND_DIFFERS(kindOf(sv), kind)}</span>
+                        }
+                        return state === 'in_step' ? (
                           <span style={s.stateOk}>
                             Obračunato {sv.calculated_at ? srDate(sv.calculated_at) : ''} i
                             slaže se sa prikazanim
                           </span>
                         ) : (
                           <span style={s.stateStale}>
-                            Sačuvani obračun iznosi {money(Number(sv.total_cost))}, a mesec sada
-                            iznosi {money(run.totals.totalCost)}. Nešto se u međuvremenu
-                            promenilo — ponovo obračunajte pre knjiženja.
+                            {KEPT_TOTAL_DIFFERS(money(Number(sv.total_cost)), money(run.totals.totalCost))}
                           </span>
                         )
                       })()}
@@ -596,6 +621,7 @@ export default function Payroll() {
                 companyId={companyId}
                 exchangeRate={rate?.eur ?? null}
                 waitsForRate={waitsForRate}
+                kind={kind}
                 savedRuns={saved}
                 onPosted={() => { monthsChanged(); load() }}
               />

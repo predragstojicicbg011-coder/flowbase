@@ -3,10 +3,11 @@ import {
   PostStepFailure, type PostContext,
 } from './post'
 import type { PostingPlan } from './posting'
+import { PRELIMINARY_REFUSED, RUN_NOT_FOUND } from './preliminaryText'
 
 const CONTEXT: PostContext = {
   companyId: 'c1', paymentDate: '2026-09-05', dueDate: null,
-  currency: 'RSD', eurRate: 117.3586,
+  currency: 'RSD', eurRate: 117.3586, runId: 'r1',
 }
 
 const plan = (over: Partial<PostingPlan> = {}): PostingPlan => ({
@@ -35,12 +36,33 @@ const plan = (over: Partial<PostingPlan> = {}): PostingPlan => ({
 })
 
 /** A client that records what it was asked to write. */
-function client(over: { claimError?: any; invoiceError?: any; txError?: any; linkError?: any } = {}) {
-  const calls: any = { invoices: [], transactions: [], postings: [], updates: [], splits: [], splitDeletes: [] }
+function client(over: {
+  claimError?: any; invoiceError?: any; txError?: any; linkError?: any
+  run?: any; runError?: any
+} = {}) {
+  const calls: any = {
+    invoices: [], transactions: [], postings: [], updates: [], splits: [], splitDeletes: [],
+    runReads: [], runUpdates: [],
+  }
   let n = 0
   return {
     calls,
     from(table: string) {
+      if (table === 'payroll_runs') {
+        return {
+          select: (cols: string) => ({ eq: (col: string, v: any) => ({
+            maybeSingle: async () => {
+              calls.runReads.push({ cols, [col]: v })
+              return over.runError ? { data: null, error: over.runError }
+                : { data: over.run === undefined ? { id: v, kind: 'regular', status: 'draft' } : over.run, error: null }
+            },
+          }) }),
+          update(row: any) {
+            calls.runUpdates.push(row)
+            return { eq: () => ({ select: async () => ({ data: [{ id: 'r1' }], error: null }) }) }
+          },
+        }
+      }
       if (table === 'pl_splits') {
         const chain: any = {
           eq: (col: string, v: any) => { calls.splitDeletes.push([col, v]); return chain },
@@ -463,4 +485,39 @@ describe('projects', () => {
     expect(c.calls.splits).toHaveLength(0)
   })
 
+})
+
+describe('a preliminary run is never posted', () => {
+  it('reads the kept run before claiming anything, and posts a regular one', async () => {
+    const c = client()
+    await postPlan(c, plan(), CONTEXT, 'Zarade')
+    expect(c.calls.runReads).toEqual([{ cols: 'id, kind, status', id: 'r1' }])
+    expect(c.calls.postings).toHaveLength(1)
+    expect(c.calls.runUpdates[0].status).toBe('posted')
+  })
+
+  it('refuses a preliminary run before the month is claimed', async () => {
+    const c = client({ run: { id: 'r1', kind: 'preliminary', status: 'draft' } })
+    await expect(postPlan(c, plan(), CONTEXT, 'Zarade')).rejects.toThrow(PRELIMINARY_REFUSED)
+    expect(c.calls.postings).toHaveLength(0)
+    expect(c.calls.invoices).toHaveLength(0)
+    expect(PRELIMINARY_REFUSED).toBe('Ovaj obračun je preliminaran, pa se ne knjiži. Ništa nije upisano.')
+  })
+
+  it('refuses a run it cannot find or cannot read, and a posting with no run', async () => {
+    for (const c of [client({ run: null }), client({ runError: { message: 'x' } })]) {
+      await expect(postPlan(c, plan(), CONTEXT, 'Zarade')).rejects.toThrow(RUN_NOT_FOUND)
+      expect(c.calls.postings).toHaveLength(0)
+    }
+    const none = client()
+    await expect(postPlan(none, plan(), { ...CONTEXT, runId: null }, 'Zarade')).rejects.toThrow(RUN_NOT_FOUND)
+    expect(none.calls.runReads).toHaveLength(0)
+    expect(none.calls.postings).toHaveLength(0)
+  })
+
+  it('a row kept before the kind column existed is regular', async () => {
+    const c = client({ run: { id: 'r1', status: 'draft' } })
+    await postPlan(c, plan(), CONTEXT, 'Zarade')
+    expect(c.calls.postings).toHaveLength(1)
+  })
 })

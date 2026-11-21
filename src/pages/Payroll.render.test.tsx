@@ -5,6 +5,7 @@ import type { SavedRun } from '../services/payroll/savedRuns'
 import { RATE_BADGE, RATE_NOT_YET_THE_TWENTIETHS, POST_WAITS_FOR_THE_TWENTIETH } from '../services/payroll/payrollRate'
 import { fmtNum } from '../utils/formatters'
 import type { AdditionRow } from '../services/payroll/additions'
+import { KEPT_KIND_DIFFERS, KEPT_RUN_EMPTY } from '../services/payroll/preliminaryText'
 
 // ── The page's world, invented: one company, one person on a round dinar
 //    contract, November 2026 with no holiday rows. Plain functions over
@@ -16,6 +17,13 @@ const state = {
   /** How many times the months list has been read. */
   monthReads: 0,
   saves: 0,
+  /** The kind every Recalculate saved with, and the total. */
+  savedKinds: [] as string[],
+  savedTotals: [] as number[],
+  /** The kept runs of the month on screen. */
+  monthRuns: [] as SavedRun[],
+  /** The ids removeRun was asked to remove. */
+  removed: [] as string[],
   /** The day the rate service says its list applies from. */
   quotedOn: '2026-11-20' as string | undefined,
   /** The currency of the one contract. */
@@ -99,20 +107,27 @@ jest.mock('../services/payroll/savedRuns', () => ({
   __esModule: true,
   ...jest.requireActual('../services/payroll/savedRuns'),
   fetchRuns: async (_c: unknown, _company: string, month?: string) => {
-    if (month) return []
+    if (month) return state.monthRuns
     state.monthReads += 1
     return state.months
   },
-  saveRun: async () => { state.saves += 1; return {} },
+  saveRun: async (_c: unknown, run: { totals: { totalCost: number } }, context: { kind: string }) => {
+    state.saves += 1; state.savedKinds.push(context.kind); state.savedTotals.push(run.totals.totalCost)
+    return {}
+  },
+  removeRun: async (_c: unknown, run: { id: string }) => { state.removed.push(run.id) },
 }))
 // The panel is not what is under test here: only that its onPosted (called
 // after a posting and after an undo) makes the months list read again.
 jest.mock('../components/PayrollPostingPanel', () => ({
   __esModule: true,
-  default: ({ onPosted, waitsForRate }: { onPosted: () => void; waitsForRate: string | null }) => (
+  default: ({ onPosted, waitsForRate, kind }: {
+    onPosted: () => void; waitsForRate: string | null; kind: string
+  }) => (
     <div>
       <button onClick={onPosted}>panel-posted-or-undone</button>
       {waitsForRate && <div data-testid="panel-waits">{waitsForRate}</div>}
+      <div data-testid="panel-kind">{kind}</div>
     </div>),
 }))
 
@@ -120,6 +135,10 @@ beforeEach(() => {
   state.months = [keptRun()]
   state.monthReads = 0
   state.saves = 0
+  state.savedKinds = []
+  state.savedTotals = []
+  state.monthRuns = []
+  state.removed = []
   state.quotedOn = '2026-11-20'
   state.contractCurrency = 'RSD'
   state.additions = []
@@ -230,5 +249,48 @@ describe('the foreign-amount test looks only at this payroll', () => {
     render(<Payroll />)
     expect(await screen.findByTestId('panel-waits'))
       .toHaveTextContent(POST_WAITS_FOR_THE_TWENTIETH('02.11.2026.', '20.11.2026.'))
+  })
+})
+
+describe('a kept run carries its kind', () => {
+  it('a month on the 20th\'s rate is kept as regular, and the panel is told so', async () => {
+    render(<Payroll />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ponovo obračunaj' }))
+    await waitFor(() => expect(state.savedKinds).toEqual(['regular']))
+    expect(screen.getByTestId('panel-kind')).toHaveTextContent('regular')
+  })
+
+  it('a euro month before the 20th\'s list is kept as preliminary', async () => {
+    state.quotedOn = '2026-11-02'
+    state.contractCurrency = 'EUR'
+    render(<Payroll />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ponovo obračunaj' }))
+    await waitFor(() => expect(state.savedKinds).toEqual(['preliminary']))
+    expect(screen.getByTestId('panel-kind')).toHaveTextContent('preliminary')
+  })
+
+  it('a draft whose total agrees but whose kind does not asks to be recalculated', async () => {
+    const first = render(<Payroll />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ponovo obračunaj' }))
+    await waitFor(() => expect(state.savedTotals).toHaveLength(1))
+    first.unmount()
+    state.monthRuns = [keptRun({ period_month: '2026-11-01', kind: 'preliminary', total_cost: state.savedTotals[0] })]
+    render(<Payroll />)
+    expect(await screen.findByText(KEPT_KIND_DIFFERS('preliminary', 'regular'))).toBeInTheDocument()
+  })
+})
+
+describe('a kept draft nobody is in any more', () => {
+  it('says so, and Recalculate removes it', async () => {
+    state.monthRuns = [keptRun({
+      id: 'k-other', period_month: '2026-11-01', run_key: 'other', label: 'Ostala primanja', total_cost: 500,
+    })]
+    render(<Payroll />)
+    expect(await screen.findByText(KEPT_RUN_EMPTY)).toBeInTheDocument()
+    const buttons = await screen.findAllByRole('button', { name: 'Ponovo obračunaj' })
+    expect(buttons).toHaveLength(2)
+    fireEvent.click(buttons[1])
+    await waitFor(() => expect(state.removed).toEqual(['k-other']))
+    expect(state.saves).toBe(0)
   })
 })

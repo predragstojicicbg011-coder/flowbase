@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabase'
-import { fetchRuns, byMonth, type RunMonth } from '../services/payroll/savedRuns'
+import { fetchRuns, byMonth, monthBadge, type RunMonth } from '../services/payroll/savedRuns'
 import { RUN_LABELS, type RunKey } from '../services/payroll/runs'
 import { fmtNum } from '../utils/formatters'
 import { countOf } from '../utils/plural'
@@ -88,9 +88,7 @@ export default function PayrollMonths({ companyId, current, onPick, reloadKey = 
                   : m.posted > 0 ? 'rgba(200,162,74,0.13)' : 'rgba(255,255,255,0.06)',
                 color: allPosted ? '#00D47E' : m.posted > 0 ? '#D8B96A' : '#7A9BB8',
               }}>
-                {allPosted ? 'Proknjiženo'
-                  : m.posted > 0 ? `Proknjiženo ${m.posted} od ${m.runs.length}`
-                  : 'Nacrt'}
+                {monthBadge(m)}
               </span>
               <span style={s.runs}>
                 {m.runs.map(r => RUN_LABELS[r.run_key as RunKey] ?? r.label).join(' · ')}

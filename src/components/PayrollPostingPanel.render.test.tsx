@@ -4,6 +4,9 @@ import PayrollPostingPanel from './PayrollPostingPanel'
 import { POSTED_DIFFERS, KEPT_DIFFERS, type SavedRun } from '../services/payroll/savedRuns'
 import type { PayrollRun } from '../services/payroll/runs'
 import { fmtNum } from '../utils/formatters'
+import {
+  POSTING_NOT_OFFERED, KEPT_KIND_DIFFERS, type RunKind,
+} from '../services/payroll/preliminaryText'
 
 // Plain functions, not jest.fn(impl): the CRA config resets mocks. Every
 // table answers an empty list; a chain of any length can be awaited.
@@ -60,9 +63,13 @@ const kept = (over: Partial<SavedRun> = {}): SavedRun => ({
   ...over,
 })
 
-const panel = (r: PayrollRun, savedRuns: SavedRun[], waitsForRate: string | null = null) => render(
-  <PayrollPostingPanel runs={[r]} people={{}} month="2026-11" companyId="c-1"
-    exchangeRate={null} savedRuns={savedRuns} onPosted={() => {}} waitsForRate={waitsForRate} />)
+const panel = (
+  r: PayrollRun | null, savedRuns: SavedRun[], waitsForRate: string | null = null,
+  kind: RunKind = 'regular',
+) => render(
+  <PayrollPostingPanel runs={r ? [r] : []} people={{}} month="2026-11" companyId="c-1"
+    exchangeRate={null} savedRuns={savedRuns} onPosted={() => {}} waitsForRate={waitsForRate}
+    kind={kind} />)
 
 beforeEach(() => { postings.current = [] })
 
@@ -109,5 +116,49 @@ describe("a month that waits for the 20th's rate", () => {
     panel(run(1000), [kept({ status: 'posted', total_cost: 1000 })], WAITS)
     expect(await screen.findByRole('button', { name: 'Poništi' })).toBeInTheDocument()
     expect(screen.queryByText(WAITS)).toBeNull()
+  })
+})
+
+describe('a preliminary month', () => {
+  const posted = () => {
+    postings.current = [{
+      id: 'p-1', run_key: 'regular', run_id: 'k-1', posted_on: '2026-11-05',
+      created_invoice_ids: [], created_transaction_ids: [],
+    }]
+  }
+
+  it('offers no Post, says why, and marks the run', async () => {
+    panel(run(1000), [kept({ total_cost: 1000, kind: 'preliminary' })], null, 'preliminary')
+    expect(await screen.findByText(POSTING_NOT_OFFERED)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Proknjiži' })).toBeNull()
+    expect(screen.getByText(/· Preliminarno/)).toBeInTheDocument()
+    // The panel and its tools stay: the unit mapping and the rest are reachable.
+    expect(screen.getByText('Knjiženje u glavnu knjigu')).toBeInTheDocument()
+  })
+
+  it('keeps Undo for a run posted earlier', async () => {
+    posted()
+    panel(run(1000), [kept({ status: 'posted', total_cost: 1000 })], null, 'preliminary')
+    expect(await screen.findByRole('button', { name: 'Poništi' })).toBeInTheDocument()
+    expect(screen.getByText(POSTING_NOT_OFFERED)).toBeInTheDocument()
+  })
+
+  it('a draft kept as preliminary in a month now regular is recalculated first', async () => {
+    panel(run(1000), [kept({ total_cost: 1000, kind: 'preliminary' })], null, 'regular')
+    expect(await screen.findByText(KEPT_KIND_DIFFERS('preliminary', 'regular'))).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Proknjiži' })).toBeDisabled()
+    expect(screen.queryByText(POSTING_NOT_OFFERED)).toBeNull()
+  })
+})
+
+describe('a posting whose run has nothing to post now', () => {
+  it('is listed with its Undo', async () => {
+    postings.current = [{
+      id: 'p-1', run_key: 'regular', run_id: 'k-1', posted_on: '2026-11-05',
+      created_invoice_ids: [], created_transaction_ids: [],
+    }]
+    panel(null, [kept({ status: 'posted', total_cost: 1000 })])
+    expect(await screen.findByRole('button', { name: 'Poništi' })).toBeInTheDocument()
+    expect(screen.getByText('Zarade')).toBeInTheDocument()
   })
 })

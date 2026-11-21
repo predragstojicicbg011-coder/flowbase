@@ -24,6 +24,9 @@ import type { PayrollRun } from '../services/payroll/runs'
 import type { EmployeeForMonth } from '../services/payroll/employees'
 import type { LedgerNames } from '../services/payroll/booking'
 import { keptWhy, type SavedRun } from '../services/payroll/savedRuns'
+import {
+  POSTING_NOT_OFFERED, PRELIMINARY, type RunKind,
+} from '../services/payroll/preliminaryText'
 import { fmtNum } from '../utils/formatters'
 import { countOf, plural } from '../utils/plural'
 import { srDate } from '../utils/months'
@@ -49,6 +52,7 @@ const personKeyEq = (a: string | null | undefined, b: string | null | undefined)
  */
 export default function PayrollPostingPanel({
   runs, people, month, companyId, exchangeRate, savedRuns, onPosted, waitsForRate = null,
+  kind = 'regular',
 }: {
   runs: PayrollRun[]
   people: Record<string, EmployeeForMonth>
@@ -65,6 +69,11 @@ export default function PayrollPostingPanel({
    * A run already posted keeps its Undo and is not told this.
    */
   waitsForRate?: string | null
+  /**
+   * The month's kind. A preliminary month offers no Post at all: the button
+   * is replaced by one sentence, while Undo and the panel's tools stay.
+   */
+  kind?: RunKind
 }) {
   const [mapping, setMapping] = useState<UnitMapping[]>([])
   const [postings, setPostings] = useState<any[]>([])
@@ -241,8 +250,10 @@ export default function PayrollPostingPanel({
       // if an input has moved since the last calculation they will not, and
       // Recalculate is the answer rather than a silent choice between two
       // versions of the month — or, for a run already posted, Undo first.
+      // In step means the same total AND the same kind: a run kept as
+      // preliminary is not what this month would post now.
       const kept = savedRuns.find(r => r.run_key === run.key)
-      const notKept = keptWhy(kept, run, fmtNum)
+      const notKept = keptWhy(kept, run, kind, fmtNum)
       const posted = postings.some(p => p.run_key === run.key)
 
       out[run.key] = {
@@ -253,7 +264,7 @@ export default function PayrollPostingPanel({
       }
     }
     return out
-  }, [runs, month, people, mapping, exchangeRate, ledger, savedRuns, postings, waitsForRate,
+  }, [runs, month, people, mapping, exchangeRate, ledger, savedRuns, postings, waitsForRate, kind,
       employeePartners, deductionPartners, taxPartner, projectHours, hoursBasis, system])
 
   /**
@@ -339,7 +350,7 @@ export default function PayrollPostingPanel({
 
   const post = async (run: PayrollRun) => {
     const entry = plans[run.key]
-    if (!entry || entry.why) return
+    if (!entry || entry.why || kind === 'preliminary') return
     setBusy(run.key); setError(null); setDone(null)
     // Payroll is booked in dinars; every row carries its euro figure beside
     // them at the NBS rate of the payment date. Entries written with no EUR
@@ -384,7 +395,7 @@ export default function PayrollPostingPanel({
     setBusy(null)
   }
 
-  const undo = async (run: PayrollRun) => {
+  const undo = async (run: { key: string; label: string }) => {
     const posting = postedFor(run.key)
     if (!posting) return
     const n = (posting.created_invoice_ids?.length || 0) + (posting.created_transaction_ids?.length || 0)
@@ -404,6 +415,9 @@ export default function PayrollPostingPanel({
   }
 
   const money = (n: number) => fmtNum(n)
+
+  /** Postings of this month whose run has no plan on screen now. */
+  const orphans = postings.filter(p => !plans[p.run_key])
 
   const allMissing = useMemo(() => {
     const set = new Set<string>()
@@ -439,6 +453,8 @@ export default function PayrollPostingPanel({
             onChange={e => setPaymentDate(e.target.value)} />
         </label>
       </div>
+
+      {kind === 'preliminary' && <div style={s.warn}>{POSTING_NOT_OFFERED}</div>}
 
       {error && <div style={s.error}>{error}</div>}
       {done && <div style={s.ok}>{done}</div>}
@@ -525,7 +541,7 @@ export default function PayrollPostingPanel({
         </div>
       )}
 
-      {Object.keys(plans).length === 0 && (
+      {Object.keys(plans).length === 0 && orphans.length === 0 && (
         <div style={s.hint}>Za ovaj mesec nema ničega za knjiženje.</div>
       )}
 
@@ -548,6 +564,7 @@ export default function PayrollPostingPanel({
                 stavke poreza: {entry.plan.invoices.filter(i => i.kind === 'obligation_child').length}
                 {entry.plan.transactions.length > 0 && `, storno: ${entry.plan.transactions.length}`}
                 {' · '}<b style={{ color: '#DCE9F6' }}>{money(planTotal(entry.plan))}</b>
+                {kind === 'preliminary' && <span style={s.preliminaryMark}> · {PRELIMINARY}</span>}
                 {storno !== 0 && (
                   <span style={{ color: '#7A9BB8' }}>
                     {' '}i {money(storno)} storniranih na drugim troškovima
@@ -564,7 +581,7 @@ export default function PayrollPostingPanel({
                 <button style={s.ghost} disabled={busy === run.key} onClick={() => undo(run)}>
                   {busy === run.key ? 'Brisanje…' : 'Poništi'}
                 </button>
-              ) : (
+              ) : kind === 'preliminary' ? null : (
                 <button style={entry.why ? s.disabled : s.primary}
                   disabled={!!entry.why || busy === run.key}
                   title={entry.why || undefined}
@@ -572,6 +589,31 @@ export default function PayrollPostingPanel({
                   {busy === run.key ? 'Knjiženje…' : 'Proknjiži'}
                 </button>
               )}
+            </div>
+          </div>
+        )
+      })}
+
+      {/* A posting whose run has nothing to post now -- nobody in it any more,
+          or nothing calculated -- can still be undone. Undo needs no rate and
+          no calculation, only the posting row. */}
+      {orphans.map(p => {
+        const run = {
+          key: p.run_key as string,
+          label: savedRuns.find(r => r.run_key === p.run_key)?.label ?? p.run_key,
+        }
+        return (
+          <div key={`posted-${p.id}`} style={s.row}>
+            <div style={{ flex: 1 }}>
+              <div style={s.runName}>
+                {run.label}
+                <span style={s.postedBadge}>Proknjiženo {srDate(p.posted_on)}</span>
+              </div>
+            </div>
+            <div>
+              <button style={s.ghost} disabled={busy === run.key} onClick={() => undo(run)}>
+                {busy === run.key ? 'Brisanje…' : 'Poništi'}
+              </button>
             </div>
           </div>
         )
@@ -745,6 +787,7 @@ const s: Record<string, React.CSSProperties> = {
   runName: { fontSize: '13px', fontWeight: '600', color: '#DCE9F6', display: 'flex', alignItems: 'center', gap: '8px' },
   runDetail: { fontSize: '11px', color: '#7A9BB8', marginTop: '3px', lineHeight: 1.5 },
   blocked: { fontSize: '11px', color: '#FF8E8D', marginTop: '5px', lineHeight: 1.45, maxWidth: '640px' },
+  preliminaryMark: { color: '#D8B96A', fontWeight: 600 },
   postedBadge: { fontSize: '9px', fontWeight: '700', padding: '2px 7px', borderRadius: '20px', background: 'rgba(0,212,126,0.13)', color: '#00D47E' },
   input: { fontFamily: 'system-ui,sans-serif', fontSize: '12px', border: '1px solid rgba(255,255,255,0.075)', borderRadius: '7px', padding: '7px 9px', background: '#060E1A', color: '#DCE9F6', outline: 'none', minWidth: '140px' },
   primary: { background: '#00D47E', color: '#060E1A', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '12px', fontWeight: '500', cursor: 'pointer' },

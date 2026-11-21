@@ -1,8 +1,12 @@
 import {
   linesOf, headerOf, byMonth, saveRun, alreadyPostedMessage,
-  keptWhy, NOT_KEPT, KEPT_DIFFERS, POSTED_DIFFERS,
+  keptWhy, keptState, kindOf, removeRun, monthBadge, NOT_KEPT, KEPT_DIFFERS, POSTED_DIFFERS,
+  KEPT_TOTAL_DIFFERS,
   type SaveContext, type SavedRun,
 } from './savedRuns'
+import {
+  KEPT_KIND_DIFFERS, KEPT_RUN_EMPTY, RUN_HAS_POSTING, RUN_NOT_REMOVED,
+} from './preliminaryText'
 import { runsFor, type RunInput } from './runs'
 import { splitContractedNet, RATES_2026 } from './engine'
 import { emptyTimesheet, type TimesheetRow } from './timesheets'
@@ -50,6 +54,7 @@ const context = (over: Partial<SaveContext> = {}): SaveContext => ({
   companyId: 'c1', month: MONTH, exchangeRate: RATE, eurRate: RATE,
   monthHours: FUND,
   people: { e1: person() },
+  kind: 'regular',
   ...over,
 })
 
@@ -263,24 +268,24 @@ describe('keptWhy — what the posting panel says about the kept run', () => {
   const drifted = run.totals.totalCost - 100
 
   it('asks for a calculation when nothing is kept', () => {
-    expect(keptWhy(undefined, run, money)).toBe(NOT_KEPT)
+    expect(keptWhy(undefined, run, 'regular', money)).toBe(NOT_KEPT)
   })
 
   it('says nothing about a draft that agrees', () => {
-    expect(keptWhy(kept({}), run, money)).toBeNull()
+    expect(keptWhy(kept({}), run, 'regular', money)).toBeNull()
   })
 
   it('asks a drifted draft to be recalculated', () => {
-    expect(keptWhy(kept({ total_cost: drifted }), run, money))
+    expect(keptWhy(kept({ total_cost: drifted }), run, 'regular', money))
       .toBe(KEPT_DIFFERS(money(drifted), money(run.totals.totalCost)))
   })
 
   it('says nothing about a posted run that agrees', () => {
-    expect(keptWhy(kept({ status: 'posted' }), run, money)).toBeNull()
+    expect(keptWhy(kept({ status: 'posted' }), run, 'regular', money)).toBeNull()
   })
 
   it('tells a drifted POSTED run to undo the posting first, never just to recalculate', () => {
-    const why = keptWhy(kept({ status: 'posted', total_cost: drifted }), run, money)
+    const why = keptWhy(kept({ status: 'posted', total_cost: drifted }), run, 'regular', money)
     expect(why).toBe(POSTED_DIFFERS(money(drifted), money(run.totals.totalCost)))
     expect(POSTED_DIFFERS('1.000,00', '1.100,00')).toBe(
       'Proknjiženo je 1.000,00, a sa današnjim podacima obračun iznosi 1.100,00. '
@@ -288,7 +293,153 @@ describe('keptWhy — what the posting panel says about the kept run', () => {
   })
 
   it('tolerates two paras of rounding, as the posting check always has', () => {
-    expect(keptWhy(kept({ total_cost: run.totals.totalCost + 0.019 }), run, money)).toBeNull()
-    expect(keptWhy(kept({ total_cost: run.totals.totalCost + 0.03 }), run, money)).not.toBeNull()
+    expect(keptWhy(kept({ total_cost: run.totals.totalCost + 0.019 }), run, 'regular', money)).toBeNull()
+    expect(keptWhy(kept({ total_cost: run.totals.totalCost + 0.03 }), run, 'regular', money)).not.toBeNull()
+  })
+})
+
+describe('a kept run carries its kind', () => {
+  const money = (n: number) => n.toFixed(2)
+  const run = runOf('regular')
+  const empty = { ...run, salaries: [], otherIncome: [] }
+  const kept = (over: Partial<SavedRun>): SavedRun => ({
+    id: 'k', company_id: 'c1', period_month: '2026-09-01', run_key: 'regular',
+    label: 'Zarade', status: 'draft', exchange_rate: RATE, eur_rate: RATE,
+    month_hours: FUND, gross: 0, net: 0, income_tax: 0,
+    contributions_employee: 0, contributions_employer: 0,
+    total_cost: run.totals.totalCost, deductions_third_party: 0, deductions_employer: 0,
+    calculated_at: '', posted_at: null, note: null, ...over,
+  })
+
+  it('the header says the month\'s kind', () => {
+    expect(headerOf(run, context({ kind: 'preliminary' })).kind).toBe('preliminary')
+    expect(headerOf(run, context()).kind).toBe('regular')
+  })
+
+  it('a row kept before the column existed reads as regular', () => {
+    expect(kindOf(kept({}))).toBe('regular')
+    expect(kindOf(kept({ kind: 'preliminary' }))).toBe('preliminary')
+  })
+
+  it('in step needs the same total AND the same kind', () => {
+    expect(keptState(null, run, 'regular')).toBe('none')
+    expect(keptState(kept({ kind: 'regular' }), run, 'regular')).toBe('in_step')
+    expect(keptState(kept({ kind: 'preliminary' }), run, 'regular')).toBe('stale_kind')
+    expect(keptState(kept({ kind: 'regular' }), run, 'preliminary')).toBe('stale_kind')
+    expect(keptState(kept({ total_cost: 1 }), run, 'regular')).toBe('stale_total')
+    expect(keptState(kept({ status: 'posted' }), run, 'preliminary')).toBe('posted')
+  })
+
+  it('the tolerance is the panel\'s: two paras are still in step, three are not', () => {
+    expect(keptState(kept({ total_cost: run.totals.totalCost + 0.019 }), run, 'regular')).toBe('in_step')
+    expect(keptState(kept({ total_cost: run.totals.totalCost + 0.03 }), run, 'regular')).toBe('stale_total')
+  })
+
+  it('a kept draft nobody is in any more is empty, not in step', () => {
+    expect(keptState(kept({ total_cost: 0 }), empty, 'regular')).toBe('empty')
+    expect(keptWhy(kept({ total_cost: 0 }), empty, 'regular', money)).toBe(KEPT_RUN_EMPTY)
+    // A posted one stays posted: it is undone, never removed.
+    expect(keptState(kept({ status: 'posted' }), empty, 'regular')).toBe('posted')
+  })
+
+  it('a draft kept as another kind is to be recalculated, by sentence', () => {
+    expect(keptWhy(kept({ kind: 'preliminary' }), run, 'regular', money))
+      .toBe(KEPT_KIND_DIFFERS('preliminary', 'regular'))
+    expect(KEPT_KIND_DIFFERS('preliminary', 'regular')).toBe(
+      'Sačuvani obračun je preliminaran, a obračun ovog meseca je sada redovan. '
+      + 'Ponovo obračunajte pre knjiženja.')
+  })
+
+  it('the run card\'s sentence is one constant', () => {
+    expect(KEPT_TOTAL_DIFFERS('1.000,00', '1.100,00')).toBe(
+      'Sačuvani obračun iznosi 1.000,00, a mesec sada iznosi 1.100,00. Nešto se u '
+      + 'međuvremenu promenilo — ponovo obračunajte pre knjiženja.')
+  })
+})
+
+describe('removeRun — a kept draft nobody is in any more', () => {
+  const target = { id: 'r9', company_id: 'c1', period_month: '2026-11-01', run_key: 'other' }
+  const client = (o: { byId?: any[]; byKey?: any[]; readError?: any; deleted?: any[]; deleteError?: any } = {}) => {
+    const calls: any = { deleted: 0, filters: [] as any[] }
+    const postings = () => {
+      const f: any = {}
+      const q: any = {
+        eq(col: string, v: any) { f[col] = v; return q },
+        limit: async () => {
+          calls.filters.push({ ...f })
+          if (o.readError) return { data: null, error: o.readError }
+          return { data: 'run_id' in f ? (o.byId ?? []) : (o.byKey ?? []), error: null }
+        },
+      }
+      return q
+    }
+    return {
+      calls,
+      from(table: string) {
+        if (table === 'payroll_postings') return { select: () => postings() }
+        const f: any = {}
+        const q: any = {
+          eq(col: string, v: any) { f[col] = v; return q },
+          select: async () => {
+            calls.deleted += 1
+            calls.deleteFilter = { ...f }
+            return { data: o.deleteError ? null : (o.deleted ?? [{ id: 'r9' }]), error: o.deleteError ?? null }
+          },
+        }
+        return { delete: () => q }
+      },
+    }
+  }
+
+  it('removes a draft with no posting, asking for status draft', async () => {
+    const c = client()
+    await removeRun(c, target)
+    expect(c.calls.deleted).toBe(1)
+    expect(c.calls.deleteFilter).toEqual({ id: 'r9', status: 'draft' })
+    expect(c.calls.filters).toEqual([
+      { run_id: 'r9' },
+      { company_id: 'c1', period_month: '2026-11-01', run_key: 'other' },
+    ])
+  })
+
+  it('refuses when a posting names the run, by id or by company, month and run', async () => {
+    const byId = client({ byId: [{ id: 'p1' }] })
+    await expect(removeRun(byId, target)).rejects.toThrow(RUN_HAS_POSTING)
+    expect(byId.calls.deleted).toBe(0)
+    const byKey = client({ byKey: [{ id: 'p1' }] })
+    await expect(removeRun(byKey, target)).rejects.toThrow(RUN_HAS_POSTING)
+    expect(byKey.calls.deleted).toBe(0)
+  })
+
+  it('refuses when the postings cannot be read, and when nothing was deleted', async () => {
+    await expect(removeRun(client({ readError: { message: 'x' } }), target)).rejects.toThrow(RUN_NOT_REMOVED)
+    await expect(removeRun(client({ deleted: [] }), target)).rejects.toThrow(RUN_NOT_REMOVED)
+    await expect(removeRun(client({ deleteError: { message: 'x' } }), target)).rejects.toThrow(RUN_NOT_REMOVED)
+  })
+})
+
+describe('the months list says posted and preliminary together', () => {
+  const run = (over: Partial<SavedRun>): SavedRun => ({
+    id: 'x', company_id: 'c1', period_month: '2026-11-01', run_key: 'regular',
+    label: 'Zarade', status: 'draft', exchange_rate: RATE, eur_rate: RATE,
+    month_hours: FUND, gross: 0, net: 0, income_tax: 0,
+    contributions_employee: 0, contributions_employer: 0,
+    total_cost: 0, deductions_third_party: 0, deductions_employer: 0,
+    calculated_at: '', posted_at: null, note: null, ...over,
+  })
+
+  it('counts the preliminary runs of a month', () => {
+    const [m] = byMonth([run({ kind: 'preliminary' }), run({ id: 'b', run_key: 'other' })])
+    expect(m.preliminary).toBe(1)
+  })
+
+  it('the badge', () => {
+    const badge = (rs: SavedRun[]) => monthBadge(byMonth(rs)[0])
+    expect(badge([run({ status: 'posted' })])).toBe('Proknjiženo')
+    expect(badge([run({})])).toBe('Nacrt')
+    expect(badge([run({ kind: 'preliminary' })])).toBe('Preliminarno')
+    expect(badge([run({ status: 'posted' }), run({ id: 'b', run_key: 'other' })])).toBe('Proknjiženo 1 od 2')
+    expect(badge([run({ status: 'posted' }), run({ id: 'b', run_key: 'other', kind: 'preliminary' })]))
+      .toBe('Proknjiženo 1 od 2 · Preliminarno')
   })
 })

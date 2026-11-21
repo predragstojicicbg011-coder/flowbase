@@ -22,10 +22,14 @@ import type { SplitLine } from '../expenseSplit'
 import { firstOfMonth } from './timesheets'
 import { postingTag } from './partnerMatch'
 import { countOf } from '../../utils/plural'
+import { PRELIMINARY_REFUSED, RUN_NOT_FOUND } from './preliminaryText'
 
 export interface PostContext {
   companyId: string
-  /** The saved run these entries come from. Posting freezes it. */
+  /**
+   * The saved run these entries come from. Posting freezes it, and refuses
+   * without it: what is posted has to be a kept, regular calculation.
+   */
   runId?: string | null
   /** Датум исплате — the date every invoice carries. */
   paymentDate: string
@@ -99,6 +103,19 @@ export async function postPlan(
 ): Promise<PostResult> {
   const why = checkPlan(plan)
   if (why) throw new Error(why)
+
+  // 0. The kept run, read before anything is claimed. A preliminary one is
+  // never posted, and a run that cannot be found is not posted either: what
+  // lands in the ledger has to be a calculation that was kept. The database
+  // refuses the same posting (payroll_postings_not_preliminary); this says it
+  // in words before anything is written.
+  if (!context.runId) throw new Error(RUN_NOT_FOUND)
+  const { data: keptRun, error: runErr } = await client
+    .from('payroll_runs').select('id, kind, status')
+    .eq('id', context.runId)
+    .maybeSingle()
+  if (runErr || !keptRun) throw new Error(RUN_NOT_FOUND)
+  if (keptRun.kind === 'preliminary') throw new Error(PRELIMINARY_REFUSED)
 
   // Every row carries its book amounts, worked out the one way the whole
   // ledger works them out. A missing EUR rate throws here, BEFORE the month
