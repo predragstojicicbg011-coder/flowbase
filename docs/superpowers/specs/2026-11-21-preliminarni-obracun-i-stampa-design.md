@@ -47,6 +47,17 @@ sve isto, samo nema R&D-a“. Odluke u toku izrade su u
   `supabase/tests/preliminary_payroll_test.sql`. Dokazana na privremenoj
   bazi od prazne; proba na `flowbase-demo` (pravilo 4) je vlasnikova.
 
+## Presude koje važe
+
+- **Praznik se deli kao i ostali sati.** Zaposleni koji dolazi ili odlazi u
+  toku meseca dobija iz šablona svaku kategoriju, i sate državnog praznika,
+  srazmerno radnim danima u obračunu — i kad je praznik pao pre dolaska ili
+  posle odlaska. Tako je zbir njegovih sati tačno njegov fond. Isto kao u
+  Mintflow-u (presuda tamo prihvaćena bez primedbe).
+- „Upiši pun mesec“ i panel broje drugačije: dugme upisuje svakom ko nema
+  evidenciju, a panel kaže koliko ih šablon zaista obračunava (bez onih koji
+  ovog meseca nemaju nijedan radni dan u obračunu).
+
 ## Redosled puštanja
 
 Migracija ide **pre** koda: strana upisuje `payroll_runs.kind` i čita
