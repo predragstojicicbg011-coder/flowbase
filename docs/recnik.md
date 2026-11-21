@@ -236,6 +236,10 @@ fajl.
 | Tax incentives | Poreske olakšice |
 | Forwarded deduction | Prosleđena obustava |
 | Retained deduction (reversal) | Zadržana obustava (storno) |
+| Preliminary (calculation) | Preliminarno / preliminarni obračun |
+| Regular (calculation) | Redovan obračun |
+| Preliminary hours (template) | Pretpostavljeni sati |
+| Running month | Tekući mesec |
 
 ## Opšte
 

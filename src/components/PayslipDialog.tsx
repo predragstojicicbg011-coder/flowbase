@@ -5,6 +5,7 @@ import type { EmployeeForMonth } from '../services/payroll/employees'
 import type { PayrollRates } from '../services/payroll/engine'
 import { fmtNum } from '../utils/formatters'
 import { monthLongLabel, srDate } from '../utils/months'
+import { PAYSLIP_TITLE, PAYSLIP_TITLE_PRELIMINARY } from '../services/payroll/preliminaryText'
 
 /**
  * One person's payslip, in the order MPP prints it.
@@ -20,7 +21,7 @@ import { monthLongLabel, srDate } from '../utils/months'
  */
 export default function PayslipDialog({
   line, person, rates, seniorityCoefficient, currencyRates,
-  runLabel, month, companyName, onClose,
+  runLabel, month, companyName, onClose, preliminary = false,
 }: {
   line: SalaryRunLine
   person: EmployeeForMonth | undefined
@@ -31,6 +32,8 @@ export default function PayslipDialog({
   month: string
   companyName: string
   onClose: () => void
+  /** A payslip of a preliminary month says so in its title. */
+  preliminary?: boolean
 }) {
   const p = payslipFor(line, person, rates, seniorityCoefficient, currencyRates)
 
@@ -47,7 +50,7 @@ export default function PayslipDialog({
       <div style={s.dialog} onClick={e => e.stopPropagation()}>
         <div style={s.header}>
           <div>
-            <div style={s.title}>Obračun zarade i naknade zarade</div>
+            <div style={s.title}>{preliminary ? PAYSLIP_TITLE_PRELIMINARY : PAYSLIP_TITLE}</div>
             <div style={s.sub}>
               {companyName} · {runLabel} · {monthLongLabel(month)}
             </div>

@@ -24,15 +24,21 @@ import {
 import { fetchAdditions, type AdditionRow } from '../services/payroll/additions'
 import {
   rateForMonth, rateBadge, rateNotice, postWaitsForTheTwentieth, convertsForeignAmount,
+  UNKNOWN_RATE_DAY,
 } from '../services/payroll/payrollRate'
 import {
   saveRun, fetchRuns, keptState, kindOf, removeRun, KEPT_TOTAL_DIFFERS,
   type SavedRun, type SaveContext,
 } from '../services/payroll/savedRuns'
-import { monthKind } from '../services/payroll/preliminaryHours'
 import {
-  KEPT_KIND_DIFFERS, KEPT_RUN_EMPTY, type RunKind,
+  monthKind, applyPreliminaryHours, templateProblem, type PreliminaryHoursRow,
+} from '../services/payroll/preliminaryHours'
+import {
+  KEPT_KIND_DIFFERS, KEPT_RUN_EMPTY, PRELIMINARY, NO_DAY_ON_PAYROLL, noticeFor, copyHeading,
+  type RunKind,
 } from '../services/payroll/preliminaryText'
+import { fetchPreliminaryHours } from '../services/payroll/preliminaryHoursStore'
+import PayrollComparison from '../components/PayrollComparison'
 import PayrollPostingPanel from '../components/PayrollPostingPanel'
 import SystemCategoryNotice from '../components/SystemCategoryNotice'
 import { useSystemCategories } from '../contexts/SystemCategoriesContext'
@@ -41,7 +47,7 @@ import PayrollMonths from '../components/PayrollMonths'
 import PayslipDialog from '../components/PayslipDialog'
 import { fmtNum } from '../utils/formatters'
 import { countOf } from '../utils/plural'
-import { srDate } from '../utils/months'
+import { srDate, monthLongLabel } from '../utils/months'
 import { belgradeToday } from '../utils/today'
 
 /**
@@ -93,6 +99,8 @@ export default function Payroll() {
   const [timesheets, setTimesheets] = useState<Record<string, TimesheetRow>>({})
   const [additions, setAdditions] = useState<AdditionRow[]>([])
   const [saved, setSaved] = useState<SavedRun[]>([])
+  /** The preliminary hours saved for the running month, as stored. */
+  const [savedTemplate, setSavedTemplate] = useState<PreliminaryHoursRow | null>(null)
   const [recalculating, setRecalculating] = useState<string | null>(null)
   /** Bumped whenever a kept run changes, so the months list reads again. */
   const [monthsKey, setMonthsKey] = useState(0)
@@ -111,7 +119,7 @@ export default function Payroll() {
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [emp, con, ded, set, hol, alloc, abs, ts, add] = await Promise.all([
+      const [emp, con, ded, set, hol, alloc, abs, ts, add, tpl] = await Promise.all([
         fetchEmployees(supabase, companyId || undefined),
         fetchContracts(supabase),
         fetchDeductions(supabase),
@@ -121,6 +129,9 @@ export default function Payroll() {
         fetchAbsences(supabase),
         fetchTimesheets(supabase, month),
         fetchAdditions(supabase, month),
+        // Only the running month has preliminary hours; any other is real.
+        month === belgradeToday().slice(0, 7)
+          ? fetchPreliminaryHours(supabase, month) : Promise.resolve(null),
       ])
       // ── The company payroll is actually run for, chosen once ──────────
       //
@@ -143,6 +154,7 @@ export default function Payroll() {
       setEmployees(emp); setContracts(con); setDeductions(ded)
       setSettings(set); setHolidays(hol)
       setAllocations(alloc); setAbsences(abs); setAdditions(add)
+      setSavedTemplate(tpl)
       setSaved(companyId ? await fetchRuns(supabase, companyId, month) : [])
       const byEmployee: Record<string, TimesheetRow> = {}
       for (const t of ts) byEmployee[t.employee_id] = t
@@ -201,11 +213,20 @@ export default function Payroll() {
   ), [employees, contracts, deductions, date, seniorityCoefficient, rate,
       allocations, absences])
 
+  // The template is applied only for the running month, and only while it
+  // still adds up to the month's fund; otherwise it is said and not used.
+  const running = month === belgradeToday().slice(0, 7)
+  const templateWhy = savedTemplate && running ? templateProblem(savedTemplate, fund) : null
+  const template = savedTemplate && running && !templateWhy ? savedTemplate : null
+  const merge = useMemo(() => applyPreliminaryHours({
+    month, people: roster.people, timesheets, template, holidays, absences,
+  }), [month, roster, timesheets, template, holidays, absences])
+
   const result = useMemo(() => {
     if (!rates.value) return null
     return runsFor({
       people: roster.people,
-      timesheets,
+      timesheets: merge.timesheets,
       rates: rates.value,
       monthHours: fund.monthHours,
       currencyRates: rate ? { EUR: rate.eur } : {},
@@ -213,7 +234,7 @@ export default function Payroll() {
       additions,
       month,
     })
-  }, [roster, timesheets, rates, fund, rate, month, coefficients, additions])
+  }, [roster, merge, rates, fund, rate, month, coefficients, additions])
 
   const money = (n: number) => fmtNum(n)
 
@@ -240,13 +261,31 @@ export default function Payroll() {
   /**
    * Preliminary or regular, for the whole month at once.
    *
-   * Any month is preliminary while it waits for the 20th's rate (it converts
+   * The running month is preliminary while anybody's hours are assumed (the
+   * template, or an all-zero row for a person with no day on the payroll);
+   * any month is preliminary while it waits for the 20th's rate (it converts
    * an amount that is not in dinars, and its rate is an earlier day's).
    */
-  const running = month === belgradeToday().slice(0, 7)
   const kind: RunKind = monthKind({
-    running, onTemplate: 0, rateSettled: waitsForRate === null,
+    running,
+    onTemplate: merge.onTemplate.length,
+    noDays: merge.noDays.length,
+    rateSettled: waitsForRate === null,
   })
+  const preliminary = kind === 'preliminary'
+  /** On the roster with no working day on the payroll: listed, not on hours. */
+  const noDayPeople = roster.people.filter(p => merge.noDays.includes(p.employee.id))
+
+  /** The notice above a preliminary month, word for word as the page shows it. */
+  const rateHalf = rate && waitsForRate !== null
+    ? { day: rate.quotedOn ? srDate(rate.quotedOn) : UNKNOWN_RATE_DAY, twentieth: srDate(rate.twentieth) }
+    : null
+  const notice = preliminary ? noticeFor({
+    onTemplate: merge.onTemplate.length,
+    people: roster.people.length,
+    noDays: merge.noDays.length,
+    rate: rateHalf,
+  }) : null
 
   /**
    * Whether the saved run still says what the calculation says.
@@ -292,6 +331,8 @@ export default function Payroll() {
 
   const copyForComparison = (run: PayrollRun) => {
     const rows = [
+      // A preliminary month says so on the first line of whatever it is pasted into.
+      ...(preliminary ? [copyHeading(monthLongLabel(month))] : []),
       ['Šifra', 'Zaposleni', 'Sati', 'Bruto', 'Osnovica za doprinose', 'Porez',
         'Doprinosi zaposlenog', 'Doprinosi poslodavca', 'Neto', 'Ukupan trošak'].join('\t'),
       ...run.salaries.map(s => [
@@ -350,7 +391,9 @@ export default function Payroll() {
           </div>
         )}
 
-        {rate && rateNotice(rate) && <div style={s.warn}>{rateNotice(rate)}</div>}
+        {/* The preliminary notice carries the rate's day itself when the month
+            waits for it, so the rate is not said twice. */}
+        {rate && rateNotice(rate) && !(notice && rateHalf) && <div style={s.warn}>{rateNotice(rate)}</div>}
 
         {rateError && (
           <div style={s.error}>
@@ -362,10 +405,12 @@ export default function Payroll() {
 
         <div style={fundIsProvenFor(fund) ? s.note : s.warn}>{explainFund(month, fund)}</div>
 
-        {roster.offPayroll.length > 0 && (
+        {templateWhy && <div style={s.warn}>{templateWhy}</div>}
+
+        {roster.offPayroll.length + noDayPeople.length > 0 && (
           <div style={s.offBox}>
             <div style={s.offTitle}>
-              Zaposleni koji namerno nisu u obračunu za ovaj mesec: {roster.offPayroll.length}
+              Zaposleni koji namerno nisu u obračunu za ovaj mesec: {roster.offPayroll.length + noDayPeople.length}
             </div>
             <div style={s.offHint}>
               Njihovu zaradu ova firma ne obračunava. Navedeni su umesto da budu izostavljeni:
@@ -379,6 +424,12 @@ export default function Payroll() {
                   {absenceLabel(o.absence.reason)} · {srDate(o.absence.valid_from)} →
                   {' '}{o.absence.valid_to ? srDate(o.absence.valid_to) : 'još nije vraćen'}
                 </span>
+              </div>
+            ))}
+            {noDayPeople.map(p => (
+              <div key={p.employee.id} style={s.offRow}>
+                <span style={s.offName}>{p.employee.full_name}</span>
+                <span style={s.offWhy}>{NO_DAY_ON_PAYROLL}</span>
               </div>
             ))}
           </div>
@@ -418,13 +469,23 @@ export default function Payroll() {
           <div style={s.emptyState}>Za ovaj mesec ništa ne može da se obračuna.</div>
         ) : (
           <>
+            {notice && <div style={s.warn}>{notice}</div>}
+
+            {/* Drawn only when nobody is missing: a total short of people
+                against last month's is every run down and everybody gone. */}
+            {preliminary && (
+              <PayrollComparison companyId={companyId} month={month} live={result.runs}
+                missing={roster.problems.length + result.problems.length} />
+            )}
+
             {total && (
               <div style={s.summaryRow} className="mf-stagger">
-                <Card label="Bruto" value={money(total.gross)} />
-                <Card label="Neto" value={money(total.net)} />
+                <Card label="Bruto" value={money(total.gross)} preliminary={preliminary} />
+                <Card label="Neto" value={money(total.net)} preliminary={preliminary} />
                 <Card label="Porez i doprinosi"
-                  value={money(total.incomeTax + total.employeeContributions + total.employerContributions)} />
-                <Card label="Ukupan trošak meseca" value={money(total.totalCost)} />
+                  value={money(total.incomeTax + total.employeeContributions + total.employerContributions)}
+                  preliminary={preliminary} />
+                <Card label="Ukupan trošak meseca" value={money(total.totalCost)} preliminary={preliminary} />
               </div>
             )}
 
@@ -440,6 +501,7 @@ export default function Payroll() {
                         <span style={s.runCount}>
                           {countOf(count, 'stavka', 'stavke', 'stavki')}
                         </span>
+                        {preliminary && <span style={s.preliminaryTag}>{PRELIMINARY}</span>}
                       </div>
                       <div style={s.runDesc}>{RUN_DESCRIPTIONS[run.key]}</div>
                     </div>
@@ -649,6 +711,7 @@ export default function Payroll() {
           runLabel={payslip.runLabel}
           month={month}
           companyName={companies.find(c => c.id === companyId)?.name || 'Sve firme'}
+          preliminary={preliminary}
           onClose={() => setPayslip(null)}
         />
       )}
@@ -656,11 +719,12 @@ export default function Payroll() {
   )
 }
 
-function Card({ label, value }: { label: string; value: string }) {
+function Card({ label, value, preliminary }: { label: string; value: string; preliminary?: boolean }) {
   return (
     <div style={s.summaryCard}>
       <div style={s.summaryLabel}>{label}</div>
       <div style={s.summaryVal}>{value}</div>
+      {preliminary && <div style={s.preliminaryLine}>{PRELIMINARY}</div>}
     </div>
   )
 }
@@ -684,6 +748,8 @@ const s: Record<string, React.CSSProperties> = {
   runHead: { width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px', background: 'none', border: 'none', padding: '14px 18px', cursor: 'pointer', textAlign: 'left' as const },
   runTitle: { fontSize: '15px', fontWeight: '600', color: '#DCE9F6', display: 'flex', alignItems: 'baseline', gap: '10px' },
   runCount: { fontSize: '11px', color: '#7A9BB8', fontWeight: '400' },
+  preliminaryTag: { fontSize: '10px', fontWeight: '600', padding: '1px 8px', borderRadius: '20px', background: 'rgba(200,162,74,0.15)', color: '#D8B96A' },
+  preliminaryLine: { fontSize: '11px', fontWeight: '600', color: '#D8B96A', marginTop: '4px' },
   runDesc: { fontSize: '11px', color: '#7A9BB8', marginTop: '4px', maxWidth: '560px', lineHeight: 1.5 },
   runTotal: { fontSize: '18px', fontWeight: '600', color: '#DCE9F6', fontVariantNumeric: 'tabular-nums' },
   runState: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', padding: '0 18px 12px' },

@@ -9,7 +9,9 @@ import {
   explainFund, fundIsProvenFor, fundForEmployee, type MonthFund,
 } from '../services/payroll/holidays'
 import type { EmployeeForMonth } from '../services/payroll/employees'
+import type { PreliminaryHoursRow } from '../services/payroll/preliminaryHours'
 import TimesheetImportDialog from './TimesheetImportDialog'
+import TimesheetPreliminaryPanel from './TimesheetPreliminaryPanel'
 import ProjectSelect from './ProjectSelect'
 import {
   fetchProjectHours, projectHoursByEmployee, saveProjectHours, checkProjectHours,
@@ -42,7 +44,10 @@ const fromDrafts = (rows: ProjectHoursDraft[]) =>
  * up to the month — is shown on every row, all the time, rather than at the
  * moment somebody tries to calculate.
  */
-export default function TimesheetGrid({ people, month, fund, workingDays }: {
+export default function TimesheetGrid({
+  people, month, fund, workingDays,
+  template = null, running = false, canSaveTemplate = false, onTemplateChanged = () => {},
+}: {
   people: EmployeeForMonth[]
   /** `YYYY-MM`. */
   month: string
@@ -50,6 +55,13 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
   fund: MonthFund
   /** Working days of the month, and how many each person was employed for. */
   workingDays: { total: number; forEmployee: (e: any) => number }
+  /** The preliminary hours saved for the running month, or null. */
+  template?: PreliminaryHoursRow | null
+  /** Whether this is the running month, the only one with preliminary hours. */
+  running?: boolean
+  /** Administrators and the owner save the preliminary hours. */
+  canSaveTemplate?: boolean
+  onTemplateChanged?: () => void
 }) {
   const monthHours = fund.monthHours
 
@@ -212,6 +224,11 @@ export default function TimesheetGrid({ people, month, fund, workingDays }: {
           </div>
         )}
       </div>
+
+      {running && (
+        <TimesheetPreliminaryPanel month={month} fund={fund} saved={template}
+          canSave={canSaveTemplate} missing={summary.missing} onChanged={onTemplateChanged} />
+      )}
 
       <div style={s.bar}>
         <div style={s.barStat}>

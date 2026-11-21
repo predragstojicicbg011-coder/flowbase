@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
 import { useCompanies } from '../contexts/CompaniesContext'
+import { useAuth } from '../contexts/AuthContext'
 import { SkeletonRows } from '../components/motion'
 import { getBookRates, type BookRates } from '../services/bookAmounts'
 import { fetchSettings, monthStart, numberFor, type SettingRow } from '../services/payroll/settings'
@@ -18,6 +19,8 @@ import {
 import {
   rateForMonth, rateBadge, rateNotice, RATE_WITHHELD,
 } from '../services/payroll/payrollRate'
+import { fetchPreliminaryHours } from '../services/payroll/preliminaryHoursStore'
+import type { PreliminaryHoursRow } from '../services/payroll/preliminaryHours'
 import EmployeeDialog from '../components/EmployeeDialog'
 import TimesheetGrid from '../components/TimesheetGrid'
 import AdditionsTab from '../components/AdditionsTab'
@@ -62,8 +65,13 @@ type Row =
 
 export default function HR() {
   const { companies, showPicker } = useCompanies()
+  const { role } = useAuth()
   const [companyId, setCompanyId] = useState<string>('')
   const [month, setMonth] = useState(() => belgradeToday().slice(0, 7))
+  /** The preliminary hours of the running month, as stored; read only for that month. */
+  const [template, setTemplate] = useState<PreliminaryHoursRow | null>(null)
+  const [templateKey, setTemplateKey] = useState(0)
+  const running = month === belgradeToday().slice(0, 7)
 
   const [employees, setEmployees] = useState<EmployeeRow[]>([])
   const [contracts, setContracts] = useState<ContractRow[]>([])
@@ -107,6 +115,17 @@ export default function HR() {
   }, [companyId])
 
   useEffect(() => { load() }, [load])
+
+  // Only the running month has preliminary hours; any other is real.
+  useEffect(() => {
+    let cancelled = false
+    setTemplate(null)
+    if (!running) return
+    fetchPreliminaryHours(supabase, month)
+      .then(t => { if (!cancelled) setTemplate(t) })
+      .catch(e => { if (!cancelled) setError(e.message || String(e)) })
+    return () => { cancelled = true }
+  }, [month, running, templateKey])
 
   // The rate of the 20th, which is the one the payslips use.
   useEffect(() => {
@@ -322,7 +341,10 @@ export default function HR() {
           <AdditionsTab month={month} people={peopleForHours} eurRate={rate?.eur ?? null} />
         ) : tab === 'hours' ? (
           <TimesheetGrid people={peopleForHours} month={month} fund={fund}
-            workingDays={workingDaysFor(month, holidays)} />
+            workingDays={workingDaysFor(month, holidays)}
+            template={template} running={running}
+            canSaveTemplate={role === 'administrator' || role === 'owner'}
+            onTemplateChanged={() => setTemplateKey(k => k + 1)} />
         ) : (
         <>
         <div style={s.summaryRow} className="mf-stagger">

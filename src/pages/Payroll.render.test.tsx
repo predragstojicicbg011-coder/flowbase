@@ -5,7 +5,10 @@ import type { SavedRun } from '../services/payroll/savedRuns'
 import { RATE_BADGE, RATE_NOT_YET_THE_TWENTIETHS, POST_WAITS_FOR_THE_TWENTIETH } from '../services/payroll/payrollRate'
 import { fmtNum } from '../utils/formatters'
 import type { AdditionRow } from '../services/payroll/additions'
-import { KEPT_KIND_DIFFERS, KEPT_RUN_EMPTY } from '../services/payroll/preliminaryText'
+import {
+  KEPT_KIND_DIFFERS, KEPT_RUN_EMPTY, NO_DAY_ON_PAYROLL, TEMPLATE_OFF_FUND, PAYSLIP_TITLE_PRELIMINARY,
+  copyHeading, noticeFor,
+} from '../services/payroll/preliminaryText'
 
 // ── The page's world, invented: one company, one person on a round dinar
 //    contract, November 2026 with no holiday rows. Plain functions over
@@ -30,6 +33,13 @@ const state = {
   contractCurrency: 'RSD',
   /** Every addition of the month, of every company: fetchAdditions does not filter. */
   additions: [] as AdditionRow[],
+  /** Whether Osoba A has a timesheet for the month. */
+  hasTimesheet: true,
+  /** The preliminary hours saved for the running month, and who asked. */
+  template: null as Record<string, unknown> | null,
+  templateReads: [] as string[],
+  /** Osoba A's off-payroll periods. */
+  absences: [] as unknown[],
 }
 
 const addition = (employeeId: string, currency: string): AdditionRow => ({
@@ -83,16 +93,24 @@ jest.mock('../services/payroll/employees', () => ({
   }],
   fetchDeductions: async () => [],
   fetchAllocations: async () => [],
-  fetchAbsences: async () => [],
+  fetchAbsences: async () => state.absences,
 }))
 jest.mock('../services/payroll/timesheets', () => {
   const actual = jest.requireActual('../services/payroll/timesheets')
   return {
     __esModule: true, ...actual,
     fetchTimesheets: async (_c: unknown, month: string) =>
-      [{ ...actual.emptyTimesheet('e-1', month), regular_hours: 168 }],
+      (state.hasTimesheet ? [{ ...actual.emptyTimesheet('e-1', month), regular_hours: 168 }] : []),
   }
 })
+jest.mock('../services/payroll/preliminaryHoursStore', () => ({
+  __esModule: true,
+  fetchPreliminaryHours: async (_c: unknown, month: string) => { state.templateReads.push(month); return state.template },
+}))
+jest.mock('../components/PayrollComparison', () => ({
+  __esModule: true,
+  default: ({ missing }: { missing: number }) => <div data-testid="comparison">missing={missing}</div>,
+}))
 jest.mock('../services/payroll/holidays', () => ({
   __esModule: true,
   ...jest.requireActual('../services/payroll/holidays'),
@@ -142,7 +160,21 @@ beforeEach(() => {
   state.quotedOn = '2026-11-20'
   state.contractCurrency = 'RSD'
   state.additions = []
+  state.hasTimesheet = true
+  state.template = null
+  state.templateReads = []
+  state.absences = []
 })
+
+/** November 2026 with no holiday rows: 21 weekdays, 168 hours. */
+const NOVEMBER = (over: Record<string, number> = {}) => {
+  const t: Record<string, unknown> = { month: '2026-11-01', note: null }
+  for (const f of ['regular_hours', 'holiday_hours', 'vacation_hours', 'sick_hours', 'sick_full_hours',
+    'sick_maternity_hours', 'sick_fund_hours', 'paid_leave_hours', 'religious_holiday_hours',
+    'military_court_hours', 'work_stoppage_hours', 'absence_hours', 'undocumented_hours',
+    'suspension_single_hours', 'suspension_family_hours', 'unpaid_hours']) t[f] = 0
+  return { ...t, regular_hours: 168, ...over }
+}
 
 const readsSettled = async (n: number) => waitFor(() => expect(state.monthReads).toBe(n))
 
@@ -292,5 +324,94 @@ describe('a kept draft nobody is in any more', () => {
     fireEvent.click(buttons[1])
     await waitFor(() => expect(state.removed).toEqual(['k-other']))
     expect(state.saves).toBe(0)
+  })
+})
+
+describe('the running month on preliminary hours', () => {
+  it('somebody with no timesheet is calculated on the template, and every figure says Preliminarno', async () => {
+    state.hasTimesheet = false
+    state.template = NOVEMBER()
+    render(<Payroll />)
+    const notice = noticeFor({ onTemplate: 1, people: 1 })
+    expect(await screen.findByText(notice)).toBeInTheDocument()
+    expect(notice).toBe('Preliminarno: na pretpostavljenim satima obračunato je 1 od 1 zaposlenih.')
+    expect(state.templateReads.length).toBeGreaterThan(0)
+    expect(state.templateReads.every(m => m === '2026-11')).toBe(true)
+    // Four summary cards and two run cards.
+    expect(screen.getAllByText('Preliminarno')).toHaveLength(6)
+    expect(screen.getByTestId('comparison')).toHaveTextContent('missing=0')
+    expect(screen.getByTestId('panel-kind')).toHaveTextContent('preliminary')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Ponovo obračunaj' })[0])
+    await waitFor(() => expect(state.savedKinds).toEqual(['preliminary']))
+    // Nobody is missing: the template stands in for the timesheet.
+    expect(screen.queryByText(/Ovo još nije provera/)).toBeNull()
+  })
+
+  it('the copied table says on its first line that it is preliminary', async () => {
+    state.hasTimesheet = false
+    state.template = NOVEMBER()
+    const written: string[] = []
+    Object.assign(navigator, { clipboard: { writeText: (t: string) => { written.push(t) } } })
+    render(<Payroll />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Zarade/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Kopiraj kao tabelu/ }))
+    expect(written[0].split('\n')[0]).toBe(copyHeading('novembar 2026'))
+  })
+
+  it('the payslip of a preliminary month says so in its title', async () => {
+    state.hasTimesheet = false
+    state.template = NOVEMBER()
+    render(<Payroll />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Zarade/ }))
+    fireEvent.click(await screen.findByText('Osoba A'))
+    expect(await screen.findByText(PAYSLIP_TITLE_PRELIMINARY)).toBeInTheDocument()
+  })
+
+  it('everybody on a timesheet and the 20th\'s rate: regular, no notice, no comparison', async () => {
+    state.template = NOVEMBER()
+    render(<Payroll />)
+    expect(await screen.findByTestId('panel-kind')).toHaveTextContent('regular')
+    expect(screen.queryByText(/^Preliminarno:/)).toBeNull()
+    expect(screen.queryByTestId('comparison')).toBeNull()
+    expect(screen.queryByText('Preliminarno')).toBeNull()
+  })
+
+  it('a template that no longer adds up to the fund is said and not used', async () => {
+    state.hasTimesheet = false
+    state.template = NOVEMBER({ regular_hours: 160 })
+    render(<Payroll />)
+    expect(await screen.findByText(TEMPLATE_OFF_FUND(160, 168))).toBeInTheDocument()
+    expect(await screen.findByText(/Ovo još nije provera/)).toBeInTheDocument()
+  })
+
+  it('another month reads no template and is calculated on real hours only', async () => {
+    state.hasTimesheet = false
+    state.template = NOVEMBER()
+    render(<Payroll />)
+    await screen.findByText(noticeFor({ onTemplate: 1, people: 1 }))
+    fireEvent.change(screen.getByDisplayValue('2026-11'), { target: { value: '2026-10' } })
+    expect(await screen.findByText(/Ovo još nije provera/)).toBeInTheDocument()
+    expect(state.templateReads.every(m => m === '2026-11')).toBe(true)
+  })
+
+  it('a person off payroll from the 2nd has no day on it: listed, not on hours, the month preliminary', async () => {
+    state.hasTimesheet = false
+    state.template = NOVEMBER()
+    state.absences = [{ id: 'a-1', employee_id: 'e-1', reason: 'unpaid_leave', valid_from: '2026-11-02', valid_to: null, note: null }]
+    render(<Payroll />)
+    expect(await screen.findByText(NO_DAY_ON_PAYROLL)).toBeInTheDocument()
+    expect(screen.getByText(noticeFor({ onTemplate: 0, people: 1, noDays: 1 }))).toBeInTheDocument()
+    expect(screen.getByTestId('panel-kind')).toHaveTextContent('preliminary')
+  })
+
+  it('a euro month before the 20th\'s list: the notice carries the rate, said once', async () => {
+    state.quotedOn = '2026-11-02'
+    state.contractCurrency = 'EUR'
+    render(<Payroll />)
+    const notice = noticeFor({ onTemplate: 0, people: 1, rate: { day: '02.11.2026.', twentieth: '20.11.2026.' } })
+    expect(await screen.findByText(notice)).toBeInTheDocument()
+    expect(notice).toBe('Preliminarno: Iznosi u evrima preračunati su po kursu od 02.11.2026., '
+      + 'a ne po kursu za 20.11.2026.')
+    expect(screen.queryByText(/još nije objavljen/)).toBeNull()
   })
 })

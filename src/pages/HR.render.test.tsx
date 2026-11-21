@@ -9,9 +9,21 @@ import { fmtNum } from '../utils/formatters'
 const state = {
   /** What the rate service answers: a day, or an outage. */
   rate: { quotedOn: '2026-11-20' } as { quotedOn?: string } | 'outage',
+  /** The signed-in role. */
+  role: 'administrator' as string | null,
+  /** The months the preliminary hours were read for. */
+  templateReads: [] as string[],
 }
 
 jest.mock('../supabase', () => ({ __esModule: true, supabase: {} }))
+jest.mock('../contexts/AuthContext', () => ({ __esModule: true, useAuth: () => ({ role: state.role }) }))
+jest.mock('../services/payroll/preliminaryHoursStore', () => ({
+  __esModule: true,
+  fetchPreliminaryHours: async (_c: unknown, month: string) => {
+    state.templateReads.push(month)
+    return { month: '2026-11-01', note: null, regular_hours: 160, holiday_hours: 8 }
+  },
+}))
 jest.mock('../utils/today', () => ({ __esModule: true, belgradeToday: () => '2026-11-20' }))
 jest.mock('../contexts/CompaniesContext', () => ({
   __esModule: true,
@@ -60,8 +72,16 @@ jest.mock('../services/payroll/employees', () => {
 // The tabs themselves are not under test: only who the page hands them.
 jest.mock('../components/TimesheetGrid', () => ({
   __esModule: true,
-  default: ({ people }: { people: { employee: { full_name: string } }[] }) =>
-    <div data-testid="grid">{people.map(p => p.employee.full_name).join(', ')}</div>,
+  default: ({ people, running, canSaveTemplate, template }: {
+    people: { employee: { full_name: string } }[]
+    running?: boolean; canSaveTemplate?: boolean; template?: { regular_hours: number } | null
+  }) => (
+    <div>
+      <div data-testid="grid">{people.map(p => p.employee.full_name).join(', ')}</div>
+      <div data-testid="grid-template">
+        {`running=${!!running} canSave=${!!canSaveTemplate} template=${template ? template.regular_hours : 'none'}`}
+      </div>
+    </div>),
 }))
 jest.mock('../components/AdditionsTab', () => ({
   __esModule: true,
@@ -69,7 +89,7 @@ jest.mock('../components/AdditionsTab', () => ({
     <div data-testid="additions">{people.map(p => p.employee.full_name).join(', ')}</div>,
 }))
 
-beforeEach(() => { state.rate = { quotedOn: '2026-11-20' } })
+beforeEach(() => { state.rate = { quotedOn: '2026-11-20' }; state.role = 'administrator'; state.templateReads = [] })
 
 describe('HR without a rate', () => {
   it('the timesheet grid keeps everybody, and says why no euro amounts are shown', async () => {
@@ -108,5 +128,40 @@ describe('the rate on HR', () => {
     render(<HR />)
     expect(await screen.findByText(RATE_BADGE(fmtNum(117), '02.11.2026.'))).toBeInTheDocument()
     expect(screen.getByText(RATE_NOT_YET_THE_TWENTIETHS('20.11.2026.', '02.11.2026.'))).toBeInTheDocument()
+  })
+})
+
+describe('the preliminary hours on HR', () => {
+  it('the running month hands the grid the saved template, and an administrator may save it', async () => {
+    render(<HR />)
+    fireEvent.click(screen.getByRole('button', { name: 'Evidencija radnog vremena' }))
+    await waitFor(() => expect(screen.getByTestId('grid-template'))
+      .toHaveTextContent('running=true canSave=true template=160'))
+    expect(state.templateReads).toEqual(['2026-11'])
+  })
+
+  it('the owner may save it; a manager or the assistant may not', async () => {
+    state.role = 'owner'
+    const owner = render(<HR />)
+    fireEvent.click(screen.getByRole('button', { name: 'Evidencija radnog vremena' }))
+    await waitFor(() => expect(screen.getByTestId('grid-template')).toHaveTextContent('canSave=true'))
+    owner.unmount()
+    for (const role of ['manager', 'administrative_assistant']) {
+      state.role = role
+      const r = render(<HR />)
+      fireEvent.click(screen.getByRole('button', { name: 'Evidencija radnog vremena' }))
+      await waitFor(() => expect(screen.getByTestId('grid-template')).toHaveTextContent('canSave=false'))
+      r.unmount()
+    }
+  })
+
+  it('another month has no preliminary hours and does not read them', async () => {
+    render(<HR />)
+    fireEvent.click(screen.getByRole('button', { name: 'Evidencija radnog vremena' }))
+    await waitFor(() => expect(state.templateReads).toEqual(['2026-11']))
+    fireEvent.change(screen.getByDisplayValue('2026-11'), { target: { value: '2026-10' } })
+    await waitFor(() => expect(screen.getByTestId('grid-template'))
+      .toHaveTextContent('running=false canSave=true template=none'))
+    expect(state.templateReads).toEqual(['2026-11'])
   })
 })
