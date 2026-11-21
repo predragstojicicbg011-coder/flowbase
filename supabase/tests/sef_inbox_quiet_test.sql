@@ -2,20 +2,22 @@
 --
 -- The new `sef_inbox_upsert` must leave every row exactly as the old one did
 -- (all columns but last_seen_at), report the same counts, and write no row
--- version when nothing changed -- except the rows the header's rule 4 keeps
--- writing (a decision on SEF the app did not make).
+-- version when SEF shows nothing new -- whatever the status. The key fold in
+-- it and in `sef_sales_upsert` must read exactly what jsonb_value_ci read,
+-- keys that differ only in case included; the sales body must still write
+-- every listed row.
 --
 -- Run in ONE transaction that is rolled back, with the migration (begin/commit
 -- stripped) in front when the database lacks it:
 --   begin; \i <migration>; \i supabase/tests/sef_inbox_quiet_test.sql; rollback;
 -- Safe on a live database: fixtures only (companies "Test SEF stari (TEST-SQ)"
--- and "Test SEF novi (TEST-SQ)", invented suppliers), helper functions named
--- sefq_*, always rolled back. Run as the database owner. Ends with ALL TESTS
--- PASSED.
+-- and "Test SEF novi (TEST-SQ)", invented suppliers and customers), helper
+-- functions named sefq_*, always rolled back. Run as the database owner. Ends
+-- with ALL TESTS PASSED.
 
 \set ON_ERROR_STOP on
 
--- ══ The old body, verbatim from 20261104090000, under a test name ═══════════
+-- ══ The old bodies, verbatim from 20261104090000, under test names ══════════
 
 create function public.sefq_upsert_old(
   p_company_id uuid,
@@ -136,6 +138,107 @@ begin
   return next;
 end $$;
 
+create function public.sefq_sales_old(
+  p_company_id uuid,
+  p_rows       jsonb)
+returns table (seen int, inserted int)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  with incoming as (
+    -- DISTINCT for the same reason as the purchase side: one array may carry
+    -- an invoice twice and `on conflict do update` refuses to touch a row twice
+    -- in one statement. The later position wins.
+    select distinct on (sef_invoice_id)
+      sef_invoice_id, status, comment, cir_invoice_id, glob_uniq_id,
+      document_number, document_type, customer_name, customer_vat_number,
+      customer_registration_number, amount, sum_without_vat, vat_amount,
+      currency, issue_date, delivery_date, due_date, overview_json, pos
+      from (
+      select
+        (public.jsonb_value_ci(r, 'sefInvoiceId'))::bigint                    as sef_invoice_id,
+        public.jsonb_value_ci(r, 'status')                                    as status,
+        public.jsonb_value_ci(r, 'comment')                                   as comment,
+        public.jsonb_value_ci(r, 'cirInvoiceId')                              as cir_invoice_id,
+        public.jsonb_value_ci(r, 'globUniqId')                                as glob_uniq_id,
+        public.jsonb_value_ci(r, 'documentNumber')                            as document_number,
+        public.jsonb_value_ci(r, 'documentType')                              as document_type,
+        public.jsonb_value_ci(r, 'customerName')                              as customer_name,
+        public.jsonb_value_ci(r, 'customerVatNumber')                         as customer_vat_number,
+        public.jsonb_value_ci(r, 'customerRegistrationNumber')                as customer_registration_number,
+        case when btrim(public.jsonb_value_ci(r, 'amount')) ~ '^[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$'
+             then btrim(public.jsonb_value_ci(r, 'amount'))::numeric end          as amount,
+        case when btrim(public.jsonb_value_ci(r, 'sumWithoutVat')) ~ '^[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$'
+             then btrim(public.jsonb_value_ci(r, 'sumWithoutVat'))::numeric end   as sum_without_vat,
+        case when btrim(public.jsonb_value_ci(r, 'vatAmount')) ~ '^[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$'
+             then btrim(public.jsonb_value_ci(r, 'vatAmount'))::numeric end       as vat_amount,
+        public.jsonb_value_ci(r, 'currency')                                  as currency,
+        case when public.jsonb_value_ci(r, 'issueDate') ~ '^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?([+-]\d{2}(:?\d{2})?|Z)?)?$'
+             then ((public.jsonb_value_ci(r, 'issueDate'))::timestamptz at time zone 'Europe/Belgrade')::date end as issue_date,
+        case when public.jsonb_value_ci(r, 'deliveryDate') ~ '^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?([+-]\d{2}(:?\d{2})?|Z)?)?$'
+             then ((public.jsonb_value_ci(r, 'deliveryDate'))::timestamptz at time zone 'Europe/Belgrade')::date end as delivery_date,
+        case when public.jsonb_value_ci(r, 'dueDate') ~ '^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?([+-]\d{2}(:?\d{2})?|Z)?)?$'
+             then ((public.jsonb_value_ci(r, 'dueDate'))::timestamptz at time zone 'Europe/Belgrade')::date end      as due_date,
+        r                                                                     as overview_json,
+        e.pos                                                                 as pos
+        from jsonb_array_elements(p_rows) with ordinality as e(r, pos)
+       where public.jsonb_value_ci(r, 'sefInvoiceId') ~ '^-?[0-9]+$'
+    ) q
+    order by sef_invoice_id, pos desc
+  ),
+  merged as (
+    insert into public.sef_inbox as t (
+      company_id, direction, sef_invoice_id, cir_invoice_id, glob_uniq_id,
+      document_number, document_type, customer_name,
+      customer_vat_number, customer_registration_number,
+      amount, sum_without_vat, vat_amount, currency,
+      issue_date, delivery_date, due_date, sent_date, sef_status, sef_comment,
+      overview_json)
+    select
+      p_company_id, 'sales', i.sef_invoice_id, i.cir_invoice_id, i.glob_uniq_id,
+      i.document_number, i.document_type, i.customer_name,
+      i.customer_vat_number, i.customer_registration_number,
+      i.amount, i.sum_without_vat, i.vat_amount, i.currency,
+      i.issue_date, i.delivery_date, i.due_date,
+      -- The window runs on `sent_date`; for an issued invoice that is the issue
+      -- date, at midnight in Belgrade.
+      case when i.issue_date is not null
+           then i.issue_date::timestamp at time zone 'Europe/Belgrade' end,
+      i.status, i.comment, i.overview_json
+      from incoming i
+    on conflict (company_id, direction, sef_invoice_id) do update set
+      -- ALWAYS, whatever has been decided: the status is what SEF says now.
+      sef_status   = coalesce(excluded.sef_status, t.sef_status),
+      sef_comment  = coalesce(excluded.sef_comment, t.sef_comment),
+      last_seen_at = now(),
+      -- The header only while the row is still to be decided.
+      cir_invoice_id               = case when t.state = 'pending' then excluded.cir_invoice_id               else t.cir_invoice_id               end,
+      glob_uniq_id                 = case when t.state = 'pending' then excluded.glob_uniq_id                 else t.glob_uniq_id                 end,
+      document_number              = case when t.state = 'pending' then excluded.document_number              else t.document_number              end,
+      document_type                = case when t.state = 'pending' then excluded.document_type                else t.document_type                end,
+      customer_name                = case when t.state = 'pending' then excluded.customer_name                else t.customer_name                end,
+      customer_vat_number          = case when t.state = 'pending' then excluded.customer_vat_number          else t.customer_vat_number          end,
+      customer_registration_number = case when t.state = 'pending' then excluded.customer_registration_number else t.customer_registration_number end,
+      amount                       = case when t.state = 'pending' then excluded.amount                       else t.amount                       end,
+      sum_without_vat              = case when t.state = 'pending' then excluded.sum_without_vat              else t.sum_without_vat              end,
+      vat_amount                   = case when t.state = 'pending' then excluded.vat_amount                   else t.vat_amount                   end,
+      currency                     = case when t.state = 'pending' then excluded.currency                     else t.currency                     end,
+      issue_date                   = case when t.state = 'pending' then excluded.issue_date                   else t.issue_date                   end,
+      delivery_date                = case when t.state = 'pending' then excluded.delivery_date                else t.delivery_date                end,
+      due_date                     = case when t.state = 'pending' then excluded.due_date                     else t.due_date                     end,
+      sent_date                    = case when t.state = 'pending' then excluded.sent_date                    else t.sent_date                    end,
+      overview_json                = case when t.state = 'pending' then excluded.overview_json                else t.overview_json                end
+    returning (xmax = 0) as was_insert
+  )
+  select count(*)::int, count(*) filter (where was_insert)::int
+    into seen, inserted
+    from merged;
+
+  return next;
+end $$;
+
 -- ══ The comparison: one payload through both bodies ═════════════════════════
 --
 -- Company A takes every payload through the old body, company B through the
@@ -144,6 +247,7 @@ end $$;
 -- the text of the whole row, so a JSON figure written 1.0 and 1.00 differs).
 -- The step reports what each body WROTE: the rows whose ctid moved (a new
 -- version, HOT or not) and the table's n_tup_upd for this transaction.
+-- p_kind 'sales' compares sefq_sales_old with sef_sales_upsert instead.
 
 create function public.sefq_rows(p_co uuid)
 returns setof text
@@ -158,7 +262,7 @@ create function public.sefq_ctids(p_co uuid)
 returns jsonb
 language sql
 as $$
-  select coalesce(jsonb_object_agg(sef_invoice_id::text, ctid::text), '{}'::jsonb)
+  select coalesce(jsonb_object_agg(direction || ':' || sef_invoice_id, ctid::text), '{}'::jsonb)
     from public.sef_inbox where company_id = p_co
 $$;
 
@@ -170,34 +274,41 @@ as $$
                     where relid = 'public.sef_inbox'::regclass), 0)
 $$;
 
-create function public.sefq_step(p_label text, p_rows jsonb)
+create function public.sefq_step(p_label text, p_rows jsonb, p_kind text default 'purchase')
 returns jsonb
 language plpgsql
 as $$
 declare
   a uuid := current_setting('sq.a')::uuid;
   b uuid := current_setting('sq.b')::uuid;
-  o record; n record;
+  o jsonb; n jsonb;
   c0 jsonb; c1 jsonb; u0 bigint; old_upd bigint; new_upd bigint;
   moved_new text[]; moved_old text[]; d int;
 begin
   c0 := public.sefq_ctids(a); u0 := public.sefq_updates();
-  select * into o from public.sefq_upsert_old(a, p_rows);
+  if p_kind = 'sales' then
+    select to_jsonb(x) into o from public.sefq_sales_old(a, p_rows) x;
+  else
+    select to_jsonb(x) into o from public.sefq_upsert_old(a, p_rows) x;
+  end if;
   old_upd := public.sefq_updates() - u0;
   c1 := public.sefq_ctids(a);
-  select coalesce(array_agg(k order by k), '{}') into moved_old
+  select coalesce(array_agg(split_part(k, ':', 2) order by k), '{}') into moved_old
     from jsonb_each_text(c0) e(k, v) where c1 ->> k is distinct from v;
 
   c0 := public.sefq_ctids(b); u0 := public.sefq_updates();
-  select * into n from public.sef_inbox_upsert(b, p_rows);
+  if p_kind = 'sales' then
+    select to_jsonb(x) into n from public.sef_sales_upsert(b, p_rows) x;
+  else
+    select to_jsonb(x) into n from public.sef_inbox_upsert(b, p_rows) x;
+  end if;
   new_upd := public.sefq_updates() - u0;
   c1 := public.sefq_ctids(b);
-  select coalesce(array_agg(k order by k), '{}') into moved_new
+  select coalesce(array_agg(split_part(k, ':', 2) order by k), '{}') into moved_new
     from jsonb_each_text(c0) e(k, v) where c1 ->> k is distinct from v;
 
-  if (o.seen, o.inserted, o.skipped) is distinct from (n.seen, n.inserted, n.skipped) then
-    raise exception 'FAIL [%]: counts differ: old %/%/% new %/%/%', p_label,
-      o.seen, o.inserted, o.skipped, n.seen, n.inserted, n.skipped;
+  if o is distinct from n then
+    raise exception 'FAIL [%]: counts differ: old % new %', p_label, o, n;
   end if;
 
   select count(*) into d from (
@@ -212,10 +323,34 @@ begin
          (select public.sefq_rows(b) except all select public.sefq_rows(a))) y);
   end if;
 
-  return jsonb_build_object(
-    'seen', n.seen, 'inserted', n.inserted, 'skipped', n.skipped,
+  return n || jsonb_build_object(
     'old_upd', old_upd, 'new_upd', new_upd,
     'moved_old', to_jsonb(moved_old), 'moved_new', to_jsonb(moved_new));
+end $$;
+
+-- A payload the bodies must REFUSE: both must fail with the same message, and
+-- neither may leave anything behind.
+create function public.sefq_refused(p_label text, p_rows jsonb, p_kind text default 'purchase')
+returns text
+language plpgsql
+as $$
+declare
+  a uuid := current_setting('sq.a')::uuid;
+  b uuid := current_setting('sq.b')::uuid;
+  m1 text; m2 text; before bigint; after bigint;
+begin
+  select count(*) into before from public.sef_inbox where company_id in (a, b);
+  begin
+    if p_kind = 'sales' then perform public.sefq_sales_old(a, p_rows); else perform public.sefq_upsert_old(a, p_rows); end if;
+  exception when others then m1 := sqlerrm; end;
+  begin
+    if p_kind = 'sales' then perform public.sef_sales_upsert(b, p_rows); else perform public.sef_inbox_upsert(b, p_rows); end if;
+  exception when others then m2 := sqlerrm; end;
+  select count(*) into after from public.sef_inbox where company_id in (a, b);
+  if m1 is null or m1 is distinct from m2 or before <> after then
+    raise exception 'FAIL [%]: old [%] new [%], rows % -> %', p_label, m1, m2, before, after;
+  end if;
+  return m2;
 end $$;
 
 -- What both companies get by hand, between steps: the owner's decisions.
@@ -284,6 +419,7 @@ begin
      "Amount": 1200, "SumWithoutVat": 1000, "VatAmount": 200, "Currency": "RSD", "DocumentNumber": "A-1/2026",
      "DeliveryDate": "2026-11-02T00:00:00+01:00", "DueDate": "2026-12-02", "SentDate": "2026-11-03T09:15:00+01:00"},
     {"InvoiceId": 1002, "Status": "Seen",     "SupplierName": "Dobavljač B", "Amount": 1200},
+    {"InvoiceId": 1003, "Status": "Approved", "SupplierName": "Dobavljač C", "Amount": 500},
     {"InvoiceId": 1004, "Status": "New",      "SupplierName": "Dobavljač D", "Amount": 700},
     {"InvoiceId": 1005, "Status": "New",      "SupplierName": "Dobavljač E", "Amount": 800},
     {"InvoiceId": 1006, "Status": "Approved", "SupplierName": "Dobavljač F", "Amount": 900},
@@ -291,27 +427,20 @@ begin
     {"InvoiceId": "abc", "Status": "New"}
   ]'::jsonb;
   r := public.sefq_step('2 repeat', p);
-  assert (r->>'seen')::int = 6 and (r->>'inserted')::int = 0 and (r->>'skipped')::int = 1,
+  assert (r->>'seen')::int = 7 and (r->>'inserted')::int = 0 and (r->>'skipped')::int = 1,
     'step 2 counts: ' || r::text;
-  -- The measurement itself works: the old body rewrote all six.
-  assert (r->>'old_upd')::int = 6 and jsonb_array_length(r->'moved_old') = 6,
-    'the old body did not rewrite the six (the measurement is broken): ' || r::text;
-  -- THE POINT: the new body writes no row version at all.
+  -- The measurement itself works: the old body rewrote all seven.
+  assert (r->>'old_upd')::int = 7 and jsonb_array_length(r->'moved_old') = 7,
+    'the old body did not rewrite the seven (the measurement is broken): ' || r::text;
+  -- THE POINT: the new body writes no row version at all -- 1003 included,
+  -- Approved on SEF with no decision from the app: an unchanged status is not
+  -- written again, so a trigger on `update of sef_status` does not fire.
   assert (r->>'new_upd')::int = 0 and r->'moved_new' = '[]'::jsonb,
     'the new body rewrote unchanged rows: ' || r::text;
 
   -- Once more, so a repeat of a repeat is quiet too.
   r := public.sefq_step('2 repeat again', p);
   assert (r->>'new_upd')::int = 0 and r->'moved_new' = '[]'::jsonb, 'second repeat wrote: ' || r::text;
-
-  -- A decision on SEF the app did not make (1003: Approved, sef_decision
-  -- null) is written every pass, as before -- a trigger following it fires.
-  -- 1006 (Approved, accepted through the app) is not.
-  r := public.sefq_step('2 approved outside', '[
-    {"InvoiceId": 1003, "Status": "Approved", "SupplierName": "Dobavljač C", "Amount": 500},
-    {"InvoiceId": 1006, "Status": "Approved", "SupplierName": "Dobavljač F", "Amount": 900}]'::jsonb);
-  assert r->'moved_new' = '["1003"]'::jsonb and (r->>'new_upd')::int = 1,
-    'only the row a trigger follows is rewritten: ' || r::text;
   raise notice '2 ok';
 end $$;
 
@@ -321,8 +450,8 @@ do $$
 declare r jsonb;
 begin
   -- 1004 is booked and goes New -> Seen: only the status comparison sees it
-  -- (not pending, not a decision). 1005 is declined and SEF cancels it.
-  -- 1008 is pending and goes Seen -> Rejected.
+  -- (not pending). 1005 is declined and SEF cancels it. 1008 is pending and
+  -- goes Seen -> Rejected.
   r := public.sefq_step('3 status', '[
     {"InvoiceId": 1004, "Status": "Seen",      "SupplierName": "Dobavljač D", "Amount": 700},
     {"InvoiceId": 1005, "Status": "Cancelled", "SupplierName": "Dobavljač E", "Amount": 800},
@@ -379,14 +508,13 @@ end $$;
 do $$
 declare r jsonb; v numeric; s text;
 begin
+  -- None of the three is pending and no status changes: no row version.
+  -- 1005 is Cancelled with no decision from the app; that alone writes nothing.
   r := public.sefq_step('5 decided figures', '[
     {"InvoiceId": 1004, "Status": "Seen",      "SupplierName": "Dobavljač D izmenjen", "Amount": 7777},
     {"InvoiceId": 1005, "Status": "Cancelled", "SupplierName": "Dobavljač E izmenjen", "Amount": 8888},
     {"InvoiceId": 1006, "Status": "Approved",  "SupplierName": "Dobavljač F izmenjen", "Amount": 9999}]'::jsonb);
-  -- 1004 (booked) and 1006 (accepted through the app) get no new version.
-  -- 1005 is Cancelled with no decision from the app, so rule 4 writes it --
-  -- with its old figures, as the old body did.
-  assert r->'moved_new' = '["1005"]'::jsonb and (r->>'new_upd')::int = 1, 'decided rows written: ' || r::text;
+  assert r->'moved_new' = '[]'::jsonb and (r->>'new_upd')::int = 0, 'decided rows written: ' || r::text;
   select amount, supplier_name into v, s from public.sef_inbox
    where company_id = current_setting('sq.b')::uuid and sef_invoice_id = 1004;
   assert v = 700 and s = 'Dobavljač D', 'the booked figures were overwritten: ' || v || ' ' || s;
@@ -444,9 +572,12 @@ begin
     {"InvoiceId": null, "Status": "New"},
     {"invoiceid": " 5", "Status": "New"},
     {"Status": "New"},
+    {},
     {"InvoiceId": 1002, "Status": "Seen", "SupplierName": "Dobavljač B", "Amount": 1200.00}]'::jsonb);
-  assert (r->>'seen')::int = 1 and (r->>'inserted')::int = 0 and (r->>'skipped')::int = 4, 'step 8 counts: ' || r::text;
+  assert (r->>'seen')::int = 1 and (r->>'inserted')::int = 0 and (r->>'skipped')::int = 5, 'step 8 counts: ' || r::text;
   assert r->'moved_new' = '[]'::jsonb, 'step 8 wrote: ' || r::text;
+  r := public.sefq_step('8 empty array', '[]'::jsonb);
+  assert (r->>'seen')::int = 0 and (r->>'inserted')::int = 0 and (r->>'skipped')::int = 0, 'empty array counts: ' || r::text;
   raise notice '8 ok';
 end $$;
 
@@ -455,10 +586,8 @@ end $$;
 do $$
 declare r jsonb; t timestamptz;
 begin
-  -- 1008 is rejected through the app first, so rule 4 does not write it.
-  -- Then nothing SEF sends differs from what the rows hold; only their age.
-  perform public.sefq_both($s$update public.sef_inbox set sef_decision = 'rejected', sef_decision_comment = 'netačan iznos'
-                              where company_id = %L and sef_invoice_id = 1008$s$);
+  -- Nothing SEF sends differs from what the rows hold; only their age.
+  -- (1008 is Rejected with no decision from the app: no reason to write.)
   perform public.sefq_both($s$update public.sef_inbox set last_seen_at = now() - interval '2 days'
                               where company_id = %L and sef_invoice_id = 1002$s$);
   perform public.sefq_both($s$update public.sef_inbox set last_seen_at = now() - interval '25 hours'
@@ -485,18 +614,148 @@ begin
   raise notice '9 ok';
 end $$;
 
--- ══ 10. The function as the catalogue holds it ══════════════════════════════
+-- ══ 10. The functions as the catalogue holds them ═══════════════════════════
 
 do $$
-declare f regprocedure := 'public.sef_inbox_upsert(uuid, jsonb)'::regprocedure;
+declare f regprocedure;
 begin
-  assert (select prosecdef from pg_proc where oid = f), 'not SECURITY DEFINER';
-  assert (select proconfig from pg_proc where oid = f) = array['search_path=public'], 'search_path changed';
-  assert pg_get_function_result(f) = 'TABLE(seen integer, inserted integer, skipped integer)', 'result changed';
-  assert not has_function_privilege('anon', f, 'execute'), 'anon may call it';
-  assert not has_function_privilege('authenticated', f, 'execute'), 'a signed-in account may call it';
-  assert has_function_privilege('service_role', f, 'execute'), 'the service role may not call it';
+  foreach f in array array['public.sef_inbox_upsert(uuid, jsonb)'::regprocedure,
+                           'public.sef_sales_upsert(uuid, jsonb)'::regprocedure]
+  loop
+    assert (select prosecdef from pg_proc where oid = f), f || ' not SECURITY DEFINER';
+    assert (select proconfig from pg_proc where oid = f) = array['search_path=public'], f || ' search_path changed';
+    assert not has_function_privilege('anon', f, 'execute'), 'anon may call ' || f;
+    assert not has_function_privilege('authenticated', f, 'execute'), 'a signed-in account may call ' || f;
+    assert has_function_privilege('service_role', f, 'execute'), 'the service role may not call ' || f;
+  end loop;
+  assert pg_get_function_result('public.sef_inbox_upsert(uuid, jsonb)'::regprocedure)
+           = 'TABLE(seen integer, inserted integer, skipped integer)', 'purchase result changed';
+  assert pg_get_function_result('public.sef_sales_upsert(uuid, jsonb)'::regprocedure)
+           = 'TABLE(seen integer, inserted integer)', 'sales result changed';
   raise notice '10 ok';
+end $$;
+
+-- ══ 11. The key fold reads exactly what jsonb_value_ci read (purchase) ══════
+
+do $$
+declare r jsonb; x record;
+begin
+  -- 11a. Keys that differ only in case. jsonb_value_ci returned the FIRST in
+  -- jsonb's storage order (shorter key first, then bytewise: upper before
+  -- lower), whatever order the text had them in.
+  r := public.sefq_step('11a case duplicates', '[
+    {"invoiceid": 1102, "InvoiceId": 1101, "amount": 2, "AMOUNT": 3, "Amount": 1,
+     "status": "Seen", "Status": "New", "suppliername": "Dobavljač K", "SupplierName": "Dobavljač J",
+     "DUEDATE": "2026-12-01", "dueDate": "2026-12-02", "duedate": "2026-12-03"}]'::jsonb);
+  select sef_invoice_id, amount, sef_status, supplier_name, due_date into x
+    from public.sef_inbox where company_id = current_setting('sq.b')::uuid and sef_invoice_id in (1101, 1102);
+  assert x.sef_invoice_id = 1101 and x.amount = 3 and x.sef_status = 'New'
+         and x.supplier_name = 'Dobavljač J' and x.due_date = date '2026-12-01',
+    'case duplicates read the wrong key: ' || row(x.*)::text;
+
+  -- 11b. Missing keys and nulls: null columns, the row still lands.
+  r := public.sefq_step('11b missing and null', '[
+    {"InvoiceId": 1103},
+    {"InvoiceId": 1104, "Amount": null, "Status": null, "SupplierName": null, "DueDate": null, "Comment": null},
+    {"INVOICEID": "1105", "STATUS": "New"}]'::jsonb);
+  assert (r->>'inserted')::int = 3, '11b inserts: ' || r::text;
+
+  -- 11c. Every JSON type where a figure, a text and a date are read.
+  r := public.sefq_step('11c types', '[
+    {"InvoiceId": 1106, "Amount": " 12.50 ", "SumWithoutVat": "abc", "VatAmount": {"x": 1},
+     "Currency": true, "SupplierName": "  razmak  ", "DocumentNumber": "", "DocumentType": [1, "2"],
+     "CirInvoiceId": 77, "GlobUniqId": "a\"b é", "Status": "New"},
+    {"InvoiceId": -3, "Amount": -0.5, "SumWithoutVat": 1e3, "VatAmount": "1e3", "Status": "Seen"}]'::jsonb);
+
+  -- 11d. Dates in every shape the guard accepts or refuses.
+  r := public.sefq_step('11d dates', '[
+    {"InvoiceId": 1107, "DeliveryDate": "2026-11-02",                "DueDate": "2026-11-02T23:30:00",      "SentDate": "2026-11-02T22:30:00Z"},
+    {"InvoiceId": 1108, "DeliveryDate": "2026-11-02T23:30:00+01:00", "DueDate": "2026-11-02 08:00",         "SentDate": "2026-11-02T10:15:30.123+0100"},
+    {"InvoiceId": 1109, "DeliveryDate": "02.11.2026",                "DueDate": null,                       "SentDate": "nije datum"},
+    {"InvoiceId": 1110, "deliverydate": "2026-11-30T23:59:59-05:00", "DUEDATE": "2026-12-31T23:00:00Z",     "sentdate": 20261102}]'::jsonb);
+
+  -- 11e. A generated grid: every key in four casings by turn, the id repeated
+  -- (the later wins), every third row carrying a second casing of three keys
+  -- with another value, figures and dates of every kind.
+  r := public.sefq_step('11e grid', (
+    select jsonb_agg(o order by g) from (
+      select g, (select jsonb_object_agg(k, v) from (
+          select case (g + i) % 4 when 0 then c when 1 then lower(c) when 2 then upper(c)
+                                  else lower(left(c, 1)) || substr(c, 2) end as k,
+                 case c
+                   when 'InvoiceId' then to_jsonb(1200 + g % 17)
+                   when 'Amount' then (array['1200', '"1200.5"', '" 99 "', '"abc"', 'null', '{"x": 1}', '-0.5'])[1 + g % 7]::jsonb
+                   when 'DeliveryDate' then (array['"2026-11-02"', '"2026-11-02T23:30:00"', '"2026-11-02T23:30:00+01:00"', '"x"', 'null'])[1 + g % 5]::jsonb
+                   when 'Status' then (array['"New"', '"Seen"', '"Approved"', 'null', '"Storno"'])[1 + g % 5]::jsonb
+                   else to_jsonb(c || '-' || g)
+                 end as v
+            from unnest(array['InvoiceId', 'CirInvoiceId', 'GlobUniqId', 'DocumentNumber', 'DocumentType',
+                              'SupplierName', 'SupplierVatRegistrationNumber', 'SupplierRegistrationNumber',
+                              'Amount', 'SumWithoutVat', 'VatAmount', 'Currency', 'DeliveryDate', 'DueDate',
+                              'SentDate', 'Status']) with ordinality as u(c, i)
+           where g > 0
+          union all
+          select upper(c) || '', to_jsonb('drugi-' || g)
+            from unnest(array['SupplierName', 'DocumentNumber', 'Status']) c
+           where g % 3 = 0) kv) as o
+        from generate_series(1, 60) g) z));
+  assert (r->>'seen')::int = 17, '11e distinct ids: ' || r::text;
+  -- And the same documents again: identical, so the new body writes nothing.
+  r := public.sefq_step('11e grid again', (
+    select jsonb_agg(overview_json order by sef_invoice_id) from public.sef_inbox
+     where company_id = current_setting('sq.b')::uuid and sef_invoice_id between 1200 and 1216));
+  assert (r->>'new_upd')::int = 0, '11e repeat wrote: ' || r::text;
+
+  -- 11f. An element that is not an object is refused, the same way, by both.
+  perform public.sefq_refused('11f number', '[{"InvoiceId": 1111}, 5]');
+  perform public.sefq_refused('11f null', '[null]');
+  perform public.sefq_refused('11f text', '["1112"]');
+  perform public.sefq_refused('11f array', '[[{"InvoiceId": 1113}]]');
+  perform public.sefq_refused('11f not an array', '{"InvoiceId": 1114}');
+  raise notice '11 ok';
+end $$;
+
+-- ══ 12. The sales pull: the same reads, the same writes ═════════════════════
+
+do $$
+declare r jsonb; x record; t timestamptz;
+begin
+  r := public.sefq_step('12a sales new', '[
+    {"sefInvoiceId": 3001, "status": "Sent", "globUniqId": "g-3001", "cirInvoiceId": "c-3001",
+     "documentNumber": "IF-1/2026", "documentType": "Invoice", "customerName": "Kupac A",
+     "customerVatNumber": "100000002", "customerRegistrationNumber": "20000002",
+     "amount": 1200, "sumWithoutVat": 1000, "vatAmount": 200, "currency": "RSD",
+     "issueDate": "2026-10-30", "deliveryDate": "2026-10-30T23:30:00", "dueDate": "2026-11-30T00:00:00+01:00"},
+    {"SefInvoiceId": 3002, "Status": "Sent", "CustomerName": "Kupac B", "Comment": "napomena", "IssueDate": "02.11.2026"},
+    {"sefinvoiceid": 3003, "SEFINVOICEID": 3004, "STATUS": "Paid", "status": "Sent", "Amount": 1, "AMOUNT": 3},
+    {"sefInvoiceId": "x"},
+    {"sefInvoiceId": 3001, "status": "Sent", "customerName": "Kupac A", "amount": 1300}]'::jsonb, 'sales');
+  assert (r->>'seen')::int = 3 and (r->>'inserted')::int = 3, '12a counts: ' || r::text;
+  select sef_invoice_id, sef_status, amount into x
+    from public.sef_inbox where company_id = current_setting('sq.b')::uuid and direction = 'sales' and sef_invoice_id in (3003, 3004);
+  assert x.sef_invoice_id = 3004 and x.sef_status = 'Paid' and x.amount = 3, 'sales case duplicates: ' || row(x.*)::text;
+
+  -- 12b. The same payload again: the sales body still writes EVERY listed row
+  -- and stamps last_seen_at (the ask-again queue orders by it).
+  perform public.sefq_both($s$update public.sef_inbox set last_seen_at = now() - interval '1 hour'
+                              where company_id = %L and direction = 'sales'$s$);
+  r := public.sefq_step('12b sales repeat', '[
+    {"SefInvoiceId": 3002, "Status": "Sent", "CustomerName": "Kupac B", "Comment": "napomena", "IssueDate": "02.11.2026"},
+    {"sefinvoiceid": 3003, "SEFINVOICEID": 3004, "STATUS": "Paid", "status": "Sent", "Amount": 1, "AMOUNT": 3}]'::jsonb, 'sales');
+  assert r->'moved_new' = '["3002", "3004"]'::jsonb and r->'moved_old' = r->'moved_new',
+    'the sales body no longer writes every listed row: ' || r::text;
+  select last_seen_at into t from public.sef_inbox
+   where company_id = current_setting('sq.b')::uuid and direction = 'sales' and sef_invoice_id = 3004;
+  assert t = now(), 'the sales body did not stamp last_seen_at: ' || t;
+
+  -- 12c. A status and a comment change; a booked sales row keeps its figures.
+  perform public.sefq_both($s$update public.sef_inbox set state = 'imported', imported_at = now()
+                              where company_id = %L and direction = 'sales' and sef_invoice_id = 3002$s$);
+  r := public.sefq_step('12c sales change', '[
+    {"SefInvoiceId": 3002, "Status": "Storno", "Comment": "greška", "CustomerName": "Kupac B izmenjen", "Amount": 5}]'::jsonb, 'sales');
+
+  perform public.sefq_refused('12d sales not an object', '[{"sefInvoiceId": 3005}, 7]', 'sales');
+  raise notice '12 ok';
 end $$;
 
 do $$ begin raise notice 'ALL TESTS PASSED'; end $$;
