@@ -496,10 +496,12 @@ export default function Payroll() {
             {notice && <div style={s.warn}>{notice}</div>}
 
             {/* Drawn only when nobody is missing: a total short of people
-                against last month's is every run down and everybody gone. */}
+                against last month's is every run down and everybody gone.
+                Missing means absent from every run, each person once — not
+                the page's warnings about people who are in the runs. */}
             {preliminary && (
               <PayrollComparison companyId={companyId} month={month} live={result.runs}
-                missing={roster.problems.length + result.problems.length} />
+                missing={gaps.missing} />
             )}
 
             {total && (

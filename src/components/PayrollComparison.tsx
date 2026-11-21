@@ -32,9 +32,10 @@ export default function PayrollComparison({ companyId, month, live, missing }: {
   month: string
   live: PayrollRun[]
   /**
-   * How many people are not in this month's calculation (the page's own
-   * blocking problems). A total missing people compared with last month's is
-   * every run down and everybody "no longer on it", so it is not drawn.
+   * How many people are absent from every run this month, each counted once
+   * (`printGaps(...).missing`). A total missing people compared with last
+   * month's is every run down and everybody "no longer on it", so it is not
+   * drawn. A warning about somebody who IS in the runs does not count.
    */
   missing: number
 }) {

@@ -43,6 +43,10 @@ const state = {
   templateReads: [] as string[],
   /** Osoba A's off-payroll periods. */
   absences: [] as unknown[],
+  /** Osoba A's deductions. */
+  deductions: [] as unknown[],
+  /** Whether the rate service is down. */
+  rateOutage: false,
 }
 
 const addition = (employeeId: string, currency: string): AdditionRow => ({
@@ -74,8 +78,10 @@ jest.mock('../contexts/SystemCategoriesContext', () => ({
 jest.mock('../components/SystemCategoryNotice', () => ({ __esModule: true, default: () => null }))
 jest.mock('../services/bookAmounts', () => ({
   __esModule: true,
-  getBookRates: async (date: string) =>
-    ({ eurRate: 117, usdRate: 100, date, quotedOn: state.quotedOn, source: 'NBS' }),
+  getBookRates: async (date: string) => {
+    if (state.rateOutage) throw new Error('Kurs NBS nije dostupan.')
+    return { eurRate: 117, usdRate: 100, date, quotedOn: state.quotedOn, source: 'NBS' }
+  },
 }))
 jest.mock('../services/payroll/settings', () => {
   const actual = jest.requireActual('../services/payroll/settings')
@@ -94,7 +100,7 @@ jest.mock('../services/payroll/employees', () => ({
     currency: state.contractCurrency, net_amount: state.contractCurrency === 'RSD' ? 100000 : 1000,
     service_years: null, note: null,
   }],
-  fetchDeductions: async () => [],
+  fetchDeductions: async () => state.deductions,
   fetchAllocations: async () => [],
   fetchAbsences: async () => state.absences,
 }))
@@ -167,6 +173,8 @@ beforeEach(() => {
   state.template = null
   state.templateReads = []
   state.absences = []
+  state.deductions = []
+  state.rateOutage = false
 })
 
 /** November 2026 with no holiday rows: 21 weekdays, 168 hours. */
@@ -460,5 +468,31 @@ describe('printing from the Payroll page', () => {
     const doc = frame()!.getAttribute('srcdoc')!
     expect(doc).toContain(`<h1 class="block">${PAYSLIP_TITLE_PRELIMINARY}</h1>`)
     expect(doc).toContain('<title>Preliminarno — Zarade novembar 2026 — Zarade — E-001 Osoba A</title>')
+  })
+})
+
+describe('who the comparison calls missing', () => {
+  it('a person in the runs with a euro deduction and no rate is warned about, not missing', async () => {
+    state.hasTimesheet = false
+    state.template = NOVEMBER()
+    state.rateOutage = true
+    state.deductions = [{
+      id: 'd-1', employee_id: 'e-1', label: 'Obustava A', goes_to: 'third_party', payee: 'Primalac A',
+      amount: 50, currency: 'EUR', percent_of_net: null, valid_from: '2025-01-01', valid_to: null,
+      is_active: true, note: null,
+    }]
+    render(<Payroll />)
+    // The page does warn about the deduction it cannot convert...
+    expect(await screen.findByText(/Obustave u valuti bez kursa/)).toBeInTheDocument()
+    // ...and the person is still in the run, so nobody is missing.
+    expect(screen.getByTestId('comparison')).toHaveTextContent('missing=0')
+  })
+
+  it('a person with no timesheet and no template is missing, once', async () => {
+    state.hasTimesheet = false
+    state.quotedOn = '2026-11-02'
+    state.contractCurrency = 'EUR'
+    render(<Payroll />)
+    expect(await screen.findByTestId('comparison')).toHaveTextContent('missing=1')
   })
 })
