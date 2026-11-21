@@ -39,6 +39,11 @@ import {
 } from '../services/payroll/preliminaryText'
 import { fetchPreliminaryHours } from '../services/payroll/preliminaryHoursStore'
 import PayrollComparison from '../components/PayrollComparison'
+import PayrollRunPrint from '../components/PayrollRunPrint'
+import {
+  recapPrint, allPayslipsPrint, payslipPrint, printGaps, NO_GAPS, PAYSLIP_NOT_PRINTABLE, COPY_HEADER,
+  type PrintSetting, type PayslipSource,
+} from '../services/payroll/payrollPrint'
 import PayrollPostingPanel from '../components/PayrollPostingPanel'
 import SystemCategoryNotice from '../components/SystemCategoryNotice'
 import { useSystemCategories } from '../contexts/SystemCategoriesContext'
@@ -106,7 +111,7 @@ export default function Payroll() {
   const [monthsKey, setMonthsKey] = useState(0)
   const monthsChanged = () => setMonthsKey(k => k + 1)
   const [payslip, setPayslip] = useState<
-    { line: SalaryRunLine; runLabel: string } | null>(null)
+    { line: SalaryRunLine; run: PayrollRun } | null>(null)
 
   /** The rate service's answer for the month's 20th, as it came. */
   const [quote, setQuote] = useState<BookRates | null>(null)
@@ -329,12 +334,31 @@ export default function Payroll() {
     setRecalculating(null)
   }
 
+  const companyName = companies.find(c => c.id === companyId)?.name || 'Sve firme'
+
+  /**
+   * Who a printed document leaves out, and whose figures in it the page warns
+   * about — by person, from the page's own problems: one person can raise
+   * several, and some problems leave the person in the runs.
+   */
+  const gaps = useMemo(() => (result ? printGaps(roster.problems, result) : NO_GAPS), [roster, result])
+
+  /** What every printed document is handed; the time is the moment of printing. */
+  const printSetting = (): PrintSetting => ({
+    companyName, month, kind, notice, gaps,
+    rate: rate ? { eur: rate.eur, quotedOn: rate.quotedOn } : null,
+    now: new Date(),
+  })
+  const payslipSource = (): PayslipSource | null => (rates.value ? {
+    rates: rates.value, seniorityCoefficient,
+    currencyRates: rate ? { EUR: rate.eur } : {}, people: peopleById,
+  } : null)
+
   const copyForComparison = (run: PayrollRun) => {
     const rows = [
       // A preliminary month says so on the first line of whatever it is pasted into.
       ...(preliminary ? [copyHeading(monthLongLabel(month))] : []),
-      ['Šifra', 'Zaposleni', 'Sati', 'Bruto', 'Osnovica za doprinose', 'Porez',
-        'Doprinosi zaposlenog', 'Doprinosi poslodavca', 'Neto', 'Ukupan trošak'].join('\t'),
+      COPY_HEADER.join('\t'),
       ...run.salaries.map(s => [
         s.code || '', s.name, s.hours, s.line.gross, s.line.contributionBase, s.line.incomeTax,
         s.line.employeeContributions, s.line.employerContributions,
@@ -494,21 +518,32 @@ export default function Payroll() {
               const isOpen = open === run.key
               return (
                 <div key={run.key} style={s.runCard}>
-                  <button style={s.runHead} onClick={() => setOpen(isOpen ? null : run.key)}>
-                    <div>
-                      <div style={s.runTitle}>
-                        {run.label}
-                        <span style={s.runCount}>
-                          {countOf(count, 'stavka', 'stavke', 'stavki')}
-                        </span>
-                        {preliminary && <span style={s.preliminaryTag}>{PRELIMINARY}</span>}
+                  <div style={s.runTop}>
+                    <button style={{ ...s.runHead, flex: 1, minWidth: 0 }}
+                      onClick={() => setOpen(isOpen ? null : run.key)}>
+                      <div>
+                        <div style={s.runTitle}>
+                          {run.label}
+                          <span style={s.runCount}>
+                            {countOf(count, 'stavka', 'stavke', 'stavki')}
+                          </span>
+                          {preliminary && <span style={s.preliminaryTag}>{PRELIMINARY}</span>}
+                        </div>
+                        <div style={s.runDesc}>{RUN_DESCRIPTIONS[run.key]}</div>
                       </div>
-                      <div style={s.runDesc}>{RUN_DESCRIPTIONS[run.key]}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' as const }}>
-                      <div style={s.runTotal}>{money(run.totals.totalCost)}</div>
-                    </div>
-                  </button>
+                      <div style={{ textAlign: 'right' as const }}>
+                        <div style={s.runTotal}>{money(run.totals.totalCost)}</div>
+                      </div>
+                    </button>
+                    <PayrollRunPrint run={run}
+                      recap={() => recapPrint(printSetting(), run, savedFor(run.key))}
+                      payslips={() => {
+                        const source = payslipSource()
+                        return source
+                          ? allPayslipsPrint(printSetting(), run, savedFor(run.key), source)
+                          : { ok: false, why: PAYSLIP_NOT_PRINTABLE }
+                      }} />
+                  </div>
 
                   {(count > 0 || savedFor(run.key)) && (
                     <div style={s.runState}>
@@ -591,7 +626,7 @@ export default function Payroll() {
                                 style={{ ...s.tr, background: i % 2 === 0 ? '#0D1B2C' : '#111F30',
                                   cursor: 'pointer' }}
                                 title="Otvori platni listić"
-                                onClick={() => setPayslip({ line, runLabel: run.label })}>
+                                onClick={() => setPayslip({ line, run })}>
                                 <td style={s.td}>
                                   <div style={{ fontWeight: '600', fontSize: '13px', color: '#00D47E' }}>
                                     {line.name}
@@ -708,11 +743,17 @@ export default function Payroll() {
           rates={rates.value}
           seniorityCoefficient={seniorityCoefficient}
           currencyRates={rate ? { EUR: rate.eur } : {}}
-          runLabel={payslip.runLabel}
+          runLabel={payslip.run.label}
           month={month}
-          companyName={companies.find(c => c.id === companyId)?.name || 'Sve firme'}
+          companyName={companyName}
           preliminary={preliminary}
           onClose={() => setPayslip(null)}
+          onPrint={() => {
+            const source = payslipSource()
+            return source
+              ? payslipPrint(printSetting(), payslip.run, savedFor(payslip.run.key), payslip.line, source)
+              : { ok: false, why: PAYSLIP_NOT_PRINTABLE }
+          }}
         />
       )}
     </div>
@@ -745,6 +786,7 @@ const s: Record<string, React.CSSProperties> = {
   summaryLabel: { fontSize: '10px', fontWeight: '600', color: 'rgba(255,255,255,0.30)', textTransform: 'uppercase' as const, letterSpacing: '0.08em', marginBottom: '6px' },
   summaryVal: { fontSize: '20px', fontWeight: '600', color: '#DCE9F6', fontVariantNumeric: 'tabular-nums' },
   runCard: { background: '#0D1B2C', border: '1px solid rgba(255,255,255,0.075)', borderRadius: '10px', marginBottom: '12px', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' },
+  runTop: { display: 'flex', alignItems: 'flex-start' },
   runHead: { width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px', background: 'none', border: 'none', padding: '14px 18px', cursor: 'pointer', textAlign: 'left' as const },
   runTitle: { fontSize: '15px', fontWeight: '600', color: '#DCE9F6', display: 'flex', alignItems: 'baseline', gap: '10px' },
   runCount: { fontSize: '11px', color: '#7A9BB8', fontWeight: '400' },

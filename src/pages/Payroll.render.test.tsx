@@ -9,6 +9,9 @@ import {
   KEPT_KIND_DIFFERS, KEPT_RUN_EMPTY, NO_DAY_ON_PAYROLL, TEMPLATE_OFF_FUND, PAYSLIP_TITLE_PRELIMINARY,
   copyHeading, noticeFor,
 } from '../services/payroll/preliminaryText'
+import { PRINT_FOOT, RECAP_TITLE, NO_PAYSLIPS_TO_PRINT } from '../services/payroll/payrollPrint'
+import { PRINT_FRAME_TITLE } from '../components/usePrintFrame'
+import { brand } from '../config/brand'
 
 // ── The page's world, invented: one company, one person on a round dinar
 //    contract, November 2026 with no holiday rows. Plain functions over
@@ -413,5 +416,49 @@ describe('the running month on preliminary hours', () => {
     expect(notice).toBe('Preliminarno: Iznosi u evrima preračunati su po kursu od 02.11.2026., '
       + 'a ne po kursu za 20.11.2026.')
     expect(screen.queryByText(/još nije objavljen/)).toBeNull()
+  })
+})
+
+describe('printing from the Payroll page', () => {
+  const frame = () => document.querySelector(`iframe[title="${PRINT_FRAME_TITLE}"]`)
+  afterEach(() => document.querySelectorAll('iframe').forEach(f => f.remove()))
+
+  it('the recap of a preliminary month carries the notice, the word and the foot naming the app', async () => {
+    window.print = () => {}
+    state.hasTimesheet = false
+    state.template = NOVEMBER()
+    render(<Payroll />)
+    const button = await screen.findByRole('button', { name: 'Štampaj rekapitulaciju — Zarade' })
+    fireEvent.click(button)
+    const doc = frame()!.getAttribute('srcdoc')!
+    expect(doc).toContain(RECAP_TITLE)
+    expect(doc).toContain(noticeFor({ onTemplate: 1, people: 1 }))
+    expect(doc).toContain('<div class="prelim">Preliminarno</div>')
+    expect(doc).toContain(PRINT_FOOT(brand.appName))
+    expect(doc).toContain('Osoba A')
+  })
+
+  it('every payslip of a run, and the other-income run has none to print', async () => {
+    window.print = () => {}
+    render(<Payroll />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Štampaj sve platne listiće — Zarade' }))
+    expect(frame()!.getAttribute('srcdoc')).toContain('E-001 — Osoba A')
+    const none = screen.getByRole('button', { name: 'Štampaj sve platne listiće — Ostala primanja' })
+    expect(none).toBeDisabled()
+    expect(none).toHaveAccessibleDescription('Nema šta da se štampa: u ovom obračunu nema nikoga.')
+    expect(NO_PAYSLIPS_TO_PRINT).toBe('Nema platnih listića za štampu: ovaj obračun nema stavki zarade.')
+  })
+
+  it('one payslip, from its dialog, says preliminary in its title', async () => {
+    window.print = () => {}
+    state.hasTimesheet = false
+    state.template = NOVEMBER()
+    render(<Payroll />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Zarade/ }))
+    fireEvent.click(await screen.findByText('Osoba A'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Štampaj ovaj platni listić' }))
+    const doc = frame()!.getAttribute('srcdoc')!
+    expect(doc).toContain(`<h1 class="block">${PAYSLIP_TITLE_PRELIMINARY}</h1>`)
+    expect(doc).toContain('<title>Preliminarno — Zarade novembar 2026 — Zarade — E-001 Osoba A</title>')
   })
 })

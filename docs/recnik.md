@@ -240,6 +240,8 @@ fajl.
 | Regular (calculation) | Redovan obračun |
 | Preliminary hours (template) | Pretpostavljeni sati |
 | Running month | Tekući mesec |
+| Payroll recap | Rekapitulacija obračuna zarade |
+| Print / Save as PDF | Štampaj / Sačuvaj kao PDF |
 
 ## Opšte
 

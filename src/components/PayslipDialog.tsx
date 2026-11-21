@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useId, useState } from 'react'
 import {
   payslipFor, payslipSections, PAYSLIP_COST_LABEL,
 } from '../services/payroll/payslip'
@@ -8,6 +8,10 @@ import type { PayrollRates } from '../services/payroll/engine'
 import { fmtNum } from '../utils/formatters'
 import { monthLongLabel } from '../utils/months'
 import { PAYSLIP_TITLE, PAYSLIP_TITLE_PRELIMINARY } from '../services/payroll/preliminaryText'
+import {
+  PRINT, PRINT_THIS_PAYSLIP, PAYSLIP_NOT_PRINTABLE, type PrintOutcome,
+} from '../services/payroll/payrollPrint'
+import { usePrintFrame } from './usePrintFrame'
 
 /**
  * One person's payslip, in the order MPP prints it.
@@ -23,7 +27,7 @@ import { PAYSLIP_TITLE, PAYSLIP_TITLE_PRELIMINARY } from '../services/payroll/pr
  */
 export default function PayslipDialog({
   line, person, rates, seniorityCoefficient, currencyRates,
-  runLabel, month, companyName, onClose, preliminary = false,
+  runLabel, month, companyName, onClose, preliminary = false, onPrint,
 }: {
   line: SalaryRunLine
   person: EmployeeForMonth | undefined
@@ -36,12 +40,22 @@ export default function PayslipDialog({
   onClose: () => void
   /** A payslip of a preliminary month says so in its title. */
   preliminary?: boolean
+  /** Builds this payslip's printed document; without it, Print is disabled. */
+  onPrint?: () => PrintOutcome
 }) {
   const p = payslipFor(line, person, rates, seniorityCoefficient, currencyRates)
   // The rows the printed payslip carries too, from the one model.
   const sections = payslipSections(p, person, currencyRates)
 
   const money = (n: number) => fmtNum(n)
+  const print = usePrintFrame()
+  const [refused, setRefused] = useState<string | null>(null)
+  const reasonId = useId()
+  const printThis = (button: HTMLElement) => {
+    if (!onPrint) return
+    const outcome = onPrint()
+    if (outcome.ok) { setRefused(null); print(outcome.html, button) } else setRefused(outcome.why)
+  }
 
   return (
     <div style={s.backdrop} onClick={onClose}>
@@ -53,8 +67,18 @@ export default function PayslipDialog({
               {companyName} · {runLabel} · {monthLongLabel(month)}
             </div>
           </div>
-          <button style={s.close} onClick={onClose} aria-label="Zatvori" title="Zatvori">✕</button>
+          <div style={s.headerTools}>
+            <button type="button" aria-label={PRINT_THIS_PAYSLIP} style={onPrint ? s.print : s.printDisabled}
+              aria-describedby={onPrint ? undefined : reasonId}
+              disabled={!onPrint} onClick={e => printThis(e.currentTarget)}>{PRINT}</button>
+            <button style={s.close} onClick={onClose} aria-label="Zatvori" title="Zatvori">✕</button>
+          </div>
         </div>
+        {(!onPrint || refused) && (
+          <div id={reasonId} role={refused ? 'alert' : undefined} style={refused ? s.refused : s.printNote}>
+            {refused ?? PAYSLIP_NOT_PRINTABLE}
+          </div>
+        )}
 
         <div style={s.body}>
           <div style={s.who}>
@@ -169,6 +193,11 @@ const s: Record<string, React.CSSProperties> = {
   title: { fontFamily: "'DM Serif Display', Georgia, serif", fontSize: '19px', color: '#DCE9F6' },
   sub: { fontSize: '12px', color: '#7A9BB8', marginTop: '3px' },
   close: { background: 'none', border: 'none', color: '#7A9BB8', fontSize: '15px', cursor: 'pointer' },
+  headerTools: { display: 'flex', alignItems: 'center', gap: '10px' },
+  print: { background: 'none', color: '#7A9BB8', border: '1px solid rgba(255,255,255,0.10)', borderRadius: '6px', padding: '4px 12px', fontSize: '11px', cursor: 'pointer' },
+  printDisabled: { background: 'none', color: '#3E5670', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '6px', padding: '4px 12px', fontSize: '11px', cursor: 'not-allowed' },
+  printNote: { padding: '6px 22px', fontSize: '11px', color: '#5C7894', borderBottom: '1px solid rgba(255,255,255,0.075)' },
+  refused: { padding: '6px 22px', fontSize: '11.5px', color: '#FF8E8D', borderBottom: '1px solid rgba(255,255,255,0.075)', lineHeight: 1.45 },
   body: { padding: '16px 22px 20px', overflowY: 'auto' as const, flex: 1 },
   who: { paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '4px' },
   whoName: { fontSize: '15px', fontWeight: '600', color: '#00D47E' },
