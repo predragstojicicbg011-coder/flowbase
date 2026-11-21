@@ -134,11 +134,17 @@ begin
     execute 'set local role authenticated';
     select count(*) into n from public.payroll_preliminary_hours;
     assert n = 0, format('%s reads %s template rows', v_who, n);
+    -- The running month's row exists, but the policy refuses before the
+    -- unique index is asked: only insufficient_privilege counts. A unique
+    -- violation here would mean the policy let the row through.
     begin
       insert into public.payroll_preliminary_hours (month, regular_hours)
       values (current_setting('po.month')::date, 1);
       raise exception 'FAIL: % wrote a template', v_who;
-    exception when insufficient_privilege or unique_violation then null;
+    exception
+      when insufficient_privilege then null;
+      when unique_violation then
+        raise exception 'FAIL: the policy let % insert; only the unique key stopped it', v_who;
     end;
     update public.payroll_preliminary_hours set regular_hours = 1;
     get diagnostics n = row_count;
@@ -150,6 +156,7 @@ begin
   end loop;
   assert (select regular_hours from public.payroll_preliminary_hours where month = current_setting('po.month')::date) = 152,
     'the template is untouched';
+  assert (select count(*) from public.payroll_preliminary_hours) = 1, 'nobody else wrote a row';
   raise notice '5 ok';
 end $$;
 
@@ -192,6 +199,30 @@ begin
   raise notice '7 ok';
 end $$;
 reset role;
+
+-- ══ 7b. With no row for the month, nobody else can write the first one ══════
+
+do $$
+declare
+  v_who text;
+begin
+  foreach v_who in array array['0e0f0000-0000-4000-8000-0000000000c3',
+                               '0e0f0000-0000-4000-8000-0000000000c4',
+                               '0e0f0000-0000-4000-8000-0000000000c5'] loop
+    perform set_config('request.jwt.claims', format('{"sub":"%s","role":"authenticated"}', v_who), true);
+    execute 'set local role authenticated';
+    begin
+      insert into public.payroll_preliminary_hours (month, regular_hours)
+      values (current_setting('po.month')::date, 168);
+      raise exception 'FAIL: % wrote the first template of the month', v_who;
+    exception when insufficient_privilege then null;
+    end;
+    execute 'reset role';
+  end loop;
+  assert not exists (select 1 from public.payroll_preliminary_hours
+                      where month = current_setting('po.month')::date), 'no row was written';
+  raise notice '7b ok';
+end $$;
 
 -- ══ 8. Every run is regular unless it says otherwise ════════════════════════
 

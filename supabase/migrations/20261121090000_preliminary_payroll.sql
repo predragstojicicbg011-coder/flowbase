@@ -419,6 +419,41 @@ begin
     end if;
   end loop;
 
+  -- The five functions as the catalogue holds them: every one pins
+  -- search_path to `public, pg_temp`; the four trigger functions run as their
+  -- owner (they must see every posting whatever the caller's policies say) and
+  -- nobody signed in may call them; payroll_belgrade_month reads no table, so
+  -- it runs with the caller's rights, authenticated may call it and anon not.
+  for r in select * from (values
+    ('payroll_belgrade_month(timestamp with time zone)', false),
+    ('payroll_preliminary_hours_running_month()', true),
+    ('payroll_runs_kind_guard()', true),
+    ('payroll_postings_not_preliminary()', true),
+    ('payroll_runs_delete_guard()', true)
+  ) as t(fn, definer) loop
+    if to_regprocedure('public.' || r.fn) is null then
+      raise exception 'public.% is not there -- rolling back', r.fn;
+    end if;
+    if (select p.prosecdef from pg_proc p where p.oid = to_regprocedure('public.' || r.fn)) is distinct from r.definer then
+      raise exception 'public.% is % SECURITY DEFINER and this file writes it % -- rolling back',
+        r.fn, case when r.definer then 'not' else 'now' end, case when r.definer then 'so' else 'without' end;
+    end if;
+    if not coalesce((select 'search_path=public, pg_temp' = any (p.proconfig)
+                       from pg_proc p where p.oid = to_regprocedure('public.' || r.fn)), false) then
+      raise exception 'public.% does not pin search_path to `public, pg_temp`: [%] -- rolling back', r.fn,
+        coalesce((select array_to_string(p.proconfig, ', ') from pg_proc p
+                   where p.oid = to_regprocedure('public.' || r.fn)), 'unset');
+    end if;
+    if r.definer and (has_function_privilege('anon', 'public.' || r.fn, 'execute')
+                      or has_function_privilege('authenticated', 'public.' || r.fn, 'execute')) then
+      raise exception 'anon or authenticated may execute public.% -- rolling back', r.fn;
+    end if;
+  end loop;
+  if has_function_privilege('anon', 'public.payroll_belgrade_month(timestamp with time zone)', 'execute')
+     or not has_function_privilege('authenticated', 'public.payroll_belgrade_month(timestamp with time zone)', 'execute') then
+    raise exception 'payroll_belgrade_month is not executable by authenticated alone among the two -- rolling back';
+  end if;
+
   -- What this file leaves as it found it.
   if not exists (select 1 from pg_indexes
                   where schemaname = 'public' and indexname = 'payroll_runs_once_idx'
