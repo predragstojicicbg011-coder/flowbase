@@ -342,7 +342,7 @@ export default function HR() {
         ) : tab === 'hours' ? (
           <TimesheetGrid people={peopleForHours} month={month} fund={fund}
             workingDays={workingDaysFor(month, holidays)}
-            template={template} running={running}
+            template={template} running={running} holidays={holidays} absences={absences}
             canSaveTemplate={role === 'administrator' || role === 'owner'}
             onTemplateChanged={() => setTemplateKey(k => k + 1)} />
         ) : (

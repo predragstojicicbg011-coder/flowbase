@@ -8,8 +8,9 @@ import {
 import {
   explainFund, fundIsProvenFor, fundForEmployee, type MonthFund,
 } from '../services/payroll/holidays'
-import type { EmployeeForMonth } from '../services/payroll/employees'
-import type { PreliminaryHoursRow } from '../services/payroll/preliminaryHours'
+import type { EmployeeForMonth, AbsenceRow } from '../services/payroll/employees'
+import type { HolidayRow } from '../services/payroll/holidays'
+import { applyPreliminaryHours, type PreliminaryHoursRow } from '../services/payroll/preliminaryHours'
 import TimesheetImportDialog from './TimesheetImportDialog'
 import TimesheetPreliminaryPanel from './TimesheetPreliminaryPanel'
 import ProjectSelect from './ProjectSelect'
@@ -47,6 +48,7 @@ const fromDrafts = (rows: ProjectHoursDraft[]) =>
 export default function TimesheetGrid({
   people, month, fund, workingDays,
   template = null, running = false, canSaveTemplate = false, onTemplateChanged = () => {},
+  holidays = [], absences = [],
 }: {
   people: EmployeeForMonth[]
   /** `YYYY-MM`. */
@@ -62,6 +64,9 @@ export default function TimesheetGrid({
   /** Administrators and the owner save the preliminary hours. */
   canSaveTemplate?: boolean
   onTemplateChanged?: () => void
+  /** The calendar and the off-payroll periods, for who the template would cover. */
+  holidays?: HolidayRow[]
+  absences?: AbsenceRow[]
 }) {
   const monthHours = fund.monthHours
 
@@ -182,6 +187,15 @@ export default function TimesheetGrid({
   }, [people, rows, fundFor])
 
   /**
+   * How many the template would calculate: the people with no timesheet, by
+   * the very rule Payroll applies — so somebody with no working day on the
+   * payroll this month (an all-zero row, not template hours) is not counted.
+   */
+  const onTemplate = useMemo(() => (template ? applyPreliminaryHours({
+    month, people, timesheets: rows, template, holidays, absences,
+  }).onTemplate.length : 0), [month, people, rows, template, holidays, absences])
+
+  /**
    * Which columns to draw.
    *
    * Fifteen categories is a spreadsheet, and most months use five of them. The
@@ -227,7 +241,7 @@ export default function TimesheetGrid({
 
       {running && (
         <TimesheetPreliminaryPanel month={month} fund={fund} saved={template}
-          canSave={canSaveTemplate} missing={summary.missing} onChanged={onTemplateChanged} />
+          canSave={canSaveTemplate} missing={onTemplate} onChanged={onTemplateChanged} />
       )}
 
       <div style={s.bar}>
