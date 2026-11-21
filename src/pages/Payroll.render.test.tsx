@@ -413,7 +413,7 @@ describe('the running month on preliminary hours', () => {
     render(<Payroll />)
     const notice = noticeFor({ onTemplate: 0, people: 1, rate: { day: '02.11.2026.', twentieth: '20.11.2026.' } })
     expect(await screen.findByText(notice)).toBeInTheDocument()
-    expect(notice).toBe('Preliminarno: Iznosi u evrima preračunati su po kursu od 02.11.2026., '
+    expect(notice).toBe('Preliminarno: iznosi u evrima preračunati su po kursu od 02.11.2026., '
       + 'a ne po kursu za 20.11.2026.')
     expect(screen.queryByText(/još nije objavljen/)).toBeNull()
   })

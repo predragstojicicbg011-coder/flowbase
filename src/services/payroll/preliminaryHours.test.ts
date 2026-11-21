@@ -3,7 +3,7 @@ import {
   timesheetFromTemplate, applyPreliminaryHours, monthKind, TEMPLATE_FIELDS,
   type PreliminaryHoursRow,
 } from './preliminaryHours'
-import { TEMPLATE_NEGATIVE, TEMPLATE_OFF_FUND } from './preliminaryText'
+import { TEMPLATE_NEGATIVE, TEMPLATE_OFF_FUND, noticeFor } from './preliminaryText'
 import { fundFor, fundForEmployee, workingDaysFor, type HolidayRow } from './holidays'
 import {
   employeesForMonth, type EmployeeRow, type ContractRow, type AbsenceRow,
@@ -252,5 +252,22 @@ describe('the kind of a month', () => {
     expect(monthKind({ running: true, onTemplate: 0, noDays: 1, rateSettled: true })).toBe('preliminary')
     expect(monthKind({ running: true, onTemplate: 0, noDays: 0, rateSettled: true })).toBe('regular')
     expect(monthKind({ running: false, onTemplate: 0, noDays: 1, rateSettled: true })).toBe('regular')
+  })
+})
+
+describe('the notice above a preliminary month', () => {
+  it('says each part only when it is true, and goes on in lower case after the colon', () => {
+    expect(noticeFor({ onTemplate: 3, people: 12 }))
+      .toBe('Preliminarno: na pretpostavljenim satima obračunato je 3 od 12 zaposlenih.')
+    expect(noticeFor({ onTemplate: 0, people: 12, noDays: 1 }))
+      .toBe('Preliminarno: 1 zaposleni bez ijednog radnog dana u obračunu ovog meseca nema evidenciju radnog vremena.')
+    expect(noticeFor({ onTemplate: 0, people: 12, noDays: 2 }))
+      .toBe('Preliminarno: 2 zaposlena bez ijednog radnog dana u obračunu ovog meseca nemaju evidenciju radnog vremena.')
+    expect(noticeFor({ onTemplate: 0, people: 12, rate: { day: '14.11.2026.', twentieth: '20.11.2026.' } }))
+      .toBe('Preliminarno: iznosi u evrima preračunati su po kursu od 14.11.2026., a ne po kursu za 20.11.2026.')
+    expect(noticeFor({ onTemplate: 3, people: 12, noDays: 1, rate: { day: 'nepoznatog dana', twentieth: '20.11.2026.' } }))
+      .toBe('Preliminarno: na pretpostavljenim satima obračunato je 3 od 12 zaposlenih. '
+        + '1 zaposleni bez ijednog radnog dana u obračunu ovog meseca nema evidenciju radnog vremena. '
+        + 'Iznosi u evrima preračunati su po kursu od nepoznatog dana, a ne po kursu za 20.11.2026.')
   })
 })

@@ -74,20 +74,22 @@ export function noticeFor(a: {
   /** The rate's day and the 20th's, both written `dd.mm.gggg.`, when the rate is not yet it. */
   rate?: { day: string; twentieth: string } | null
 }): string {
-  let text = 'Preliminarno:'
+  const parts: string[] = []
   if (a.onTemplate > 0) {
-    text += ` na pretpostavljenim satima obračunato je ${a.onTemplate} od ${a.people} zaposlenih.`
+    parts.push(`Na pretpostavljenim satima obračunato je ${a.onTemplate} od ${a.people} zaposlenih.`)
   }
   const noDays = a.noDays ?? 0
   if (noDays > 0) {
-    text += ` ${countOf(noDays, 'zaposleni', 'zaposlena', 'zaposlenih')} bez ijednog radnog dana `
-      + `u obračunu ovog meseca ${plural(noDays, 'nema', 'nemaju', 'nema')} evidenciju radnog vremena.`
+    parts.push(`${countOf(noDays, 'zaposleni', 'zaposlena', 'zaposlenih')} bez ijednog radnog dana `
+      + `u obračunu ovog meseca ${plural(noDays, 'nema', 'nemaju', 'nema')} evidenciju radnog vremena.`)
   }
   if (a.rate) {
-    text += ` Iznosi u evrima preračunati su po kursu od ${a.rate.day}, `
-      + `a ne po kursu za ${ending(a.rate.twentieth)}`
+    parts.push(`Iznosi u evrima preračunati su po kursu od ${a.rate.day}, `
+      + `a ne po kursu za ${ending(a.rate.twentieth)}`)
   }
-  return text
+  // After the colon the first part goes on in lower case, as Serbian writes it.
+  const [first = '', ...rest] = parts
+  return ['Preliminarno:', first.charAt(0).toLowerCase() + first.slice(1), ...rest].join(' ').trim()
 }
 
 export const POSTING_NOT_OFFERED = 'Preliminarni obračun se ne knjiži. Postaje redovan kada svi '
