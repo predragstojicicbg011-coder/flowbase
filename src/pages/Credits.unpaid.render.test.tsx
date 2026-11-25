@@ -97,6 +97,11 @@ describe('Vrati na neplaćeno', () => {
       'Vratiti ratu #1 (dospeće 31.10.2026.) kredita „Obrtni kredit“ na neplaćenu?',
       '',
       '· rata postaje neplaćena: plaćeno 0, bez datuma plaćanja i bez veze sa stavkom izvoda (sada plaćeno 1.250,00 EUR od 1.250,00 EUR)',
+      // #1 was paid by a bank line still in the books (transaction_id tx-1).
+      '· ratu je platila stavka izvoda koja je i dalje u knjigama. Ako je ta uplata pogrešna, obrišite izvod '
+        + 'kom pripada („Obriši izvod“): to u jednom koraku vraća ratu na neplaćenu i uklanja njene redove glavnice '
+        + 'i kamate (kod izvoda proknjiženih pre nego što je izvod pamtio te redove, njih ručno). Brisanje same '
+        + 'stavke na strani Transakcije vraća ratu, ali te redove ostavlja. Ovo dugme ne uklanja ni stavku ni te redove.',
       '· kredit je zatvoren, pa se ponovo otvara',
       '· SEF faktura kamate vezana za ovu ratu ostaje vezana',
       '',

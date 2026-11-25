@@ -27,6 +27,7 @@ import type { ScriptLike } from '../services/expenseSplit'
 import { fetchesQuietly, runLimited } from '../services/sef/documentPrefetch'
 import {
   loadInstalmentCandidates, loadDayRates, proposeInstalment, rememberedCredits,
+  rememberedCreditNames, rememberedSentence,
   linkToInstalment, differenceSentence, differs, needsRate, rankInstalments,
   type InstalmentCandidate, type InvoiceFacts, type DayRates,
 } from '../services/sef/creditInterestLink'
@@ -846,10 +847,22 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
       if (rpcErr) throw rpcErr
     } catch (e: any) {
       markedRows.current.delete(row.id)
+      // Linked to a credit instalment meanwhile (another tab, another
+      // person): the interest is already in the books with the instalment,
+      // and the invoice just saved books it a second time.
+      let nowLinked = false
+      try {
+        const { data: now } = await supabase.from('sef_inbox').select('state').eq('id', row.id).maybeSingle()
+        nowLinked = (now as any)?.state === 'linked'
+      } catch { /* the generic sentence below stands */ }
       if (mounted.current) {
         setRowError({
           id: row.id,
-          text: `The invoice was saved, but this row could not be marked as booked: ${e?.message || e}`,
+          text: nowLinked
+            ? 'Faktura je sačuvana u knjigama, ali je ovaj red SEF sandučeta u međuvremenu povezan sa ratom kredita, '
+              + 'pa nije označen kao proknjižen. Kamata je već u knjigama sa otplatom rate: obrišite upravo sačuvanu '
+              + 'fakturu, inače je kamata proknjižena dvaput.'
+            : `The invoice was saved, but this row could not be marked as booked: ${e?.message || e}`,
         })
       }
       return
@@ -929,7 +942,10 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     // A bank whose PIB is remembered on a credit: its invoice is interest, and
     // the instalment is proposed instead of a classification.
     const creditProposal = row.state === 'pending' ? proposeInstalment(factsOf(row), instalments, ratesOf(row)) : null
-    const proposal = creditProposal ? null : proposalFor(row, match)
+    // Remembered but matching nothing: no category proposal either, because a
+    // proposal invites booking what may be interest already in the books.
+    const rememberedOn = row.state === 'pending' && !creditProposal ? rememberedCreditNames(factsOf(row), instalments) : []
+    const proposal = creditProposal || rememberedOn.length > 0 ? null : proposalFor(row, match)
     const linkedTo = row.state === 'linked' && row.credit_installment_id
       ? instalmentById.get(row.credit_installment_id) ?? null : null
     const linkedDiff = linkedTo ? linkedDifference(row, linkedTo) : null
@@ -991,6 +1007,11 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
         {creditProposal && (
           <div style={{ ...s.flag, color: DIALOG.dim, background: DIALOG.raised }}>
             Predlog: poveži sa kreditom „{creditProposal.creditName}“ · rata #{creditProposal.installmentNo} · dospeva {fmtDate(creditProposal.dueDate)} · kamata {fmtAmount(creditProposal.interestAmount, creditProposal.currency)}. PIB ovog dobavljača je zapamćen na tom kreditu.
+          </div>
+        )}
+        {rememberedOn.length > 0 && (
+          <div data-testid="remembered-pib" style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>
+            {rememberedSentence(rememberedOn)}
           </div>
         )}
         {proposal && (

@@ -1,6 +1,6 @@
 import {
   rankInstalments, proposeInstalment, differenceSentence, linkToInstalment, loadInstalmentCandidates,
-  convert, differs, MATCH_TOLERANCE,
+  convert, differs, MATCH_TOLERANCE, matchTolerance, rememberedCreditNames, rememberedSentence,
   type InstalmentCandidate, type InvoiceFacts, type DayRates,
 } from './creditInterestLink'
 
@@ -142,7 +142,7 @@ describe('the sentence that says the difference', () => {
   it('says the converted amount, the rate and its day across currencies', () => {
     const [r] = rankInstalments(invoice({ amount: 56130, currency: 'RSD' }), [inst({ interestAmount: 478.94 })], { rates: RATES })
     expect(differenceSentence({ amount: 56130, currency: 'RSD' }, r, '2026-10-31'))
-      .toBe('faktura 56.130,00 RSD ≈ 478,92 EUR po srednjem kursu NBS za 31.10.2026. (1 EUR = 117,2000 RSD), kamata rate 478,94 EUR, razlika -0,02 EUR')
+      .toBe('faktura 56.130,00 RSD ≈ 478,92 EUR po srednjem kursu NBS za 31.10.2026. (1 EUR = 117,2000 RSD), kamata rate 478,94 EUR, razlika -0,02 EUR (u okviru tolerancije preračuna od 2,39 EUR)')
   })
 
   it('says the rate is missing rather than a difference it cannot know', () => {
@@ -232,5 +232,61 @@ describe('reading the candidates', () => {
       bank: 'Larkspur banka', creditStatus: 'active', kind: 'revolving', currency: 'EUR',
       lenderPib: '900000017', installmentNo: 3, dueDate: '2026-10-31', interestAmount: 262.01, paidState: 'partial',
     })
+  })
+})
+
+describe('the tolerance across currencies (fix round 1)', () => {
+  const dinars = (amount: number) => invoice({ amount, currency: 'RSD' })
+
+  it('is 0,5 % of the interest, never less than a cent, and only across currencies', () => {
+    expect(matchTolerance(true, 262.01)).toBe(1.31)
+    expect(matchTolerance(true, 1)).toBe(0.01)
+    expect(matchTolerance(false, 262.01)).toBe(0.01)
+  })
+
+  it('counts a 0,07 EUR miss after conversion as a match, and says it is within the tolerance', () => {
+    // 30.715,78 RSD at 117,2 is 262,08 EUR; the interest is 262,01 EUR.
+    const [r] = rankInstalments(dinars(30715.78), [inst({ interestAmount: 262.01 })], { rates: RATES })
+    expect(r.difference).toBe(0.07)
+    expect(r.matches).toBe(true)
+    expect(differs(30715.78, r)).toBe(true)
+    expect(differenceSentence({ amount: 30715.78, currency: 'RSD' }, r, '2026-10-31'))
+      .toBe('faktura 30.715,78 RSD ≈ 262,08 EUR po srednjem kursu NBS za 31.10.2026. (1 EUR = 117,2000 RSD), '
+        + 'kamata rate 262,01 EUR, razlika 0,07 EUR (u okviru tolerancije preračuna od 1,31 EUR)')
+  })
+
+  it('proposes that instalment from a remembered PIB', () => {
+    expect(proposeInstalment(dinars(30715.78), [inst({ lenderPib: '900000017', interestAmount: 262.01 })], RATES)?.installmentId)
+      .toBe('i-1')
+  })
+
+  it('does not match a fee invoice from the same bank', () => {
+    const fee = dinars(1500)
+    const [r] = rankInstalments(fee, [inst({ interestAmount: 262.01 })], { rates: RATES })
+    expect(r.matches).toBe(false)
+    expect(differenceSentence({ amount: 1500, currency: 'RSD' }, r, '2026-10-31')).not.toMatch(/tolerancije/)
+    expect(proposeInstalment(fee, [inst({ lenderPib: '900000017', interestAmount: 262.01 })], RATES)).toBeNull()
+  })
+
+  it('keeps the one-cent rule within one currency', () => {
+    expect(rankInstalments(invoice({ amount: 262.08 }), [inst({ interestAmount: 262.01 })])[0].matches).toBe(false)
+  })
+})
+
+describe('a remembered PIB with no match', () => {
+  it('names the credits that remember it, once each, active only', () => {
+    const r = (over: Partial<InstalmentCandidate>) => inst({ lenderPib: '900000017', ...over })
+    expect(rememberedCreditNames(invoice(), [
+      r({ installmentId: 'a' }), r({ installmentId: 'b' }),
+      r({ installmentId: 'c', creditName: 'Zatvoren', creditStatus: 'closed' }),
+      inst({ installmentId: 'd', creditName: 'Drugi' }),
+    ])).toEqual(['Obrtni kredit'])
+  })
+
+  it('says to link it if it is interest', () => {
+    expect(rememberedSentence(['Obrtni kredit'])).toBe(
+      'PIB ovog dobavljača je zapamćen na kreditu „Obrtni kredit“, ali kamata nijedne rate se ne poklapa sa iznosom. '
+      + 'Ako je ovo kamata, povežite je sa ratom; ako je provizija ili druga usluga banke, proknjižite je.')
+    expect(rememberedSentence(['A', 'B'])).toMatch(/^PIB ovog dobavljača je zapamćen na kreditima „A“, „B“, /)
   })
 })

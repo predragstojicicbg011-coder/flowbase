@@ -22,6 +22,8 @@ export interface UnpaidCandidate {
   status: string
   paid_amount: number | null
   total_amount: number
+  /** The bank line that paid it, when one is stamped (statement or transaction dialog). */
+  transaction_id?: string | null
 }
 
 /** A paid, or partly paid, instalment can go back to unpaid. */
@@ -41,6 +43,7 @@ export function unpaidQuestion(
     `· rata postaje neplaćena: plaćeno 0, bez datuma plaćanja i bez veze sa stavkom izvoda`
       + (paid > 0 ? ` (sada plaćeno ${fmtMoney(paid, credit.currency)} od ${fmtMoney(i.total_amount, credit.currency)})` : ''),
   ]
+  if (i.transaction_id) lines.push(PAID_BY_A_LINE)
   if (credit.status === 'closed') lines.push('· kredit je zatvoren, pa se ponovo otvara')
   if (linkedSefInvoices > 0) {
     lines.push(linkedSefInvoices === 1
@@ -51,6 +54,18 @@ export function unpaidQuestion(
   lines.push(UNPAID_LEAVES_LEGS)
   return lines.join('\n')
 }
+
+/**
+ * When a bank line still in the books paid the instalment, the delete is the
+ * better way out: "Obriši izvod" returns the instalment AND takes the rows it
+ * posted (20261125090000). A line deleted alone on Transakcije returns the
+ * instalment but leaves the rows (writeOrder.deleteConfirmText says so).
+ */
+export const PAID_BY_A_LINE =
+  '· ratu je platila stavka izvoda koja je i dalje u knjigama. Ako je ta uplata pogrešna, obrišite izvod '
+  + 'kom pripada („Obriši izvod“): to u jednom koraku vraća ratu na neplaćenu i uklanja njene redove glavnice '
+  + 'i kamate (kod izvoda proknjiženih pre nego što je izvod pamtio te redove, njih ručno). Brisanje same '
+  + 'stavke na strani Transakcije vraća ratu, ali te redove ostavlja. Ovo dugme ne uklanja ni stavku ni te redove.'
 
 /** The rows a payment already posted stay where they are. */
 export const UNPAID_LEAVES_LEGS =

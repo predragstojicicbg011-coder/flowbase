@@ -1,5 +1,5 @@
 import {
-  canReturnToUnpaid, unpaidQuestion, markInstallmentUnpaid, unpaidDone, UNPAID_LEAVES_LEGS,
+  canReturnToUnpaid, unpaidQuestion, markInstallmentUnpaid, unpaidDone, UNPAID_LEAVES_LEGS, PAID_BY_A_LINE,
 } from './creditInstallmentUnpaid'
 
 // Invented credit and figures.
@@ -40,6 +40,17 @@ describe('the question', () => {
     expect(q).toContain('\n· SEF faktura kamate vezana za ovu ratu ostaje vezana\n')
     expect(unpaidQuestion(inst(), credit(), 2)).toContain('· SEF fakture kamate vezane za ovu ratu (2) ostaju vezane')
     expect(q.endsWith(UNPAID_LEAVES_LEGS)).toBe(true)
+  })
+
+  it('when a bank line still in the books paid it, says the delete is the way that also takes the rows', () => {
+    const q = unpaidQuestion(inst({ transaction_id: 'tx-1' }), credit(), 0)
+    expect(q.split('\n')[3]).toBe(PAID_BY_A_LINE)
+    expect(PAID_BY_A_LINE).toBe(
+      '· ratu je platila stavka izvoda koja je i dalje u knjigama. Ako je ta uplata pogrešna, obrišite izvod '
+      + 'kom pripada („Obriši izvod“): to u jednom koraku vraća ratu na neplaćenu i uklanja njene redove glavnice '
+      + 'i kamate (kod izvoda proknjiženih pre nego što je izvod pamtio te redove, njih ručno). Brisanje same '
+      + 'stavke na strani Transakcije vraća ratu, ali te redove ostavlja. Ovo dugme ne uklanja ni stavku ni te redove.')
+    expect(unpaidQuestion(inst({ transaction_id: null }), credit(), 0)).not.toContain(PAID_BY_A_LINE)
   })
 
   it('names no count of the posted rows, which cannot be found reliably', () => {

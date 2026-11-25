@@ -366,6 +366,34 @@ describe('an invoice in dinars for a credit in euros', () => {
     expect(screen.getByText('Iznosi ne mogu da se uporede: faktura 30.707,57 RSD, kamata rate 262,01 EUR; kurs NBS za 28.11.2026. nije dostupan, pa razlika nije izračunata. Ipak povezati?')).toBeTruthy()
   })
 
+  it('proposes a link across currencies for a 0,07 EUR miss, within the conversion tolerance', async () => {
+    ;(global as any).__db.credits = credits(BANK_PIB)
+    ;(global as any).__db.sef_inbox = [{ ...inDinars, amount: 30715.78 }]
+    const { container } = show()
+    expect(await screen.findByText(/^Predlog: poveži sa kreditom „Obrtni kredit“ · rata #2/)).toBeTruthy()
+    expect(screen.queryByTestId('remembered-pib')).toBeNull()
+    expect(screen.queryByText(/Provizije banke/)).toBeNull()
+    fireEvent.click(screen.getByText(LINK))
+    expect(within(container.querySelector('[data-option="i-2"]') as HTMLElement).getByText('Predlog')).toBeTruthy()
+    expect(screen.getByText('faktura 30.715,78 RSD ≈ 262,08 EUR po srednjem kursu NBS za 28.11.2026. (1 EUR = 117,2000 RSD), '
+      + 'kamata rate 262,01 EUR, razlika 0,07 EUR (u okviru tolerancije preračuna od 1,31 EUR)')).toBeTruthy()
+    // Not to the cent, so still asked twice.
+    fireEvent.click(screen.getByText(DO_LINK))
+    expect(links()).toEqual([])
+    expect(screen.getByText(/^Iznosi se razlikuju: .*\. Ipak povezati\?$/)).toBeTruthy()
+  })
+
+  it('a fee invoice in dinars from the remembered bank proposes nothing, and says the PIB is remembered', async () => {
+    ;(global as any).__db.credits = credits(BANK_PIB)
+    ;(global as any).__db.sef_inbox = [{ ...inDinars, amount: 1500 }]
+    show()
+    await screen.findByText('Larkspur banka')
+    await waitFor(() => expect((global as any).__db.ratesAsked).toEqual(['2026-11-28']))
+    expect(await screen.findByTestId('remembered-pib')).toBeTruthy()
+    expect(screen.queryByText(/Predlog: poveži/)).toBeNull()
+    expect(screen.queryByText(/Provizije banke/)).toBeNull()
+  })
+
   it('proposes the link from a remembered PIB once the rate shows the match', async () => {
     ;(global as any).__db.credits = credits(BANK_PIB)
     show()
@@ -395,12 +423,15 @@ describe('the proposal from a remembered PIB', () => {
    * leave P&L. So a remembered PIB proposes a link only when an instalment's
    * interest is the amount, to within a cent.
    */
-  it('keeps the classification, and chooses nothing, when no instalment matches the amount', async () => {
+  it('says the PIB is remembered instead of proposing a category, and chooses nothing, when no instalment matches', async () => {
     ;(global as any).__db.credits = credits(BANK_PIB)
     ;(global as any).__db.sef_inbox = [{ ...pending, amount: 263 }]
     const { container } = show()
     await screen.findByText('Larkspur banka')
-    expect(screen.getByText(/Predlog: Bankarske usluge › Provizije banke/)).toBeTruthy()
+    expect(screen.getByTestId('remembered-pib').textContent).toBe(
+      'PIB ovog dobavljača je zapamćen na kreditu „Obrtni kredit“, ali kamata nijedne rate se ne poklapa sa iznosom. '
+      + 'Ako je ovo kamata, povežite je sa ratom; ako je provizija ili druga usluga banke, proknjižite je.')
+    expect(screen.queryByText(/Provizije banke/)).toBeNull()
     expect(screen.queryByText(/Predlog: poveži/)).toBeNull()
     fireEvent.click(screen.getByText(LINK))
     expect(Array.from(container.querySelectorAll('input[type="radio"]')).some(r => (r as HTMLInputElement).checked)).toBe(false)

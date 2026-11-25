@@ -79,17 +79,29 @@ export interface RankedInstalment extends InstalmentCandidate {
   rateMissing: boolean
   /** Days from the instalment's due date to the nearest invoice date; null when the invoice has none. */
   days: number | null
-  /** The interest is the invoice amount, within `MATCH_TOLERANCE`. */
+  /** The interest is the invoice amount, within `matchTolerance`. */
   matches: boolean
 }
 
 /**
  * How far an instalment's interest may be from the invoice amount and still be
- * called the same: one cent, in the credit's currency (after conversion when
- * the invoice is in another). Only a match is ever proposed or chosen for him;
- * anything further is linked by his own choice.
+ * called the same, in one currency: one cent. Only a match is ever proposed or
+ * chosen for him; anything further is linked by his own choice.
  */
 export const MATCH_TOLERANCE = 0.01
+
+/**
+ * Across currencies the bank converts at its own rate and moment, so a cent is
+ * too tight: the converted amount may miss the interest by up to 0,5 % of the
+ * interest (never less than a cent). Without this nothing across currencies
+ * was ever proposed, and the expense-category proposal took its place, which
+ * invites booking the interest a second time.
+ */
+export const CROSS_CURRENCY_SHARE = 0.005
+
+/** The match tolerance for this instalment, in the credit's currency. */
+export const matchTolerance = (cross: boolean, interest: number): number =>
+  cross ? Math.max(MATCH_TOLERANCE, cents(Math.abs(interest) * CROSS_CURRENCY_SHARE)) : MATCH_TOLERANCE
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const cents = (n: number) => Math.round(n * 100) / 100
@@ -150,7 +162,7 @@ export function rankInstalments(
     const days = dates.length === 0 || Number.isNaN(due)
       ? null
       : Math.min(...dates.map(t => Math.round(Math.abs(t - due) / DAY_MS)))
-    const matches = inCredit !== null && Math.abs(difference) <= MATCH_TOLERANCE + 1e-9
+    const matches = inCredit !== null && Math.abs(difference) <= matchTolerance(cross, c.interestAmount) + 1e-9
     const miss = inCredit === null ? 1 : Math.abs(difference) / Math.max(Math.abs(inCredit), 0.01)
     ranked.push({ ...c, difference, converted, rateMissing, days, matches, score: miss + (days ?? 365) / 90 })
   }
@@ -210,7 +222,28 @@ export function differenceSentence(
   const diff = cents(r.converted.amount - r.interestAmount)
   const head = `faktura ${fmtMoney(invoice.amount, ic)} ≈ ${fmtMoney(r.converted.amount, cc)} po srednjem kursu NBS`
     + ` za ${srDate(r.converted.date)} (1 ${cc} = ${fmtNum(r.converted.rate, 4)} ${ic}), ${interest}`
-  return Math.abs(diff) < 0.005 ? `${head}, bez razlike` : `${head}, razlika ${fmtMoney(diff, cc)}`
+  if (Math.abs(diff) < 0.005) return `${head}, bez razlike`
+  const within = Math.abs(diff) <= matchTolerance(true, r.interestAmount) + 1e-9
+  return `${head}, razlika ${fmtMoney(diff, cc)}`
+    + (within ? ` (u okviru tolerancije preračuna od ${fmtMoney(matchTolerance(true, r.interestAmount), cc)})` : '')
+}
+
+/** The names of the active credits that remember this invoice's PIB, once each. */
+export function rememberedCreditNames(invoice: InvoiceFacts, candidates: InstalmentCandidate[]): string[] {
+  return Array.from(new Set(rememberedCredits(invoice, candidates).map(c => c.creditName)))
+}
+
+/**
+ * Said instead of the expense-category proposal when the supplier's PIB is
+ * remembered on a credit but no instalment's interest matches the amount: a
+ * category proposal there invites "Otvori i proknjiži" on what may be interest
+ * already booked with the instalment.
+ */
+export function rememberedSentence(names: string[]): string {
+  const list = names.map(n => `„${n}“`).join(', ')
+  return `PIB ovog dobavljača je zapamćen na ${names.length > 1 ? 'kreditima' : 'kreditu'} ${list}, `
+    + 'ali kamata nijedne rate se ne poklapa sa iznosom. Ako je ovo kamata, povežite je sa ratom; '
+    + 'ako je provizija ili druga usluga banke, proknjižite je.'
 }
 
 /** Whether the chosen instalment's interest is not the amount to the cent (or cannot be compared). */
