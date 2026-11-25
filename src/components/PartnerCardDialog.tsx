@@ -227,13 +227,19 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
                 <span>{money(Math.abs(card.closing))}</span>
               </div>
 
-              {(card.advances.invoices.length > 0 || card.advances.proformaPayments.length > 0) && (
+              {(card.advances.invoices.length > 0 || card.advances.proformaPayments.length > 0 || card.advances.usedDirectly.length > 0) && (
                 <div style={box}>
                   <div style={{ fontSize: '12px', fontWeight: 600, color: DIALOG.text, marginBottom: '6px' }}>Avansi kod dobavljača (ne ulaze u saldo)</div>
                   {card.advances.proformaPayments.map((p, i) => (
                     <div key={`p${i}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: DIALOG.text, padding: '2px 0' }}>
                       <span>{dateSr(p.date)} · Isplata po predračunu {p.invoice_number || 'bez broja'} — {p.bank || 'banka'} {clip(p.documentId)}</span>
                       <span>{money(p.amount)}</span>
+                    </div>
+                  ))}
+                  {card.advances.usedDirectly.map((u, i) => (
+                    <div key={`u${i}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: DIALOG.text, padding: '2px 0' }}>
+                      <span>{dateSr(u.date)} · Predračun {u.proforma_number || 'bez broja'} iskorišćen računom {u.final_number || 'bez broja'} {clip(u.finalId)}</span>
+                      <span>{money(u.amount)}</span>
                     </div>
                   ))}
                   {card.advances.invoices.map(a => (
@@ -244,7 +250,7 @@ export default function PartnerCardDialog({ partner, onClose }: { partner: { id:
                   ))}
                   {card.advances.paidWithoutAdvance > 0.005 && (
                     <div style={{ fontSize: '11px', color: DIALOG.amber, marginTop: '4px' }}>
-                      Plaćeno po predračunima bez avansnog računa: {money(card.advances.paidWithoutAdvance)}
+                      Plaćeno po predračunima, a još nije zatvoreno avansnim računom ni računom: {money(card.advances.paidWithoutAdvance)}
                     </div>
                   )}
                 </div>

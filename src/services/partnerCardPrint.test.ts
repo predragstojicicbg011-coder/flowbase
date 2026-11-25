@@ -59,3 +59,25 @@ describe('the printed partner card', () => {
     expect(html).toContain('window.print()')
   })
 })
+
+describe('a proforma a bill used directly, printed (20261125100000)', () => {
+  it('is listed below the balance, and the warning says what is still waiting', () => {
+    const c = buildPartnerCard({
+      documents: [
+        { id: 'p7', invoice_number: 'PR-7', invoice_date: '2026-11-02', type: 'expense', document_type: 'proforma', currency: 'RSD',
+          amount: 3000, amount_rsd: 3000, adjusts_invoice_id: null, prior_period: false, advance_open: null, advance_deducted_rsd: 0 },
+        { id: 'b21', invoice_number: 'F-21', invoice_date: '2026-11-10', type: 'expense', document_type: 'invoice', currency: 'RSD',
+          amount: 2400, amount_rsd: 2400, adjusts_invoice_id: null, prior_period: false, advance_open: null, advance_deducted_rsd: 0 },
+      ],
+      payments: [{ invoice_id: 'p7', transaction_id: 't7', date: '2026-11-03', amount_rsd: 3000, bank: 'OTP banka' }],
+      usage: [{ final_invoice_id: 'b21', advance_invoice_id: 'p7', amount_rsd: 2400, amount: 2400 }], coverage: [], direct: [],
+    }, { from: null, to: null })
+    const page = partnerCardPrintHtml({
+      company: { full_legal_name: 'Firma Alfa doo', address: null, city: null, pib: null },
+      partner: { name: 'Dobavljač D', tax_id: null, address: null, city: null },
+      period: { from: null, to: null }, card: c, generatedOn: '2026-11-25',
+    })
+    expect(page).toContain('Predračun PR-7 iskorišćen računom F-21')
+    expect(page).toContain('Plaćeno po predračunima, a još nije zatvoreno avansnim računom ni računom: 600,00')
+  })
+})

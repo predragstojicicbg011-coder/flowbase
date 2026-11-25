@@ -42,8 +42,22 @@ describe('supplier advances', () => {
     render(<SupplierAdvancesPanel onClose={() => {}} />)
     expect(await screen.findByText('Bepro Beton')).toBeInTheDocument()
     expect(screen.getByText('Avans čeka konačni račun: 6.599,88 RSD')).toBeInTheDocument()
-    expect(screen.getByText('Plaćeno bez avansnog računa: 50.000,00 RSD')).toBeInTheDocument()
+    expect(screen.getByText('Plaćeno po predračunima, a još nije zatvoreno avansnim računom ni računom: 50.000,00 RSD')).toBeInTheDocument()
     expect(screen.getByText('Avansni račun AV-LOOSE (Dobavljač Y) nije vezan za predračun')).toBeInTheDocument()
+  })
+
+  it('shows what bills used of the proformas directly, in its own column (20261125100000)', async () => {
+    mockTables.v_supplier_advances = [
+      { company_id: 'co', partner_id: 'd', partner_name: 'Dobavljač D', currency: 'RSD', paid_on_proformas: 2400, covered: 0,
+        advance_total: 0, used: 0, paid_without_advance: 0, advance_open: 0, used_directly: 2400 },
+    ]
+    render(<SupplierAdvancesPanel onClose={() => {}} />)
+    expect(await screen.findByText('Dobavljač D')).toBeInTheDocument()
+    expect(screen.getByText('Iskorišćeno direktno računima')).toBeInTheDocument()
+    const row = screen.getByText('Dobavljač D').closest('tr')!
+    expect(Array.from(row.querySelectorAll('td')).map(td => td.textContent)).toEqual(
+      ['Dobavljač D', '2.400,00 RSD', '0,00 RSD', '2.400,00 RSD', '0,00 RSD', '0,00 RSD'])
+    expect(screen.queryByText(/još nije zatvoreno/)).not.toBeInTheDocument()
   })
 
   it('lists no customer advance invoice among the supplier ones', async () => {

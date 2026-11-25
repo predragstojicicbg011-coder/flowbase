@@ -1450,7 +1450,15 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             // Net of the advance a revenue billing deducts: that part is
             // settled already, and the investor does not pay it again.
             const advanceOwn = Number(inv.advance_deducted) || 0
-            const remainingInvOrig = Math.max(0, (inv.amount || 0) - advanceOwn - alreadyAllocOrig)
+            // Its credit notes count toward what it is owed, and what an
+            // advance invoice or a paid proforma already closed of it is not
+            // owed again (20261125100000): `invoices` carries neither, the view does.
+            const { data: invView } = await supabase.from('v_invoice_status')
+              .select('adjustments, advance_used').eq('id', invoiceId).maybeSingle()
+            const adjustments = Number(invView?.adjustments) || 0
+            const advanceUsed = Number(invView?.advance_used) || 0
+            const owed = owedAmount({ amount: inv.amount, adjustments, advance_used: advanceUsed })
+            const remainingInvOrig = Math.max(0, owed - advanceOwn - alreadyAllocOrig)
 
             if (remainingInvOrig <= 0.005) continue // already paid
 
@@ -1462,7 +1470,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             // the two dates. See services/settleInvoice.ts.
             const remainingPayRsd = partBookAmounts(remainingOrig, rowParent).amount_rsd
             const settlement = settlementFor({
-              invoice: { ...inv, paid_amount: alreadyAllocOrig },
+              invoice: { ...inv, paid_amount: alreadyAllocOrig, adjustments, advance_used: advanceUsed },
               paymentCurrency: p.currency,
               paymentOwn: remainingOrig,
               paymentRsd: remainingPayRsd,
@@ -1484,7 +1492,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             settlementExpectations.push({
               invoiceId: invoiceId,
               invoiceNumber: inv.invoice_number || null,
-              amount: owedAmount(inv),
+              amount: owed,
               allocated: alreadyAllocOrig + allocOwn,
               amountRsd: inv.amount_rsd ?? null,
               advanceDeducted: advanceOwn,
@@ -1494,7 +1502,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             const { data: allAlloc } = await supabase.from('invoice_transaction_links')
               .select('allocated_amount').eq('invoice_id', invoiceId)
             const totalAllocatedOrig = (allAlloc || []).reduce((s: number, r: any) => s + (r.allocated_amount || 0), 0)
-            const invStatus = settledStatus(owedAmount(inv), totalAllocatedOrig, inv.amount_rsd, advanceOwn)
+            const invStatus = settledStatus(owed, totalAllocatedOrig, inv.amount_rsd, advanceOwn)
             await supabase.from('invoices')
               .update({ status: invStatus, updated_at: new Date().toISOString() })
               .eq('id', invoiceId)

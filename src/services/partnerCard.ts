@@ -10,7 +10,9 @@
 //   credit note on a supplier's bill   Duguje      balance falls
 //   payment of a supplier's bill       Duguje      balance falls
 //   advance closing a final invoice    Duguje      balance falls (on the final invoice's date)
+//   proforma closing a final invoice   Duguje      balance falls (on the final invoice's date)
 //   advance closing our final invoice  Potražuje   balance rises (on the final invoice's date)
+//   proforma closing our final invoice Potražuje   balance rises (on the final invoice's date)
 //   our invoice to a customer          Duguje      balance falls (they owe us)
 //   credit note on our invoice         Potražuje   balance rises
 //   receipt from a customer            Potražuje   balance rises
@@ -18,7 +20,8 @@
 //
 // NOT in the balance (the client's decision), listed below it: advances to
 // suppliers (payments of proformas, advance invoices and what is left of
-// them), and direct payments with no bill.
+// them, what final invoices used of a proforma directly — 20261125100000),
+// and direct payments with no bill.
 //
 // Pure: the loader (loadPartnerCard) fetches, this decides.
 
@@ -55,7 +58,12 @@ export interface CardPayment {
   direction?: 'in' | 'out' | null
 }
 
-export interface CardUsage { final_invoice_id: string; advance_invoice_id: string; amount_rsd: number }
+/**
+ * A use of an advance by a final invoice. `advance_invoice_id` is the SOURCE:
+ * an advance invoice, or a proforma used directly (20261125100000). `amount`
+ * is the use in the documents' own currency, where the loader has it.
+ */
+export interface CardUsage { final_invoice_id: string; advance_invoice_id: string; amount_rsd: number; amount?: number }
 export interface CardCoverage { proforma_id: string; amount: number }
 export interface CardDirect { id: string; date: string; amount_rsd: number; bank: string | null; note: string | null; direction: 'in' | 'out' }
 
@@ -81,6 +89,9 @@ export interface PartnerCard {
   advances: {
     invoices: { id: string; invoice_number: string | null; date: string | null; amount: number; used: number; open: number; priorPeriod: boolean }[]
     proformaPayments: { documentId: string; invoice_number: string | null; date: string; amount: number; bank: string | null }[]
+    /** What final invoices used of a proforma directly, at the proforma's rate (as coverage is). */
+    usedDirectly: { proformaId: string; proforma_number: string | null; finalId: string; final_number: string | null; date: string | null; amount: number }[]
+    /** Paid on proformas and neither covered by an advance invoice nor used directly. */
     paidWithoutAdvance: number
   }
   direct: { id: string; date: string; amount: number; bank: string | null; note: string | null; direction: 'in' | 'out' }[]
@@ -124,8 +135,10 @@ export function buildPartnerCard(
     const fin = byId.get(u.final_invoice_id)
     const adv = byId.get(u.advance_invoice_id)
     if (!fin) continue
+    const byProforma = adv?.document_type === 'proforma'
     changes.push({
-      date: fin.invoice_date || '', order: 2, label: `Zatvoreno avansom ${adv?.invoice_number || ''}`.trim(),
+      date: fin.invoice_date || '', order: 2,
+      label: `${byProforma ? 'Zatvoreno predračunom' : 'Zatvoreno avansom'} ${adv?.invoice_number || ''}`.trim(),
       // Closes the final invoice: a supplier's lowers what we owe, a customer's
       // lowers what they owe us.
       documentId: u.advance_invoice_id, refers: fin.invoice_number, owe: fin.type === 'revenue' ? num(u.amount_rsd) : -num(u.amount_rsd),
@@ -185,16 +198,28 @@ export function buildPartnerCard(
     })
   const paidOnProformas = proformaPayments.reduce((s, p) => s + p.amount, 0)
   // Coverage is in the proforma's currency; in dinars at the proforma's rate.
-  const covered = input.coverage.reduce((s, c) => {
-    const pf = byId.get(c.proforma_id)
-    const rate = pf && num(pf.amount) !== 0 ? num(pf.amount_rsd) / num(pf.amount) : 1
-    return s + num(c.amount) * rate
-  }, 0)
+  const rateOf = (pf: CardDocument | undefined) => (pf && num(pf.amount) !== 0 ? num(pf.amount_rsd) / num(pf.amount) : 1)
+  const covered = input.coverage.reduce((s, c) => s + num(c.amount) * rateOf(byId.get(c.proforma_id)), 0)
+  // A proforma used by a final invoice directly, dated by the final invoice:
+  // at the proforma's rate, as coverage is, so the two add up against what
+  // was paid on it.
+  const usedDirectly: PartnerCard['advances']['usedDirectly'] = []
+  for (const u of input.usage) {
+    const pf = byId.get(u.advance_invoice_id)
+    const fin = byId.get(u.final_invoice_id)
+    if (!pf || pf.document_type !== 'proforma' || !inTo(fin?.invoice_date ?? null)) continue
+    const own = u.amount ?? (num(pf.amount_rsd) !== 0 ? num(u.amount_rsd) / rateOf(pf) : num(u.amount_rsd))
+    usedDirectly.push({
+      proformaId: pf.id, proforma_number: pf.invoice_number, finalId: u.final_invoice_id, final_number: fin?.invoice_number ?? null,
+      date: fin?.invoice_date ?? null, amount: r2(num(own) * rateOf(pf)),
+    })
+  }
+  const usedDirectlyTotal = usedDirectly.reduce((s, u) => s + u.amount, 0)
 
   return {
     opening, rows, closing,
     verdict: closing > 0.005 ? 'Dugujemo partneru' : closing < -0.005 ? 'Partner nam duguje' : 'Nema duga',
-    advances: { invoices: advanceInvoices, proformaPayments, paidWithoutAdvance: r2(Math.max(0, paidOnProformas - covered)) },
+    advances: { invoices: advanceInvoices, proformaPayments, usedDirectly, paidWithoutAdvance: r2(Math.max(0, paidOnProformas - covered - usedDirectlyTotal)) },
     direct: input.direct
       .filter(t => (!period.from || t.date >= period.from) && inTo(t.date))
       .map(t => ({ id: t.id, date: t.date, amount: r2(num(t.amount_rsd)), bank: t.bank, note: t.note, direction: t.direction })),

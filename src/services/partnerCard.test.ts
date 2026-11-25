@@ -185,3 +185,47 @@ describe('an invoice stornoed on SEF', () => {
     expect(c.closing).toBe(-40000)
   })
 })
+
+describe('a bill closed by its proforma directly (20261125100000)', () => {
+  const pdocs: CardDocument[] = [
+    doc({ id: 'p7', invoice_number: 'PR-7', invoice_date: '2026-11-02', document_type: 'proforma', amount: 2400, amount_rsd: 2400 }),
+    doc({ id: 'b21', invoice_number: 'F-21', invoice_date: '2026-11-10', amount: 2400, amount_rsd: 2400 }),
+  ]
+  const ppay: CardPayment[] = [pay({ invoice_id: 'p7', transaction_id: 't7', date: '2026-11-03', amount_rsd: 2400 })]
+  const puse = [{ final_invoice_id: 'b21', advance_invoice_id: 'p7', amount_rsd: 2400, amount: 2400 }]
+  const pcard = buildPartnerCard({ documents: pdocs, payments: ppay, usage: puse, direct: [], coverage: [] }, { from: null, to: null })
+
+  it('the balance row says the proforma closed it, on the bill\'s date', () => {
+    expect(pcard.rows.map(r => [r.date, r.label, r.debit, r.credit, r.balance])).toEqual([
+      ['2026-11-10', 'Račun F-21', 0, 2400, 2400],
+      ['2026-11-10', 'Zatvoreno predračunom PR-7', 2400, 0, 0],
+    ])
+    expect(pcard.closing).toBe(0)
+  })
+
+  it('lists the use below the balance, and nothing waits for a document', () => {
+    expect(pcard.advances.usedDirectly).toEqual([
+      { proformaId: 'p7', proforma_number: 'PR-7', finalId: 'b21', final_number: 'F-21', date: '2026-11-10', amount: 2400 },
+    ])
+    expect(pcard.advances.paidWithoutAdvance).toBe(0)
+  })
+
+  it('a use after the period is not counted yet', () => {
+    const early = buildPartnerCard({ documents: pdocs, payments: ppay, usage: puse, direct: [], coverage: [] }, { from: null, to: '2026-11-05' })
+    expect(early.advances.usedDirectly).toEqual([])
+    expect(early.advances.paidWithoutAdvance).toBe(2400)
+  })
+
+  it('a euro proforma is counted at its own rate, as coverage is', () => {
+    const edocs = [
+      doc({ id: 'pe', invoice_number: 'PR-E', invoice_date: '2026-11-02', document_type: 'proforma', currency: 'EUR', amount: 1000, amount_rsd: 117000 }),
+      doc({ id: 'be', invoice_number: 'F-E', invoice_date: '2026-11-10', currency: 'EUR', amount: 1000, amount_rsd: 117500 }),
+    ]
+    const c = buildPartnerCard({
+      documents: edocs, payments: [pay({ invoice_id: 'pe', transaction_id: 'te', date: '2026-11-03', amount_rsd: 117000 })],
+      usage: [{ final_invoice_id: 'be', advance_invoice_id: 'pe', amount_rsd: 117500, amount: 1000 }], direct: [], coverage: [],
+    }, { from: null, to: null })
+    expect(c.advances.usedDirectly[0].amount).toBe(117000)
+    expect(c.advances.paidWithoutAdvance).toBe(0)
+  })
+})

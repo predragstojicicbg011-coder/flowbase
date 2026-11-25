@@ -1,6 +1,7 @@
 import {
   advancePaymentProblem, advanceProformaSide, advancesPayableBy, coverageProblem, paymentSide, proformaSidesOffered, openAdvancesNotice, proformaFromPayment, proformaNumbersIn, proposeCoverage, proposeUsage, usageProblem,
-  type OpenAdvance, type PaidProforma,
+  proformaOpen, proposeProformaUse, usableProformasNotice,
+  type OpenAdvance, type PaidProforma, type UsableProforma,
 } from './advances'
 
 const adv = (over: Partial<OpenAdvance>): OpenAdvance => ({
@@ -195,5 +196,60 @@ describe('paying an advance invoice with a payment', () => {
     expect(proformaSidesOffered('revenue')).toEqual(['revenue'])
     expect(proformaSidesOffered('expense')).toEqual(['expense'])
     expect(proformaSidesOffered(null)).toEqual(['expense', 'revenue'])
+  })
+})
+
+// ── A final invoice uses a paid proforma directly (20261125100000) ──────────
+const usable = (over: Partial<UsableProforma>): UsableProforma => ({
+  id: 'u1', invoice_number: 'PR-7', invoice_date: '2026-11-01', currency: 'RSD', paid: 2400, open: 2400, ...over,
+})
+
+describe('proformaOpen', () => {
+  it('is paid less covered less used directly, never below 0', () => {
+    expect(proformaOpen({ paid_amount: 3000, covered: 1000, used_directly: 1500 })).toBe(500)
+    expect(proformaOpen({ paid_amount: '3000', covered: null, used_directly: undefined })).toBe(3000)
+    expect(proformaOpen({ paid_amount: 1000, covered: 1000, used_directly: 5 })).toBe(0)
+  })
+})
+
+describe('proposeProformaUse', () => {
+  it('fills what the bill still owes, up to what is left of the ONE proforma', () => {
+    expect(proposeProformaUse(2400, 0, [usable({})])).toEqual({ proformaId: 'u1', amount: 2400 })
+    expect(proposeProformaUse(5000, 0, [usable({ open: 2000 })])).toEqual({ proformaId: 'u1', amount: 2000 })
+  })
+
+  it('less what payments already hold, and with the bill\'s credit notes', () => {
+    expect(proposeProformaUse(2400, 1000, [usable({})])).toEqual({ proformaId: 'u1', amount: 1400 })
+    expect(proposeProformaUse(2400 - 500, 0, [usable({})])).toEqual({ proformaId: 'u1', amount: 1900 })
+  })
+
+  it('proposes nothing with two proformas, none, or a bill already paid', () => {
+    expect(proposeProformaUse(2400, 0, [usable({}), usable({ id: 'u2' })])).toBeNull()
+    expect(proposeProformaUse(2400, 0, [])).toBeNull()
+    expect(proposeProformaUse(2400, 2400, [usable({})])).toBeNull()
+  })
+})
+
+describe('usableProformasNotice', () => {
+  it('says how many and how much, in Serbian', () => {
+    expect(usableProformasNotice([usable({ open: 8350 })])).toBe(
+      'Plaćeno bez avansnog računa: 1 predračun, neiskorišćeno 8.350,00 RSD. Može da zatvori ovaj račun direktno.')
+    expect(usableProformasNotice([usable({ open: 1000 }), usable({ id: 'u2', open: 500 })])).toBe(
+      'Plaćeno bez avansnog računa: 2 predračuna, neiskorišćeno 1.500,00 RSD. Mogu da zatvore ovaj račun direktno.')
+    expect(usableProformasNotice([])).toBe('')
+  })
+})
+
+describe('usageProblem with a proforma and payments', () => {
+  it('names a proforma as a proforma', () => {
+    expect(usageProblem(5000, [{ amount: 2001, open: 2000, kind: 'proforma' }])).toBe('Od predračuna je ostalo 2.000,00, a traži se 2.001,00.')
+    expect(usageProblem(5000, [{ amount: 2001, open: 2000 }])).toBe('Od avansnog računa je ostalo 2.000,00, a traži se 2.001,00.')
+  })
+
+  it('a bill is not paid twice: uses and payments together within the dinar it closes by', () => {
+    expect(usageProblem(1500, [{ amount: 1202, open: 1500, kind: 'proforma' }], 300, 1)).toBe(
+      'Iskorišćeni avans (1.202,00) i ono što plaćanja već drže (300,00) zajedno su više od onoga što račun duguje (1.500,00). Račun se ne plaća dva puta.')
+    expect(usageProblem(1500, [{ amount: 1201, open: 1500, kind: 'proforma' }], 300, 1)).toBeNull()
+    expect(usageProblem(1500, [{ amount: 1201, open: 1500, kind: 'proforma' }], 300)).not.toBeNull()
   })
 })

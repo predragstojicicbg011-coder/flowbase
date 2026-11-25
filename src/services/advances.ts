@@ -1,9 +1,11 @@
 // ─── advances ───────────────────────────────────────────────────────────────
 //
 // Supplier advances: a paid PROFORMA is covered by an ADVANCE INVOICE, which a
-// FINAL INVOICE uses up, in full or in part (20261021090000). The database
-// holds the rules; these are the form's proposals and its copy of the rules,
-// so the person sees the figures filled in and the reason before saving.
+// FINAL INVOICE uses up, in full or in part (20261021090000). A final invoice
+// may also use a paid proforma DIRECTLY, with no advance invoice in between,
+// in both directions (20261125100000). The database holds the rules; these
+// are the form's proposals and its copy of the rules, so the person sees the
+// figures filled in and the reason before saving.
 
 import { fmtNum, fmtMoney } from '../utils/formatters'
 import { invoiceNumberKey } from './documentType'
@@ -18,7 +20,12 @@ export interface OpenAdvance {
   currency: string | null
 }
 
-/** A proforma with payments (v_invoice_status: paid_amount, covered). */
+/**
+ * A proforma with payments (v_invoice_status: paid_amount, covered,
+ * used_directly). `covered` is what is already spoken for: covered by advance
+ * invoices AND used by final invoices directly (20261125100000) — what was
+ * paid on a proforma is shared between the two.
+ */
 export interface PaidProforma {
   id: string
   invoice_number: string | null
@@ -27,10 +34,55 @@ export interface PaidProforma {
   currency: string | null
 }
 
+/**
+ * A paid proforma a final invoice can use directly (no advance invoice in
+ * between, 20261125100000): `open` is what was paid on it and neither covered
+ * by an advance invoice nor used by another final invoice.
+ */
+export interface UsableProforma {
+  id: string
+  invoice_number: string | null
+  invoice_date: string | null
+  currency: string | null
+  paid: number
+  open: number
+}
+
 /** An advance invoice a final invoice names (SEF BillingReference). */
 export interface AdvanceRef { number: string; date: string | null; amount?: number }
 
 const cents = (n: number) => Math.round(n * 100) / 100
+
+/** What is left of a proforma for direct use: paid − covered − used directly, never below 0. */
+export function proformaOpen(r: { paid_amount?: unknown; covered?: unknown; used_directly?: unknown }): number {
+  const n = (v: unknown) => Number(v) || 0
+  return Math.max(0, cents(n(r.paid_amount) - n(r.covered) - n(r.used_directly)))
+}
+
+/**
+ * The amount a final invoice fills in itself from a paid proforma: only where
+ * there is exactly ONE proforma to use, and then what it still owes (its
+ * amount with its credit notes, less what ordinary payments already hold), up
+ * to what is left of the proforma. Null where nothing is proposed.
+ */
+export function proposeProformaUse(
+  owed: number, alreadyPaid: number, proformas: UsableProforma[],
+): { proformaId: string; amount: number } | null {
+  if (proformas.length !== 1) return null
+  const left = cents(owed - Math.max(0, alreadyPaid))
+  const amount = cents(Math.min(left, proformas[0].open))
+  return amount > 0 ? { proformaId: proformas[0].id, amount } : null
+}
+
+/** „Plaćeno bez avansnog računa: 1 predračun, neiskorišćeno 8.350,00 RSD. …“, or ''. */
+export function usableProformasNotice(proformas: UsableProforma[]): string {
+  const open = proformas.filter(p => p.open > 0.005)
+  if (open.length === 0) return ''
+  const n = open.length
+  const one = n % 10 === 1 && n % 100 !== 11
+  const total = cents(open.reduce((s, p) => s + p.open, 0))
+  return `Plaćeno bez avansnog računa: ${n} ${one ? 'predračun' : 'predračuna'}, neiskorišćeno ${fmtMoney(total, open[0].currency || 'RSD')}. ${one ? 'Može da zatvori' : 'Mogu da zatvore'} ovaj račun direktno.`
+}
 
 /**
  * The advances a final invoice uses: each one it names, in the order it names
@@ -84,12 +136,26 @@ export function coverageProblem(amount: number, chosen: PaidProforma[]): string 
   return `Avansni račun (${fmtNum(amount)}) je veći od plaćenog po izabranim predračunima (${fmtNum(available)}).`
 }
 
-/** Why these uses of advances do not fit the final invoice, or null. */
-export function usageProblem(finalAmount: number, rows: { amount: number; open: number }[]): string | null {
+/**
+ * Why these uses of advances do not fit the final invoice, or null.
+ * `finalAmount` is what the bill owes: its amount with its credit notes.
+ * `paid` is what payments will hold of it once it is saved (its own links, or
+ * the transactions being linked to it now): a bill is not paid twice, and the
+ * database refuses the same (advance_usage_rules, 20261125100000), within the
+ * dinar the bill closes by (`tolerance`, in the bill's currency).
+ */
+export function usageProblem(
+  finalAmount: number, rows: { amount: number; open: number; kind?: 'advance_invoice' | 'proforma' }[],
+  paid: number = 0, tolerance: number = 0.005,
+): string | null {
   const over = rows.find(r => r.amount > r.open + 0.005)
-  if (over) return `Od avansnog računa je ostalo ${fmtNum(over.open)}, a traži se ${fmtNum(over.amount)}.`
+  if (over) return `Od ${over.kind === 'proforma' ? 'predračuna' : 'avansnog računa'} je ostalo ${fmtNum(over.open)}, a traži se ${fmtNum(over.amount)}.`
   const total = cents(rows.reduce((s, r) => s + r.amount, 0))
   if (total > finalAmount + 0.005) return `Iskorišćeni avans (${fmtNum(total)}) je veći od računa (${fmtNum(finalAmount)}).`
+  const held = cents(Math.max(0, paid))
+  if (total > 0 && total + held > finalAmount + Math.max(0.005, tolerance)) {
+    return `Iskorišćeni avans (${fmtNum(total)}) i ono što plaćanja već drže (${fmtNum(held)}) zajedno su više od onoga što račun duguje (${fmtNum(finalAmount)}). Račun se ne plaća dva puta.`
+  }
   return null
 }
 

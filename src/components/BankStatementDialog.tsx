@@ -916,7 +916,10 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
 
   /** Set an invoice's status from everything currently allocated against it. */
   const refreshInvoiceStatus = async (invoiceId: string) => {
-    const { data: inv } = await supabase.from('invoices').select('amount, amount_rsd, advance_deducted').eq('id', invoiceId).single()
+    // The view, not the table: it carries the bill's credit notes and what an
+    // advance invoice or a paid proforma already closed of it (20261125100000).
+    const { data: inv } = await supabase.from('v_invoice_status')
+      .select('amount, amount_rsd, advance_deducted, adjustments, advance_used').eq('id', invoiceId).maybeSingle()
     if (!inv) return
     const { data: allocations } = await supabase.from('invoice_transaction_links')
       .select('allocated_amount').eq('invoice_id', invoiceId)
@@ -1328,7 +1331,12 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
             // whole row regardless — `allocOrig = amount` — which over-allocated
             // every payment that exceeded its invoice.
             const { data: invStatus } = await supabase.from('v_invoice_status')
-              .select('paid_amount').eq('id', inv.id).maybeSingle()
+              .select('paid_amount, adjustments, advance_used').eq('id', inv.id).maybeSingle()
+            // Its credit notes count toward what it is owed, and what an
+            // advance invoice or a paid proforma already closed of it is not
+            // owed again (20261125100000): owedAmount takes both into account.
+            const adjustments = Number(invStatus?.adjustments) || 0
+            const advanceUsed = Number(invStatus?.advance_used) || 0
 
             // WHERE THE ROW AND THE BILL SHARE A CURRENCY, NOTHING IS
             // CONVERTED. Comparing the row in the book currency at the ROW
@@ -1338,7 +1346,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
             const rowRsd = rowBook.amount_rsd
             const alreadyOwn = Math.max(0, invStatus?.paid_amount ?? 0)
             const settlement = settlementFor({
-              invoice: { ...inv, paid_amount: alreadyOwn },
+              invoice: { ...inv, paid_amount: alreadyOwn, adjustments, advance_used: advanceUsed },
               paymentCurrency: row.currency || defaultCurrency,
               paymentOwn: amount,
               paymentRsd: rowRsd,
@@ -1436,7 +1444,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
             settlementExpectations.push({
               invoiceId: inv.id,
               invoiceNumber: inv.invoice_number || null,
-              amount: owedAmount(inv),
+              amount: owedAmount({ amount: inv.amount, adjustments, advance_used: advanceUsed }),
               allocated: willHold,
               amountRsd: inv.amount_rsd ?? null,
               advanceDeducted: Number(inv.advance_deducted) || 0,

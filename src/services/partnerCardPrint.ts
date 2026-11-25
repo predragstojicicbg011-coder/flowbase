@@ -49,12 +49,13 @@ export function partnerCardPrintHtml(p: {
     card.rows.length === 0 ? '<tr><td colspan="5" class="muted">Nema promena u ovom periodu.</td></tr>' : '',
   ].join('\n')
 
-  const advances = card.advances.invoices.length || card.advances.proformaPayments.length
+  const advances = card.advances.invoices.length || card.advances.proformaPayments.length || card.advances.usedDirectly.length
     ? `<h3>Avansi kod dobavljača (ne ulaze u saldo)</h3><table class="list">`
       + card.advances.proformaPayments.map(a => `<tr><td>${dateSr(a.date)}</td><td>Isplata po predračunu ${esc(a.invoice_number || 'bez broja')} — ${esc(a.bank || 'banka')}</td><td class="n">${money(a.amount)}</td></tr>`).join('')
+      + card.advances.usedDirectly.map(u => `<tr><td>${dateSr(u.date)}</td><td>Predračun ${esc(u.proforma_number || 'bez broja')} iskorišćen računom ${esc(u.final_number || 'bez broja')}</td><td class="n">${money(u.amount)}</td></tr>`).join('')
       + card.advances.invoices.map(a => `<tr><td>${dateSr(a.date)}</td><td>Avansni račun ${esc(a.invoice_number || 'bez broja')}${a.priorPeriod ? ' (iz ranijeg perioda)' : ''} · ${money(a.amount)} · iskorišćeno ${money(a.used)}</td><td class="n">otvoreno ${money(a.open)}</td></tr>`).join('')
       + '</table>'
-      + (card.advances.paidWithoutAdvance > 0.005 ? `<p class="warn">Plaćeno po predračunima bez avansnog računa: ${money(card.advances.paidWithoutAdvance)}</p>` : '')
+      + (card.advances.paidWithoutAdvance > 0.005 ? `<p class="warn">Plaćeno po predračunima, a još nije zatvoreno avansnim računom ni računom: ${money(card.advances.paidWithoutAdvance)}</p>` : '')
     : ''
 
   const direct = card.direct.length

@@ -7,8 +7,9 @@ import { fmtMoney } from '../utils/formatters'
 // ─── Avansi dobavljačima ────────────────────────────────────────────────────
 //
 // The chain per supplier, from v_supplier_advances (20261021090000): what was
-// paid on proformas, how much of it advance invoices cover, how much final
-// invoices have used, and what is still open. A remainder is not closed by
+// paid on proformas, how much of it advance invoices cover, how much of it
+// bills used directly with no advance invoice (20261125100000), how much final
+// invoices have used of the advance invoices, and what is still open. A remainder is not closed by
 // hand (the client's decision): it stays here as a warning until the next
 // advance invoice or final invoice resolves it.
 
@@ -22,6 +23,8 @@ interface SupplierRow {
   used: number
   paid_without_advance: number
   advance_open: number
+  /** Paid on proformas and used by final invoices directly (20261125100000). */
+  used_directly: number
 }
 
 export default function SupplierAdvancesPanel({ onClose }: { onClose: () => void }) {
@@ -46,6 +49,7 @@ export default function SupplierAdvancesPanel({ onClose }: { onClose: () => void
         paid_on_proformas: Number(r.paid_on_proformas) || 0, covered: Number(r.covered) || 0,
         advance_total: Number(r.advance_total) || 0, used: Number(r.used) || 0,
         paid_without_advance: Number(r.paid_without_advance) || 0, advance_open: Number(r.advance_open) || 0,
+        used_directly: Number(r.used_directly) || 0,
       })))
       setLoose(((adv.data || []) as any[]).filter(a => a.unlinked))
       setLoading(false)
@@ -89,6 +93,7 @@ export default function SupplierAdvancesPanel({ onClose }: { onClose: () => void
                   <th style={{ ...th, textAlign: 'left' }}>Dobavljač</th>
                   <th style={th}>Plaćeno po predračunima</th>
                   <th style={th}>Pokriveno avansnim</th>
+                  <th style={th}>Iskorišćeno direktno računima</th>
                   <th style={th}>Iskorišćeno konačnim</th>
                   <th style={th}>Avans otvoren</th>
                 </tr>
@@ -98,11 +103,12 @@ export default function SupplierAdvancesPanel({ onClose }: { onClose: () => void
                   <tr key={`${r.partner_id}-${r.currency}`} style={{ borderTop: '0.5px solid ' + DIALOG.border }}>
                     <td style={{ ...td, textAlign: 'left', whiteSpace: 'normal' }}>
                       <div>{r.partner_name || '—'}</div>
-                      {r.paid_without_advance > 0.005 && <div style={warn}>Plaćeno bez avansnog računa: {money(r.paid_without_advance, r.currency)}</div>}
+                      {r.paid_without_advance > 0.005 && <div style={warn}>Plaćeno po predračunima, a još nije zatvoreno avansnim računom ni računom: {money(r.paid_without_advance, r.currency)}</div>}
                       {r.advance_open > 0.005 && <div style={warn}>Avans čeka konačni račun: {money(r.advance_open, r.currency)}</div>}
                     </td>
                     <td style={td}>{money(r.paid_on_proformas, r.currency)}</td>
                     <td style={td}>{money(r.covered, r.currency)}</td>
+                    <td style={td}>{money(r.used_directly, r.currency)}</td>
                     <td style={td}>{money(r.used, r.currency)}</td>
                     <td style={td}>{money(r.advance_open, r.currency)}</td>
                   </tr>

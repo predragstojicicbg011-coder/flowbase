@@ -102,9 +102,11 @@ begin
     raise exception 'FAIL: another supplier''s advance';
   exception when check_violation then null;
   end;
+  -- A paid proforma may close a final invoice directly (20261125100000), but
+  -- never beyond what was paid on it and not covered: 50000 is left of PR-1.
   begin
-    insert into public.advance_usage (final_invoice_id, advance_invoice_id, amount) values (v_fin3, v_pf, 1);
-    raise exception 'FAIL: a proforma used as an advance invoice';
+    insert into public.advance_usage (final_invoice_id, advance_invoice_id, amount) values (v_fin3, v_pf, 50001);
+    raise exception 'FAIL: a proforma used beyond what is left of it';
   exception when check_violation then null;
   end;
   begin

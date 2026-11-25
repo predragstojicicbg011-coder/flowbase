@@ -47,9 +47,11 @@ import {
   type AdjustableBill, type DocumentType,
 } from '../services/documentType'
 import {
-  coverageProblem, openAdvancesNotice, proposeCoverage, proposeUsage, usageProblem,
-  type AdvanceRef, type OpenAdvance, type PaidProforma,
+  coverageProblem, openAdvancesNotice, proformaOpen, proposeCoverage, proposeProformaUse, proposeUsage, usableProformasNotice, usageProblem,
+  type AdvanceRef, type OpenAdvance, type PaidProforma, type UsableProforma,
 } from '../services/advances'
+import { linkDinars, overAllocationProblem, readHeldLinks } from '../services/paymentLeft'
+import { toleranceFor } from '../services/settleInvoice'
 
 /** Display labels for the stored tag keys; the keys stay as they are in the data. */
 const TAG_LABEL: Record<string, string> = {
@@ -226,7 +228,14 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [usageLoaded, setUsageLoaded] = useState(!invoice?.id)
   /** A supplier's bill: the advance invoices with something left to use. */
   const [openAdvances, setOpenAdvances] = useState<OpenAdvance[]>([])
-  /** How much of each advance this final invoice uses, as typed. */
+  /** A final invoice, either direction: the partner's paid proformas it can
+   *  use directly, with no advance invoice in between (20261125100000). */
+  const [usableProformas, setUsableProformas] = useState<UsableProforma[]>([])
+  /** What ordinary payments already hold of this bill (v_invoice_status.paid_amount), when editing. */
+  const [billPaid, setBillPaid] = useState(0)
+  /** Its credit notes (v_invoice_status.adjustments, negative), when editing. */
+  const [billAdj, setBillAdj] = useState(0)
+  /** How much of each advance (or proforma) this final invoice uses, as typed. */
   const [usage, setUsage] = useState<Record<string, string>>({})
   const [usageTouched, setUsageTouched] = useState(false)
   /** Advance invoices from an earlier period, added from this final invoice
@@ -528,7 +537,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     const load = async () => {
       const [{ data, error }, own] = await Promise.all([
         supabase.from('v_invoice_status')
-          .select('id, invoice_number, invoice_date, currency, paid_amount, covered')
+          .select('id, invoice_number, invoice_date, currency, paid_amount, covered, used_directly')
           .eq('company_id', companyId).eq('partner_id', partnerId).eq('type', invType).eq('document_type', 'proforma')
           .order('invoice_date', { ascending: true }).limit(300),
         invoice?.id
@@ -540,7 +549,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       const mine = new Map<string, number>(((own as any).data || []).map((c: any) => [c.proforma_id, Number(c.amount) || 0]))
       const rows: PaidProforma[] = (data || []).map((r: any) => ({
         id: r.id, invoice_number: r.invoice_number, currency: r.currency,
-        paid: Number(r.paid_amount) || 0, covered: (Number(r.covered) || 0) - (mine.get(r.id) || 0),
+        // What final invoices use of it directly is spoken for as well.
+        paid: Number(r.paid_amount) || 0,
+        covered: (Number(r.covered) || 0) + (Number(r.used_directly) || 0) - (mine.get(r.id) || 0),
       })).filter((r: PaidProforma) => r.paid - r.covered > 0.005)
       setPaidProformas(rows)
       setCoverageLoaded(true)
@@ -564,13 +575,14 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setCoverage(Object.fromEntries(proposal.map(p => [p.proformaId, String(p.amount)])))
   }, [docType, amount, paidProformas, coverageTouched, priorPeriod]) // eslint-disable-line
 
-  // A supplier's bill: the partner's advance invoices with something left
-  // (this bill's own usage counted back in when editing).
+  // A final invoice: the partner's advance invoices with something left, and
+  // its paid proformas with something neither covered nor used (this bill's
+  // own usage counted back in when editing).
   useEffect(() => {
-    if (!isFinalBill || !companyId || !partnerId) { setOpenAdvances([]); return }
+    if (!isFinalBill || !companyId || !partnerId) { setOpenAdvances([]); setUsableProformas([]); return }
     let cancelled = false
     const load = async () => {
-      const [{ data, error }, own] = await Promise.all([
+      const [{ data, error }, own, pf, held] = await Promise.all([
         supabase.from('v_invoice_status')
           .select('id, invoice_number, invoice_date, currency, amount, advance_open')
           .eq('company_id', companyId).eq('partner_id', partnerId).eq('type', invType).eq('document_type', 'advance_invoice')
@@ -578,14 +590,30 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         invoice?.id
           ? supabase.from('advance_usage').select('advance_invoice_id, amount').eq('final_invoice_id', invoice.id)
           : Promise.resolve({ data: [] as any[] }),
+        supabase.from('v_invoice_status')
+          .select('id, invoice_number, invoice_date, currency, paid_amount, covered, used_directly')
+          .eq('company_id', companyId).eq('partner_id', partnerId).eq('type', invType).eq('document_type', 'proforma')
+          .order('invoice_date', { ascending: true }).limit(300),
+        invoice?.id
+          ? supabase.from('v_invoice_status').select('paid_amount, adjustments').eq('id', invoice.id).limit(1)
+          : Promise.resolve({ data: null as any }),
       ])
       if (cancelled) return
       if (error) console.warn('advances load error:', error.message)
+      const heldRow = (held as any)?.data
+      const heldOne = Array.isArray(heldRow) ? heldRow[0] : heldRow
+      setBillPaid(Number(heldOne?.paid_amount) || 0)
+      setBillAdj(Number(heldOne?.adjustments) || 0)
+      if ((pf as any)?.error) console.warn('proformas load error:', (pf as any).error.message)
       const mine = new Map<string, number>(((own as any).data || []).map((u: any) => [u.advance_invoice_id, Number(u.amount) || 0]))
       setOpenAdvances((data || []).map((r: any) => ({
         id: r.id, invoice_number: r.invoice_number, invoice_date: r.invoice_date, currency: r.currency,
         amount: Number(r.amount) || 0, open: (Number(r.advance_open) || 0) + (mine.get(r.id) || 0),
       })).filter((a: OpenAdvance) => a.open > 0.005))
+      setUsableProformas(((((pf as any)?.data) || []) as any[]).map(r => ({
+        id: r.id, invoice_number: r.invoice_number, invoice_date: r.invoice_date, currency: r.currency,
+        paid: Number(r.paid_amount) || 0, open: Math.round((proformaOpen(r) + (mine.get(r.id) || 0)) * 100) / 100,
+      })).filter((p: UsableProforma) => p.open > 0.005))
       setUsageLoaded(true)
       if (mine.size > 0) {
         setUsage(Object.fromEntries(Array.from(mine.entries()).map(([k, v]) => [k, String(v)])))
@@ -608,6 +636,24 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setUsage(Object.fromEntries(usageProposal.usage.map(u => [u.advanceId, String(u.amount)])))
   }, [openAdvances, usageTouched]) // eslint-disable-line
 
+  /** The paid proformas this bill can use: the partner's, in the bill's currency. */
+  const billProformas = isFinalBill
+    ? usableProformas.filter(p => !currency || (p.currency || 'RSD') === currency)
+    : []
+
+  // Until the person types, a bill with exactly ONE paid proforma to use is
+  // closed by it: what the bill still owes (its amount with its credit notes,
+  // less what payments hold), up to what is left of the proforma. Not where
+  // SEF names advance invoices (those are filled above), not where the bill
+  // is being linked to transactions that pay it, and not where it deducts the
+  // old project advance (the database refuses both on one invoice).
+  useEffect(() => {
+    if (!isFinalBill || usageTouched || advancesRequired) return
+    const proposal = linkedTxIds.length > 0 || advanceOwn > 0 ? null
+      : proposeProformaUse((parseFloat(amount) || 0) + billAdj, billPaid, billProformas)
+    setUsage(proposal ? { [proposal.proformaId]: String(proposal.amount) } : {})
+  }, [usableProformas, billPaid, billAdj, amount, currency, usageTouched, isFinalBill, linkedTxIds.length, advanceOwn]) // eslint-disable-line
+
   /** Add a named advance from an earlier period, sized by what the bill says it paid. */
   const addPriorAdvance = (ref: AdvanceRef) => {
     const already = priorAdvances.reduce((sum, a) => sum + a.amount, 0)
@@ -616,10 +662,13 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     touch('advances')
   }
 
-  /** The usage as it will be saved: booked advances with an amount. */
-  const usageRows = isFinalBill
-    ? openAdvances
-        .map(a => ({ a, amount: parseFloat((usage[a.id] || '').replace(',', '.')) || 0 }))
+  /** The usage as it will be saved: booked advances and paid proformas with an amount. */
+  const usageRows: { a: { id: string; open: number }; amount: number; kind: 'advance_invoice' | 'proforma' }[] = isFinalBill
+    ? [
+        ...openAdvances.map(a => ({ a, kind: 'advance_invoice' as const })),
+        ...billProformas.map(a => ({ a, kind: 'proforma' as const })),
+      ]
+        .map(r => ({ ...r, amount: parseFloat((usage[r.a.id] || '').replace(',', '.')) || 0 }))
         .filter(r => r.amount > 0)
     : []
 
@@ -659,11 +708,18 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         || `Zbir pokrića (${fmtNum(total)}) nije jednak avansnom računu (${fmtNum(a)}).`
     }
     if (isFinalBill && (usageRows.length > 0 || priorAdvances.length > 0 || advancesRequired)) {
-      const total = Math.round((usageRows.reduce((sum, r) => sum + r.amount, 0) + priorAdvances.reduce((sum, a) => sum + a.amount, 0)) * 100) / 100
-      const why = usageProblem(parseFloat(amount) || 0, [
-        ...usageRows.map(r => ({ amount: r.amount, open: r.a.open })),
+      // What SEF says was paid by advance is advance invoices only: a proforma
+      // used directly is the rest of the bill, paid ahead.
+      const total = Math.round((usageRows.filter(r => r.kind === 'advance_invoice').reduce((sum, r) => sum + r.amount, 0)
+        + priorAdvances.reduce((sum, a) => sum + a.amount, 0)) * 100) / 100
+      // What payments will hold once it is saved: the transactions being
+      // linked now (they replace its links), or the links it has.
+      const paidAfter = linkedTxIds.length > 0 ? (linkPreview?.covered ?? 0) : billPaid
+      const owes = (parseFloat(amount) || 0) + billAdj
+      const why = usageProblem(owes, [
+        ...usageRows.map(r => ({ amount: r.amount, open: r.a.open, kind: r.kind })),
         ...priorAdvances.map(a => ({ amount: a.amount, open: a.amount })),
-      ])
+      ], paidAfter, toleranceFor(parseFloat(amount) || 0, book.amounts?.amount_rsd ?? null))
       if (missingAdvances.length > 0) {
         e.advances = `${invType === 'revenue' ? 'Konačna faktura' : 'Konačni račun'} navodi avansni račun ${missingAdvances.map(m => m.number).join(', ')} koji nije u knjigama.`
       } else if (why) {
@@ -703,7 +759,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
 
   useEffect(() => {
     setErrors(runValidation())
-  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions, docType, adjustsId, baseBills, coverage, paidProformas, priorPeriod, usage, openAdvances, priorAdvances, revKind, leaseId, serviceMonth]) // eslint-disable-line
+  }, [companyId, currency, invoiceDate, partnerId, newPartnerName, showNewPartner, invType, plCatId, deptId, revStream, amount, exRate, eurRate, plImpact, linkedTxId, advanceInput, projectId, splitLines, projectAdvances, projectDeductions, docType, adjustsId, baseBills, coverage, paidProformas, priorPeriod, usage, openAdvances, usableProformas, priorAdvances, revKind, leaseId, serviceMonth, linkedTxIds, billPaid, billAdj, directTransactions]) // eslint-disable-line
 
   useEffect(() => {
     const load = async () => {
@@ -1070,6 +1126,24 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     setSaveError('')
     setFillRefused(null)
     setSaving(true)
+    // A posted transaction linked here may already pay other bills: it is
+    // asked what is left of it BEFORE anything is written (the database
+    // refuses the same, links_stay_within_their_payment), counted in dinars as
+    // the payment sees each link. Its link to this very bill is left out: the
+    // save rewrites it.
+    if (linkedTxId) {
+      const planned = linkAllocation(booked)
+      for (const l of planned?.links || []) {
+        const tx = linkedTxs.find(t => t.id === l.transactionId)
+        if (!tx) continue
+        const payment = { amount: Number(tx.amount) || 0, amount_rsd: tx.amount_rsd ?? null, currency: tx.currency ?? null }
+        const asked = linkDinars(payment, { currency: currency || 'RSD', allocated_amount: l.allocatedAmount, allocated_amount_rsd: l.allocatedAmountRsd })
+        if (asked === null) continue
+        const { held } = await readHeldLinks(supabase, tx.id, invoice?.id ?? null)
+        const why = overAllocationProblem({ ...payment, label: `od ${String(tx.transaction_date || '').split('-').reverse().join('.')}`.trim() }, held, asked)
+        if (why) { setSaveError(why); setSaving(false); return }
+      }
+    }
     try {
       let finalPartnerId = partnerId
       if (showNewPartner && newPartnerName) {
@@ -1204,7 +1278,8 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
       //
       // An advance from an earlier period is booked first (no proforma, no
       // P&L, at this bill's rates), then every use in one insert.
-      const usageIds: { id: string; amount: number }[] = usageRows.map(r => ({ id: r.a.id, amount: r.amount }))
+      const usageIds: { id: string; amount: number; kind: 'advance_invoice' | 'proforma' }[] =
+        usageRows.map(r => ({ id: r.a.id, amount: r.amount, kind: r.kind }))
       {
         const ids = usageIds
         for (const pa of priorAdvances) {
@@ -1220,7 +1295,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           }).select().single()
           if (madeErr) throw new Error(`Račun je sačuvan, ali avansni račun ${pa.number} nije: ${madeErr.message}`)
           if (!made?.id) throw new Error(`Račun je sačuvan, ali avansni račun ${pa.number} nije — baza nije vratila red.`)
-          ids.push({ id: made.id, amount: pa.amount })
+          ids.push({ id: made.id, amount: pa.amount, kind: 'advance_invoice' })
         }
       }
 
@@ -1235,7 +1310,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           ? coverageRows.map(r => ({ proforma_id: r.p.id, amount: Math.round(r.amount * 100) / 100 }))
           : null
         const p_usage = isFinalBill && usageLoaded
-          ? usageIds.map(u => ({ advance_invoice_id: u.id, amount: Math.round(u.amount * 100) / 100 }))
+          ? usageIds.map(u => u.kind === 'proforma'
+              ? { proforma_id: u.id, amount: Math.round(u.amount * 100) / 100 }
+              : { advance_invoice_id: u.id, amount: Math.round(u.amount * 100) / 100 })
           : null
         if (p_coverage !== null || p_usage !== null) {
           const { error: linkErr } = await supabase.rpc('replace_advance_links', { p_invoice: invoiceId, p_coverage, p_usage })
@@ -1794,7 +1871,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                     )}
                   </div>
                 )}
-                {isFinalBill && (openAdvances.length > 0 || advancesRequired) && (
+                {isFinalBill && (openAdvances.length > 0 || billProformas.length > 0 || advancesRequired) && (
                   <fieldset aria-label="Avansi" style={{ border: 0, padding: 0, margin: '0 0 14px' }}>
                     {openAdvancesNotice(openAdvances, invType) && (
                       <div style={{ ...s.infoBox, marginBottom: '6px', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, fontSize: '12px' }}>
@@ -1814,6 +1891,21 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                         <input aria-label={`Avans ${a.invoice_number || a.id}`} style={{ ...s.input, width: '140px' }}
                           value={usage[a.id] || ''} placeholder="0,00"
                           onChange={e => { setUsage(prev => ({ ...prev, [a.id]: e.target.value })); setUsageTouched(true); touch('advances') }} />
+                      </div>
+                    ))}
+                    {usableProformasNotice(billProformas) && (
+                      <div style={{ ...s.infoBox, margin: '6px 0', background: DIALOG.blueFill, borderColor: DIALOG.blue, color: DIALOG.blue, fontSize: '12px' }}>
+                        {usableProformasNotice(billProformas)}
+                      </div>
+                    )}
+                    {billProformas.map(p => (
+                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                        <span style={{ flex: 1, fontSize: '12px', color: DIALOG.text }}>
+                          Predračun {p.invoice_number || 'bez broja'} · plaćeno {fmtNum(p.paid)} · neiskorišćeno {fmtNum(p.open)}
+                        </span>
+                        <input aria-label={`Predračun ${p.invoice_number || p.id}`} style={{ ...s.input, width: '140px' }}
+                          value={usage[p.id] || ''} placeholder="0,00"
+                          onChange={e => { setUsage(prev => ({ ...prev, [p.id]: e.target.value })); setUsageTouched(true); touch('advances') }} />
                       </div>
                     ))}
                     {priorAdvances.map(pa => (

@@ -23,6 +23,8 @@ interface AdvanceRow {
   used: number | string | null
   received_without_advance: number | string | null
   advance_open: number | string | null
+  /** Received on proformas and used by our final invoices directly (20261125100000). */
+  used_directly?: number | string | null
 }
 
 const n0 = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
@@ -65,6 +67,7 @@ export default function CustomerAdvancesSection({ companyId }: {
                 <th style={rs.th}>Projekat</th>
                 <th style={rs.thNum}>Primljeno po predračunima</th>
                 <th style={rs.thNum}>Pokriveno avansnim</th>
+                <th style={rs.thNum}>Iskorišćeno direktno fakturama</th>
                 <th style={rs.thNum}>Iskorišćeno</th>
                 <th style={rs.thNum}>Otvoreno</th>
               </tr>
@@ -80,7 +83,7 @@ export default function CustomerAdvancesSection({ companyId }: {
                       {r.partner_name || '—'}
                       {without > EPS && (
                         <div style={{ ...rs.subCell, color: '#F5A623' }}>
-                          {`Primljeno bez avansnog računa: ${money(without, r.currency)}`}
+                          {`Primljeno po predračunima, a još nije zatvoreno avansnim računom ni fakturom: ${money(without, r.currency)}`}
                         </div>
                       )}
                       {open > EPS && (
@@ -92,6 +95,7 @@ export default function CustomerAdvancesSection({ companyId }: {
                     <td style={rs.td}><span style={rs.smallCell}>{r.project_name || '—'}</span></td>
                     <td style={{ ...rs.td, ...rs.num }}>{money(r.received_on_proformas, r.currency)}</td>
                     <td style={{ ...rs.td, ...rs.num }}>{money(r.covered, r.currency)}</td>
+                    <td style={{ ...rs.td, ...rs.num }}>{money(r.used_directly, r.currency)}</td>
                     <td style={{ ...rs.td, ...rs.num }}>{money(r.used, r.currency)}</td>
                     <td style={{ ...rs.td, ...rs.num, fontWeight: 600 }}>{money(open, r.currency)}</td>
                   </tr>

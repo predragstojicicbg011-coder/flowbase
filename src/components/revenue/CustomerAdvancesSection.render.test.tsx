@@ -38,7 +38,21 @@ describe('Avansi kupaca', () => {
     expect(within(row).getByText('120.000 RSD')).toBeInTheDocument()
     expect(within(row).getByText('Novi Beograd A1')).toBeInTheDocument()
     expect(within(row).getByText('Avans čeka konačnu fakturu: 80.000 RSD')).toBeInTheDocument()
-    expect(within(row).getByText('Primljeno bez avansnog računa: 50.000 RSD')).toBeInTheDocument()
+    expect(within(row).getByText('Primljeno po predračunima, a još nije zatvoreno avansnim računom ni fakturom: 50.000 RSD')).toBeInTheDocument()
+  })
+
+  it('shows what our invoices used of a customer proforma directly (20261125100000)', async () => {
+    mockDb.v_customer_advances = [{
+      company_id: 'c1', partner_id: 'k2', partner_name: 'Kupac Beta', project_id: null, project_name: null, currency: 'RSD',
+      received_on_proformas: 1200, covered: 0, advance_total: 0, used: 0,
+      received_without_advance: 200, advance_open: 0, used_directly: 1000,
+    }]
+    render(<CustomerAdvancesSection companyId="c1" format={format} />)
+    const table = await screen.findByRole('table', { name: 'Avansi kupaca' })
+    expect(within(table).getByText('Iskorišćeno direktno fakturama')).toBeInTheDocument()
+    const row = within(table).getByText('Kupac Beta').closest('tr')!
+    expect(within(row).getByText('1.000 RSD')).toBeInTheDocument()
+    expect(within(row).getByText('Primljeno po predračunima, a još nije zatvoreno avansnim računom ni fakturom: 200 RSD')).toBeInTheDocument()
   })
 
   it('says so when there are none', async () => {
