@@ -1477,11 +1477,15 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             })
             const allocOwn = settlement.own
 
-            await supabase.from('invoice_transaction_links').insert({
+            // Checked: the database refuses a link that takes the payment
+            // beyond what it paid, or pays a bill twice (20261125100000), and
+            // a refusal unread would leave a posted payment linked to nothing.
+            const { error: linkErr } = await supabase.from('invoice_transaction_links').insert({
               invoice_id: invoiceId,
               transaction_id: newTx.id,
               ...linkAmountsFromOwn(allocOwn, inv),
             })
+            if (linkErr) throw new Error(`${formatDate(p.date)} ${p.description || ''}: plaćanje je proknjiženo, ali nije povezano sa fakturom ${inv.invoice_number || 'bez broja'}: ${linkErr.message}`)
 
             // What is left of the payment, in the unit the loop counts in.
             remainingOrig = settlement.leftOnPayment
@@ -1524,10 +1528,11 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
                   const childAllocOrig = Math.round((child.amount || 0) * childShare * 100) / 100
                   // A child is a part of the parent invoice, so its link is
                   // booked at the PARENT's stored rates.
-                  await supabase.from('invoice_transaction_links').insert({
+                  const { error: childLinkErr } = await supabase.from('invoice_transaction_links').insert({
                     invoice_id: child.id, transaction_id: newTx.id,
                     ...linkAmountsFromOwn(childAllocOrig, inv),
                   })
+                  if (childLinkErr) throw new Error(`${formatDate(p.date)} ${p.description || ''}: plaćanje je proknjiženo, ali nije povezano sa stavkom obračuna računa ${inv.invoice_number || 'bez broja'}: ${childLinkErr.message}`)
                   const childStatus = settledStatus(child.amount || 0, childAllocOrig, child.amount_rsd, Number(child.advance_deducted) || 0)
                   await supabase.from('invoices').update({ status: childStatus, updated_at: new Date().toISOString() }).eq('id', child.id)
                 }

@@ -333,17 +333,19 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
     const asPayment = (p: any) => ({ amount: Number(p?.amount) || 0, amount_rsd: p?.amount_rsd ?? null, currency: p?.currency ?? null })
     if (sourceType === 'transaction') {
       const pay = asPayment(source)
-      const asked = toWrite.reduce((s, w) => s + (linkDinars(pay, { currency: w.link.currency, allocated_amount: w.booked.allocated_amount, allocated_amount_rsd: w.booked.allocated_amount_rsd }) ?? 0), 0)
+      const askedLinks = toWrite.map(w => ({ currency: w.link.currency, allocated_amount: w.booked.allocated_amount, allocated_amount_rsd: w.booked.allocated_amount_rsd }))
+      const asked = askedLinks.reduce((s, l) => s + (linkDinars(pay, l) ?? 0), 0)
       const { held } = await heldLinksOf(sourceId)
-      return overAllocationProblem(pay, held, asked) || ''
+      return overAllocationProblem(pay, held, asked, askedLinks) || ''
     }
     for (const w of toWrite) {
       const pay = asPayment(w.link)
-      const asked = linkDinars(pay, { currency: source?.currency ?? null, allocated_amount: w.booked.allocated_amount, allocated_amount_rsd: w.booked.allocated_amount_rsd })
+      const askedLink = { currency: source?.currency ?? null, allocated_amount: w.booked.allocated_amount, allocated_amount_rsd: w.booked.allocated_amount_rsd }
+      const asked = linkDinars(pay, askedLink)
       if (asked === null) continue
       const { held } = await heldLinksOf(w.link.id)
       const date = (w.link.date || '').split('-').reverse().join('.')
-      const why = overAllocationProblem({ ...pay, label: `od ${date}${w.link.identifier && w.link.identifier !== '—' ? ` (izvod ${w.link.identifier})` : ''}` }, held, asked)
+      const why = overAllocationProblem({ ...pay, label: `od ${date}${w.link.identifier && w.link.identifier !== '—' ? ` (izvod ${w.link.identifier})` : ''}` }, held, asked, [askedLink])
       if (why) return why
     }
     return ''

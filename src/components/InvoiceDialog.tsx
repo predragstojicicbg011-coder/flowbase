@@ -641,14 +641,17 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     ? usableProformas.filter(p => !currency || (p.currency || 'RSD') === currency)
     : []
 
-  // Until the person types, a bill with exactly ONE paid proforma to use is
-  // closed by it: what the bill still owes (its amount with its credit notes,
-  // less what payments hold), up to what is left of the proforma. Not where
-  // SEF names advance invoices (those are filled above), not where the bill
-  // is being linked to transactions that pay it, and not where it deducts the
-  // old project advance (the database refuses both on one invoice).
+  // Until the person types, a NEW bill with exactly ONE paid proforma to use
+  // is closed by it: what the bill still owes (its amount with its credit
+  // notes, less what payments hold), up to what is left of the proforma. Not
+  // where SEF names advance invoices (those are filled above), not where the
+  // bill is being linked to transactions that pay it, and not where it
+  // deducts the old project advance (the database refuses both on one
+  // invoice). An existing bill opened for editing lists its usable proformas
+  // and fills nothing: an old bill was paid some other way, or on purpose not
+  // at all, and opening it must not change that (fix round 1).
   useEffect(() => {
-    if (!isFinalBill || usageTouched || advancesRequired) return
+    if (!isFinalBill || usageTouched || advancesRequired || invoice?.id) return
     const proposal = linkedTxIds.length > 0 || advanceOwn > 0 ? null
       : proposeProformaUse((parseFloat(amount) || 0) + billAdj, billPaid, billProformas)
     setUsage(proposal ? { [proposal.proformaId]: String(proposal.amount) } : {})
@@ -1137,10 +1140,11 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         const tx = linkedTxs.find(t => t.id === l.transactionId)
         if (!tx) continue
         const payment = { amount: Number(tx.amount) || 0, amount_rsd: tx.amount_rsd ?? null, currency: tx.currency ?? null }
-        const asked = linkDinars(payment, { currency: currency || 'RSD', allocated_amount: l.allocatedAmount, allocated_amount_rsd: l.allocatedAmountRsd })
+        const link = { currency: currency || 'RSD', allocated_amount: l.allocatedAmount, allocated_amount_rsd: l.allocatedAmountRsd }
+        const asked = linkDinars(payment, link)
         if (asked === null) continue
         const { held } = await readHeldLinks(supabase, tx.id, invoice?.id ?? null)
-        const why = overAllocationProblem({ ...payment, label: `od ${String(tx.transaction_date || '').split('-').reverse().join('.')}`.trim() }, held, asked)
+        const why = overAllocationProblem({ ...payment, label: `od ${String(tx.transaction_date || '').split('-').reverse().join('.')}`.trim() }, held, asked, [link])
         if (why) { setSaveError(why); setSaving(false); return }
       }
     }

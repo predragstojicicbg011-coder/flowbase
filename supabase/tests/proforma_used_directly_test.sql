@@ -19,6 +19,8 @@ declare
   v_b7 uuid; v_b9 uuid; v_b3 uuid; v_p500 uuid; v_p100 uuid; v_i60 uuid; v_i40 uuid;
   v_eur1 uuid; v_eur2 uuid; v_rsdb uuid; v_trsd uuid; v_teur uuid;
   v_par uuid; v_chi uuid; v_tpay uuid; v_gone uuid; v_kept uuid; v_t6 uuid; v_f8 uuid; v_t7 uuid;
+  v_e19 uuid; v_t19 uuid; v_inv uuid; v_tx uuid; k int; v_rate numeric; v_bill numeric; v_bill_rsd numeric; v_pay numeric;
+  v_own numeric; v_rsd numeric; v_refused int := 0; v_old_rule int := 0; v_first text;
   v_msg text; r record; n numeric;
 begin
   insert into public.companies (name, country, currency) values ('Test predracun direktno (TEST-PD)', 'Srbija', 'RSD') returning id into v_co;
@@ -460,6 +462,53 @@ begin
   exception when check_violation then null;
   end;
   raise notice '18 ok';
+
+  -- 19. A dinar payment short of a euro bill (fix round 1). settlementFor's
+  --     part payment writes own = round2(dinars / rate) and linkAmountsFromOwn
+  --     its dinars as round2(own * rate): up to half a euro-para ABOVE the
+  --     payment. A para of the invoice's currency per such link is allowed.
+  insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, amount_eur, exchange_rate, eur_rate)
+  values (v_co, v_s2, 'PD-E-19', current_date, 'expense', 'EUR', 1000, 117500, 1000, 117.5, 117.5) returning id into v_e19;
+  insert into public.transactions (company_id, partner_id, transaction_date, type, currency, amount, amount_rsd, pl_impact, status)
+  values (v_co, v_s2, current_date, 'invoice_payment', 'RSD', 117200, 117200, false, 'posted') returning id into v_t19;
+  insert into public.invoice_transaction_links (invoice_id, transaction_id, allocated_amount, allocated_amount_rsd, allocated_amount_eur)
+  values (v_e19, v_t19, 997.45, 117200.38, 997.45);
+  assert (select allocated_amount_rsd from public.invoice_transaction_links where transaction_id = v_t19) = 117200.38, '997,45 EUR = 117.200,38 RSD stands';
+  -- A para of the invoice's currency (1,175 RSD), not more.
+  begin
+    update public.invoice_transaction_links set allocated_amount_rsd = 117201.25 where transaction_id = v_t19;
+    raise exception 'FAIL: more than a euro-para above a dinar payment';
+  exception when check_violation then null;
+  end;
+  -- The sweep: settlementFor's own outputs, part and whole, over random bills and rates.
+  perform setseed(0.25);
+  for k in 1 .. 400 loop
+    v_rate := round((95 + random() * 30)::numeric, 4);
+    v_bill := round((1 + random() * 20000)::numeric, 2);
+    v_bill_rsd := round(v_bill * v_rate, 2);
+    v_pay := round((v_bill_rsd * (0.5 + random() * 0.51))::numeric, 2);
+    if v_pay >= v_bill_rsd - 0.01 then
+      v_own := v_bill; v_rsd := v_bill_rsd;                      -- covers the remainder: the remainder itself
+    else
+      v_own := least(v_bill, round(v_pay / v_rate, 2));          -- partFromRsd
+      v_rsd := round(v_own * v_rate, 2);                         -- partBookAmounts
+    end if;
+    if v_rsd > v_pay + 0.01 + 0.005 then v_old_rule := v_old_rule + 1; end if;
+    insert into public.invoices (company_id, partner_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, amount_eur, exchange_rate, eur_rate)
+    values (v_co, v_s2, 'PD-SW-' || k, current_date, 'expense', 'EUR', v_bill, v_bill_rsd, v_bill, v_rate, v_rate) returning id into v_inv;
+    insert into public.transactions (company_id, partner_id, transaction_date, type, currency, amount, amount_rsd, pl_impact, status)
+    values (v_co, v_s2, current_date, 'invoice_payment', 'RSD', v_pay, v_pay, false, 'posted') returning id into v_tx;
+    begin
+      insert into public.invoice_transaction_links (invoice_id, transaction_id, allocated_amount, allocated_amount_rsd, allocated_amount_eur)
+      values (v_inv, v_tx, v_own, v_rsd, v_own);
+    exception when check_violation then
+      v_refused := v_refused + 1;
+      v_first := coalesce(v_first, format('bill %s EUR at %s, payment %s RSD -> %s EUR / %s RSD', v_bill, v_rate, v_pay, v_own, v_rsd));
+    end;
+  end loop;
+  assert v_refused = 0, format('%s of settlementFor''s own outputs refused, first: %s', v_refused, v_first);
+  assert v_old_rule > 0, 'the sweep never reached a part payment above the payment by more than a dinar-para';
+  raise notice '19 ok (% of 400 above a dinar-para, none refused)', v_old_rule;
 
   raise notice 'ALL TESTS PASSED';
 end $$;

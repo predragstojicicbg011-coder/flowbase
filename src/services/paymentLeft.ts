@@ -84,10 +84,32 @@ export function heldDinars(payment: PaymentMoney, links: HeldLink[]): number {
   return cents(countedLinks(payment, links).reduce((s, v) => s + v, 0))
 }
 
-/** A para of the payment's currency per counted link, in dinars: the rounding settlementFor allows. */
-function slack(payment: PaymentMoney, counted: number): number {
-  return Math.max(1, counted) * Math.max(0.01, 0.01 * (paymentRate(payment) ?? 1)) + 0.005
+/** A link as the slack sees it: its currency and its two figures. */
+export interface SlackLink { currency: string | null; allocated_amount: number | null; allocated_amount_rsd: number | null }
+
+/**
+ * The rounding one counted link may carry, in dinars, or null where it is not
+ * counted. A para of the PAYMENT's currency for a link in the payment's
+ * currency (settlementFor finishes a bill within CLOSED_WITHIN); a para of the
+ * INVOICE's currency, at the link's own rate, for a link in another currency:
+ * a part payment there is written as own = round2(dinars / rate) and its
+ * dinars as round2(own × rate), up to half a para of the invoice's currency
+ * above what was paid (a 117.200 RSD payment of a 1.000 EUR bill at 117,5:
+ * 997,45 EUR = 117.200,38 RSD). The database allows the same.
+ */
+export function linkSlack(payment: PaymentMoney, link: SlackLink): number | null {
+  const rate = paymentRate(payment)
+  if (cur(link.currency) === cur(payment.currency)) return Math.max(0.01, 0.01 * (rate ?? 1))
+  if (rate === null || link.allocated_amount_rsd == null) return null
+  const own = Math.abs(num(link.allocated_amount))
+  return Math.max(0.01, 0.01 * (own > 0 ? Math.abs(num(link.allocated_amount_rsd)) / own : 0))
 }
+
+const slackOf = (payment: PaymentMoney, links: SlackLink[]) =>
+  links.map(l => linkSlack(payment, l)).filter((v): v is number => v !== null).reduce((s, v) => s + v, 0)
+
+/** A para of the payment's own currency, in dinars. */
+const paymentPara = (payment: PaymentMoney) => Math.max(0.01, 0.01 * (paymentRate(payment) ?? 1))
 
 /** What is left of the payment, never below zero: in dinars, and in its own currency. */
 export function paymentLeft(payment: PaymentMoney, links: HeldLink[]): { rsd: number; own: number } {
@@ -102,17 +124,20 @@ const ownOf = (payment: PaymentMoney, rsd: number) => cents(rsd / (paymentRate(p
 /**
  * Why allocating `askedRsd` more of this payment (dinars as it sees them, see
  * linkDinars) would take it beyond what it paid, or null. `links` are the ones
- * it already has.
+ * it already has; `asked` the links the figure is made of, for their rounding
+ * (without them, a para of the payment's currency).
  */
 export function overAllocationProblem(
   payment: PaymentMoney & { label?: string | null },
   links: HeldLink[],
   askedRsd: number,
+  asked: SlackLink[] = [],
 ): string | null {
   const paid = paymentDinars(payment)
   const held = heldDinars(payment, links)
-  const counted = countedLinks(payment, links).length
-  if (cents(held + askedRsd) <= paid + slack(payment, counted + 1)) return null
+  const room = slackOf(payment, links.filter(l => !l.child && !l.deleted))
+    + (asked.length > 0 ? slackOf(payment, asked) : paymentPara(payment)) + 0.005
+  if (cents(held + askedRsd) <= paid + room) return null
   const c = cur(payment.currency)
   const name = payment.label ? `Plaćanje ${payment.label}` : 'Plaćanje'
   return `${name} iznosi ${formatMoney(ownOf(payment, paid), c)} i već plaća ${formatMoney(ownOf(payment, held), c)}: od njega je ostalo ${formatMoney(ownOf(payment, Math.max(0, cents(paid - held))), c)}, a traži se ${formatMoney(ownOf(payment, askedRsd), c)}. Plaćanje se ne raspoređuje preko onoga što je plaćeno.`
@@ -181,7 +206,7 @@ export function allocationsExceedPayment(
   const paid = paymentDinars(payment)
   const mine = asLinks(allocations)
   const asked = heldDinars(payment, mine)
-  if (asked <= paid + slack(payment, countedLinks(payment, mine).length)) return null
+  if (asked <= paid + Math.max(slackOf(payment, mine.filter(l => !l.child && !l.deleted)), paymentPara(payment)) + 0.005) return null
   if (before && asked <= heldDinars(payment, asLinks(before)) + 0.005) return null
   const c = cur(payment.currency)
   return `Fakture na ovom plaćanju su raspoređene ${formatMoney(ownOf(payment, asked), c)}, više od samog plaćanja (${formatMoney(ownOf(payment, paid), c)}). Ništa nije sačuvano. Smanjite raspodelu: plaćanje se ne raspoređuje preko onoga što je plaćeno.`

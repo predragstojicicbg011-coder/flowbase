@@ -162,13 +162,26 @@ describe('a supplier\'s bill and its paid proforma', () => {
     expect(insertedInto('invoices')).toHaveLength(0)
   })
 
-  it('on edit, takes off its credit notes and what payments already hold', async () => {
+  it('an existing bill opened for editing lists its usable proforma and fills NOTHING (fix round 1)', async () => {
+    mockState.status.proforma = [paidProforma()]
+    mockState.byId.b1 = { id: 'b1', paid_amount: 0, adjustments: 0 }
+    render(<InvoiceDialog onClose={() => {}} invoice={bill({ id: 'b1', document_type: 'invoice' })} />)
+    const use = await screen.findByLabelText('Predračun PR-7') as HTMLInputElement
+    await new Promise(r => setTimeout(r, 100))
+    expect(use.value).toBe('')
+    expect(screen.getByText('Plaćeno bez avansnog računa: 1 predračun, neiskorišćeno 2.400,00 RSD. Može da zatvori ovaj račun direktno.')).toBeInTheDocument()
+  })
+
+  it('on edit, a use typed by hand is held to what the bill still owes: its credit notes and payments taken off', async () => {
     mockState.status.proforma = [paidProforma()]
     mockState.byId.b1 = { id: 'b1', paid_amount: 300, adjustments: -500 }
     render(<InvoiceDialog onClose={() => {}} invoice={bill({ id: 'b1', document_type: 'invoice' })} />)
     const use = await screen.findByLabelText('Predračun PR-7') as HTMLInputElement
-    // 2.400 − 500 (credit note) − 300 (paid) = 1.600.
-    await waitFor(() => expect(use.value).toBe('1600'))
+    // 2.400 − 500 (credit note) = 1.900 owed; 300 paid; 1.700 would be 2.000.
+    fireEvent.change(use, { target: { value: '1700' } })
+    expect(await screen.findByText('Iskorišćeni avans (1.700,00) i ono što plaćanja već drže (300,00) zajedno su više od onoga što račun duguje (1.900,00). Račun se ne plaća dva puta.')).toBeInTheDocument()
+    fireEvent.change(use, { target: { value: '1600' } })
+    await waitFor(() => expect(screen.queryByText(/Račun se ne plaća dva puta/)).not.toBeInTheDocument())
   })
 })
 

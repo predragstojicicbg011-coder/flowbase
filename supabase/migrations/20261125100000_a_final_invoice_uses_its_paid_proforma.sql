@@ -138,9 +138,15 @@
 --
 --   counted   links to live, top-level invoices (a payroll child mirrors its
 --             parent's share of the same payment and is not counted twice);
---   limit     |amount| in dinars, plus a para of the payment's currency per
---             counted link -- the rounding settlementFor allows when a payment
---             finishes a bill (CLOSED_WITHIN);
+--   limit     |amount| in dinars, plus a para per counted link, in dinars:
+--             of the PAYMENT's currency for a link in the payment's currency
+--             (settlementFor finishes a bill within CLOSED_WITHIN), of the
+--             INVOICE's currency for a link in another currency -- a part
+--             payment there is written as own = round2(dinars / rate) and its
+--             dinars as round2(own * rate), up to half a para of the invoice's
+--             currency above what the payment paid (fix round 1: a 117.200 RSD
+--             payment of a 1.000 EUR bill at 117,5 holds 997,45 EUR =
+--             117.200,38 RSD);
 --   when      after INSERT, and after UPDATE of allocated_amount,
 --             allocated_amount_rsd, invoice_id or transaction_id. Never on
 --             DELETE: a delete only lowers.
@@ -371,7 +377,10 @@ set search_path to 'public'
 as $$
 declare v_pf record; v_paid numeric; v_cov numeric; v_direct numeric;
 begin
-  select * into v_pf from public.invoices where id = old.invoice_id;
+  -- The proforma's row first (fix round 1): a use takes it `for update`
+  -- (advance_usage_rules), so an unlink and a use of one proforma wait for
+  -- each other and the second one's sums see the first one's write.
+  select * into v_pf from public.invoices where id = old.invoice_id for update;
   if v_pf.id is null or v_pf.document_type <> 'proforma' then
     return null;
   end if;
@@ -725,7 +734,7 @@ declare
   v_rate    numeric;   -- dinars per unit of the payment's currency; null: a foreign payment with no dinar figure
   v_unit    numeric;
   v_total   numeric;
-  v_links   int;
+  v_slack   numeric;
   v_mine    numeric := 0;
   v_was     numeric := 0;
   v_before  numeric;
@@ -748,17 +757,21 @@ begin
     -- Counted: links of this payment to live, top-level invoices. A link in
     -- the payment's currency at the payment's rate; a link in another
     -- currency at its own dinar figure (none when the payment has no rate).
+    -- The slack: a para per counted link, of the payment's currency for a
+    -- same-currency link, of the invoice's currency (at the link's own rate)
+    -- for a link in another currency.
     select coalesce(sum(case when coalesce(i.currency, 'RSD') = coalesce(v_tx.currency, 'RSD') then l.allocated_amount * v_unit
                              when v_rate is not null then l.allocated_amount_rsd end), 0),
-           count(case when coalesce(i.currency, 'RSD') = coalesce(v_tx.currency, 'RSD') then l.allocated_amount * v_unit
-                      when v_rate is not null then l.allocated_amount_rsd end)
-      into v_total, v_links
+           coalesce(sum(case when coalesce(i.currency, 'RSD') = coalesce(v_tx.currency, 'RSD') then greatest(0.01, 0.01 * v_unit)
+                             when v_rate is not null and l.allocated_amount_rsd is not null
+                             then greatest(0.01, 0.01 * coalesce(abs(l.allocated_amount_rsd / nullif(l.allocated_amount, 0)), 0)) end), 0)
+      into v_total, v_slack
       from public.invoice_transaction_links l
       join public.invoices i on i.id = l.invoice_id
      where l.transaction_id = v_tx.id
        and i.deleted_at is null and i.parent_invoice_id is null;
 
-    v_limit := abs(v_tx.amount) * v_unit + greatest(v_links, 1) * greatest(0.01, 0.01 * v_unit) + 0.005;
+    v_limit := abs(v_tx.amount) * v_unit + v_slack + 0.005;
     if abs(v_total) > v_limit then
       -- What this write changed of that total: the new row's share, less the
       -- old row's where it was on the same payment.
@@ -942,6 +955,9 @@ begin
   end if;
 
   select prosrc into v_src from pg_proc where oid = 'public.proforma_keeps_its_payment()'::regprocedure;
+  if v_src !~ 'select\s+\*\s+into\s+v_pf\s+from\s+public\.invoices\s+where\s+id\s*=\s*old\.invoice_id\s+for\s+update;' then
+    raise exception 'proforma_keeps_its_payment does not lock the proforma row before it sums, so an unlink and a use at once could both pass -- rolling back';
+  end if;
   if v_src !~ 'from\s+public\.advance_usage\s+u\s+join\s+public\.invoices\s+f\s+on\s+f\.id\s*=\s*u\.final_invoice_id\s+and\s+f\.deleted_at\s+is\s+null\s+where\s+u\.advance_invoice_id\s*=\s*v_pf\.id'
      or v_src !~ 'if\s+v_cov\s*\+\s*v_direct\s*>\s*v_paid\s*\+\s*0\.005\s+then' then
     raise exception 'proforma_keeps_its_payment does not count the direct use, so a used proforma''s payment could be unlinked -- rolling back';
@@ -966,9 +982,10 @@ begin
 
   select prosrc into v_src from pg_proc where oid = 'public.links_stay_within_their_payment()'::regprocedure;
   if v_src !~ 'select\s+coalesce\(sum\(case\s+when\s+coalesce\(i\.currency,\s*''RSD''\)\s*=\s*coalesce\(v_tx\.currency,\s*''RSD''\)\s+then\s+l\.allocated_amount\s*\*\s*v_unit\s+when\s+v_rate\s+is\s+not\s+null\s+then\s+l\.allocated_amount_rsd\s+end\),\s*0\),'
-     or v_src !~ 'into\s+v_total,\s*v_links\s+from\s+public\.invoice_transaction_links\s+l\s+join\s+public\.invoices\s+i\s+on\s+i\.id\s*=\s*l\.invoice_id\s+where\s+l\.transaction_id\s*=\s*v_tx\.id\s+and\s+i\.deleted_at\s+is\s+null\s+and\s+i\.parent_invoice_id\s+is\s+null;'
+     or v_src !~ 'into\s+v_total,\s*v_slack\s+from\s+public\.invoice_transaction_links\s+l\s+join\s+public\.invoices\s+i\s+on\s+i\.id\s*=\s*l\.invoice_id\s+where\s+l\.transaction_id\s*=\s*v_tx\.id\s+and\s+i\.deleted_at\s+is\s+null\s+and\s+i\.parent_invoice_id\s+is\s+null;'
+     or v_src !~ 'then\s+greatest\(0\.01,\s*0\.01\s*\*\s*v_unit\)\s+when\s+v_rate\s+is\s+not\s+null\s+and\s+l\.allocated_amount_rsd\s+is\s+not\s+null\s+then\s+greatest\(0\.01,\s*0\.01\s*\*\s*coalesce\(abs\(l\.allocated_amount_rsd\s*/\s*nullif\(l\.allocated_amount,\s*0\)\),\s*0\)\)\s+end\),\s*0\)\s+into\s+v_total'
      or v_src !~ 'v_rate\s*:=\s*case\s+when\s+coalesce\(v_tx\.currency,\s*''RSD''\)\s*=\s*''RSD''\s+then\s+1\s+when\s+coalesce\(v_tx\.amount_rsd,\s*0\)\s*<>\s*0\s+then\s+abs\(v_tx\.amount_rsd\s*/\s*v_tx\.amount\)\s+end;'
-     or v_src !~ 'v_limit\s*:=\s*abs\(v_tx\.amount\)\s*\*\s*v_unit\s*\+\s*greatest\(v_links,\s*1\)\s*\*\s*greatest\(0\.01,\s*0\.01\s*\*\s*v_unit\)\s*\+\s*0\.005;\s*if\s+abs\(v_total\)\s*>\s*v_limit\s+then'
+     or v_src !~ 'v_limit\s*:=\s*abs\(v_tx\.amount\)\s*\*\s*v_unit\s*\+\s*v_slack\s*\+\s*0\.005;\s*if\s+abs\(v_total\)\s*>\s*v_limit\s+then'
      or v_src !~ 'if\s+abs\(v_total\)\s*>\s*abs\(v_before\)\s*\+\s*0\.005\s+then\s+select\s+string_agg'
      or v_src !~ 'raise\s+exception\s+''Plaćanje od' then
     raise exception 'links_stay_within_their_payment does not hold a payment''s links, in dinars as the payment sees them, to what it paid -- rolling back';
@@ -1039,9 +1056,10 @@ begin
     having abs(coalesce(sum(case when coalesce(i.currency, 'RSD') = coalesce(t.currency, 'RSD') then l.allocated_amount * coalesce(x.rate, 1)
                                  when x.rate is not null then l.allocated_amount_rsd end), 0))
            > abs(t.amount) * coalesce(x.rate, 1)
-             + greatest(count(case when coalesce(i.currency, 'RSD') = coalesce(t.currency, 'RSD') then 1
-                                   when x.rate is not null and l.allocated_amount_rsd is not null then 1 end), 1)
-               * greatest(0.01, 0.01 * coalesce(x.rate, 1)) + 0.005) y;
+             + coalesce(sum(case when coalesce(i.currency, 'RSD') = coalesce(t.currency, 'RSD') then greatest(0.01, 0.01 * coalesce(x.rate, 1))
+                                 when x.rate is not null and l.allocated_amount_rsd is not null
+                                 then greatest(0.01, 0.01 * coalesce(abs(l.allocated_amount_rsd / nullif(l.allocated_amount, 0)), 0)) end), 0)
+             + 0.005) y;
   select count(*) into v_m from (
     select f.id
       from public.invoices f

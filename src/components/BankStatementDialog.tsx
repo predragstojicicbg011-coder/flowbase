@@ -1361,10 +1361,14 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
             // services/settlementCheck.ts.
             let willHold = alreadyOwn + allocOrig
 
-            await supabase.from('invoice_transaction_links').insert({
+            // Checked: the database refuses a link that takes the payment
+            // beyond what it paid, or pays a bill twice (20261125100000), and
+            // a refusal unread would leave a posted payment linked to nothing.
+            const { error: linkErr } = await supabase.from('invoice_transaction_links').insert({
               invoice_id: row.linked_invoice_id, transaction_id: newTx.id,
               ...linkAmountsFromOwn(allocOrig, inv),
             })
+            if (linkErr) throw new Error(`Stavka ${row.date}: plaćanje je proknjiženo, ali nije povezano sa fakturom ${inv.invoice_number || 'bez broja'}: ${linkErr.message}`)
 
             // ── The currency difference ──────────────────────────────────
             //

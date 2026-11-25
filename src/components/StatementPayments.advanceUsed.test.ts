@@ -50,3 +50,28 @@ describe('the two statement paths read the advance and hand it on', () => {
     expect(src).toContain('invoice: { ...inv, paid_amount: alreadyAllocOrig, adjustments, advance_used: advanceUsed },')
   })
 })
+
+describe('a link the database refuses is never lost silently (fix round 1)', () => {
+  // Every insert into invoice_transaction_links in the two statement paths
+  // reads its error: the guard (20261125100000) can refuse one, and an unread
+  // refusal left a posted payment linked to nothing.
+  for (const file of ['BankStatementDialog.tsx', 'BulkImport.tsx']) {
+    it(`${file}: every link insert is checked and throws`, () => {
+      const src = read(file)
+      const inserts = src.split("supabase.from('invoice_transaction_links').insert(").length - 1
+      expect(inserts).toBeGreaterThan(0)
+      const checked = (src.match(/const \{ error: \w+ \} = await supabase\.from\('invoice_transaction_links'\)\.insert\(/g) || []).length
+      expect(checked).toBe(inserts)
+    })
+  }
+
+  it('says which line and which bill, in Serbian', () => {
+    expect(read('BankStatementDialog.tsx')).toContain(
+      "if (linkErr) throw new Error(`Stavka ${row.date}: plaćanje je proknjiženo, ali nije povezano sa fakturom ${inv.invoice_number || 'bez broja'}: ${linkErr.message}`)")
+    const bulk = read('BulkImport.tsx')
+    expect(bulk).toContain(
+      "if (linkErr) throw new Error(`${formatDate(p.date)} ${p.description || ''}: plaćanje je proknjiženo, ali nije povezano sa fakturom ${inv.invoice_number || 'bez broja'}: ${linkErr.message}`)")
+    expect(bulk).toContain(
+      "if (childLinkErr) throw new Error(`${formatDate(p.date)} ${p.description || ''}: plaćanje je proknjiženo, ali nije povezano sa stavkom obračuna računa ${inv.invoice_number || 'bez broja'}: ${childLinkErr.message}`)")
+  })
+})
