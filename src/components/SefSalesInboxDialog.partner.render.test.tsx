@@ -119,7 +119,7 @@ describe('the customer handed to the booking', () => {
     await screen.findByTestId('booking')
     expect(mockState.invoiceProps.sefSupplier).toEqual({
       name: doc.customerName, taxId: doc.customerVatNumber, registrationNumber: doc.customerRegistrationNumber,
-      address: doc.customerAddress, city: doc.customerCity, matchedPartnerId: null,
+      address: doc.customerAddress, city: doc.customerCity, matchedPartnerId: null, skipFill: false,
     })
   })
 
@@ -128,6 +128,22 @@ describe('the customer handed to the booking', () => {
     await show()
     fireEvent.click(screen.getByText('Proknjiži'))
     await screen.findByTestId('booking')
+    expect(mockState.invoiceProps.sefSupplier.matchedPartnerId).toBe('k1')
+    expect(mockState.invoiceProps.sefSupplier.skipFill).toBe(false)
+  })
+
+  /** Units of one budget user share a PIB: the PIB does not say which unit
+   *  the partner is, so no partner is given it. */
+  it('tells the booking to fill nothing for a budget user (JBKJS on the buyer)', async () => {
+    const withJbkjs = mockXml.replace(/(<cac:AccountingCustomerParty>\s*<cac:Party>)/,
+      '$1<cac:PartyIdentification><cbc:ID schemeID="JBKJS">12345</cbc:ID></cac:PartyIdentification>')
+    expect(parseUbl(withJbkjs).customerJbkjs).toBe('12345')
+    mockState.rows = [row({ ubl_xml: withJbkjs })]
+    mockState.partners = [{ id: 'k1', name: 'Kupac Test d.o.o.', tax_id: doc.customerVatNumber, registration_number: null }]
+    await show()
+    fireEvent.click(screen.getByText('Proknjiži'))
+    await screen.findByTestId('booking')
+    expect(mockState.invoiceProps.sefSupplier.skipFill).toBe(true)
     expect(mockState.invoiceProps.sefSupplier.matchedPartnerId).toBe('k1')
   })
 })

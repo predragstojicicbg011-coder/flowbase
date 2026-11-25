@@ -75,6 +75,7 @@ describe('a failure after the invoice exists', () => {
     expect(await screen.findByText('Faktura JE proknjižena — F-7/26 je u knjigama')).toBeInTheDocument()
     expect(screen.getByText('Faktura je sačuvana, ali podela nije: permission denied')).toBeInTheDocument()
     expect(screen.queryByText('Faktura nije proknjižena')).not.toBeInTheDocument()
+    expect(screen.getByText('Ono što nije uspelo došlo je posle nje, a ponovno knjiženje bi samo dodalo drugu. Zatvorite ovo i ispravite iz knjige faktura.')).toBeInTheDocument()
     expect(postButton().disabled).toBe(true)
     fireEvent.click(postButton())
     await waitFor(() => expect(mockState.inserted.filter(i => i.table === 'invoices')).toHaveLength(1))

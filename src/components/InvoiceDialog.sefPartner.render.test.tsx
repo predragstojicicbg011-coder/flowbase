@@ -13,6 +13,8 @@ const mockState = {
   updates: [] as { table: string; patch: any; filters: any[] }[],
   updateError: null as string | null,
   dialogProps: null as any,
+  /** What the stubbed form saves, over what it was opened on. */
+  createdOver: {} as Record<string, unknown>,
   transactions: [] as any[],
   /** Every write, in the order it was made. */
   sequence: [] as string[],
@@ -85,7 +87,7 @@ jest.mock('./PartnerDialog', () => (p: any) => {
   // registration number was cleared before saving.
   return (
     <div data-testid="partner-dialog">
-      <button onClick={() => p.onSaved({ id: 'p-new', name: p.initialName, tax_id: p.initialTaxId, registration_number: null })}>stub create</button>
+      <button onClick={() => p.onSaved({ id: 'p-new', name: p.initialName, tax_id: p.initialTaxId, registration_number: null, ...mockState.createdOver })}>stub create</button>
     </div>
   )
 })
@@ -117,6 +119,7 @@ beforeEach(() => {
   mockState.updates = []
   mockState.updateError = null
   mockState.dialogProps = null
+  mockState.createdOver = {}
   mockState.transactions = []
   mockState.sequence = []
 })
@@ -172,6 +175,8 @@ describe('the partner of a bill booked from SEF', () => {
     expect(screen.queryByText(/^Faktura je (izmenjena|proknjižena)\.$/)).not.toBeInTheDocument()
     expect(postButton().disabled).toBe(true)
     expect(invoicesInserted()).toHaveLength(1)
+    expect(screen.getByText('Ono što nije uspelo došlo je posle nje, a ponovno knjiženje bi samo dodalo drugu. Zatvorite ovo i upišite PIB u Partnerima.')).toBeInTheDocument()
+    expect(screen.queryByText(/ispravite iz knjige faktura/)).not.toBeInTheDocument()
   })
 
   it('writes the partner last: after the invoice, its split and its links', async () => {
@@ -220,6 +225,61 @@ describe('the partner of a bill booked from SEF', () => {
     fireEvent.click(await screen.findByTitle('Dodaj novog partnera (pretraga NBS)'))
     fireEvent.click(await screen.findByText('stub create'))
     expect(await screen.findByText('Matični broj 20000001 sa fakture biće upisan kod ovog partnera, koji ga nema.')).toBeInTheDocument()
+  })
+
+  /** The form can be retyped into another company: that one is not "from
+   *  the bill", and the bill must not complete it. */
+  it('a partner created from the form but renamed and with its PIB cleared is given nothing', async () => {
+    mockState.createdOver = { name: 'Gama Doo', tax_id: '' }
+    render(<InvoiceDialog onClose={() => {}} invoice={draft({ partner_id: null, partners: null })} sefSupplier={{ ...supplier, matchedPartnerId: null }} />)
+    fireEvent.click(await screen.findByTitle('Dodaj novog partnera (pretraga NBS)'))
+    fireEvent.click(await screen.findByText('stub create'))
+    await screen.findByDisplayValue('Gama Doo')
+    expect(screen.queryByText(/sa fakture biće upisan/)).not.toBeInTheDocument()
+    next(); next(); next()
+    post()
+    await waitFor(() => expect(invoicesInserted()).toHaveLength(1))
+    expect(partnerUpdates()).toHaveLength(0)
+  })
+
+  it('a partner created from the form and renamed, but keeping the PIB, is still completed', async () => {
+    mockState.createdOver = { name: 'Alfa' }
+    render(<InvoiceDialog onClose={() => {}} invoice={draft({ partner_id: null, partners: null })} sefSupplier={{ ...supplier, matchedPartnerId: null }} />)
+    fireEvent.click(await screen.findByTitle('Dodaj novog partnera (pretraga NBS)'))
+    fireEvent.click(await screen.findByText('stub create'))
+    expect(await screen.findByText('Matični broj 20000001 sa fakture biće upisan kod ovog partnera, koji ga nema.')).toBeInTheDocument()
+  })
+
+  /** A budget user's units share a PIB (JBKJS on the buyer). */
+  it('a party marked skipFill is told nothing and given nothing, even when matched', async () => {
+    render(<InvoiceDialog onClose={() => {}} invoice={draft()} sefSupplier={{ ...supplier, skipFill: true }} />)
+    await screen.findByDisplayValue('Alfa Doo')
+    expect(screen.queryByText(/sa fakture biće upisan/)).not.toBeInTheDocument()
+    next(); next(); next()
+    post()
+    await waitFor(() => expect(invoicesInserted()).toHaveLength(1))
+    expect(partnerUpdates()).toHaveLength(0)
+  })
+
+  /** The sales inbox hands over the customer the same way. */
+  it('a revenue invoice from SEF completes the customer the inbox matched', async () => {
+    mockState.partners = [{ id: 'k1', name: 'Kupac Doo', tax_id: null, registration_number: null }]
+    const customer = { name: 'Kupac Doo', taxId: '100000002', registrationNumber: '20000002', address: null, city: null, matchedPartnerId: 'k1' }
+    const revenue = {
+      company_id: 'co1', partner_id: 'k1', partners: { name: 'Kupac Doo' }, type: 'revenue',
+      invoice_number: 'IF-15/2026', invoice_date: '2026-11-02', currency: 'RSD', amount: 120000,
+      exchange_rate: 1, eur_rate: 117.2, revenue_kind: 'services', revenue_stream: 'Ostalo',
+    }
+    render(<InvoiceDialog onClose={() => {}} invoice={revenue} sefSupplier={customer} />)
+    expect(await screen.findByText('PIB 100000002 i matični broj 20000002 sa fakture biće upisani kod ovog partnera, koji ih nema.')).toBeInTheDocument()
+    next(); next(); next()
+    post()
+    await waitFor(() => expect(partnerUpdates()).toHaveLength(2))
+    expect(invoicesInserted()[0].payload).toMatchObject({ type: 'revenue', partner_id: 'k1' })
+    expect(partnerUpdates().map(u => [u.patch, u.filters])).toEqual([
+      [{ tax_id: '100000002' }, [['eq', 'id', 'k1'], ['is', 'tax_id', null]]],
+      [{ registration_number: '20000002' }, [['eq', 'id', 'k1'], ['is', 'registration_number', null]]],
+    ])
   })
 
   it("a new partner is opened on the bill's supplier, PIB, registration number and address", async () => {

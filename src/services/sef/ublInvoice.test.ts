@@ -535,3 +535,30 @@ describe('adresa dobavljaca, za partnera napravljenog sa fakture', () => {
     expect(parseUbl('<nonsense/>').customerAddress).toBeNull()
   })
 })
+
+describe('JBKJS kupca (jedinica korisnika budzetskih sredstava)', () => {
+  const buyer = (ids: string) => `<Invoice xmlns:cac="urn:cac" xmlns:cbc="urn:cbc"><cbc:ID>1</cbc:ID>
+    <cac:AccountingSupplierParty><cac:Party>
+      <cac:PartyIdentification><cbc:ID schemeID="JBKJS">99999</cbc:ID></cac:PartyIdentification>
+    </cac:Party></cac:AccountingSupplierParty>
+    <cac:AccountingCustomerParty><cac:Party>${ids}
+      <cac:PartyTaxScheme><cbc:CompanyID>RS100000002</cbc:CompanyID></cac:PartyTaxScheme>
+    </cac:Party></cac:AccountingCustomerParty></Invoice>`
+
+  it('cita ga po schemeID, samo od kupca', () => {
+    expect(parseUbl(buyer('<cac:PartyIdentification><cbc:ID schemeID="JBKJS">12345</cbc:ID></cac:PartyIdentification>')).customerJbkjs).toBe('12345')
+  })
+
+  it('cita i zapis JBKJS:12345, i preskace druge identifikacije', () => {
+    expect(parseUbl(buyer(
+      '<cac:PartyIdentification><cbc:ID schemeID="9948">100000002</cbc:ID></cac:PartyIdentification>'
+      + '<cac:PartyIdentification><cbc:ID>JBKJS: 12345</cbc:ID></cac:PartyIdentification>')).customerJbkjs).toBe('12345')
+  })
+
+  it('je null kad ga nema, i na praznom ili pogresnom dokumentu', () => {
+    expect(parseUbl(buyer('<cac:PartyIdentification><cbc:ID schemeID="9948">100000002</cbc:ID></cac:PartyIdentification>')).customerJbkjs).toBeNull()
+    expect(parseUbl(buyer('<cac:PartyIdentification><cbc:ID schemeID="JBKJS"></cbc:ID></cac:PartyIdentification>')).customerJbkjs).toBeNull()
+    expect(parseUbl(buyer('')).customerJbkjs).toBeNull()
+    expect(parseUbl('<nonsense/>').customerJbkjs).toBeNull()
+  })
+})

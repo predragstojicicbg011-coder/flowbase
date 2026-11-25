@@ -17,7 +17,7 @@ const ubl = (over: Partial<UblInvoice> = {}): UblInvoice => ({
   supplierName: 'Telekom Srbija', supplierVatNumber: '100002887',
   supplierRegistrationNumber: '17162543', supplierAddress: null, supplierCity: null,
   customerName: 'PRIMALAC DOO BEOGRAD', customerVatNumber: '100000001',
-  customerRegistrationNumber: '20000001', customerAddress: null, customerCity: null,
+  customerRegistrationNumber: '20000001', customerAddress: null, customerCity: null, customerJbkjs: null,
   bankAccount: '160-0000000000000-11', bankAccounts: ['160-0000000000000-11'],
   paymentReference: '12-345', paymentModel: '97',
   net: 10000, vat: 2000, total: 12000, sefPurchaseInvoiceId: null, lines: [],

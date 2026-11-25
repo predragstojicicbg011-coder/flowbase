@@ -350,6 +350,9 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
       address: ubl.customerAddress,
       city: ubl.customerCity,
       matchedPartnerId: match?.partnerId ?? null,
+      // A budget user's unit shares its PIB with the user's other units: the
+      // PIB does not say which unit a partner is, so none is given it.
+      skipFill: !!ubl.customerJbkjs,
     }
     const shared = match ? null : sharedIdentifier({ vatNumber: customer.taxId, registrationNumber: customer.registrationNumber }, partners)
 

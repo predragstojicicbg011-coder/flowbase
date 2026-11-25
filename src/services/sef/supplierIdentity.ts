@@ -33,6 +33,10 @@ export interface SefSupplier {
    *  partner izabran ručno može biti zbirni, a PIB upisan na njega bi na
    *  njega povukao svaku sledeću fakturu ove firme. */
   matchedPartnerId?: string | null
+  /** Tačno kad nijedan partner ne sme da dobije podatke ove strane: jedinica
+   *  korisnika budžetskih sredstava (JBKJS na fakturi) deli PIB sa ostalim
+   *  jedinicama istog korisnika, pa PIB ne kaže koja je jedinica partner. */
+  skipFill?: boolean
 }
 
 const digits = (s: string | null | undefined): string => (s || '').replace(/\D/g, '')
@@ -43,6 +47,26 @@ const digits = (s: string | null | undefined): string => (s || '').replace(/\D/g
  * svi prazni; PIB su cifre, pa vrednost bez njih ne nosi nijedan.
  */
 export const isEmptyIdentifier = (s: string | null | undefined): boolean => digits(s) === ''
+
+const sameName = (a: string | null | undefined, b: string | null | undefined): boolean => {
+  const n = (s: string | null | undefined) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase()
+  return n(a) !== '' && n(a) === n(b)
+}
+
+/**
+ * Da li je partner upravo napravljen iz forme otvorene na strani sa fakture
+ * i dalje ta strana: cifre njegovog PIB-a jednake su onima sa fakture, ili
+ * mu je ime isto. Forma može da se prekuca u sasvim drugu firmu; ta nije
+ * „sa fakture“ i ne dobija ništa.
+ */
+export function isFromDocument(
+  created: { name?: string | null; tax_id?: string | null } | null | undefined,
+  party: Pick<SefSupplier, 'name' | 'taxId'> | null | undefined,
+): boolean {
+  if (!created || !party) return false
+  const pib = digits(party.taxId)
+  return (!!pib && digits(created.tax_id) === pib) || sameName(created.name, party.name)
+}
 
 export interface SharedIdentifier {
   field: 'PIB' | 'matični broj'

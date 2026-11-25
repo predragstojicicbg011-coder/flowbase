@@ -25,7 +25,7 @@ import {
 } from '../services/partnerAccountChoice'
 import { fmtLocal, fmtMoney, fmtNum } from '../utils/formatters'
 import { fetchAllPartners } from '../services/allPartners'
-import { identityFill, identityFillSentence, saveIdentityFill, fillFailureSentence, type SefSupplier } from '../services/sef/supplierIdentity'
+import { identityFill, identityFillSentence, saveIdentityFill, fillFailureSentence, isFromDocument, type SefSupplier } from '../services/sef/supplierIdentity'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 import { REVENUE_STREAMS, streamForProjectKind } from '../services/revenueStreams'
 import {
@@ -153,6 +153,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [partnerDialogInitialName, setPartnerDialogInitialName] = useState('')
   /** A partner created in this dialog from the SEF document's party. */
   const [createdFromBillId, setCreatedFromBillId] = useState('')
+  /** The fields a refused PIB fill left unwritten, said at the end of the
+   *  banner ("upišite PIB u Partnerima"); null for any other failure. */
+  const [fillRefused, setFillRefused] = useState<string | null>(null)
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0])
   const [dueDate, setDueDate] = useState('')
@@ -975,7 +978,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   // this document. A partner picked by hand may be a catch-all ("Razni
   // dobavljači"), and the supplier's PIB written onto it would pull every
   // later bill of this supplier onto that partner.
-  const fillsPartner = !!sefSupplier && !!partnerId
+  const fillsPartner = !!sefSupplier && !sefSupplier.skipFill && !!partnerId
     && (partnerId === sefSupplier.matchedPartnerId || partnerId === createdFromBillId)
   const partnerFill = fillsPartner
     ? identityFill(partners.find(p => p.id === partnerId), sefSupplier, partners)
@@ -1065,6 +1068,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
     const booked = book.amounts
     if (!booked) { setSaveError(book.error || 'Kurs je obavezan'); return }
     setSaveError('')
+    setFillRefused(null)
     setSaving(true)
     try {
       let finalPartnerId = partnerId
@@ -1265,6 +1269,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         if (failure) {
           setSaving(false)
           setSaveError(fillFailureSentence(failure))
+          setFillRefused(failure.fields.includes('tax_id') ? 'PIB' : 'matični broj')
           return
         }
       }
@@ -1579,7 +1584,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
               <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.9 }}>{saveError}</div>
               {insertedId && (
                 <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.9 }}>
-                  Ono što nije uspelo došlo je posle nje, a ponovno knjiženje bi samo dodalo drugu. Zatvorite ovo i ispravite iz knjige faktura.
+                  {fillRefused
+                    ? `Ono što nije uspelo došlo je posle nje, a ponovno knjiženje bi samo dodalo drugu. Zatvorite ovo i upišite ${fillRefused} u Partnerima.`
+                    : 'Ono što nije uspelo došlo je posle nje, a ponovno knjiženje bi samo dodalo drugu. Zatvorite ovo i ispravite iz knjige faktura.'}
                 </div>
               )}
             </div>
@@ -2355,7 +2362,9 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
             setPartnerSearch(newPartner.name)
             // Made from the document's party: the one partner besides the
             // matched one that the document may complete.
-            if (sefSupplier) setCreatedFromBillId(newPartner.id)
+            // Only while it is still that party: the form may have been
+            // retyped into another company, which the document must not fill.
+            if (sefSupplier && isFromDocument(newPartner, sefSupplier)) setCreatedFromBillId(newPartner.id)
             setPartnerDialogOpen(false)
           }}
         />

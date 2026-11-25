@@ -1,6 +1,6 @@
 import {
   sharedIdentifier, sharedIdentifierSentence, identityFill, identityFillSentence, saveIdentityFill,
-  isEmptyIdentifier, fillFailureSentence,
+  isEmptyIdentifier, fillFailureSentence, isFromDocument,
 } from './supplierIdentity'
 import { matchSupplier, type PartnerLite } from './matchPartner'
 
@@ -8,6 +8,22 @@ import { matchSupplier, type PartnerLite } from './matchPartner'
 
 const p = (over: Partial<PartnerLite> & { id: string }): PartnerLite => ({
   name: 'Alfa Doo', tax_id: null, registration_number: null, ...over,
+})
+
+describe('partner napravljen iz forme otvorene na fakturi', () => {
+  const party = { name: 'Alfa Doo Beograd', taxId: '100000001' }
+
+  it('je sa fakture kad mu je PIB isti, kako god napisan, ili ime isto', () => {
+    expect(isFromDocument({ name: 'Drugo ime', tax_id: 'RS 100000001' }, party)).toBe(true)
+    expect(isFromDocument({ name: '  alfa doo   BEOGRAD ', tax_id: null }, party)).toBe(true)
+  })
+
+  it('nije sa fakture kad je prekucan u drugu firmu', () => {
+    expect(isFromDocument({ name: 'Gama Doo', tax_id: null }, party)).toBe(false)
+    expect(isFromDocument({ name: 'Gama Doo', tax_id: '100000005' }, party)).toBe(false)
+    expect(isFromDocument({ name: '', tax_id: '' }, { name: '', taxId: null })).toBe(false)
+    expect(isFromDocument(null, party)).toBe(false)
+  })
 })
 
 describe('dva partnera na jednom podatku', () => {

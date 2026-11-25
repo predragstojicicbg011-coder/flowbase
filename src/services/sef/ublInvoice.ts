@@ -95,6 +95,10 @@ export interface UblInvoice {
    *  customer created from an invoice we issued. Null where absent. */
   customerAddress: string | null
   customerCity: string | null
+  /** The buyer's JBKJS (a budget user's unit), from `PartyIdentification/ID`
+   *  with `schemeID="JBKJS"` or a value written `JBKJS:12345`. Units of one
+   *  budget user share a PIB. Null where the buyer has none. */
+  customerJbkjs: string | null
   bankAccount: string | null    // as written; null when the bill names none
   /** `bankAccount` split on `;` and trimmed. A supplier may offer several in
    *  the one field, and which of them to pay is a decision, not a parse. */
@@ -154,6 +158,19 @@ const addressOf = (party: Element | null): { address: string | null; city: strin
   ].filter(Boolean).join(' ')),
   city: oneLine(text(child(party, 'PostalAddress', 'CityName'))),
 })
+
+/** A party's JBKJS, wherever its PartyIdentification carries one; null-safe. */
+const jbkjsOf = (party: Element | null): string | null => {
+  for (const pi of kids(party, 'PartyIdentification')) {
+    const id = child(pi, 'ID')
+    const raw = text(id)
+    if (!raw) continue
+    const prefixed = /^JBKJS\s*:\s*(.*)$/i.exec(raw)
+    const scheme = (id?.getAttribute('schemeID') || '').trim().toUpperCase()
+    if (scheme === 'JBKJS' || prefixed) return ((prefixed ? prefixed[1] : raw).trim()) || null
+  }
+  return null
+}
 
 // A PaymentID may open with a marker naming the payment model, as in
 // "(mod97) 108113652782", and the model is half of what a bank needs to match
@@ -229,7 +246,7 @@ const empty = (): UblInvoice => ({
   supplierName: null, supplierVatNumber: null, supplierRegistrationNumber: null,
   supplierAddress: null, supplierCity: null,
   customerName: null, customerVatNumber: null, customerRegistrationNumber: null,
-  customerAddress: null, customerCity: null,
+  customerAddress: null, customerCity: null, customerJbkjs: null,
   deliveryDate: null,
   bankAccount: null, bankAccounts: [], paymentReference: null, paymentModel: null,
   net: null, vat: null, total: null, sefPurchaseInvoiceId: null, lines: [],
@@ -360,6 +377,7 @@ export function parseUbl(xml: string): UblInvoice {
     customerRegistrationNumber: digits(text(child(customer, 'PartyLegalEntity', 'CompanyID'))),
     customerAddress: addressOf(customer).address,
     customerCity: addressOf(customer).city,
+    customerJbkjs: jbkjsOf(customer),
     bankAccount,
     bankAccounts: (bankAccount || '').split(';').map(a => a.trim()).filter(Boolean),
     paymentReference: payId.reference,
