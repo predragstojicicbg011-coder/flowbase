@@ -1088,7 +1088,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
     try {
       const counts = await gatherDeletion(supabase, batchId)
       if (!window.confirm(deletionWarning(log.file_name, counts))) { setDeletingBatch(null); return }
-      setHistoryNotice(deletionSummary(await deleteStatementBatch(supabase, batchId)))
+      setHistoryNotice(deletionSummary(await deleteStatementBatch(supabase, batchId), counts))
       setHistoryRefresh(n => n + 1)
       onImported()
     } catch (err: any) {
@@ -1343,6 +1343,9 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             instPaid += paidPrincipal
 
             await supabase.from('transactions').insert({
+              // The import's batch, so "Obriši" on this statement takes the leg
+              // with the bank line it came from (20261125090000).
+              import_batch_id: importBatchId,
               company_id: company, bank_id: bank,
               partner_id: partnerId, transaction_date: formatDate(p.date),
               statement_number: p.statement_number || null,
@@ -1362,6 +1365,7 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             instPaid += paidInterest
 
             await supabase.from('transactions').insert({
+              import_batch_id: importBatchId,
               company_id: company, bank_id: bank,
               partner_id: partnerId, transaction_date: formatDate(p.date),
               statement_number: p.statement_number || null,
@@ -1382,6 +1386,9 @@ export default function BulkImport({ onClose, onImported, onEditStatement }: Pro
             paid_amount: Math.round(totalPaid * 100) / 100,
             status: instFullyPaid ? 'paid' : 'outstanding', // ostaje outstanding ako nije u potpunosti plaćeno
             paid_date: instFullyPaid ? formatDate(p.date) : null,
+            // The bank line that paid it, as the statement dialog stamps it, so
+            // deleting that line or the whole import reopens the instalment.
+            transaction_id: newTx?.id ?? null,
             updated_at: new Date().toISOString(),
           }).eq('id', instId)
         }

@@ -33,7 +33,7 @@ import {
   lastPageIndex, pageLabel, hasPrevPage, hasNextPage,
   type Tab, type FilterState, type DatePreset, type Predicate,
 } from '../services/ledgerFilters'
-import { deleteTransactionSafely } from '../services/writeOrder'
+import { deleteTransactionSafely, confirmDeleteText } from '../services/writeOrder'
 import { countOf, plural } from '../utils/plural'
 
 // Which table each tab reads, and with which embeds. The filter itself is not
@@ -349,8 +349,11 @@ export default function Transactions() {
   // obrisane, transakcija ostala, poruka "period je zakljucan", i tiho izgubljen
   // kreditni raspored. Redosljed i atomicnost su sada u `writeOrder`, zajedno
   // sa tacnom porukom za svaki korak koji moze da padne.
-  const deleteTransaction = async (id: string) => {
-    if (!window.confirm('Obrisati ovu transakciju?')) return
+  const deleteTransaction = async (t: { id: string; type?: string | null; pl_impact?: boolean | null }) => {
+    const id = t.id
+    // Stavka izvoda kojom je placen kredit ponovo otvara ratu, a njeni redovi
+    // glavnice i kamate ostaju u P&L-u; pitanje to kaze (`deleteConfirmText`).
+    if (!window.confirm(await confirmDeleteText(supabase, t))) return
     const outcome = await deleteTransactionSafely(supabase, { transactionId: id, deletedBy: user?.id ?? null })
     if (!outcome.ok) { window.alert(outcome.message); return }
     // Signal other pages to refetch
@@ -888,7 +891,7 @@ export default function Transactions() {
                             <div style={s.contextMenu}>
                               <div style={s.contextItem} onClick={() => handleEditTransaction(t)}>✏️ Izmeni</div>
                               {t.type === 'direct' && <div style={s.contextItem} onClick={() => { setReconcileSource({ type: 'transaction', id: t.id }); setShowMenu(null) }}>🔗 Upari</div>}
-                              <div style={{ ...s.contextItem, color: '#FF5B5A' }} onClick={() => deleteTransaction(t.id)}>🗑 Obriši</div>
+                              <div style={{ ...s.contextItem, color: '#FF5B5A' }} onClick={() => deleteTransaction(t)}>🗑 Obriši</div>
                             </div>
                           )}
                         </div>

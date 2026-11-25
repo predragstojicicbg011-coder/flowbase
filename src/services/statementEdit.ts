@@ -14,8 +14,10 @@
 //
 //   credit payments  post far more than themselves. One row settles
 //                    installments and writes separate principal and interest
-//                    rows that carry no batch id. Editing the row we can see
-//                    would leave the rows we cannot see saying something else.
+//                    rows. Editing the bank line would leave those legs saying
+//                    something else. Since 20261125090000 the legs carry the
+//                    statement's batch id (so deleting the statement takes
+//                    them) and are left out of the grid by `statementLines`.
 //
 //   pass-through     lives in its own table. Changing a row's type across
 //                    tables is a delete and an insert, not an update, and the
@@ -125,6 +127,30 @@ export function txToSeed(tx: any, partnerName = ''): RowSeed {
     note: '',
     is_advance: !!tx.is_advance,
   }
+}
+
+/**
+ * Is this stored row one of the principal or interest LEGS a credit payment
+ * writes, rather than a line of the statement?
+ *
+ * Every row of that family carries `type = 'credit_payment'`; the bank line is
+ * written with `pl_impact: false` and each leg with `pl_impact: true`, because
+ * the leg is the row the P&L reads.
+ */
+export function isCreditLeg(tx: { type?: string | null; pl_impact?: boolean | null }): boolean {
+  return tx.type === 'credit_payment' && tx.pl_impact === true
+}
+
+/**
+ * The rows of a batch that are lines of the statement, in their order.
+ *
+ * A statement posted from 20261125090000 on stamps the credit legs with its
+ * batch id, so that `delete_statement_cascade` takes them with the bank line.
+ * They were never lines a person typed, and putting them in the grid would
+ * show one payment three times and save the legs back as bank lines.
+ */
+export function statementLines<T extends { type?: string | null; pl_impact?: boolean | null }>(rows: T[]): T[] {
+  return rows.filter(r => !isCreditLeg(r))
 }
 
 /**

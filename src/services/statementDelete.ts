@@ -9,7 +9,19 @@
 // drifted would be the one somebody read.
 
 export interface DeletionCounts {
+  /**
+   * The statement's own lines in `transactions` -- NOT counting the principal
+   * and interest legs its credit payments posted, which are `creditLegs`.
+   */
   transactions: number
+  /**
+   * The principal and interest rows the statement's credit payments posted
+   * beside their bank lines (`type = 'credit_payment'`, `pl_impact` true).
+   * They carry the batch since 20261125090000, so the delete takes them too;
+   * counted apart so that one credit payment does not read as three lines.
+   * Optional so a count built before it existed still reads.
+   */
+  creditLegs?: number
   passthroughs: number
   /** Distinct invoices this statement allocated against. */
   invoiceIds: string[]
@@ -30,6 +42,10 @@ export function deletionWarning(fileName: string | null | undefined, c: Deletion
     '',
     `· transakcija: ${c.transactions}`,
   ]
+  const legs = c.creditLegs ?? 0
+  if (legs > 0) {
+    lines.push(`· redova glavnice i kamate iz otplata kredita: ${legs}`)
+  }
   if (c.passthroughs > 0) {
     lines.push(`· prolaznih stavki: ${c.passthroughs}`)
   }
@@ -47,10 +63,19 @@ export function deletionWarning(fileName: string | null | undefined, c: Deletion
   return lines.join('\n')
 }
 
-/** What was actually done, in the same terms the warning used. */
-export function deletionSummary(r: any): string {
+/**
+ * What was actually done, in the same terms the warning used.
+ *
+ * `transactions_deleted` counts EVERY row of the batch in `transactions`, the
+ * credit legs included. Given the counts the warning was built from, the
+ * figure is split back into lines and legs so it reads as the warning did.
+ */
+export function deletionSummary(r: any, counts?: Pick<DeletionCounts, 'creditLegs'>): string {
   const d = (r || {}) as any
-  return `Obrisano transakcija: ${d.transactions_deleted ?? 0}`
+  const all = d.transactions_deleted ?? 0
+  const legs = Math.min(counts?.creditLegs ?? 0, all)
+  return `Obrisano transakcija: ${all - legs}`
+    + (legs > 0 ? `, redova glavnice i kamate iz otplata kredita: ${legs}` : '')
     + ((d.passthroughs_deleted ?? 0) > 0 ? `, prolaznih stavki: ${d.passthroughs_deleted}` : '')
     + `, uklonjeno raspodela: ${d.allocations_removed ?? 0}`
     + ((d.installments_reopened ?? 0) > 0 ? `, ponovo otvoreno rata kredita: ${d.installments_reopened}` : '')
@@ -60,9 +85,14 @@ export function deletionSummary(r: any): string {
 
 /** Count what a batch holds, before asking. Soft-deleted rows are excluded. */
 export async function gatherDeletion(supabase: any, batchId: string): Promise<DeletionCounts> {
-  const [{ count: txCount }, { count: ptCount }, { data: links }] = await Promise.all([
+  const [{ count: txCount }, { count: legCount, error: legErr }, { count: ptCount }, { data: links }] = await Promise.all([
     supabase.from('transactions').select('id', { count: 'exact', head: true })
       .eq('import_batch_id', batchId).is('deleted_at', null),
+    // The credit legs among them (see `creditLegs`). A failed read counts
+    // none apart, which is how the warning read before they carried the batch.
+    supabase.from('transactions').select('id', { count: 'exact', head: true })
+      .eq('import_batch_id', batchId).is('deleted_at', null)
+      .eq('type', 'credit_payment').eq('pl_impact', true),
     supabase.from('passthrough').select('id', { count: 'exact', head: true })
       .eq('import_batch_id', batchId).is('deleted_at', null),
     supabase.from('invoice_transaction_links')
@@ -76,8 +106,10 @@ export async function gatherDeletion(supabase: any, batchId: string): Promise<De
         .select('invoice_number, calculated_status').in('id', invoiceIds)
     : { data: [] as any[] }
 
+  const creditLegs = legErr ? 0 : Math.min(legCount ?? 0, txCount ?? 0)
   return {
-    transactions: txCount ?? 0,
+    transactions: (txCount ?? 0) - creditLegs,
+    creditLegs,
     passthroughs: ptCount ?? 0,
     invoiceIds,
     closing: (affected || [])

@@ -1,7 +1,7 @@
 import {
   txToSeed, passthroughToSeed, allowedTypes, isRowEditable,
   statementSpan, statementLabel, invoiceStatus, rowAmount, rowLine,
-  editedStatementName, editedStatementNote,
+  editedStatementName, editedStatementNote, isCreditLeg, statementLines,
 } from './statementEdit'
 
 const expenseTx = {
@@ -365,5 +365,33 @@ describe('what an edited statement’s log is called', () => {
     expect(editedStatementName({ fromFile: true, fileName: null }, '2026-44'))
       .toBe('Izvod #2026-44')
     expect(editedStatementName({ fromFile: true, fileName: '' }, '')).toBe('Ručni unos')
+  })
+})
+
+describe('the credit legs a statement posts are not lines of it', () => {
+  // Since 20261125090000 the principal and interest legs carry the statement's
+  // batch id, so that "Obriši izvod" takes them. Reopening the statement reads
+  // the batch, and without this the legs would come back as lines.
+  const bankLine = { id: 'bl', type: 'credit_payment', pl_impact: false }
+  const principal = { id: 'lp', type: 'credit_payment', pl_impact: true }
+  const interest = { id: 'li', type: 'credit_payment', pl_impact: true }
+  const expense = { id: 'ex', type: 'direct', pl_impact: true }
+  const payment = { id: 'ip', type: 'invoice_payment', pl_impact: false }
+
+  it('knows a leg from the bank line by pl_impact', () => {
+    expect(isCreditLeg(principal)).toBe(true)
+    expect(isCreditLeg(interest)).toBe(true)
+    expect(isCreditLeg(bankLine)).toBe(false)
+  })
+
+  it('never calls a P&L row of another type a leg', () => {
+    expect(isCreditLeg(expense)).toBe(false)
+    expect(isCreditLeg(payment)).toBe(false)
+    expect(isCreditLeg({ type: 'credit_payment', pl_impact: null })).toBe(false)
+  })
+
+  it('keeps every line of the batch, in order, and only drops the legs', () => {
+    expect(statementLines([expense, bankLine, principal, interest, payment]).map(r => r.id))
+      .toEqual(['ex', 'bl', 'ip'])
   })
 })

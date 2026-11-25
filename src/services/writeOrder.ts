@@ -325,6 +325,57 @@ export async function deleteTransactionInSteps(
   return { ok: true, message: '', done, atomic: false, invoiceLinksRemoved: 0, installmentsUnlinked: 0 }
 }
 
+// ── What the owner is asked before one transaction goes ────────────────────
+
+/**
+ * The question asked before a single transaction is deleted.
+ *
+ * A credit payment posted from a bank statement or a bulk import is THREE
+ * rows: the bank line (`pl_impact` false) and the principal and interest legs
+ * beside it (`pl_impact` true). Since 20261125090000 the instalment points at
+ * the bank line, so deleting the bank line alone reopens the instalment -- and
+ * the two legs stay in the P&L. Pay that instalment again and it is booked
+ * twice. The legs cannot be found reliably from here (two payments to the same
+ * bank on the same day and statement is a real case), so the owner is told,
+ * in plain words, before anything is touched.
+ *
+ * `settledInstalments` null means the count could not be read; the warning is
+ * then given anyway, because a confident silence would be the one wrong answer.
+ */
+export function deleteConfirmText(
+  row: { type?: string | null; pl_impact?: boolean | null },
+  settledInstalments: number | null,
+): string {
+  const isBankLine = row.type === 'credit_payment' && row.pl_impact !== true
+  if (!isBankLine || settledInstalments === 0) return 'Obrisati ovu transakciju?'
+  const what = settledInstalments === null
+    ? 'To je stavka izvoda kojom je plaćen kredit i možda je zatvorila ratu kredita.'
+    : `To je stavka izvoda kojom je plaćen kredit; zatvorila je rata kredita: ${settledInstalments}.`
+  return [
+    'Obrisati ovu transakciju?',
+    '',
+    what,
+    'Brisanje ponovo otvara ratu, ali redovi glavnice i kamate koje je proknjižila ostaju u P&L-u. '
+      + 'Obrišite i ta dva reda, ili umesto toga obrišite ceo izvod — inače će rata biti '
+      + 'proknjižena dvaput kada se ponovo plati.',
+  ].join('\n')
+}
+
+/** `deleteConfirmText` for a ledger row, asking the database what it settled. */
+export async function confirmDeleteText(
+  client: SupabaseLike,
+  row: { id: string; type?: string | null; pl_impact?: boolean | null },
+): Promise<string> {
+  if (!(row.type === 'credit_payment' && row.pl_impact !== true)) return deleteConfirmText(row, 0)
+  try {
+    const { count, error } = await client.from('credit_installments')
+      .select('id', { count: 'exact', head: true }).eq('transaction_id', row.id)
+    return deleteConfirmText(row, !error && typeof count === 'number' ? count : null)
+  } catch {
+    return deleteConfirmText(row, null)
+  }
+}
+
 // ── Reallocating an invoice's link ─────────────────────────────────────────
 
 /** The two writes a link reallocation is, in the order that cannot lose one. */

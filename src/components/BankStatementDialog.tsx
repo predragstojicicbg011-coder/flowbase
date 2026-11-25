@@ -40,7 +40,7 @@ import { useSystemCategories } from '../contexts/SystemCategoriesContext'
 import SystemCategoryNotice from './SystemCategoryNotice'
 import { creditLegBooker, checkCreditCurrency } from '../services/creditPayment'
 import {
-  txToSeed, passthroughToSeed, allowedTypes, statementSpan, statementLabel,
+  txToSeed, passthroughToSeed, allowedTypes, statementSpan, statementLabel, statementLines,
   editedStatementName, editedStatementNote,
   invoiceStatus, rowAmount, rowLine, type RowSeed, type RowSource,
 } from '../services/statementEdit'
@@ -580,7 +580,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
     try {
       const counts = await gatherDeletion(supabase, batchId)
       if (!window.confirm(deletionWarning(log.file_name, counts))) { setDeleting(null); return }
-      setNotice(deletionSummary(await deleteStatementBatch(supabase, batchId)))
+      setNotice(deletionSummary(await deleteStatementBatch(supabase, batchId), counts))
       setHistoryRefresh(n => n + 1)
       onImported()
     } catch (err: any) {
@@ -647,7 +647,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
       // already filtered. Paged, and ordered by id last so the sort is unique:
       // a statement long enough to cross the row cap would otherwise repeat
       // rows and drop others. See fetchAllPages.
-      const [txRows, ptRows] = await Promise.all([
+      const [batchTxRows, ptRows] = await Promise.all([
         fetchAllPages<any>((from, to) => supabase.from('transactions').select('*')
           .eq('import_batch_id', batchId)
           .order('transaction_date').order('created_at').order('id').range(from, to)),
@@ -655,6 +655,10 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
           .eq('import_batch_id', batchId)
           .order('transaction_date').order('created_at').order('id').range(from, to)),
       ])
+      // The principal and interest legs a credit payment wrote carry the
+      // batch too, so the statement delete takes them; they are not lines of
+      // the statement and are not put in the grid. See `statementLines`.
+      const txRows = statementLines(batchTxRows)
       if (txRows.length === 0 && ptRows.length === 0) {
         setError('Ovaj izvod više nema stavki — obrisane su ili premeštene.')
         setLoadingStatement(false)
@@ -1214,8 +1218,23 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
             if (paidHere <= 0) continue
             remaining -= paidHere
 
+            // ── The legs belong to the statement, and the instalment to the line
+            //
+            // Both legs carry the statement's batch, and the instalment is
+            // stamped with the BANK LINE that paid it. Without either,
+            // `delete_statement_cascade` -- which soft-deletes the batch's rows
+            // and reopens every instalment whose `transaction_id` is one of
+            // them -- would leave both legs on the P&L and the instalment
+            // reading paid. The bank line rather than a leg, because it always
+            // exists (an interest-only instalment has no principal leg), and
+            // because deleting it alone from the ledger then reopens the
+            // instalment too (20261125090000).
             if (split.principal > 0) {
               await supabase.from('transactions').insert({
+                // The statement's batch, so "Obriši izvod" takes this leg with
+                // the bank line it came from. Reopening the statement leaves
+                // it out of the grid (`statementLines`).
+                import_batch_id: importBatchId,
                 company_id: company, bank_id: bank,
                 partner_id: partnerId, transaction_date: row.date,
                 statement_number: statementNumber || null,
@@ -1229,6 +1248,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
             }
             if (split.interest > 0) {
               await supabase.from('transactions').insert({
+                import_batch_id: importBatchId,
                 company_id: company, bank_id: bank,
                 partner_id: partnerId, transaction_date: row.date,
                 statement_number: statementNumber || null,
@@ -1250,6 +1270,7 @@ export default function BankStatementDialog({ onClose, onImported, editLog }: Pr
               status: settled ? 'paid' : 'outstanding',
               paid_date: settled ? row.date : null,
               paid_amount: totalPaid,
+              transaction_id: newTx?.id ?? null,
               updated_at: new Date().toISOString(),
             }).eq('id', instId)
           }
