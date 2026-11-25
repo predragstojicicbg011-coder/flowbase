@@ -24,7 +24,8 @@ import SearchableSelect from './SearchableSelect'
 import { REVENUE_STREAMS } from '../services/revenueStreams'
 import { linkAmountsFromOwn } from '../services/invoiceLinks'
 import { outstandingOwn, settlementFor } from '../services/settleInvoice'
-import { planLinkChanges, describeChanges } from '../services/linkPlan'
+import { planLinkChanges, describeChanges, shrinkingFirst } from '../services/linkPlan'
+import { allocationsExceedPayment, type SavedAllocation } from '../services/paymentLeft'
 import {
   allocationCurrency, commonCurrency, formatMoney, toRsd,
 } from '../services/allocationDisplay'
@@ -79,6 +80,10 @@ interface Props {
 
 interface LinkedInvoice {
   invoice_id: string
+  /** A payroll child (mirrors its parent's share), or an invoice the reader
+   *  cannot see: neither is counted against the payment (paymentLeft.ts). */
+  child?: boolean
+  unseen?: boolean
   invoice_number: string
   partner_name: string
   invoice_date: string
@@ -213,7 +218,10 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
    */
   const [originalLinkIds, setOriginalLinkIds] = useState<string[]>([])
   /** The same rows, so a released invoice can be named rather than counted. */
-  const [originalLinks, setOriginalLinks] = useState<{ invoice_id: string; invoice_number: string }[]>([])
+  const [originalLinks, setOriginalLinks] = useState<{
+    invoice_id: string; invoice_number: string; allocated_own: number; allocated_rsd: number
+    currency: string | null; child: boolean; unseen: boolean
+  }[]>([])
   const [linksLoading, setLinksLoading] = useState(false)
   /** What the save did to the links, shown on the success screen. */
   const [linkSummary, setLinkSummary] = useState('')
@@ -673,7 +681,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
       setLinksLoading(true)
       const { data, error } = await supabase
         .from('invoice_transaction_links')
-        .select('invoice_id, allocated_amount, allocated_amount_rsd, invoices(id, invoice_number, invoice_date, due_date, currency, amount, amount_rsd, exchange_rate, eur_rate, project_id, type, advance_deducted, partners(name))')
+        // `parent_invoice_id`: a payroll child mirrors its parent's share of the
+        // payment and is not counted against it twice (services/paymentLeft.ts).
+        .select('invoice_id, allocated_amount, allocated_amount_rsd, invoices(id, invoice_number, invoice_date, due_date, currency, amount, amount_rsd, exchange_rate, eur_rate, project_id, type, advance_deducted, parent_invoice_id, partners(name))')
         .eq('transaction_id', rowId)
       // What is actually left on each of them. The invoice's own amount is not
       // that: a partly paid invoice would show its full value as outstanding,
@@ -723,10 +733,17 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
         // currency — READ STRAIGHT OUT OF THE COLUMN that holds it. Seeding it
         // from the book column instead would put a round trip in on every reopen.
         allocated_own: l.allocated_amount || 0,
+        // Not counted against the payment: a payroll child, or an invoice the
+        // embed cannot see (deleted, hidden by RLS) -- as the database counts.
+        child: !!l.invoices?.parent_invoice_id,
+        unseen: !l.invoices,
       }))
       setLinkedInvoices(rows as any)
       setOriginalLinkIds(rows.map(r => r.invoice_id))
-      setOriginalLinks(rows.map(r => ({ invoice_id: r.invoice_id, invoice_number: r.invoice_number })))
+      setOriginalLinks(rows.map(r => ({
+        invoice_id: r.invoice_id, invoice_number: r.invoice_number, allocated_own: r.allocated_own, allocated_rsd: r.allocated_rsd,
+        currency: r.currency ?? null, child: r.child, unseen: r.unseen,
+      })))
       setLinksLoading(false)
     }
     load()
@@ -963,6 +980,23 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
     const e = runValidation()
     if (Object.keys(e).length > 0) { setShowValidationSummary(true); return }
     setPostError('')
+
+    // ── A payment is not allocated beyond what it paid ────────────────────
+    //
+    // Asked of the whole set this save leaves on the payment, BEFORE a single
+    // row is written, in dinars as the payment sees each link: the database
+    // refuses a link that does (it judges each write by itself,
+    // links_stay_within_their_payment), and by then the row and the released
+    // links would already have been written. Only a RAISE is refused,
+    // measured against the links it opened with.
+    if (txType === 'invoice_payment') {
+      const asSaved = (l: { allocated_own?: number; allocated_rsd?: number; currency?: string | null; child?: boolean; unseen?: boolean }, rsd?: number): SavedAllocation =>
+        ({ allocated: l.allocated_own || 0, allocated_rsd: rsd ?? l.allocated_rsd ?? null, currency: l.currency ?? null, child: !!l.child, unseen: !!l.unseen })
+      const tooMuch = allocationsExceedPayment(
+        { amount: parseFloat(amount) || 0, amount_rsd: book.amounts?.amount_rsd ?? null, currency: currency || null },
+        linkedInvoices.map(l => asSaved(l, toRsd(l.allocated_own || 0, l))), originalLinks.map(l => asSaved(l)))
+      if (tooMuch) { setShowValidationSummary(false); setPostError(tooMuch); return }
+    }
 
     // ── Which table is this save actually writing to? ─────────────────────
     //
@@ -1376,7 +1410,9 @@ export default function TransactionDialog({ onClose, transaction, sourceTable = 
             links = links.map(l => l.invoice_id === 'pending-proforma' ? { ...l, invoice_id: made.id } : l)
             madeProformaId = made.id
           }
-          for (const link of links.filter(l => l.allocated_own > 0)) {
+          // Lowered allocations first: the database refuses any one write that
+          // takes this payment's links above what it paid (services/linkPlan.ts).
+          for (const link of shrinkingFirst(links.filter(l => l.allocated_own > 0), originalLinks)) {
             // THE FIGURE THAT WAS TYPED IS THE FIGURE THAT IS STORED. It goes
             // into `allocated_amount`, which is the column the settled/partial
             // rule reads, and the dinars and euros are derived from it at the

@@ -109,3 +109,24 @@ export function describeChanges(plan: LinkPlan): string {
   }
   return parts.length > 0 ? parts.join(', ') + '.' : 'Nijedna faktura nije povezana sa ovim plaćanjem.'
 }
+
+/**
+ * The links to write, in the order that never takes the payment above what it
+ * paid on the way: every link whose allocation FALLS first, then the ones that
+ * stay, then the ones that rise or are new. Each write is its own request, and
+ * the database refuses any single one that raises a payment's links above it
+ * (links_stay_within_their_payment, 20261125100000) — so a payment of 100 split
+ * 60/40 and edited to 70/30 has to write the 30 before the 70.
+ *
+ * `before` is what each invoice held of this payment when the dialog opened.
+ * Stable: links that change by the same amount keep their order.
+ */
+export function shrinkingFirst<T extends { invoice_id: string; allocated_own: number }>(
+  links: T[], before: { invoice_id: string; allocated_own: number }[],
+): T[] {
+  const was = new Map(before.map(b => [b.invoice_id, Number(b.allocated_own) || 0]))
+  return links
+    .map((l, i) => ({ l, i, delta: (Number(l.allocated_own) || 0) - (was.get(l.invoice_id) ?? 0) }))
+    .sort((a, b) => a.delta - b.delta || a.i - b.i)
+    .map(x => x.l)
+}

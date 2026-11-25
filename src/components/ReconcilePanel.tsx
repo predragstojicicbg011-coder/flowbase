@@ -12,6 +12,7 @@ import { round2 as bookRound2 } from '../services/bookAmounts'
 import { fmtMoney } from '../utils/formatters'
 import { countOf } from '../utils/plural'
 import { isRefundRow } from '../services/refund'
+import { asHeldLink, linkDinars, overAllocationProblem, paymentLeft, readHeldLinks } from '../services/paymentLeft'
 
 /** Display labels for the status and type keys a candidate row carries. */
 const STATUS_LABEL: Record<string, string> = {
@@ -120,10 +121,11 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
         setCandidates((invs || []).filter((i: any) => isPayable(i.document_type ?? 'invoice')))
       }
 
-      // Existing links
+      // Existing links. `parent_invoice_id`: a payroll child mirrors its
+      // parent's share of the payment and is not counted against it twice.
       const { data: existing } = await supabase
         .from('invoice_transaction_links')
-        .select(`*, invoices(invoice_number, invoice_date, currency, amount, partners(name))`)
+        .select(`*, invoices(invoice_number, invoice_date, currency, amount, parent_invoice_id, partners(name))`)
         .eq('transaction_id', sourceId)
       setExistingLinks(existing || [])
 
@@ -183,11 +185,27 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
   const invoiceFor = (row: any) => (sourceType === 'transaction' ? row : source)
   const paymentFor = (row: any) => (sourceType === 'transaction' ? source : row)
 
-  const addLink = (candidate: any) => {
+  /**
+   * The links a payment already has, read now. With an INVOICE as the source
+   * every candidate is a payment that may already pay other bills; offering
+   * it at its full amount is how one payment came to be allocated twice.
+   */
+  const heldLinksOf = (transactionId: string) => readHeldLinks(supabase, transactionId)
+
+  const addLink = async (candidate: any) => {
     if (isLinked(candidate.id) || isAlreadyReconciled(candidate.id)) return
 
     const invoice = invoiceFor(candidate)
     const payment = paymentFor(candidate)
+
+    // What the payment already pays elsewhere: its existing links (with a
+    // transaction as the source they are on screen already), in dinars as the
+    // payment sees each one (services/paymentLeft.ts).
+    const already = sourceType === 'transaction'
+      ? existingLinks.map(asHeldLink)
+      : (await heldLinksOf(candidate.id)).held
+    const left = paymentLeft(
+      { amount: payment?.amount ?? 0, amount_rsd: payment?.amount_rsd ?? null, currency: payment?.currency ?? null }, already)
 
     // The two directions are mirror images. With a TRANSACTION as the source
     // every row spends the same payment, so what is left of it shrinks as
@@ -209,8 +227,8 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
       settlement = settlementFor({
         invoice: held,
         paymentCurrency: payment?.currency,
-        paymentOwn: Math.max(0, (payment?.amount ?? 0) - takenFromPayment),
-        paymentRsd: Math.max(0, (payment?.amount_rsd ?? 0) - takenRsd),
+        paymentOwn: Math.max(0, round2(left.own - takenFromPayment)),
+        paymentRsd: Math.max(0, round2(left.rsd - takenRsd)),
       })
     } catch (err) {
       // RateUnavailableError: the invoice carries no stored rate, so its
@@ -218,9 +236,17 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
       setSaveError(err instanceof Error ? err.message : String(err))
       return
     }
+    // Nothing to allocate is not a link: a payment that is spent, or a bill
+    // that is settled, is not added, and says why.
+    if (settlement.own <= 0.005) {
+      setSaveError(outstandingOwn(held) > 0.005
+        ? `Od ovog plaćanja nije ostalo ništa za raspodelu: iznosi ${formatMoney(Math.abs(Number(payment?.amount) || 0), payment?.currency || 'RSD')} i njegove fakture već drže sve.`
+        : 'Nema šta da se rasporedi: faktura je već zatvorena.')
+      return
+    }
     setSaveError('')
 
-    setLinks(prev => [...prev, {
+    setLinks(prev => prev.some(l => l.id === candidate.id) ? prev : [...prev, {
       id: candidate.id,
       type: sourceType === 'transaction' ? 'invoice' : 'transaction',
       date: candidate.invoice_date || candidate.transaction_date,
@@ -296,15 +322,45 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
     )
   })
 
+  /**
+   * Why this save would allocate a payment beyond what it paid, or ''. Asked
+   * before anything is written, of the links as they are NOW (another person
+   * may have linked the payment since the panel opened), in dinars as the
+   * payment sees each link. The database refuses the same
+   * (links_stay_within_their_payment, 20261125100000).
+   */
+  const overAllocation = async (toWrite: { link: LinkRow; booked: ReturnType<typeof linkAmountsFromOwn> }[]): Promise<string> => {
+    const asPayment = (p: any) => ({ amount: Number(p?.amount) || 0, amount_rsd: p?.amount_rsd ?? null, currency: p?.currency ?? null })
+    if (sourceType === 'transaction') {
+      const pay = asPayment(source)
+      const asked = toWrite.reduce((s, w) => s + (linkDinars(pay, { currency: w.link.currency, allocated_amount: w.booked.allocated_amount, allocated_amount_rsd: w.booked.allocated_amount_rsd }) ?? 0), 0)
+      const { held } = await heldLinksOf(sourceId)
+      return overAllocationProblem(pay, held, asked) || ''
+    }
+    for (const w of toWrite) {
+      const pay = asPayment(w.link)
+      const asked = linkDinars(pay, { currency: source?.currency ?? null, allocated_amount: w.booked.allocated_amount, allocated_amount_rsd: w.booked.allocated_amount_rsd })
+      if (asked === null) continue
+      const { held } = await heldLinksOf(w.link.id)
+      const date = (w.link.date || '').split('-').reverse().join('.')
+      const why = overAllocationProblem({ ...pay, label: `od ${date}${w.link.identifier && w.link.identifier !== '—' ? ` (izvod ${w.link.identifier})` : ''}` }, held, asked)
+      if (why) return why
+    }
+    return ''
+  }
+
   const handleSave = async () => {
     if (links.length === 0) return
+    // A link of nothing is not saved.
+    const toSave = links.filter(l => (l.allocated_own || 0) > 0.005)
+    if (toSave.length === 0) { setSaveError('Nema šta da se sačuva: svaka raspodela je 0.'); return }
 
     // Every link booked BEFORE anything is written: an invoice without stored
     // rates cannot be allocated, and finding that out halfway through would
     // leave half a reconciliation behind.
     let booked: ReturnType<typeof linkAmountsFromOwn>[]
     try {
-      booked = links.map(link => linkAmountsFromOwn(link.allocated_own, invoiceFor(link) || {}))
+      booked = toSave.map(link => linkAmountsFromOwn(link.allocated_own, invoiceFor(link) || {}))
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
       return
@@ -312,12 +368,15 @@ export default function ReconcilePanel({ sourceType, sourceId, onClose, onReconc
 
     setSaving(true); setSaveError('')
 
+    const over = await overAllocation(toSave.map((link, i) => ({ link, booked: booked[i] })))
+    if (over) { setSaveError(over); setSaving(false); return }
+
     // Outside the try so the catch can read it: a refusal partway through a
     // multi-link reconciliation has to say how many already landed.
     const completed: CompletedWrite[] = []
 
     try {
-      for (const [i, link] of links.entries()) {
+      for (const [i, link] of toSave.entries()) {
         const invoiceId = sourceType === 'transaction' ? link.id : sourceId
         const transactionId = sourceType === 'transaction' ? sourceId : link.id
 

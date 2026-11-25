@@ -1,4 +1,4 @@
-import { describeChanges, isNoChange, planLinkChanges, type Allocation } from './linkPlan'
+import { describeChanges, isNoChange, planLinkChanges, shrinkingFirst, type Allocation } from './linkPlan'
 
 const at = (invoiceId: string, allocated = 100): Allocation => ({ invoiceId, allocated })
 
@@ -126,5 +126,17 @@ describe('describeChanges', () => {
   it('says so plainly when a payment closes nothing', () => {
     expect(describeChanges(planLinkChanges([], [])))
       .toBe('Nijedna faktura nije povezana sa ovim plaćanjem.')
+  })
+})
+
+describe('shrinkingFirst (20261125100000: each link write is judged by itself)', () => {
+  const l = (invoice_id: string, allocated_own: number) => ({ invoice_id, allocated_own })
+
+  it('writes the lowered link before the raised one: 60/40 edited to 70/30 writes the 30 first', () => {
+    expect(shrinkingFirst([l('a', 70), l('b', 30)], [l('a', 60), l('b', 40)]).map(x => x.invoice_id)).toEqual(['b', 'a'])
+  })
+
+  it('a new link counts as a rise from nothing; unchanged links keep their order', () => {
+    expect(shrinkingFirst([l('n', 10), l('a', 50), l('b', 50)], [l('a', 50), l('b', 50)]).map(x => x.invoice_id)).toEqual(['a', 'b', 'n'])
   })
 })

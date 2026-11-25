@@ -340,3 +340,76 @@ describe('a refund is never offered as the payment of a bill', () => {
     expect(screen.getByText(/raspoređeno/)).toBeInTheDocument()
   })
 })
+
+// ─── A payment is never allocated beyond itself (20261125100000) ────────────
+//
+// The panel used to offer a payment at its full amount to a second bill
+// although it already paid a first one in full. It now offers what is LEFT of
+// the payment -- its existing links counted in dinars as the payment sees
+// them -- refuses to add a spent one, re-reads the links before it writes, and
+// never saves a link of nothing.
+
+const heldBy = (invoiceId: string, allocated: number, rsd: number, currency = 'RSD') => ({
+  invoice_id: invoiceId, transaction_id: 'tx1', allocated_amount: allocated, allocated_amount_rsd: rsd,
+  invoices: { invoice_number: 'DRUGI-1', currency, parent_invoice_id: null },
+})
+
+describe('a payment that already pays another bill', () => {
+  it('opened from the bill: a spent payment is not added, and the panel says why', async () => {
+    rows = {
+      invoices: [invoice()], v_invoice_status: [invoice()], transactions: [payment()],
+      invoice_transaction_links: [heldBy('other', 134561.52, 134561.52)],
+    }
+    install()
+    panel('invoice', 'inv1')
+    fireEvent.click(await screen.findByText('+ Poveži'))
+    expect(await screen.findByText(/Od ovog plaćanja nije ostalo ništa za raspodelu: iznosi 134\.561,52 RSD i njegove fakture već drže sve\./)).toBeInTheDocument()
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+  })
+
+  it('opened from the bill: a partly spent payment is offered only what is left of it', async () => {
+    rows = {
+      invoices: [invoice()], v_invoice_status: [invoice()], transactions: [payment()],
+      invoice_transaction_links: [heldBy('other', 100000, 100000)],
+    }
+    install()
+    panel('invoice', 'inv1')
+    const field = await link()
+    expect(Number(field.value)).toBe(34561.52)
+  })
+
+  it('opened from the payment: a dinar payment of a euro bill counts that link too', async () => {
+    // 117.500 RSD already pays a 1.000 EUR bill in full; nothing is left for a dinar bill.
+    rows = {
+      transactions: [payment({ amount: 117500, amount_rsd: 117500, amount_eur: 1002.56 })],
+      v_invoice_status: [invoice()], invoices: [invoice()],
+      invoice_transaction_links: [heldBy('eur-bill', 1000, 117500, 'EUR')],
+    }
+    install()
+    panel()
+    fireEvent.click(await screen.findByText('+ Poveži'))
+    expect(await screen.findByText(/Od ovog plaćanja nije ostalo ništa za raspodelu: iznosi 117\.500,00 RSD/)).toBeInTheDocument()
+  })
+
+  it('refuses the save, before writing anything, when the payment was spent since the panel opened', async () => {
+    rows = { invoices: [invoice()], v_invoice_status: [invoice()], transactions: [payment()], invoice_transaction_links: [] }
+    install()
+    panel('invoice', 'inv1')
+    await link()
+    rows.invoice_transaction_links.push(heldBy('other', 134561.52, 134561.52))
+    fireEvent.click(screen.getByText(/Sačuvaj i upari/))
+    expect(await screen.findByText(/Plaćanje od 05\.08\.2026 \(izvod 103\) iznosi 134\.561,52 RSD i već plaća 134\.561,52 RSD: od njega je ostalo 0,00 RSD, a traži se 134\.561,52 RSD\. Plaćanje se ne raspoređuje preko onoga što je plaćeno\./)).toBeInTheDocument()
+    expect(calls.some(c => c.op === 'upsert' || c.op === 'update')).toBe(false)
+  })
+
+  it('does not save a link of nothing', async () => {
+    rows = { transactions: [payment()], v_invoice_status: [invoice()], invoices: [invoice()], invoice_transaction_links: [] }
+    install()
+    panel()
+    const field = await link()
+    fireEvent.change(field, { target: { value: '0' } })
+    fireEvent.click(screen.getByText(/Sačuvaj i upari/))
+    expect(await screen.findByText(/Nema šta da se sačuva: svaka raspodela je 0\./)).toBeInTheDocument()
+    expect(written()).toBeUndefined()
+  })
+})
