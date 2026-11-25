@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import { DIALOG } from './dialogTheme'
+import { fetchAllPages } from '../utils/fetchAllPages'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 
 interface Props {
@@ -12,6 +13,9 @@ interface Props {
    *  as a name somebody has to look up. */
   initialTaxId?: string
   initialRegistrationNumber?: string
+  /** Sa SEF fakture, koja navodi ulicu i grad druge strane. */
+  initialAddress?: string
+  initialCity?: string
   onClose: () => void
   onSaved: (partner: any) => void
   onDelete?: (id: string, name: string) => void
@@ -151,7 +155,7 @@ function NbsMergeDialog({ existingPartner, existingAccounts, nbsResult, onConfir
   )
 }
 
-export default function PartnerDialog({ partner, initialName = '', initialAccountNumber = '', initialTaxId = '', initialRegistrationNumber = '', onClose, onSaved, onDelete }: Props) {
+export default function PartnerDialog({ partner, initialName = '', initialAccountNumber = '', initialTaxId = '', initialRegistrationNumber = '', initialAddress = '', initialCity = '', onClose, onSaved, onDelete }: Props) {
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
   const [activeTab, setActiveTab] = useState<'info' | 'accounts'>('info')
@@ -161,8 +165,8 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
   const [type, setType] = useState(partner?.type || 'vendor')
   const [taxId, setTaxId] = useState(partner?.tax_id || initialTaxId)
   const [registrationNumber, setRegistrationNumber] = useState(partner?.registration_number || initialRegistrationNumber)
-  const [address, setAddress] = useState(partner?.address || '')
-  const [city, setCity] = useState(partner?.city || '')
+  const [address, setAddress] = useState(partner?.address || initialAddress)
+  const [city, setCity] = useState(partner?.city || initialCity)
   const [country, setCountry] = useState(partner?.country || '')
   const [contactName, setContactName] = useState(partner?.contact_name || '')
   const [contactEmail, setContactEmail] = useState(partner?.contact_email || '')
@@ -180,6 +184,8 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
 
   // Duplicate detection
   const [duplicateWarning, setDuplicateWarning] = useState<{ partner: any; field: string } | null>(null)
+  /** Čitanje radi duplikata nije uspelo, pa je sačuvano bez provere. */
+  const [duplicateCheckFailed, setDuplicateCheckFailed] = useState(false)
 
   // Bank accounts
   const [accounts, setAccounts] = useState<any[]>([])
@@ -205,17 +211,43 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
     if (partner?.id || savedPartnerId) fetchAccounts()
   }, [partner?.id, savedPartnerId]) // eslint-disable-line
 
-  // Check for duplicates by PIB or MB
+  // ── Jedan PIB, jedan partner ─────────────────────────────────────────────
+  //
+  // Dva partnera na jednom PIB-u dele dokumente dobavljača: predračun kod
+  // jednog, račun kod drugog, i račun ne može da iskoristi predračun koji
+  // plaća. Zato se nov partner, ili PIB (ili matični broj) promenjen ovde,
+  // odbija kad ga drugi partner već ima.
+  //
+  // Poredi se po CIFRAMA, kao što SEF prepoznavanje poredi: `RS100000001`,
+  // `100 000 001` i `100000001` su jedan PIB. Čita se obrascem sa `%` između
+  // cifara (`%1%0%0…%1%`), koji pogađa svaki zapis istog broja šta god stoji
+  // oko ili između cifara, a ovde se presuđuje po tačnim ciframa. Obrazac je
+  // uzak (vrednost mora da sadrži sve cifre redom), i čita se svaka strana,
+  // po id-u, pa pravi duplikat ne može da ispadne iz prozora. Podatak ostavljen
+  // kakav je bio se ne proverava: knjige već imaju parove, a odbijanje svake
+  // izmene bilo koje polovine ne bi rasturilo nijedan.
+  //
+  // Čitanje koje ne uspe ne zaustavlja čuvanje (kao i ranije), ali se kaže na
+  // potvrdi, da se „sačuvano“ ne čita kao „provereno“.
   const checkDuplicate = async (pib: string, mb: string): Promise<{ partner: any; field: string } | null> => {
-    const checks = []
-    if (pib?.trim()) checks.push(supabase.from('partners').select('id,name,tax_id,registration_number').eq('tax_id', pib.trim()).neq('id', partner?.id || '00000000-0000-0000-0000-000000000000').limit(1))
-    if (mb?.trim()) checks.push(supabase.from('partners').select('id,name,tax_id,registration_number').eq('registration_number', mb.trim()).neq('id', partner?.id || '00000000-0000-0000-0000-000000000000').limit(1))
+    const digits = (v: unknown) => String(v ?? '').replace(/\D/g, '')
+    const checks: { field: string; column: 'tax_id' | 'registration_number'; value: string }[] = []
+    if (digits(pib) && digits(pib) !== digits(partner?.tax_id)) checks.push({ field: 'PIB', column: 'tax_id', value: digits(pib) })
+    if (digits(mb) && digits(mb) !== digits(partner?.registration_number)) checks.push({ field: 'matični broj', column: 'registration_number', value: digits(mb) })
 
-    for (let i = 0; i < checks.length; i++) {
-      const { data } = await checks[i]
-      if (data && data.length > 0) {
-        return { partner: data[0], field: i === 0 ? 'PIB' : 'matični broj' }
+    for (const c of checks) {
+      let rows: any[]
+      try {
+        rows = await fetchAllPages<any>((from, to) => supabase.from('partners').select('id,name,tax_id,registration_number')
+          .like(c.column, `%${c.value.split('').join('%')}%`)
+          .neq('id', partner?.id || '00000000-0000-0000-0000-000000000000')
+          .order('id').range(from, to))
+      } catch {
+        setDuplicateCheckFailed(true)
+        continue
       }
+      const hit = rows.find((p: any) => digits(p[c.column]) === c.value)
+      if (hit) return { partner: hit, field: c.field }
     }
     return null
   }
@@ -330,6 +362,7 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
     setSaveError('')
 
     // Duplicate check
+    setDuplicateCheckFailed(false)
     const dup = await checkDuplicate(taxId, registrationNumber)
     if (dup) {
       setDuplicateWarning(dup)
@@ -407,6 +440,9 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
         {initialAccountNumber && !partner && (
           <div style={{ fontSize: '12px', color: '#5DCAA5' }}>✓ Račun {initialAccountNumber} je automatski dodat</div>
         )}
+        {duplicateCheckFailed && (
+          <div role="alert" style={{ fontSize: '12px', color: '#F5A623' }}>Sačuvano bez provere da li drugi partner ima isti PIB ili matični broj: provera nije mogla da se pročita.</div>
+        )}
       </div>
     </div>
   )
@@ -445,9 +481,14 @@ export default function PartnerDialog({ partner, initialName = '', initialAccoun
                     {duplicateWarning.partner.tax_id && <span style={{ color: '#7A9BB8', marginLeft: '8px' }}>PIB: {duplicateWarning.partner.tax_id}</span>}
                     {duplicateWarning.partner.registration_number && <span style={{ color: '#7A9BB8', marginLeft: '8px' }}>MB: {duplicateWarning.partner.registration_number}</span>}
                   </div>
+                  <div role="alert" style={{ fontSize: '12px', color: '#DCE9F6', marginTop: '6px' }}>
+                    Ništa nije sačuvano: ovaj {duplicateWarning.field} već ima partner {duplicateWarning.partner.name}. Koristite tog partnera ili ispravite broj.
+                  </div>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                    {/* Bilo je „Zanemari i nastavi“, što je samo sakrivalo ovo:
+                        sledeće čuvanje je pitalo ponovo i ponovo bilo odbijeno. */}
                     <button style={{ ...ds.btnGhost, fontSize: '12px', padding: '5px 12px' }} onClick={() => setDuplicateWarning(null)}>
-                      Zanemari i nastavi
+                      Nazad na formu
                     </button>
                     <button style={{ ...ds.btnPrimary, fontSize: '12px', padding: '5px 12px' }} onClick={() => { setDuplicateWarning(null); onClose() }}>
                       Otvori postojećeg
