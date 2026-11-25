@@ -9,6 +9,7 @@ import { fmtLocal } from '../utils/formatters'
 import { findLikelyDuplicate, type LedgerInvoice } from '../services/sef/sefDuplicate'
 import { matchSupplier, type PartnerLite, type SupplierMatch } from '../services/sef/matchPartner'
 import { matchCompany, type CompanyLite } from '../services/sef/matchCompany'
+import { sharedIdentifier, sharedIdentifierSentence, type SefSupplier, type SharedIdentifier } from '../services/sef/supplierIdentity'
 import { parseUbl } from '../services/sef/ublInvoice'
 import { bookedDateOf } from '../services/sef/draftFromUbl'
 import {
@@ -66,6 +67,10 @@ interface Booking {
   notes: string[]
   isCreditNote: boolean
   documents: { label: string; open: () => void }[]
+  /** The customer as the document names it: what a partner created while
+   *  booking is created with, and what a matched partner lacking its PIB is
+   *  given (supplierIdentity, which serves either party of a document). */
+  customer: SefSupplier
 }
 
 // Named, not `*`: the table also holds each invoice's whole UBL document.
@@ -102,6 +107,9 @@ function fmtAmount(amount: number | null, currency: string | null): string {
 
 const isCreditNote = (r: SalesRow) => /credit/i.test(r.document_type || '')
 
+/** `partners.tax_id` holds bare digits; an identifier with none is no identifier. */
+const digitsOrNull = (s: string | null | undefined): string | null => (s || '').replace(/\D/g, '') || null
+
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'pending', label: 'Na čekanju' },
   { key: 'imported', label: 'Proknjižene' },
@@ -130,7 +138,7 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
   const [filter, setFilter] = useState<Filter>('pending')
   const [declining, setDeclining] = useState<SalesRow | null>(null)
   const [reason, setReason] = useState('')
-  const [newCustomer, setNewCustomer] = useState<SalesRow | null>(null)
+  const [newCustomer, setNewCustomer] = useState<SefSupplier | null>(null)
   const [booking, setBooking] = useState<Booking | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -236,6 +244,18 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
     return m
   }, [visible, partners])
 
+  // The rows nobody matched because two partners already share the
+  // customer's PIB: those name the pair and offer no third.
+  const shareds = useMemo(() => {
+    const m = new Map<string, SharedIdentifier>()
+    visible.forEach(r => {
+      if (matches.get(r.id)) return
+      const shared = sharedIdentifier({ vatNumber: r.customer_vat_number, registrationNumber: r.customer_registration_number }, partners)
+      if (shared) m.set(r.id, shared)
+    })
+    return m
+  }, [visible, partners, matches])
+
   const decline = () => exclusive(async () => {
     if (!declining || !reason.trim()) return
     setError(''); setRowError(null)
@@ -323,8 +343,19 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
       }
     } catch { /* left to the owner */ }
 
+    const customer: SefSupplier = {
+      name: ubl.customerName ?? row.customer_name,
+      taxId: digitsOrNull(ubl.customerVatNumber ?? row.customer_vat_number),
+      registrationNumber: digitsOrNull(ubl.customerRegistrationNumber ?? row.customer_registration_number),
+      address: ubl.customerAddress,
+      city: ubl.customerCity,
+      matchedPartnerId: match?.partnerId ?? null,
+    }
+    const shared = match ? null : sharedIdentifier({ vatNumber: customer.taxId, registrationNumber: customer.registrationNumber }, partners)
+
     const notes = salesReviewNotes(ubl, {
       matchedBy: match?.by ?? null,
+      shared: shared ? sharedIdentifierSentence(shared) : null,
       company: {
         by: companyMatch?.by ?? null,
         name: companies.find(c => c.id === companyId)?.name ?? null,
@@ -381,7 +412,7 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
 
     if (!mounted.current) return
     setBooking({
-      row, notes, isCreditNote: ubl.isCreditNote, documents,
+      row, notes, isCreditNote: ubl.isCreditNote, documents, customer,
       draft,
     })
   })
@@ -414,8 +445,36 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
     await markImported(row, invoiceId, 'Faktura je povezana')
   })
 
+  /**
+   * Opens the new-partner form on the customer the row names, with the
+   * address and city from our own stored copy of the document (no SEF call).
+   */
+  const createCustomer = async (row: SalesRow) => {
+    let address: string | null = null
+    let city: string | null = null
+    try {
+      const { data } = await supabase.from('sef_inbox').select('ubl_xml').eq('id', row.id).maybeSingle()
+      if ((data as any)?.ubl_xml) {
+        const ubl = parseUbl(String((data as any).ubl_xml))
+        address = ubl.customerAddress
+        city = ubl.customerCity
+      }
+    } catch {
+      // The form opens without them; the identifiers are on the row.
+    }
+    if (!mounted.current) return
+    setNewCustomer({
+      name: row.customer_name,
+      taxId: digitsOrNull(row.customer_vat_number),
+      registrationNumber: digitsOrNull(row.customer_registration_number),
+      address, city,
+    })
+  }
+
   const renderRow = (row: SalesRow) => {
     const match = matches.get(row.id) ?? null
+    // Two partners already on the customer's PIB: a third is not offered.
+    const shared = shareds.get(row.id) ?? null
     const voided = isVoidedOnSef(row.sef_status)
     const voidText = voidedLabel(row.sef_status)
     const paid = /^paid$/i.test((row.sef_status || '').trim())
@@ -436,8 +495,8 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
               {/prepayment/i.test(row.document_type || '') && <span style={{ ...s.badge, background: DIALOG.amberFill, color: DIALOG.amber }}>Avansni račun</span>}
               {voidText && <span style={{ ...s.badge, background: DIALOG.redFill, color: DIALOG.red }}>{voidText}</span>}
               {paid && <span style={{ ...s.badge, background: DIALOG.accentFill, color: DIALOG.accent }}>Plaćena (SEF)</span>}
-              {!match && row.state === 'pending' && !voided && (
-                <button style={s.linkBtn} disabled={busy} onClick={() => setNewCustomer(row)}>Dodaj kupca</button>
+              {!match && !shared && row.state === 'pending' && !voided && (
+                <button style={s.linkBtn} disabled={busy} onClick={() => createCustomer(row)}>Dodaj kupca</button>
               )}
               {match?.by === 'name' && (
                 <span style={{ ...s.badge, background: DIALOG.amberFill, color: DIALOG.amber }}>Prepoznat samo po nazivu</span>
@@ -454,6 +513,9 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
           <div style={s.amount}>{fmtAmount(row.amount, row.currency)}</div>
         </div>
 
+        {shared && (
+          <div style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>{sharedIdentifierSentence(shared)}</div>
+        )}
         {dup && (
           <div style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>
             Već imate fakturu {dup.invoice.invoice_number} od {fmtDate(dup.invoice.invoice_date)} istog kupca.
@@ -580,15 +642,18 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
           creditNote={booking.isCreditNote}
           sourceDocuments={booking.documents}
           reviewNotes={booking.notes}
+          sefSupplier={booking.customer}
           onSaved={(invoiceId: string) => markImported(booking.row, invoiceId, 'Faktura je sačuvana')}
           onClose={() => { setBooking(null); load() }} />
       )}
 
       {newCustomer && (
         <PartnerDialog
-          initialName={newCustomer.customer_name || ''}
-          initialTaxId={newCustomer.customer_vat_number || ''}
-          initialRegistrationNumber={newCustomer.customer_registration_number || ''}
+          initialName={newCustomer.name || ''}
+          initialTaxId={newCustomer.taxId || ''}
+          initialRegistrationNumber={newCustomer.registrationNumber || ''}
+          initialAddress={newCustomer.address || ''}
+          initialCity={newCustomer.city || ''}
           onClose={() => setNewCustomer(null)}
           onSaved={(p: PartnerLite) => { setPartners(prev => [...prev, p]); setNewCustomer(null) }} />
       )}

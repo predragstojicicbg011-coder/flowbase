@@ -97,12 +97,15 @@ export function salesReviewNotes(
   ctx: {
     matchedBy: 'pib' | 'registration' | 'name' | null
     company: { by: 'pib' | 'registration' | null; name: string | null }
+    /** Where no partner matched because two or more share the customer's
+     *  PIB: the sentence naming them (`sharedIdentifierSentence`). */
+    shared?: string | null
   },
 ): string[] {
   const notes: string[] = []
 
   if (ctx.matchedBy === null) {
-    notes.push('Kupac nije u partnerima — dodajte ga.')
+    notes.push(ctx.shared || 'Kupac nije u partnerima — dodajte ga.')
   } else if (ctx.matchedBy === 'name') {
     notes.push('Kupac je prepoznat samo po nazivu — proverite da li je partner prava firma.')
   } else {

@@ -526,4 +526,12 @@ describe('adresa dobavljaca, za partnera napravljenog sa fakture', () => {
     expect(u.supplierCity).toBeNull()
     expect(parseUbl('<nonsense/>').supplierAddress).toBeNull()
   })
+
+  it('cita adresu kupca odvojeno, za kupca napravljenog sa izlazne fakture', () => {
+    const u = parseUbl(party('<cbc:StreetName>Test ulica 1</cbc:StreetName>'))
+    expect(u.customerAddress).toBe('Ulica kupca 9')
+    expect(u.customerCity).toBe('Drugde')
+    expect(u.supplierAddress).toBe('Test ulica 1')
+    expect(parseUbl('<nonsense/>').customerAddress).toBeNull()
+  })
 })

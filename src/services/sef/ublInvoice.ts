@@ -91,6 +91,10 @@ export interface UblInvoice {
   customerName: string | null
   customerVatNumber: string | null       // PIB, digits only
   customerRegistrationNumber: string | null
+  /** The customer's street and city, read like the supplier's: for a
+   *  customer created from an invoice we issued. Null where absent. */
+  customerAddress: string | null
+  customerCity: string | null
   bankAccount: string | null    // as written; null when the bill names none
   /** `bankAccount` split on `;` and trimmed. A supplier may offer several in
    *  the one field, and which of them to pay is a decision, not a parse. */
@@ -225,6 +229,7 @@ const empty = (): UblInvoice => ({
   supplierName: null, supplierVatNumber: null, supplierRegistrationNumber: null,
   supplierAddress: null, supplierCity: null,
   customerName: null, customerVatNumber: null, customerRegistrationNumber: null,
+  customerAddress: null, customerCity: null,
   deliveryDate: null,
   bankAccount: null, bankAccounts: [], paymentReference: null, paymentModel: null,
   net: null, vat: null, total: null, sefPurchaseInvoiceId: null, lines: [],
@@ -353,6 +358,8 @@ export function parseUbl(xml: string): UblInvoice {
     customerName: text(child(customer, 'PartyName', 'Name')),
     customerVatNumber: digits(text(child(customer, 'PartyTaxScheme', 'CompanyID'))),
     customerRegistrationNumber: digits(text(child(customer, 'PartyLegalEntity', 'CompanyID'))),
+    customerAddress: addressOf(customer).address,
+    customerCity: addressOf(customer).city,
     bankAccount,
     bankAccounts: (bankAccount || '').split(';').map(a => a.trim()).filter(Boolean),
     paymentReference: payId.reference,

@@ -96,6 +96,14 @@ describe('salesReviewNotes', () => {
     expect(salesReviewNotes(base(), { matchedBy: null, company })).toContain('Kupac nije u partnerima — dodajte ga.')
   })
 
+  /** Two partners on the customer's PIB: adding one more would make it three. */
+  it('names the partners that share the PIB instead of asking to add the customer', () => {
+    const shared = 'Dva partnera imaju PIB 100000002: Kupac Doo i Kupac Doo Beograd. Izaberite pravog ručno i uklonite duplikat u Partnerima; nov partner se ne nudi.'
+    const notes = salesReviewNotes(base(), { matchedBy: null, company, shared })
+    expect(notes).toContain(shared)
+    expect(notes.join(' ')).not.toMatch(/dodajte ga/)
+  })
+
   it('names the seller company and the booking date', () => {
     const notes = salesReviewNotes(base(), { matchedBy: 'pib', company }).join(' ')
     expect(notes).toContain('Primer Gradnja d.o.o.')
