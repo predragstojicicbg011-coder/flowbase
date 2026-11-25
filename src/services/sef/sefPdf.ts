@@ -176,6 +176,25 @@ export async function sefPdfUrl(
   return sefObjectUrl(client, row.pdf_path)
 }
 
+/**
+ * Opens a kept PDF in a new tab: the way the SEF inbox shows an invoice, and
+ * the way the Krediti page shows a linked one. Reads our own storage, never
+ * SEF. The tab is opened BEFORE the link is signed, inside the click, so a
+ * popup blocker does not eat it. Answers null, or the sentence that says why not.
+ */
+export async function openInNewTab(sign: () => Promise<string | null>): Promise<string | null> {
+  const tab = window.open('', '_blank')
+  try {
+    const url = await sign()
+    if (!url) throw new Error('PDF nije dostupan.')
+    if (tab) { tab.opener = null; tab.location.href = url } else window.open(url, '_blank', 'noopener')
+    return null
+  } catch (e) {
+    tab?.close()
+    return `PDF ne može da se otvori: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
 // ─── The attachments as the browser sees them ───────────────────────────────
 
 /** A row of `sef_inbox_attachments`, as much as the inbox reads. */

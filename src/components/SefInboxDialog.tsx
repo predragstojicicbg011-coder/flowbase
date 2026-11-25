@@ -4,8 +4,6 @@ import { DIALOG, chrome } from './dialogTheme'
 import PartnerDialog from './PartnerDialog'
 import InvoiceDialog from './InvoiceDialog'
 import { fetchAllPages } from '../utils/fetchAllPages'
-import { MONTHS_SHORT_SR } from '../utils/months'
-import { fmtLocal } from '../utils/formatters'
 import { plural } from '../utils/plural'
 import { findLikelyDuplicate, type LedgerInvoice } from '../services/sef/sefDuplicate'
 import { matchSupplier, type PartnerLite, type SupplierMatch } from '../services/sef/matchPartner'
@@ -16,7 +14,7 @@ import { parseUbl } from '../services/sef/ublInvoice'
 import { draftFromUbl, reviewNotesFor, bookedDateOf } from '../services/sef/draftFromUbl'
 import {
   sefPdfUrl, sefObjectUrl, attachmentsByInbox, attachmentLabel, offersRefetchPdf, refetchSefPdf,
-  ATTACHMENT_COLUMNS, type SefAttachmentRow,
+  openInNewTab, ATTACHMENT_COLUMNS, type SefAttachmentRow,
 } from '../services/sef/sefPdf'
 import {
   decideOnSef, readSefDecisionsEnabled, decisionActions, SWITCH_OFF_MESSAGE, type SefDecision,
@@ -27,6 +25,13 @@ import { fetchScripts } from '../services/quickFillStore'
 import { getBookRates, rateFor } from '../services/bookAmounts'
 import type { ScriptLike } from '../services/expenseSplit'
 import { fetchesQuietly, runLimited } from '../services/sef/documentPrefetch'
+import {
+  loadInstalmentCandidates, loadDayRates, proposeInstalment, rememberedCredits,
+  linkToInstalment, differenceSentence, differs, needsRate, rankInstalments,
+  type InstalmentCandidate, type InvoiceFacts, type DayRates,
+} from '../services/sef/creditInterestLink'
+import SefCreditLinkChooser from './SefCreditLinkChooser'
+import { fmtDate, fmtAmount } from './sefFormat'
 
 // The inbox of invoices SEF has sent us.
 //
@@ -43,11 +48,13 @@ interface Props {
   onImported: () => void
 }
 
-type State = 'pending' | 'imported' | 'dismissed'
+type State = 'pending' | 'imported' | 'dismissed' | 'linked'
 type Filter = State | 'all'
 
 interface SefRow {
   id: string
+  /** The company SEF delivered it to; a link goes to that company's credits only. */
+  company_id?: string | null
   sef_invoice_id: number
   document_number: string | null
   document_type: string | null
@@ -76,6 +83,9 @@ interface SefRow {
   sef_decision_comment: string | null
   sef_decided_at: string | null
   sef_decided_by_name: string | null
+  /** Set while the row is linked to a credit instalment (state `linked`). */
+  credit_installment_id?: string | null
+  linked_at?: string | null
 }
 
 /** A decision on SEF waiting for its confirmation. */
@@ -116,6 +126,7 @@ const INBOX_COLUMNS = [
   'delivery_date', 'due_date', 'sent_date', 'sef_status', 'state',
   'dismiss_reason', 'dismissed_at', 'imported_at', 'ubl_fetched_at', 'pdf_path', 'pdf_kind', 'pdf_note',
   'sef_decision', 'sef_decision_comment', 'sef_decided_at', 'sef_decided_by_name',
+  'company_id', 'credit_installment_id', 'linked_at',
 ].join(', ')
 
 const LEDGER_COLUMNS = [
@@ -124,14 +135,6 @@ const LEDGER_COLUMNS = [
 ].join(', ')
 
 const STALE_AFTER_MS = 2 * 60 * 60 * 1000
-
-/** A calendar date, read from its own digits: `new Date('2026-08-01')` is
- *  midnight UTC and prints as the day before west of Greenwich. */
-function fmtDate(value: string | null | undefined): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value || '')
-  if (!m) return value || '—'
-  return `${Number(m[3])}. ${MONTHS_SHORT_SR[Number(m[2]) - 1]} ${m[1]}.`
-}
 
 /** The calendar day a moment fell on in Belgrade. The pull window runs on
  *  Belgrade dates, so a bill sent at 23:30 UTC must read as the next day here
@@ -161,12 +164,6 @@ function ago(ms: number): string {
   return `pre ${days} ${plural(days, 'dan', 'dana', 'dana')}`
 }
 
-function fmtAmount(amount: number | null, currency: string | null): string {
-  if (amount === null || amount === undefined) return '—'
-  // Through the application's own formatter: 1.234,56 RSD.
-  return currency ? fmtLocal(Number(amount), currency) : String(amount)
-}
-
 const isCreditNote = (r: SefRow) => /credit/i.test(r.document_type || '')
 
 /** `partners.tax_id` holds bare digits; an identifier with none is no identifier. */
@@ -186,6 +183,7 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'pending', label: 'Na čekanju' },
   { key: 'imported', label: 'Proknjižene' },
   { key: 'dismissed', label: 'Odbijene' },
+  { key: 'linked', label: 'Vezane za kredite' },
   { key: 'all', label: 'Sve' },
 ]
 
@@ -193,6 +191,7 @@ const EMPTY_TEXT: Record<Filter, string> = {
   pending: 'Ništa ne čeka. Nove fakture se pojavljuju ovde posle sledećeg povlačenja.',
   imported: 'Još ništa nije proknjiženo iz SEF-a.',
   dismissed: 'Nijedna faktura nije odbijena.',
+  linked: 'Nijedna faktura još nije povezana sa ratom kredita.',
   all: 'Sanduče je prazno.',
 }
 
@@ -228,6 +227,14 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
   const [decisionsEnabled, setDecisionsEnabled] = useState(false)
   const [deciding, setDeciding] = useState<Deciding | null>(null)
   const [decisionComment, setDecisionComment] = useState('')
+  // Every credit instalment, for linking a bank's interest invoice to one, and
+  // the row whose chooser is open.
+  const [instalments, setInstalments] = useState<InstalmentCandidate[]>([])
+  const [linking, setLinking] = useState<SefRow | null>(null)
+  // NBS rates by day, for an invoice in another currency than the credit;
+  // a day that could not be read keeps its reason.
+  const [dayRates, setDayRates] = useState<Map<string, DayRates | { problem: string }>>(new Map())
+  const ratesAsked = useRef(new Set<string>())
 
   // State is asynchronous and a double click arrives faster than a render, so
   // the guard is a ref. What a second click would cost is a SEF call and a
@@ -247,7 +254,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     const problems: string[] = []
     const today = new Date().toLocaleDateString('en-CA')
 
-    const [inbox, ledgerRows, partnerRows, companyRows, scriptRows, complete, failed, floor, decisionsOn, attachmentRows] = await Promise.all([
+    const [inbox, ledgerRows, partnerRows, companyRows, scriptRows, complete, failed, floor, decisionsOn, attachmentRows, instalmentRows] = await Promise.all([
       // Paged, because PostgREST caps a response at 1000 rows and says nothing.
       // `nullsFirst: false` because a descending sort otherwise puts undated
       // rows above everything that has a date.
@@ -325,6 +332,8 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
         supabase.from('sef_inbox_attachments').select(ATTACHMENT_COLUMNS)
           .order('id').range(from, to))
         .catch((e: any) => { problems.push(`Could not read the invoices' attachments: ${e?.message || e}`); return [] as SefAttachmentRow[] }),
+      loadInstalmentCandidates(supabase)
+        .catch((e: any) => { problems.push(`Krediti nisu mogli da se pročitaju, pa fakture ne mogu da se povežu sa ratom: ${e?.message || e}`); return [] as InstalmentCandidate[] }),
     ])
 
     if (!mounted.current) return
@@ -342,6 +351,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     setPullFrom(floor && floor > '2000' ? floor : '')
     setDecisionsEnabled(decisionsOn)
     setAttachments(attachmentsByInbox(attachmentRows))
+    setInstalments(instalmentRows)
     setError(problems.join(' '))
     setLoading(false)
   }, [])
@@ -409,7 +419,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
   }
 
   const counts = useMemo(() => {
-    const c: Record<Filter, number> = { pending: 0, imported: 0, dismissed: 0, all: rows.length }
+    const c: Record<Filter, number> = { pending: 0, imported: 0, dismissed: 0, linked: 0, all: rows.length }
     rows.forEach(r => { c[r.state] += 1 })
     return c
   }, [rows])
@@ -509,15 +519,8 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
    */
   const openSigned = async (rowId: string, sign: () => Promise<string | null>) => {
     setRowError(null)
-    const tab = window.open('', '_blank')
-    try {
-      const url = await sign()
-      if (!url) throw new Error('PDF nije dostupan.')
-      if (tab) { tab.opener = null; tab.location.href = url } else window.open(url, '_blank', 'noopener')
-    } catch (e) {
-      tab?.close()
-      setRowError({ id: rowId, text: `PDF ne može da se otvori: ${e instanceof Error ? e.message : String(e)}` })
-    }
+    const refused = await openInNewTab(sign)
+    if (refused) setRowError({ id: rowId, text: refused })
   }
   const showPdf = (row: SefRow) => openSigned(row.id, () => sefPdfUrl(supabase, row))
   const showAttachment = (row: SefRow, a: SefAttachmentRow) => openSigned(row.id, () => sefObjectUrl(supabase, a.path))
@@ -574,6 +577,98 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     if (!data || data.length === 0) { setRowError({ id: row.id, text: 'Ništa nije promenjeno. Faktura je možda uklonjena ili nije vaša da je vratite.' }); return }
     await load()
   })
+
+  // ── A bank's interest invoice, linked to its credit instalment ──
+
+  /** The day whose NBS rate converts the invoice into a credit's currency:
+   *  the day SEF received it (the day it was issued), else its delivery or due date. */
+  const rateDateOf = (row: SefRow): string | null =>
+    belgradeDay(row.sent_date) || row.delivery_date || row.due_date || null
+
+  /** What the row says about the invoice, for ranking the instalments it may be for. */
+  const factsOf = (row: SefRow): InvoiceFacts => ({
+    amount: row.amount === null || row.amount === undefined ? null : Number(row.amount),
+    currency: row.currency,
+    companyId: row.company_id ?? null,
+    dates: [row.delivery_date, row.due_date, belgradeDay(row.sent_date) || null],
+    supplierPib: row.supplier_vat_number,
+    rateDate: rateDateOf(row),
+  })
+
+  const instalmentById = useMemo(
+    () => new Map(instalments.map(i => [i.installmentId, i])), [instalments])
+
+  const ratesOf = (row: SefRow): DayRates | null => {
+    const d = rateDateOf(row)
+    const r = d ? dayRates.get(d) : undefined
+    return r && 'rsdPer' in r ? r : null
+  }
+  const rateProblemOf = (row: SefRow): string | null => {
+    const d = rateDateOf(row)
+    const r = d ? dayRates.get(d) : undefined
+    return r && 'problem' in r ? r.problem : null
+  }
+
+  // The days whose rates are needed: an invoice whose chooser is open, or
+  // whose PIB is remembered on a credit, or that is linked, in another
+  // currency than the credit. Each day is asked once per visit.
+  const rateDays = useMemo(() => {
+    const out = new Set<string>()
+    for (const r of rows) {
+      const d = rateDateOf(r)
+      if (!d) continue
+      const other = (list: InstalmentCandidate[]) => list.some(c => needsRate(r.currency, c.currency))
+      if (r.state === 'pending') {
+        if (linking?.id === r.id ? other(instalments) : other(rememberedCredits(factsOf(r), instalments))) out.add(d)
+      } else if (r.state === 'linked' && r.credit_installment_id) {
+        const c = instalmentById.get(r.credit_installment_id)
+        if (c && needsRate(r.currency, c.currency)) out.add(d)
+      }
+    }
+    return Array.from(out).sort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, instalments, instalmentById, linking])
+
+  useEffect(() => {
+    for (const d of rateDays) {
+      if (ratesAsked.current.has(d)) continue
+      ratesAsked.current.add(d)
+      loadDayRates(d).then(
+        r => { if (mounted.current) setDayRates(prev => new Map(prev).set(d, r)) },
+        (e: unknown) => { if (mounted.current) setDayRates(prev => new Map(prev).set(d, { problem: e instanceof Error ? e.message : String(e) })) })
+    }
+  }, [rateDays])
+
+  /**
+   * Links a bank's interest invoice to its credit instalment, through the one
+   * function that may: no invoice is created and nothing reaches P&L, and SEF
+   * is not touched. The function refuses in words, shown on the row as they came.
+   */
+  const link = (row: SefRow, installmentId: string) => exclusive(async () => {
+    setError(''); setNotice(''); setRowError(null); setRowNotice(null)
+    try {
+      await linkToInstalment(supabase, row.id, installmentId)
+    } catch (e) {
+      setRowError({ id: row.id, text: e instanceof Error ? e.message : String(e) })
+      return
+    }
+    const inst = instalmentById.get(installmentId)
+    const said = inst ? linkedDifference(row, inst) : null
+    setLinking(null)
+    await load()
+    const what = inst ? `ratom #${inst.installmentNo} kredita „${inst.creditName}“` : 'ratom kredita'
+    setNotice(`Faktura${row.document_number ? ` ${row.document_number}` : ''} je povezana sa ${what}. Ništa nije proknjiženo.`
+      + (said ? ` Iznosi se razlikuju: ${said}.` : ''))
+  })
+
+  /** The difference between the invoice and the instalment's interest, said; null when there is none to say. */
+  const linkedDifference = (row: SefRow, inst: InstalmentCandidate): string | null => {
+    const amount = row.amount === null || row.amount === undefined ? null : Number(row.amount)
+    if (amount === null) return null
+    const [r] = rankInstalments(factsOf(row), [inst], { includeClosed: true, rates: ratesOf(row) })
+    if (!r || !differs(amount, r)) return null
+    return differenceSentence({ amount, currency: row.currency }, r, rateDateOf(row))
+  }
 
   /**
    * Fetches the document, reads it, and opens the invoice dialog on a draft.
@@ -786,7 +881,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
 
   const startDeciding = (row: SefRow, accepted: boolean) => {
     setDeciding({ row, accepted }); setDecisionComment('')
-    setDeclining(null); setError(''); setNotice(''); setRowError(null); setRowNotice(null)
+    setDeclining(null); setLinking(null); setError(''); setNotice(''); setRowError(null); setRowNotice(null)
   }
 
   /** " 18.10.2026. 10:00 · Osoba A" — when and who, as far as it is known. */
@@ -831,7 +926,13 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     const dup = findLikelyDuplicate(
       { document_number: row.document_number, amount: row.amount, currency: row.currency, partner_id: match?.partnerId ?? null },
       ledger)
-    const proposal = proposalFor(row, match)
+    // A bank whose PIB is remembered on a credit: its invoice is interest, and
+    // the instalment is proposed instead of a classification.
+    const creditProposal = row.state === 'pending' ? proposeInstalment(factsOf(row), instalments, ratesOf(row)) : null
+    const proposal = creditProposal ? null : proposalFor(row, match)
+    const linkedTo = row.state === 'linked' && row.credit_installment_id
+      ? instalmentById.get(row.credit_installment_id) ?? null : null
+    const linkedDiff = linkedTo ? linkedDifference(row, linkedTo) : null
     const opened = !!row.ubl_fetched_at
     const rowAttachments = attachments.get(row.id) || []
     // What the row allows, narrowed by what SEF's own status already settles
@@ -887,6 +988,11 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
           </div>
         )}
         {dup && <div style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>{dup.text}</div>}
+        {creditProposal && (
+          <div style={{ ...s.flag, color: DIALOG.dim, background: DIALOG.raised }}>
+            Predlog: poveži sa kreditom „{creditProposal.creditName}“ · rata #{creditProposal.installmentNo} · dospeva {fmtDate(creditProposal.dueDate)} · kamata {fmtAmount(creditProposal.interestAmount, creditProposal.currency)}. PIB ovog dobavljača je zapamćen na tom kreditu.
+          </div>
+        )}
         {proposal && (
           <div style={{ ...s.flag, color: DIALOG.dim, background: DIALOG.raised }}>
             <span>Predlog: {[proposal.pl_category, proposal.pl_subcategory, proposal.department].filter(Boolean).join(' › ')}. </span>
@@ -896,6 +1002,18 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
         {row.state === 'dismissed' && (
           <div style={{ ...s.flag, color: DIALOG.dim, background: DIALOG.raised }}>
             Odbijena{row.dismissed_at ? ` ${fmtDate(belgradeDay(row.dismissed_at))}` : ''}: {row.dismiss_reason}
+          </div>
+        )}
+        {row.state === 'linked' && (
+          <div style={{ ...s.flag, color: DIALOG.blue, background: DIALOG.blueFill }}>
+            {linkedTo
+              ? `Povezana sa kreditom „${linkedTo.creditName}“ · rata #${linkedTo.installmentNo} · dospeva ${fmtDate(linkedTo.dueDate)} · kamata ${fmtAmount(linkedTo.interestAmount, linkedTo.currency)}. Nije proknjižena: kamata je u knjigama sa otplatom rate.`
+              : 'Povezana sa ratom kredita koja ne može da se pročita.'}
+          </div>
+        )}
+        {linkedDiff && (
+          <div style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>
+            Iznosi se razlikuju: {linkedDiff}.
           </div>
         )}
         {row.state === 'imported' && (
@@ -985,7 +1103,20 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
           </div>
         )}
 
-        {declining?.id !== row.id && deciding?.row.id !== row.id && (
+        {linking?.id === row.id && (
+          <SefCreditLinkChooser
+            rowId={row.id}
+            invoice={factsOf(row)}
+            candidates={instalments}
+            proposed={creditProposal?.installmentId ?? null}
+            rates={ratesOf(row)}
+            rateProblem={rateProblemOf(row)}
+            busy={busy}
+            onCancel={() => setLinking(null)}
+            onLink={id => link(row, id)} />
+        )}
+
+        {declining?.id !== row.id && deciding?.row.id !== row.id && linking?.id !== row.id && (
           <div style={s.actions}>
             {keepsBooks && guardNote && (
               <span style={{ ...s.hint, marginTop: 0, alignSelf: 'center', marginRight: 'auto' }}>{guardNote}</span>
@@ -1020,15 +1151,26 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
                     ? 'Dokument je već preuzet, pa ponovno otvaranje ne menja status na SEF-u'
                     : 'Otvaranje preuzima dokument, čime faktura na SEF-u postaje pregledana'}
                   onClick={() => openAndBook(row)}>Otvori i proknjiži</button>
+                {keepsBooks && (
+                  <button style={s.btnGhost} disabled={busy}
+                    title='Za kamatu banke koja je već proknjižena sa otplatom rate: povezuje fakturu sa ratom i ništa ne knjiži'
+                    onClick={() => { setLinking(row); setDeclining(null); setDeciding(null); setError(''); setNotice(''); setRowError(null) }}>Poveži sa ratom kredita</button>
+                )}
                 <button style={s.btnGhost} disabled={busy}
-                  onClick={() => { setDeclining(row); setDeciding(null); setReason(''); setError(''); setNotice(''); setRowError(null) }}>Odbij</button>
+                  onClick={() => { setDeclining(row); setDeciding(null); setLinking(null); setReason(''); setError(''); setNotice(''); setRowError(null) }}>Odbij</button>
               </>
             )}
-            {row.state !== 'pending' && (
+            {row.state === 'linked' && (
+              <button style={s.btnGhost} disabled={busy}
+                title='Vraća fakturu u red; u knjigama se ništa ne menja'
+                onClick={() => restore(row)}>Odveži</button>
+            )}
+            {row.state !== 'pending' && row.state !== 'linked' && (
               <button style={s.btnGhost} disabled={busy} onClick={() => restore(row)}>Vrati u red</button>
             )}
-            {/* Only an opened row can have a PDF: it is kept at that one fetch. */}
-            {!opened && row.state === 'pending' && keepsBooks && (prefetching.current.has(row.id) || fetchesQuietly(row)
+            {/* Only an opened row can have a PDF: it is kept at that one fetch.
+                A linked row may still fetch it, so the Krediti page can show it. */}
+            {!opened && (row.state === 'pending' || row.state === 'linked') && keepsBooks && (prefetching.current.has(row.id) || fetchesQuietly(row)
               ? <span style={{ ...s.hint, marginTop: 0, alignSelf: 'center' }}>Preuzimam PDF i priloge…</span>
               : <button style={{ ...s.btnGhost, opacity: busy ? 0.5 : 1 }} disabled={busy}
                   title='Preuzima dokument sa SEF-a radi PDF-a i priloga. Faktura na SEF-u time postaje pregledana.'
@@ -1053,7 +1195,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
             )}
           </div>
         )}
-        {keepsBooks && offersRefetchPdf(row) && declining?.id !== row.id && deciding?.row.id !== row.id && (
+        {keepsBooks && offersRefetchPdf(row) && declining?.id !== row.id && deciding?.row.id !== row.id && linking?.id !== row.id && (
           <div style={s.hint}>
             Sačuvan je PDF koji je dobavljač priložio (npr. otpremnica), ne račun. „Preuzmi račun sa SEF-a“ ga zamenjuje SEF-ovim prikazom računa; status na SEF-u se ne menja.
           </div>

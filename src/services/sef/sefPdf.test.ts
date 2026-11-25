@@ -4,7 +4,7 @@ import { webcrypto } from 'crypto'
 import {
   pickEnvelopePdf, extractEnvelopePdfs, base64ToBytes, sha256Hex, sefPdfPath, sefPdfUrl,
   sefAttachmentPath, sefObjectUrl, attachmentsByInbox, attachmentLabel,
-  refetchPdfRefusal, offersRefetchPdf, refetchSefPdf,
+  refetchPdfRefusal, offersRefetchPdf, refetchSefPdf, openInNewTab,
   SEF_PDF_BUCKET, SEF_PDF_URL_SECONDS, type StorageClientLike, type SefAttachmentRow,
 } from './sefPdf'
 
@@ -209,5 +209,28 @@ describe('fetching the invoice again for a row that kept an attachment', () => {
     const m = clientReturning({ data: null, error: { message: 'non-2xx' } })
     await expect(refetchSefPdf(m.client, opened, async () => 'Faktura je na SEF-u još nova'))
       .rejects.toThrow('Faktura je na SEF-u još nova')
+  })
+})
+
+describe('opening a kept PDF in a new tab', () => {
+  const realOpen = window.open
+  afterEach(() => { window.open = realOpen })
+
+  it('opens the tab inside the click, then sends it to the signed link', async () => {
+    const tab: any = { opener: 'x', location: { href: '' }, close: jest.fn() }
+    window.open = jest.fn(() => tab) as any
+    expect(await openInNewTab(async () => 'https://signed.example/1.pdf')).toBeNull()
+    expect(window.open).toHaveBeenCalledWith('', '_blank')
+    expect(tab.opener).toBeNull()
+    expect(tab.location.href).toBe('https://signed.example/1.pdf')
+  })
+
+  it('closes the tab and says why when there is no PDF or the link is refused', async () => {
+    const tab: any = { opener: null, location: { href: '' }, close: jest.fn() }
+    window.open = jest.fn(() => tab) as any
+    expect(await openInNewTab(async () => null)).toBe('PDF ne može da se otvori: PDF nije dostupan.')
+    expect(tab.close).toHaveBeenCalled()
+    expect(await openInNewTab(async () => { throw new Error('Object not found') }))
+      .toBe('PDF ne može da se otvori: Object not found')
   })
 })
