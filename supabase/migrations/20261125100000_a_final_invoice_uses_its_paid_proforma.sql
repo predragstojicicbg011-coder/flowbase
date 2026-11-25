@@ -377,13 +377,20 @@ set search_path to 'public'
 as $$
 declare v_pf record; v_paid numeric; v_cov numeric; v_direct numeric;
 begin
-  -- The proforma's row first (fix round 1): a use takes it `for update`
-  -- (advance_usage_rules), so an unlink and a use of one proforma wait for
-  -- each other and the second one's sums see the first one's write.
-  select * into v_pf from public.invoices where id = old.invoice_id for update;
+  -- Read with no lock: most links are not a proforma's, and this trigger
+  -- runs after links_stay_within_their_payment, which holds the payment's and
+  -- the bill's advisory locks -- a row lock here on every invoice would wait in
+  -- a circle with a link INSERT on the same bill (its foreign key holds the row
+  -- FOR KEY SHARE and it waits for the bill's advisory lock; fix round 2).
+  select * into v_pf from public.invoices where id = old.invoice_id;
   if v_pf.id is null or v_pf.document_type <> 'proforma' then
     return null;
   end if;
+  -- A proforma: its row, FOR NO KEY UPDATE (fix rounds 1-2). That conflicts
+  -- with a use's FOR UPDATE (advance_usage_rules), so an unlink and a use of
+  -- one proforma wait for each other and the second one's sums see the first
+  -- one's write; it does not conflict with an insert's FOR KEY SHARE.
+  perform 1 from public.invoices where id = v_pf.id for no key update;
   select coalesce(sum(l.allocated_amount), 0) into v_paid from public.invoice_transaction_links l where l.invoice_id = v_pf.id;
   select coalesce(sum(c.amount), 0) into v_cov
     from public.advance_coverage c join public.invoices a on a.id = c.advance_invoice_id and a.deleted_at is null
@@ -955,8 +962,8 @@ begin
   end if;
 
   select prosrc into v_src from pg_proc where oid = 'public.proforma_keeps_its_payment()'::regprocedure;
-  if v_src !~ 'select\s+\*\s+into\s+v_pf\s+from\s+public\.invoices\s+where\s+id\s*=\s*old\.invoice_id\s+for\s+update;' then
-    raise exception 'proforma_keeps_its_payment does not lock the proforma row before it sums, so an unlink and a use at once could both pass -- rolling back';
+  if v_src !~ 'select\s+\*\s+into\s+v_pf\s+from\s+public\.invoices\s+where\s+id\s*=\s*old\.invoice_id;\s*if\s+v_pf\.id\s+is\s+null\s+or\s+v_pf\.document_type\s*<>\s*''proforma''\s+then\s+return\s+null;\s+end\s+if;\s*(--[^\n]*\n\s*)*perform\s+1\s+from\s+public\.invoices\s+where\s+id\s*=\s*v_pf\.id\s+for\s+no\s+key\s+update;\s*select\s+coalesce\(sum\(l\.allocated_amount\)' then
+    raise exception 'proforma_keeps_its_payment does not read the row unlocked, return for a non-proforma, then lock the proforma FOR NO KEY UPDATE before it sums (a lock on every invoice deadlocks with a link insert; no lock lets an unlink and a use both pass) -- rolling back';
   end if;
   if v_src !~ 'from\s+public\.advance_usage\s+u\s+join\s+public\.invoices\s+f\s+on\s+f\.id\s*=\s*u\.final_invoice_id\s+and\s+f\.deleted_at\s+is\s+null\s+where\s+u\.advance_invoice_id\s*=\s*v_pf\.id'
      or v_src !~ 'if\s+v_cov\s*\+\s*v_direct\s*>\s*v_paid\s*\+\s*0\.005\s+then' then
