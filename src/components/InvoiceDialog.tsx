@@ -25,6 +25,7 @@ import {
 } from '../services/partnerAccountChoice'
 import { fmtLocal, fmtMoney, fmtNum } from '../utils/formatters'
 import { fetchAllPartners } from '../services/allPartners'
+import { identityFill, identityFillSentence, saveIdentityFill, fillFailureSentence, type SefSupplier } from '../services/sef/supplierIdentity'
 import { DOCUMENT_CURRENCIES } from '../services/bookAmounts'
 import { REVENUE_STREAMS, streamForProjectKind } from '../services/revenueStreams'
 import {
@@ -80,11 +81,16 @@ interface Props {
   /** Documents of the source (a SEF invoice's PDF and attachments), offered
    *  from the header while booking it. */
   sourceDocuments?: { label: string; open: () => void }[]
+  /** The other party as a SEF document names it (the supplier on a bill,
+   *  the customer on an invoice we issued). A partner created from here is
+   *  created with its PIB, registration number and address, and a partner
+   *  the document is saved against is given the identifiers it lacks. */
+  sefSupplier?: SefSupplier
 }
 
 interface ValidationErrors { [key: string]: string }
 
-export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, creditNote, sourceDocuments }: Props) {
+export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, creditNote, sourceDocuments, sefSupplier }: Props) {
   const [docsOpen, setDocsOpen] = useState(false)
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
@@ -145,6 +151,8 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [showNewPartner, setShowNewPartner] = useState(false) // eslint-disable-line
   const [partnerDialogOpen, setPartnerDialogOpen] = useState(false)
   const [partnerDialogInitialName, setPartnerDialogInitialName] = useState('')
+  /** A partner created in this dialog from the SEF document's party. */
+  const [createdFromBillId, setCreatedFromBillId] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0])
   const [dueDate, setDueDate] = useState('')
@@ -959,6 +967,20 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   useEffect(() => { if (invoice && departments.length > 0) { const dept = departments.find(d => d.name === invoice.department); if (dept) setDeptId(dept.id) } }, [invoice, departments])
 
   const filteredPartners = partners.filter(p => !partnerSearch || p.name.toLowerCase().includes(partnerSearch.toLowerCase()))
+  // What a SEF document adds to the partner it is saved against: the PIB and
+  // registration number the partner lacks, never over one it has. Said under
+  // the partner before the save, and written by it (handlePost).
+  //
+  // ONLY to the partner the inbox matched, or one just created here from
+  // this document. A partner picked by hand may be a catch-all ("Razni
+  // dobavljači"), and the supplier's PIB written onto it would pull every
+  // later bill of this supplier onto that partner.
+  const fillsPartner = !!sefSupplier && !!partnerId
+    && (partnerId === sefSupplier.matchedPartnerId || partnerId === createdFromBillId)
+  const partnerFill = fillsPartner
+    ? identityFill(partners.find(p => p.id === partnerId), sefSupplier, partners)
+    : {}
+  const partnerFillSentence = identityFillSentence(partnerFill)
   // A refund is money that came back; it paid no bill, so it is never offered
   // as a payment. `directTransactions` itself stays whole, so a refund that is
   // already linked still resolves in `linkedTxs` and can be unlinked.
@@ -1229,6 +1251,22 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         const outcome = await reallocateInvoiceLinks(supabase, invoiceId, savedLinks?.links || [],
           'Upareno — P&L je već proknjižen kroz direktnu transakciju')
         if (!outcome.ok) throw new Error(outcome.message)
+      }
+      // ── The document's PIB onto its partner, last ───────────────────
+      //
+      // Last, because it is the least of what this save does: a refusal here
+      // must not stop the splits or the links above. Reported, not thrown —
+      // the invoice is saved and right, and what is left is a PIB to type.
+      if (finalPartnerId && finalPartnerId === partnerId && (partnerFill.tax_id || partnerFill.registration_number)) {
+        const held = partners.find(p => p.id === finalPartnerId)
+        const failure = await saveIdentityFill(supabase, finalPartnerId, partnerFill, {
+          tax_id: held?.tax_id ?? null, registration_number: held?.registration_number ?? null,
+        })
+        if (failure) {
+          setSaving(false)
+          setSaveError(fillFailureSentence(failure))
+          return
+        }
       }
       setSuccess(true)
       setTimeout(() => { setSuccess(false); onClose() }, 1500)
@@ -1702,10 +1740,17 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
                           </div>
                         )}
                         {fieldErr('partnerId') && <span style={s.errorMsg}>{fieldErr('partnerId')}</span>}
+                        {partnerFillSentence && (
+                          <div role="status" style={{ fontSize: '11px', color: DIALOG.dim, marginTop: '4px' }}>{partnerFillSentence}</div>
+                        )}
                       </div>
                       <button
                         style={{ fontFamily: 'system-ui,sans-serif', fontSize: '20px', width: '36px', height: '36px', border: '0.5px solid ' + DIALOG.border, borderRadius: '8px', background: DIALOG.raised, color: DIALOG.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-                        onClick={() => { setPartnerDialogInitialName(partnerSearch); setPartnerDialogOpen(true) }}
+                        // From a SEF document the form opens on the party the
+                        // document names, PIB and all: a partner made with the
+                        // name alone is findable only by its spelling, and
+                        // the next spelling makes a duplicate.
+                        onClick={() => { setPartnerDialogInitialName(sefSupplier?.name || partnerSearch); setPartnerDialogOpen(true) }}
                         title="Dodaj novog partnera (pretraga NBS)">+</button>
                     </div>
                   </div>
@@ -2299,11 +2344,18 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         <PartnerDialog
           initialName={partnerDialogInitialName}
           initialAccountNumber=""
+          initialTaxId={sefSupplier?.taxId || ''}
+          initialRegistrationNumber={sefSupplier?.registrationNumber || ''}
+          initialAddress={sefSupplier?.address || ''}
+          initialCity={sefSupplier?.city || ''}
           onClose={() => setPartnerDialogOpen(false)}
           onSaved={(newPartner) => {
             setPartners(prev => [...prev, newPartner])
             setPartnerId(newPartner.id)
             setPartnerSearch(newPartner.name)
+            // Made from the document's party: the one partner besides the
+            // matched one that the document may complete.
+            if (sefSupplier) setCreatedFromBillId(newPartner.id)
             setPartnerDialogOpen(false)
           }}
         />

@@ -10,6 +10,7 @@ import { plural } from '../utils/plural'
 import { findLikelyDuplicate, type LedgerInvoice } from '../services/sef/sefDuplicate'
 import { matchSupplier, type PartnerLite, type SupplierMatch } from '../services/sef/matchPartner'
 import { matchCompany, type CompanyLite } from '../services/sef/matchCompany'
+import { sharedIdentifier, sharedIdentifierSentence, type SefSupplier, type SharedIdentifier } from '../services/sef/supplierIdentity'
 import { proposeClassification, type PastInvoice, type Proposal } from '../services/sef/proposeClassification'
 import { parseUbl } from '../services/sef/ublInvoice'
 import { draftFromUbl, reviewNotesFor, bookedDateOf } from '../services/sef/draftFromUbl'
@@ -101,6 +102,10 @@ interface Booking {
   /** The invoice's PDF and the supplier's attachments, saved by the fetch
    *  that opened it: offered in the booking dialog from the start. */
   documents: { label: string; open: () => void }[]
+  /** The supplier as the document names it: what a partner created while
+   *  booking is created with, and what a matched partner lacking its PIB is
+   *  given (supplierIdentity). */
+  supplier: SefSupplier
 }
 
 // Named, not `*`: the table also holds each invoice's whole UBL document and
@@ -164,6 +169,9 @@ function fmtAmount(amount: number | null, currency: string | null): string {
 
 const isCreditNote = (r: SefRow) => /credit/i.test(r.document_type || '')
 
+/** `partners.tax_id` holds bare digits; an identifier with none is no identifier. */
+const digitsOrNull = (s: string | null | undefined): string | null => (s || '').replace(/\D/g, '') || null
+
 /** A failed call's real reason is in the response body, not in `message`. */
 async function reasonFrom(err: any): Promise<string> {
   try {
@@ -201,7 +209,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
   const [pullFrom, setPullFrom] = useState('')
   const [declining, setDeclining] = useState<SefRow | null>(null)
   const [reason, setReason] = useState('')
-  const [newSupplier, setNewSupplier] = useState<SefRow | null>(null)
+  const [newSupplier, setNewSupplier] = useState<SefSupplier | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -435,6 +443,18 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     return m
   }, [visible, partners])
 
+  // The rows nobody matched because two partners already share the bill's
+  // PIB: those name the pair and offer no third.
+  const shareds = useMemo(() => {
+    const m = new Map<string, SharedIdentifier>()
+    visible.forEach(r => {
+      if (matches.get(r.id)) return
+      const shared = sharedIdentifier({ vatNumber: r.supplier_vat_number, registrationNumber: r.supplier_registration_number }, partners)
+      if (shared) m.set(r.id, shared)
+    })
+    return m
+  }, [visible, partners, matches])
+
   const decline = () => exclusive(async () => {
     if (!declining || !reason.trim()) return
     setError(''); setNotice(''); setRowError(null)
@@ -661,8 +681,19 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
       // Left to the owner, with the button the invoice dialog already has.
     }
 
+    const supplier: SefSupplier = {
+      name: ubl.supplierName ?? row.supplier_name,
+      taxId: digitsOrNull(ubl.supplierVatNumber ?? row.supplier_vat_number),
+      registrationNumber: digitsOrNull(ubl.supplierRegistrationNumber ?? row.supplier_registration_number),
+      address: ubl.supplierAddress,
+      city: ubl.supplierCity,
+      matchedPartnerId: partnerId,
+    }
+    const shared = match ? null : sharedIdentifier({ vatNumber: supplier.taxId, registrationNumber: supplier.registrationNumber }, partners)
+
     const notes = reviewNotesFor(ubl, {
       matchedBy: match?.by ?? null, proposal, saved,
+      shared: shared ? sharedIdentifierSentence(shared) : null,
       company: {
         by: companyMatch?.by ?? null,
         name: companies.find(c => c.id === companyId)?.name ?? null,
@@ -689,7 +720,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
 
     if (!mounted.current) return
     setBooking({
-      row, notes, isCreditNote: ubl.isCreditNote, documents,
+      row, notes, isCreditNote: ubl.isCreditNote, documents, supplier,
       draft: draftFromUbl(ubl, row, partnerId, proposal, saved, companyId, rate, eurRate),
     })
   })
@@ -764,8 +795,39 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     return parts.length ? ` ${parts.join(' · ')}` : ''
   }
 
+  /**
+   * Opens the new-partner form on the supplier the row names. Where the
+   * document has already been fetched, its address and city come too: read
+   * from our own copy of it, which costs nothing on SEF.
+   */
+  const createSupplier = async (row: SefRow) => {
+    let address: string | null = null
+    let city: string | null = null
+    if (row.ubl_fetched_at) {
+      try {
+        const { data } = await supabase.from('sef_inbox').select('ubl_xml').eq('id', row.id).maybeSingle()
+        if ((data as any)?.ubl_xml) {
+          const ubl = parseUbl(String((data as any).ubl_xml))
+          address = ubl.supplierAddress
+          city = ubl.supplierCity
+        }
+      } catch {
+        // The form opens without them; the identifiers are on the row.
+      }
+    }
+    if (!mounted.current) return
+    setNewSupplier({
+      name: row.supplier_name,
+      taxId: digitsOrNull(row.supplier_vat_number),
+      registrationNumber: digitsOrNull(row.supplier_registration_number),
+      address, city,
+    })
+  }
+
   const renderRow = (row: SefRow) => {
     const match = matches.get(row.id) ?? null
+    // Two partners already on the bill's PIB: a third is not offered.
+    const shared = shareds.get(row.id) ?? null
     const dup = findLikelyDuplicate(
       { document_number: row.document_number, amount: row.amount, currency: row.currency, partner_id: match?.partnerId ?? null },
       ledger)
@@ -798,8 +860,8 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
                   color: outsideBadge.tone === 'red' ? DIALOG.red : DIALOG.dim,
                 }}>{outsideBadge.label}</span>
               )}
-              {!match && (
-                <button style={s.linkBtn} disabled={busy} onClick={() => setNewSupplier(row)}>Nov dobavljač — napravi</button>
+              {!match && !shared && (
+                <button style={s.linkBtn} disabled={busy} onClick={() => createSupplier(row)}>Nov dobavljač — napravi</button>
               )}
               {match?.by === 'name' && (
                 <span style={{ ...s.badge, background: DIALOG.amberFill, color: DIALOG.amber }}>Prepoznat samo po imenu</span>
@@ -816,6 +878,9 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
           <div style={s.amount}>{fmtAmount(row.amount, row.currency)}</div>
         </div>
 
+        {shared && (
+          <div style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>{sharedIdentifierSentence(shared)}</div>
+        )}
         {opened && (
           <div style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>
             Otvorena — već pregledana na SEF-u
@@ -1098,6 +1163,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
           creditNote={booking.isCreditNote}
           sourceDocuments={booking.documents}
           reviewNotes={booking.notes}
+          sefSupplier={booking.supplier}
           // Left open until the dialog closes itself, so the owner sees its
           // confirmation; the queue behind it is refreshed by `markImported`.
           onSaved={(invoiceId: string) => markImported(booking.row, invoiceId)}
@@ -1106,9 +1172,11 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
 
       {newSupplier && (
         <PartnerDialog
-          initialName={newSupplier.supplier_name || ''}
-          initialTaxId={newSupplier.supplier_vat_number || ''}
-          initialRegistrationNumber={newSupplier.supplier_registration_number || ''}
+          initialName={newSupplier.name || ''}
+          initialTaxId={newSupplier.taxId || ''}
+          initialRegistrationNumber={newSupplier.registrationNumber || ''}
+          initialAddress={newSupplier.address || ''}
+          initialCity={newSupplier.city || ''}
           onClose={() => setNewSupplier(null)}
           onSaved={(p: PartnerLite) => { setPartners(prev => [...prev, p]); setNewSupplier(null) }} />
       )}

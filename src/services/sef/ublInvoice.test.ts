@@ -497,3 +497,33 @@ describe('an advance invoice and the final invoice it closes (real documents)', 
     expect(b.isAdvanceInvoice).toBe(false)
   })
 })
+
+describe('adresa dobavljaca, za partnera napravljenog sa fakture', () => {
+  const party = (address: string) => `<Invoice xmlns:cac="urn:cac" xmlns:cbc="urn:cbc"><cbc:ID>1</cbc:ID>
+    <cac:AccountingSupplierParty><cac:Party>
+      <cac:PartyName><cbc:Name>Alfa Doo</cbc:Name></cac:PartyName>
+      <cac:PostalAddress>${address}</cac:PostalAddress>
+      <cac:PartyTaxScheme><cbc:CompanyID>RS100000001</cbc:CompanyID></cac:PartyTaxScheme>
+    </cac:Party></cac:AccountingSupplierParty>
+    <cac:AccountingCustomerParty><cac:Party>
+      <cac:PostalAddress><cbc:StreetName>Ulica kupca 9</cbc:StreetName><cbc:CityName>Drugde</cbc:CityName></cac:PostalAddress>
+    </cac:Party></cac:AccountingCustomerParty></Invoice>`
+
+  it('cita ulicu i grad dobavljaca, svako u jednom redu', () => {
+    const u = parseUbl(party('<cbc:StreetName>Test  ulica   1</cbc:StreetName><cbc:CityName> Testgrad </cbc:CityName>'))
+    expect(u.supplierAddress).toBe('Test ulica 1')
+    expect(u.supplierCity).toBe('Testgrad')
+  })
+
+  it('dodaje broj zgrade koji posiljalac drzi odvojeno', () => {
+    expect(parseUbl(party('<cbc:StreetName>Test ulica</cbc:StreetName><cbc:BuildingNumber>7a</cbc:BuildingNumber>')).supplierAddress)
+      .toBe('Test ulica 7a')
+  })
+
+  it('je null kad je faktura ne navodi', () => {
+    const u = parseUbl(party(''))
+    expect(u.supplierAddress).toBeNull()
+    expect(u.supplierCity).toBeNull()
+    expect(parseUbl('<nonsense/>').supplierAddress).toBeNull()
+  })
+})

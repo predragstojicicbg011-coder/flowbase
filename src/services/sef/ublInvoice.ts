@@ -81,6 +81,11 @@ export interface UblInvoice {
   supplierName: string | null
   supplierVatNumber: string | null       // PIB, digits only
   supplierRegistrationNumber: string | null
+  /** `PostalAddress/StreetName` (and `BuildingNumber`, where a sender splits
+   *  it off), for a partner created from the bill. Null where absent. */
+  supplierAddress: string | null
+  /** `PostalAddress/CityName`. */
+  supplierCity: string | null
   // WHO THE BILL IS ADDRESSED TO. The owner runs several companies, and which
   // of them a bill belongs to is written on the bill itself.
   customerName: string | null
@@ -130,6 +135,21 @@ const digits = (s: string | null): string | null => {
   const d = (s || '').replace(/\D/g, '')
   return d || null
 }
+
+// Runs of spaces are typing; a partner's address is stored as one line.
+const oneLine = (s: string | null): string | null => {
+  const t = (s || '').replace(/\s+/g, ' ').trim()
+  return t || null
+}
+
+/** Street (with a building number a sender keeps apart) and city of a party. */
+const addressOf = (party: Element | null): { address: string | null; city: string | null } => ({
+  address: oneLine([
+    text(child(party, 'PostalAddress', 'StreetName')),
+    text(child(party, 'PostalAddress', 'BuildingNumber')),
+  ].filter(Boolean).join(' ')),
+  city: oneLine(text(child(party, 'PostalAddress', 'CityName'))),
+})
 
 // A PaymentID may open with a marker naming the payment model, as in
 // "(mod97) 108113652782", and the model is half of what a bank needs to match
@@ -203,6 +223,7 @@ const empty = (): UblInvoice => ({
   isAdvanceInvoice: false, billingReferences: [], grossTotal: null, advanceUsed: 0, advanceText: '',
   documentCurrency: null, documentTotal: null,
   supplierName: null, supplierVatNumber: null, supplierRegistrationNumber: null,
+  supplierAddress: null, supplierCity: null,
   customerName: null, customerVatNumber: null, customerRegistrationNumber: null,
   deliveryDate: null,
   bankAccount: null, bankAccounts: [], paymentReference: null, paymentModel: null,
@@ -325,6 +346,8 @@ export function parseUbl(xml: string): UblInvoice {
     // `RS100000004` in the document; `partners.tax_id` holds the bare digits.
     supplierVatNumber: digits(text(child(supplier, 'PartyTaxScheme', 'CompanyID'))),
     supplierRegistrationNumber: digits(text(child(supplier, 'PartyLegalEntity', 'CompanyID'))),
+    supplierAddress: addressOf(supplier).address,
+    supplierCity: addressOf(supplier).city,
     // Read exactly like the supplier's, from the other party. `RS100000001`
     // in the document; `company_profiles.pib` holds the bare digits.
     customerName: text(child(customer, 'PartyName', 'Name')),

@@ -181,6 +181,9 @@ export function reviewNotesFor(
     proposal: Proposal | null
     /** Account numbers saved against the matched partner. */
     saved: string[]
+    /** Where no partner matched because two or more share the bill's PIB:
+     *  the sentence naming them (`sharedIdentifierSentence`). */
+    shared?: string | null
     /** What the queue row said — the figures the owner DECIDED on, which are
      *  not necessarily the ones in the document he is about to book. */
     header?: { amount: number | null; currency: string | null }
@@ -204,7 +207,7 @@ export function reviewNotesFor(
   }
 
   if (ctx.matchedBy === null) {
-    notes.push('Nijedan partner ne odgovara ovom dobavljaču. Izaberite ga ili napravite pre knjiženja.')
+    notes.push(ctx.shared || 'Nijedan partner ne odgovara ovom dobavljaču. Izaberite ga ili napravite pre knjiženja.')
   } else if (ctx.matchedBy === 'name') {
     notes.push('Dobavljač je prepoznat samo po imenu, što je najslabije poklapanje. Proverite da li je partner prava firma.')
   }

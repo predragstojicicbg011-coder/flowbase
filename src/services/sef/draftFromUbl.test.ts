@@ -15,7 +15,7 @@ const ubl = (over: Partial<UblInvoice> = {}): UblInvoice => ({
   currency: 'RSD', typeCode: '380', isCreditNote: false, isDebitNote: false, billingReference: null,
   isAdvanceInvoice: false, billingReferences: [], grossTotal: null, advanceUsed: 0, advanceText: '',
   supplierName: 'Telekom Srbija', supplierVatNumber: '100002887',
-  supplierRegistrationNumber: '17162543',
+  supplierRegistrationNumber: '17162543', supplierAddress: null, supplierCity: null,
   customerName: 'PRIMALAC DOO BEOGRAD', customerVatNumber: '100000001',
   customerRegistrationNumber: '20000001',
   bankAccount: '160-0000000000000-11', bankAccounts: ['160-0000000000000-11'],
@@ -449,6 +449,14 @@ describe('what the owner is told before confirming', () => {
 
   it('says when no partner matched', () => {
     expect(reviewNotesFor(plain, { ...base, matchedBy: null }).join(' ')).toMatch(/Nijedan partner/i)
+  })
+
+  /** Two partners on the bill's PIB: creating one more would make it three. */
+  it('names the partners that share the PIB instead, and offers no new one', () => {
+    const shared = 'Dva partnera imaju PIB 100000001: Alfa Doo i Alfa Doo Beograd. Izaberite pravog ručno i uklonite duplikat u Partnerima; nov partner se ne nudi.'
+    const notes = reviewNotesFor(plain, { ...base, matchedBy: null, shared })
+    expect(notes).toContain(shared)
+    expect(notes.join(' ')).not.toMatch(/Nijedan partner/)
   })
 })
 
