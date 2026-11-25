@@ -88,6 +88,11 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
   const [docsOpen, setDocsOpen] = useState(false)
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
+  /** The id of the invoice this dialog inserted, once it has. Post is disabled
+   *  from then on: the invoice exists, a second press cannot undo whatever
+   *  failed after the insert, and it can only add a second invoice that
+   *  nothing will link or report. */
+  const [insertedId, setInsertedId] = useState('')
   const [success, setSuccess] = useState(false)
   const [errors, setErrors] = useState<ValidationErrors>({})
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -1138,6 +1143,7 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
         // reporting success.
         if (!newInv?.id) throw new Error('Faktura nije sačuvana — baza nije vratila red.')
         invoiceId = newInv.id
+        setInsertedId(newInv.id)
         // From here the invoice EXISTS, whatever the steps below do. Handed
         // over now so a later failure cannot leave it unlinked.
         if (onSaved) {
@@ -1524,8 +1530,20 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
           <div style={s.validationBanner}>
             <span>⚠️</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '500', fontSize: '12px' }}>Faktura nije proknjižena</div>
+              {/* Once the insert has gone through, "not posted" is the opposite
+                  of the truth, and it would sit beside a Post button that can
+                  no longer be pressed. */}
+              <div style={{ fontWeight: '500', fontSize: '12px' }}>
+                {insertedId
+                  ? `Faktura JE proknjižena${invoiceNumber ? ` — ${invoiceNumber} je u knjigama` : ''}`
+                  : 'Faktura nije proknjižena'}
+              </div>
               <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.9 }}>{saveError}</div>
+              {insertedId && (
+                <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.9 }}>
+                  Ono što nije uspelo došlo je posle nje, a ponovno knjiženje bi samo dodalo drugu. Zatvorite ovo i ispravite iz knjige faktura.
+                </div>
+              )}
             </div>
             <button style={s.bannerClose} onClick={() => setSaveError('')}>×</button>
           </div>
@@ -2266,10 +2284,10 @@ export default function InvoiceDialog({ onClose, invoice, onSaved, reviewNotes, 
             {step < 4 && <button style={s.btnPrimary} onClick={() => { touchStep(step); setStep(step + 1) }}>Dalje</button>}
             {step === 4 && (
               <button
-                style={{ ...s.btnPrimary, opacity: saving || whySplit ? 0.55 : 1 }}
+                style={{ ...s.btnPrimary, opacity: saving || whySplit || insertedId ? 0.55 : 1 }}
                 onClick={handlePost}
-                disabled={saving || !!whySplit}
-                title={whySplit || undefined}>
+                disabled={saving || !!whySplit || !!insertedId}
+                title={whySplit || (insertedId ? 'Faktura je već sačuvana. Ponovno knjiženje bi dodalo drugu.' : undefined)}>
                 {saving ? 'Čuvanje…' : invoice ? 'Sačuvaj izmene' : 'Proknjiži fakturu'}
               </button>
             )}
