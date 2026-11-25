@@ -18,7 +18,7 @@ import { useAuth } from '../contexts/AuthContext'
 import SefLinkChips from '../components/SefLinkChips'
 import { loadCreditSefLinks, linksByInstalment, type CreditSefLink } from '../services/sef/creditSefLinks'
 import {
-  canReturnToUnpaid, unpaidQuestion, markInstallmentUnpaid, unpaidDone,
+  canReturnToUnpaid, unpaidQuestion, markInstallmentUnpaid, unpaidDone, payingLineOf,
 } from '../services/creditInstallmentUnpaid'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -516,7 +516,10 @@ export function CreditRow({ credit, installments, sefLinks, onRefresh, onEdit }:
   const returnToUnpaid = async (inst: Installment) => {
     if (unpaying) return
     const linked = sefLinks?.get(inst.id)?.length ?? 0
-    if (!window.confirm(unpaidQuestion(inst, credit, linked))) return
+    // Which way out the question names depends on what paid it: a statement
+    // line, or a transaction entered by hand.
+    const paying = inst.transaction_id ? await payingLineOf(supabase, inst.transaction_id) : 'unknown'
+    if (!window.confirm(unpaidQuestion(inst, credit, linked, paying))) return
     setUnpaying(inst.id); setUnpaidSaid(null)
     try {
       const r = await markInstallmentUnpaid(supabase, inst.id)

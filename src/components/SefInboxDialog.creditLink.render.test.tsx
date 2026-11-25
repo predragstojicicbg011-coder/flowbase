@@ -19,6 +19,7 @@ jest.mock('../services/bookAmounts', () => {
     getBookRates: async (date: string) => {
       const db = (global as any).__db
       db.ratesAsked.push(date)
+      if (db.rateHangs) return new Promise(() => {})
       if (db.rateFails) throw new Error(`Kurs NBS nije dostupan za ${date}`)
       return { date, eurRate: 117.2, usdRate: 108.5, source: 'test' }
     },
@@ -392,6 +393,28 @@ describe('an invoice in dinars for a credit in euros', () => {
     expect(await screen.findByTestId('remembered-pib')).toBeTruthy()
     expect(screen.queryByText(/Predlog: poveži/)).toBeNull()
     expect(screen.queryByText(/Provizije banke/)).toBeNull()
+  })
+
+  it('while the NBS rate is missing, says the amounts were not compared rather than that nothing matches', async () => {
+    ;(global as any).__db.credits = credits(BANK_PIB)
+    ;(global as any).__db.sef_inbox = [{ ...inDinars, amount: 1500 }]
+    ;(global as any).__db.rateFails = true
+    show()
+    await screen.findByText('Larkspur banka')
+    await waitFor(() => expect(screen.getByTestId('remembered-pib').textContent).toBe(
+      'PIB ovog dobavljača je zapamćen na kreditu „Obrtni kredit“, ali kurs NBS za 28.11.2026. još nije dostupan, '
+      + 'pa iznosi nisu upoređeni. Ako je ovo kamata, povežite je sa ratom; ako je provizija ili druga usluga banke, proknjižite je.'))
+    expect(screen.queryByText(/se ne poklapa/)).toBeNull()
+    expect(screen.queryByText(/Provizije banke/)).toBeNull()
+  })
+
+  it('says the same while the rate is still loading', async () => {
+    ;(global as any).__db.credits = credits(BANK_PIB)
+    ;(global as any).__db.sef_inbox = [{ ...inDinars, amount: 1500 }]
+    ;(global as any).__db.rateHangs = true
+    show()
+    await screen.findByText('Larkspur banka')
+    expect(screen.getByTestId('remembered-pib').textContent).toMatch(/kurs NBS za 28\.11\.2026\. još nije dostupan, pa iznosi nisu upoređeni/)
   })
 
   it('proposes the link from a remembered PIB once the rate shows the match', async () => {

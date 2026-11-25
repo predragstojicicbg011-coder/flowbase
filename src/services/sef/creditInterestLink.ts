@@ -239,11 +239,19 @@ export function rememberedCreditNames(invoice: InvoiceFacts, candidates: Instalm
  * category proposal there invites "Otvori i proknjiži" on what may be interest
  * already booked with the instalment.
  */
-export function rememberedSentence(names: string[]): string {
+export function rememberedSentence(names: string[], rate?: { missing: boolean; date?: string | null }): string {
   const list = names.map(n => `„${n}“`).join(', ')
-  return `PIB ovog dobavljača je zapamćen na ${names.length > 1 ? 'kreditima' : 'kreditu'} ${list}, `
-    + 'ali kamata nijedne rate se ne poklapa sa iznosom. Ako je ovo kamata, povežite je sa ratom; '
-    + 'ako je provizija ili druga usluga banke, proknjižite je.'
+  const why = rate?.missing
+    ? `ali kurs NBS${rate.date ? ` za ${srDate(rate.date)}` : ''} još nije dostupan, pa iznosi nisu upoređeni`
+    : 'ali kamata nijedne rate se ne poklapa sa iznosom'
+  return `PIB ovog dobavljača je zapamćen na ${names.length > 1 ? 'kreditima' : 'kreditu'} ${list}, ${why}. `
+    + 'Ako je ovo kamata, povežite je sa ratom; ako je provizija ili druga usluga banke, proknjižite je.'
+}
+
+/** Whether a remembered credit is in another currency and its rate is not in hand (loading or missing). */
+export function rememberedRateMissing(invoice: InvoiceFacts, candidates: InstalmentCandidate[], rates: DayRates | null | undefined): boolean {
+  return invoice.amount !== null && invoice.amount !== undefined
+    && rememberedCredits(invoice, candidates).some(c => needsRate(invoice.currency, c.currency) && !convert(1, invoice.currency, c.currency, rates))
 }
 
 /** Whether the chosen instalment's interest is not the amount to the cent (or cannot be compared). */

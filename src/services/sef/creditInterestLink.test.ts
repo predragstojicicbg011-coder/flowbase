@@ -1,6 +1,6 @@
 import {
   rankInstalments, proposeInstalment, differenceSentence, linkToInstalment, loadInstalmentCandidates,
-  convert, differs, MATCH_TOLERANCE, matchTolerance, rememberedCreditNames, rememberedSentence,
+  convert, differs, MATCH_TOLERANCE, matchTolerance, rememberedCreditNames, rememberedSentence, rememberedRateMissing,
   type InstalmentCandidate, type InvoiceFacts, type DayRates,
 } from './creditInterestLink'
 
@@ -288,5 +288,19 @@ describe('a remembered PIB with no match', () => {
       'PIB ovog dobavljača je zapamćen na kreditu „Obrtni kredit“, ali kamata nijedne rate se ne poklapa sa iznosom. '
       + 'Ako je ovo kamata, povežite je sa ratom; ako je provizija ili druga usluga banke, proknjižite je.')
     expect(rememberedSentence(['A', 'B'])).toMatch(/^PIB ovog dobavljača je zapamćen na kreditima „A“, „B“, /)
+  })
+
+  it('says the amounts were not compared while a rate is missing', () => {
+    expect(rememberedSentence(['Obrtni kredit'], { missing: true, date: '2026-10-31' })).toBe(
+      'PIB ovog dobavljača je zapamćen na kreditu „Obrtni kredit“, ali kurs NBS za 31.10.2026. još nije dostupan, '
+      + 'pa iznosi nisu upoređeni. Ako je ovo kamata, povežite je sa ratom; ako je provizija ili druga usluga banke, proknjižite je.')
+  })
+
+  it('knows a rate is missing only for a remembered credit in another currency', () => {
+    const rem = inst({ lenderPib: '900000017', interestAmount: 262.01 })
+    const dinars = invoice({ amount: 1500, currency: 'RSD' })
+    expect(rememberedRateMissing(dinars, [rem], null)).toBe(true)
+    expect(rememberedRateMissing(dinars, [rem], RATES)).toBe(false)
+    expect(rememberedRateMissing(invoice({ amount: 263 }), [rem], null)).toBe(false)
   })
 })

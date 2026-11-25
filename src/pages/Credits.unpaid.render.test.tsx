@@ -17,6 +17,8 @@ jest.mock('../supabase', () => {
   chain.insert = (p: any) => { writes.push(['insert', p]); return chain }
   chain.delete = () => { writes.push(['delete']); return chain }
   chain.then = (f: any, r: any) => Promise.resolve({ data: [], error: null }).then(f, r)
+  // The paying line's batch, as the question asks for it.
+  chain.maybeSingle = () => Promise.resolve((global as any).__txRead)
   return {
     supabase: {
       from: (t: string) => { writes.push(['from', t]); return chain },
@@ -68,6 +70,7 @@ const rowOf = (c: HTMLElement, id: string) => c.querySelector(`[data-inst="${id}
 beforeEach(() => {
   ;(global as any).__canEdit = true
   ;(global as any).__rpcAnswer = { data: { credit_reopened: true, sef_links: 1 }, error: null }
+  ;(global as any).__txRead = { data: { import_batch_id: 'batch-1' }, error: null }
   mock().__rpc.length = 0
   mock().__writes.length = 0
   refreshed = 0
@@ -92,14 +95,14 @@ describe('Vrati na neplaćeno', () => {
     const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false)
     const { container } = show(new Map([['i-1', [link('s1', 'i-1')]]]))
     fireEvent.click(within(rowOf(container, 'i-1')).getByText('Vrati na neplaćeno'))
-    expect(confirm).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
     expect(confirm.mock.calls[0][0]).toBe([
       'Vratiti ratu #1 (dospeće 31.10.2026.) kredita „Obrtni kredit“ na neplaćenu?',
       '',
       '· rata postaje neplaćena: plaćeno 0, bez datuma plaćanja i bez veze sa stavkom izvoda (sada plaćeno 1.250,00 EUR od 1.250,00 EUR)',
-      // #1 was paid by a bank line still in the books (transaction_id tx-1).
+      // #1 was paid by a statement line still in the books (tx-1, with a batch).
       '· ratu je platila stavka izvoda koja je i dalje u knjigama. Ako je ta uplata pogrešna, obrišite izvod '
-        + 'kom pripada („Obriši izvod“): to u jednom koraku vraća ratu na neplaćenu i uklanja njene redove glavnice '
+        + 'kojem pripada („Obriši izvod“): to u jednom koraku vraća ratu na neplaćenu i uklanja njene redove glavnice '
         + 'i kamate (kod izvoda proknjiženih pre nego što je izvod pamtio te redove, njih ručno). Brisanje same '
         + 'stavke na strani Transakcije vraća ratu, ali te redove ostavlja. Ovo dugme ne uklanja ni stavku ni te redove.',
       '· kredit je zatvoren, pa se ponovo otvara',
@@ -112,6 +115,22 @@ describe('Vrati na neplaćeno', () => {
     // Declined: nothing written.
     expect(unpaidCalls()).toEqual([])
     expect(mock().__writes.filter((w: any[]) => w[0] !== 'from')).toEqual([])
+  })
+
+  it('names the transaction entered by hand, or neither way when the paying line cannot be read', async () => {
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false)
+    ;(global as any).__txRead = { data: { import_batch_id: null }, error: null }
+    const { container } = show()
+    fireEvent.click(within(rowOf(container, 'i-1')).getByText('Vrati na neplaćeno'))
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
+    expect(confirm.mock.calls[0][0]).toContain('· ratu je platila ručno uneta transakcija, ne izvod.')
+    expect(confirm.mock.calls[0][0]).not.toContain('Obriši izvod')
+
+    ;(global as any).__txRead = { data: null, error: { message: 'pad veze' } }
+    fireEvent.click(within(rowOf(container, 'i-1')).getByText('Vrati na neplaćeno'))
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2))
+    expect(confirm.mock.calls[1][0]).toContain('· ratu je platila transakcija koja je i dalje u knjigama.')
+    expect(confirm.mock.calls[1][0]).not.toMatch(/Obriši izvod|ručno uneta/)
   })
 
   it('writes through the one function only, never a table and never a transaction, then reloads', async () => {

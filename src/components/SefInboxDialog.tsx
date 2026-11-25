@@ -27,7 +27,7 @@ import type { ScriptLike } from '../services/expenseSplit'
 import { fetchesQuietly, runLimited } from '../services/sef/documentPrefetch'
 import {
   loadInstalmentCandidates, loadDayRates, proposeInstalment, rememberedCredits,
-  rememberedCreditNames, rememberedSentence,
+  rememberedCreditNames, rememberedSentence, rememberedRateMissing,
   linkToInstalment, differenceSentence, differs, needsRate, rankInstalments,
   type InstalmentCandidate, type InvoiceFacts, type DayRates,
 } from '../services/sef/creditInterestLink'
@@ -1011,7 +1011,9 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
         )}
         {rememberedOn.length > 0 && (
           <div data-testid="remembered-pib" style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>
-            {rememberedSentence(rememberedOn)}
+            {rememberedSentence(rememberedOn, {
+              missing: rememberedRateMissing(factsOf(row), instalments, ratesOf(row)), date: rateDateOf(row),
+            })}
           </div>
         )}
         {proposal && (

@@ -1,5 +1,6 @@
 import {
   canReturnToUnpaid, unpaidQuestion, markInstallmentUnpaid, unpaidDone, UNPAID_LEAVES_LEGS, PAID_BY_A_LINE,
+  PAID_BY_A_MANUAL_ENTRY, PAID_BY_A_TRANSACTION, payingLineOf,
 } from './creditInstallmentUnpaid'
 
 // Invented credit and figures.
@@ -42,15 +43,55 @@ describe('the question', () => {
     expect(q.endsWith(UNPAID_LEAVES_LEGS)).toBe(true)
   })
 
-  it('when a bank line still in the books paid it, says the delete is the way that also takes the rows', () => {
-    const q = unpaidQuestion(inst({ transaction_id: 'tx-1' }), credit(), 0)
+  it('when a statement line paid it, says deleting the statement also takes the rows', () => {
+    const q = unpaidQuestion(inst({ transaction_id: 'tx-1' }), credit(), 0, 'statement')
     expect(q.split('\n')[3]).toBe(PAID_BY_A_LINE)
     expect(PAID_BY_A_LINE).toBe(
       '· ratu je platila stavka izvoda koja je i dalje u knjigama. Ako je ta uplata pogrešna, obrišite izvod '
-      + 'kom pripada („Obriši izvod“): to u jednom koraku vraća ratu na neplaćenu i uklanja njene redove glavnice '
+      + 'kojem pripada („Obriši izvod“): to u jednom koraku vraća ratu na neplaćenu i uklanja njene redove glavnice '
       + 'i kamate (kod izvoda proknjiženih pre nego što je izvod pamtio te redove, njih ručno). Brisanje same '
       + 'stavke na strani Transakcije vraća ratu, ali te redove ostavlja. Ovo dugme ne uklanja ni stavku ni te redove.')
-    expect(unpaidQuestion(inst({ transaction_id: null }), credit(), 0)).not.toContain(PAID_BY_A_LINE)
+  })
+
+  it('when a transaction entered by hand paid it, says its delete returns the instalment and the rows go by hand', () => {
+    const q = unpaidQuestion(inst({ transaction_id: 'tx-1' }), credit(), 0, 'manual')
+    expect(q.split('\n')[3]).toBe(PAID_BY_A_MANUAL_ENTRY)
+    expect(PAID_BY_A_MANUAL_ENTRY).toBe(
+      '· ratu je platila ručno uneta transakcija, ne izvod. Brisanje te transakcije na strani Transakcije vraća '
+      + 'ratu na neplaćenu, a redove glavnice i kamate obrišite ručno. Ovo dugme ne uklanja ni transakciju ni te redove.')
+    expect(q).not.toMatch(/izvod kojem/)
+  })
+
+  it('when what paid it cannot be read, names neither way', () => {
+    const q = unpaidQuestion(inst({ transaction_id: 'tx-1' }), credit(), 0, 'unknown')
+    expect(q.split('\n')[3]).toBe(PAID_BY_A_TRANSACTION)
+    expect(PAID_BY_A_TRANSACTION).not.toMatch(/izvod|ručno uneta/)
+    // The default, too.
+    expect(unpaidQuestion(inst({ transaction_id: 'tx-1' }), credit(), 0)).toContain(PAID_BY_A_TRANSACTION)
+  })
+
+  it('says nothing of a paying line when none is stamped', () => {
+    const q = unpaidQuestion(inst({ transaction_id: null }), credit(), 0, 'statement')
+    for (const s of [PAID_BY_A_LINE, PAID_BY_A_MANUAL_ENTRY, PAID_BY_A_TRANSACTION]) expect(q).not.toContain(s)
+  })
+
+  it('reads the paying line by its batch, and calls any failure unknown', async () => {
+    const client = (answer: any, fail = false) => {
+      const calls: any[] = []
+      const q: any = {
+        select: (c: string) => { calls.push(['select', c]); return q },
+        eq: (c: string, v: any) => { calls.push(['eq', c, v]); return q },
+        maybeSingle: () => (fail ? Promise.reject(new Error('mreža')) : Promise.resolve(answer)),
+      }
+      return { client: { from: (t: string) => { calls.push(['from', t]); return q } }, calls }
+    }
+    const a = client({ data: { import_batch_id: 'b-1' }, error: null })
+    expect(await payingLineOf(a.client, 'tx-1')).toBe('statement')
+    expect(a.calls).toEqual([['from', 'transactions'], ['select', 'import_batch_id'], ['eq', 'id', 'tx-1']])
+    expect(await payingLineOf(client({ data: { import_batch_id: null }, error: null }).client, 'tx-1')).toBe('manual')
+    expect(await payingLineOf(client({ data: null, error: null }).client, 'tx-1')).toBe('unknown')
+    expect(await payingLineOf(client({ data: null, error: { message: 'x' } }).client, 'tx-1')).toBe('unknown')
+    expect(await payingLineOf(client(null, true).client, 'tx-1')).toBe('unknown')
   })
 
   it('names no count of the posted rows, which cannot be found reliably', () => {
