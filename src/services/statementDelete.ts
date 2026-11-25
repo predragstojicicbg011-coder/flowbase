@@ -151,22 +151,38 @@ export async function gatherDeletion(supabase: any, batchId: string): Promise<De
 }
 
 /**
- * The batch's credit bank lines that no instalment points to (see
- * `unlinkedCreditLines`). null when either read fails.
+ * The batch's credit bank lines posted before their legs carried the batch
+ * (see `unlinkedCreditLines`). null when any read fails.
+ *
+ * "No instalment points to it" alone is not enough: an instalment paid by two
+ * NEW bank lines remembers only the second, so the first would read as old.
+ * A line counts only when, besides, the batch holds NO stamped leg
+ * (`credit_payment`, `pl_impact` true) on that line's date, bank and partner
+ * -- the legs a new line writes beside itself.
  */
 async function countUnlinkedCreditLines(supabase: any, batchId: string): Promise<number | null> {
   try {
-    const { data: lines, error } = await supabase.from('transactions').select('id')
+    const { data: lines, error } = await supabase.from('transactions')
+      .select('id, transaction_date, bank_id, partner_id')
       .eq('import_batch_id', batchId).is('deleted_at', null)
       .eq('type', 'credit_payment').not('pl_impact', 'is', true)
     if (error) return null
-    const ids = ((lines || []) as any[]).map(l => l.id as string)
-    if (ids.length === 0) return 0
+    const all = (lines || []) as any[]
+    if (all.length === 0) return 0
     const { data: paid, error: paidErr } = await supabase.from('credit_installments')
-      .select('transaction_id').in('transaction_id', ids)
+      .select('transaction_id').in('transaction_id', all.map(l => l.id))
     if (paidErr) return null
     const linked = new Set(((paid || []) as any[]).map(i => i.transaction_id))
-    return ids.filter(id => !linked.has(id)).length
+    const unlinked = all.filter(l => !linked.has(l.id))
+    if (unlinked.length === 0) return 0
+    const { data: legs, error: legErr } = await supabase.from('transactions')
+      .select('transaction_date, bank_id, partner_id')
+      .eq('import_batch_id', batchId).is('deleted_at', null)
+      .eq('type', 'credit_payment').eq('pl_impact', true)
+    if (legErr) return null
+    const key = (r: any) => `${r.transaction_date ?? ''}|${r.bank_id ?? ''}|${r.partner_id ?? ''}`
+    const stamped = new Set(((legs || []) as any[]).map(key))
+    return unlinked.filter(l => !stamped.has(key(l))).length
   } catch {
     return null
   }

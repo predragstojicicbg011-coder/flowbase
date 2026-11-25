@@ -95,7 +95,7 @@ describe('deleting a credit payment’s bank line alone', () => {
       tx('t-i', 'KAMATA RATA 4', { type: 'credit_payment', pl_impact: true, amount: 200 }),
     ], [{ id: 'i1' }])
     const text = await askedOnDelete('KREDIT RATA 4')
-    expect(text).toContain('To je stavka izvoda kojom je plaćen kredit; zatvorila je 1 ratu kredita.')
+    expect(text).toContain('To je stavka izvoda kojom je plaćen kredit; platila je 1 ratu kredita.')
     expect(text).toContain(LEGS_STAY)
   })
 

@@ -182,6 +182,58 @@ describe('a credit payment the delete cannot reach', () => {
     expect(c.unlinkedCreditLines).toBe(1)
   })
 
+  it('does not count a new line whose instalment remembers only the second of two new lines', async () => {
+    // One instalment paid by two lines of this statement: the instalment
+    // points at the second, but both wrote stamped legs beside themselves.
+    const c = await gatherDeletion(client({
+      ...base,
+      'transactions:legs': {
+        count: 2,
+        data: [
+          { transaction_date: '2026-10-13', bank_id: 'b1', partner_id: 'p1' },
+          { transaction_date: '2026-10-14', bank_id: 'b1', partner_id: 'p1' },
+        ],
+        error: null,
+      },
+      'transactions:lines': {
+        data: [
+          { id: 'first', transaction_date: '2026-10-13', bank_id: 'b1', partner_id: 'p1' },
+          { id: 'second', transaction_date: '2026-10-14', bank_id: 'b1', partner_id: 'p1' },
+        ],
+        error: null,
+      },
+      credit_installments: { data: [{ transaction_id: 'second' }], error: null },
+    }), 'batch-1')
+    expect(c.unlinkedCreditLines).toBe(0)
+    expect(deletionWarning('izvod.txt', c)).not.toMatch(/nisu vezane|proveriti/)
+  })
+
+  it('still counts an old line beside a new one on another day', async () => {
+    const c = await gatherDeletion(client({
+      ...base,
+      'transactions:legs': { count: 1, data: [{ transaction_date: '2026-10-14', bank_id: 'b1', partner_id: 'p1' }], error: null },
+      'transactions:lines': {
+        data: [
+          { id: 'old', transaction_date: '2026-10-13', bank_id: 'b1', partner_id: 'p1' },
+          { id: 'new', transaction_date: '2026-10-14', bank_id: 'b1', partner_id: 'p1' },
+        ],
+        error: null,
+      },
+      credit_installments: { data: [{ transaction_id: 'new' }], error: null },
+    }), 'batch-1')
+    expect(c.unlinkedCreditLines).toBe(1)
+  })
+
+  it('cannot tell when the leg read fails', async () => {
+    const c = await gatherDeletion(client({
+      ...base,
+      'transactions:legs': { count: null, data: null, error: { message: 'Failed to fetch' } },
+      'transactions:lines': { data: [{ id: 'old', transaction_date: '2026-10-13', bank_id: 'b1', partner_id: 'p1' }], error: null },
+      credit_installments: { data: [], error: null },
+    }), 'batch-1')
+    expect(c.unlinkedCreditLines).toBeNull()
+  })
+
   it('counts none when the statement has no credit bank line', async () => {
     const c = await gatherDeletion(client(base), 'batch-1')
     expect(c.unlinkedCreditLines).toBe(0)

@@ -355,8 +355,8 @@ export function deleteConfirmText(
   if (!isBankLine || settledInstalments === 0) return 'Obrisati ovu transakciju?'
   const one = settledInstalments === null || settledInstalments === 1
   const what = settledInstalments === null
-    ? 'To je stavka izvoda kojom je plaćen kredit i možda je zatvorila ratu kredita.'
-    : `To je stavka izvoda kojom je plaćen kredit; zatvorila je ${countOf(settledInstalments, 'ratu kredita', 'rate kredita', 'rata kredita')}.`
+    ? 'To je stavka izvoda kojom je plaćen kredit i možda je platila ratu kredita.'
+    : `To je stavka izvoda kojom je plaćen kredit; platila je ${countOf(settledInstalments, 'ratu kredita', 'rate kredita', 'rata kredita')}.`
   const reopens = `Brisanje ponovo otvara ${one ? 'ratu' : 'te rate'}`
   const twice = one
     ? 'inače će rata biti proknjižena dvaput kada se ponovo plati.'

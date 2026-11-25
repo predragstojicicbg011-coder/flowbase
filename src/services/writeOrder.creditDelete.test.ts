@@ -16,7 +16,7 @@ describe('deleteConfirmText', () => {
     expect(deleteConfirmText(bankLine, 1, 2)).toBe([
       'Obrisati ovu transakciju?',
       '',
-      'To je stavka izvoda kojom je plaćen kredit; zatvorila je 1 ratu kredita.',
+      'To je stavka izvoda kojom je plaćen kredit; platila je 1 ratu kredita.',
       'Brisanje ponovo otvara ratu, ali redovi glavnice i kamate koje je proknjižila (2 reda) ostaju u P&L-u. '
         + 'Obrišite i te redove, ili umesto toga obrišite ceo izvod — inače će rata biti proknjižena '
         + 'dvaput kada se ponovo plati.',
@@ -32,13 +32,13 @@ describe('deleteConfirmText', () => {
 
   it('three instalments, five legs', () => {
     const t = deleteConfirmText(bankLine, 3, 5)
-    expect(t).toContain('zatvorila je 3 rate kredita.')
+    expect(t).toContain('platila je 3 rate kredita.')
     expect(t).toContain('Brisanje ponovo otvara te rate, ali redovi glavnice i kamate koje je proknjižila (5 redova) ostaju u P&L-u.')
     expect(t).toContain('inače će rate biti proknjižene dvaput kada se ponovo plate.')
   })
 
   it('five instalments read "5 rata kredita"', () => {
-    expect(deleteConfirmText(bankLine, 5, 10)).toContain('zatvorila je 5 rata kredita.')
+    expect(deleteConfirmText(bankLine, 5, 10)).toContain('platila je 5 rata kredita.')
   })
 
   it('legs that cannot be counted are named without a number', () => {
@@ -52,7 +52,7 @@ describe('deleteConfirmText', () => {
 
   it('warns anyway when the instalment count could not be read', () => {
     expect(deleteConfirmText(bankLine, null, 2))
-      .toContain('To je stavka izvoda kojom je plaćen kredit i možda je zatvorila ratu kredita.')
+      .toContain('To je stavka izvoda kojom je plaćen kredit i možda je platila ratu kredita.')
   })
 
   it('asks the plain question for a leg, an ordinary row, and a bank line that settled nothing', () => {
@@ -107,7 +107,7 @@ describe('confirmDeleteText', () => {
       family: { data: [{ id: 't-line', pl_impact: false }, { id: 'p', pl_impact: true }, { id: 'i', pl_impact: true }], error: null },
     })
     const t = await confirmDeleteText(client, bankLine)
-    expect(t).toContain('zatvorila je 1 ratu kredita.')
+    expect(t).toContain('platila je 1 ratu kredita.')
     expect(t).toContain('(2 reda) ostaju u P&L-u')
     expect(asked).toEqual([
       'credit_installments transaction_id=t-line',
@@ -142,8 +142,8 @@ describe('confirmDeleteText', () => {
 
   it('warns when the instalment read fails or throws', async () => {
     expect(await confirmDeleteText(fake({ instalments: { count: null, error: { message: 'x' } } }).client, bankLine))
-      .toContain('možda je zatvorila ratu kredita')
+      .toContain('možda je platila ratu kredita')
     expect(await confirmDeleteText(fake({ instalments: 'throws' }).client, bankLine))
-      .toContain('možda je zatvorila ratu kredita')
+      .toContain('možda je platila ratu kredita')
   })
 })
