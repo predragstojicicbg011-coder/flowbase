@@ -258,14 +258,17 @@ describe('a credit payment the delete cannot reach', () => {
     expect(UNLINKED_WARNING).toBe(
       'Proknjižene su pre nego što je izvod pamtio svoje redove glavnice i kamate, pa ih ovo brisanje '
       + 'NE uklanja i NE vraća njihove rate na neplaćene. Pre nego što isti izvod ponovo uvezete, ručno '
-      + 'obrišite te redove glavnice i kamate i vratite rate na neplaćene — inače će otplata biti '
-      + 'proknjižena dvaput, a kao plaćena biće označena sledeća rata.')
+      + 'obrišite te redove glavnice i kamate (strana Transakcije), a njihove rate vratite na neplaćene '
+      + 'dugmetom „Vrati na neplaćeno“ na strani Krediti — inače će otplata biti proknjižena dvaput, a kao '
+      + 'plaćena biće označena sledeća rata.')
     // Still the last word.
     expect(w.endsWith('Ovo se ne može poništiti odavde.')).toBe(true)
   })
 
   it('says it could not check when the count is unknown', () => {
     expect(deletionWarning('izvod.txt', counts({ unlinkedCreditLines: null }))).toContain(UNLINKED_UNKNOWN)
+    // And names the button that does by hand what the delete cannot.
+    expect(UNLINKED_UNKNOWN.endsWith('Rata se vraća dugmetom „Vrati na neplaćeno“ na strani Krediti.')).toBe(true)
   })
 
   it('says nothing when every credit line is linked, or the count predates the check', () => {

@@ -14,6 +14,12 @@ import { fmtMoney, fmtNum } from '../utils/formatters'
 import { countOf, plural } from '../utils/plural'
 import { useDisplayCurrency } from '../contexts/DisplayCurrencyContext'
 import { getBookRates, bookAmounts, type BookRates } from '../services/bookAmounts'
+import { useAuth } from '../contexts/AuthContext'
+import SefLinkChips from '../components/SefLinkChips'
+import { loadCreditSefLinks, linksByInstalment, type CreditSefLink } from '../services/sef/creditSefLinks'
+import {
+  canReturnToUnpaid, unpaidQuestion, markInstallmentUnpaid, unpaidDone,
+} from '../services/creditInstallmentUnpaid'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Credit {
@@ -477,8 +483,10 @@ function EditInstallmentDialog({ installment, currency, onClose, onSaved }: {
 }
 
 // ─── Credit Row (expandable) ──────────────────────────────────────────────────
-export function CreditRow({ credit, installments, onRefresh, onEdit }: {
+export function CreditRow({ credit, installments, sefLinks, onRefresh, onEdit }: {
   credit: Credit
+  /** The SEF interest invoices linked to each instalment, by instalment id. */
+  sefLinks?: Map<string, CreditSefLink[]>
   /** Open the credit itself for correction. */
   onEdit: () => void
   /**
@@ -495,6 +503,31 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
   const [expanded, setExpanded] = useState(false)
   const [editingInst, setEditingInst] = useState<Installment | null>(null)
   const [filter, setFilter] = useState<'all' | 'outstanding' | 'paid'>('outstanding')
+  // "Vrati na neplaćeno" is for whoever may edit an instalment: the people who
+  // keep the books (credit_installments_update = can_write_books()).
+  const { canEdit } = useAuth()
+  const [unpaying, setUnpaying] = useState<string | null>(null)
+  const [unpaidSaid, setUnpaidSaid] = useState<{ ok: boolean; text: string } | null>(null)
+
+  /**
+   * A paid or partly paid instalment back to unpaid, after the question that
+   * says what moves and what does not. Never touches a posted row.
+   */
+  const returnToUnpaid = async (inst: Installment) => {
+    if (unpaying) return
+    const linked = sefLinks?.get(inst.id)?.length ?? 0
+    if (!window.confirm(unpaidQuestion(inst, credit, linked))) return
+    setUnpaying(inst.id); setUnpaidSaid(null)
+    try {
+      const r = await markInstallmentUnpaid(supabase, inst.id)
+      setUnpaidSaid({ ok: true, text: unpaidDone(inst.installment_no, r) })
+      onRefresh()
+    } catch (e) {
+      setUnpaidSaid({ ok: false, text: `Rata nije vraćena na neplaćenu: ${e instanceof Error ? e.message : String(e)}` })
+    } finally {
+      setUnpaying(null)
+    }
+  }
 
   const handleExpand = () => setExpanded(e => !e)
 
@@ -622,6 +655,13 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
             </div>
           </div>
 
+          {unpaidSaid && (
+            <div role={unpaidSaid.ok ? 'status' : 'alert'}
+              style={{ padding: '8px 20px', fontSize: '12px', color: unpaidSaid.ok ? '#00D47E' : '#FF5B5A', background: unpaidSaid.ok ? 'rgba(0,212,126,0.06)' : 'rgba(255,91,90,0.08)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              {unpaidSaid.text}
+            </div>
+          )}
+
           {/* Table. No loading state: the instalments arrived with the page,
               so opening a row has nothing to wait for. */}
           {(
@@ -638,8 +678,10 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
               <tbody>
                 {filteredInst.map((inst, idx) => {
                   const overdue = inst.status === 'outstanding' && isOverdue(inst.due_date)
+                  const linked = sefLinks?.get(inst.id) || []
                   return (
-                    <tr key={inst.id} style={{ borderBottom: '0.5px solid rgba(255,255,255,0.03)', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
+                    <React.Fragment key={inst.id}>
+                    <tr data-inst={inst.id} style={{ borderBottom: '0.5px solid rgba(255,255,255,0.03)', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
                       <td style={{ padding: '9px 16px', fontSize: '12px', color: 'rgba(255,255,255,0.35)', fontFamily: "'Inter',sans-serif", fontVariantNumeric: 'tabular-nums' }}>{inst.installment_no}</td>
                       <td style={{ padding: '9px 16px', fontSize: '12px', color: overdue ? '#FF5B5A' : '#DCE9F6', fontWeight: overdue ? '600' : '400' }}>
                         {fmtDate(inst.due_date)}
@@ -680,6 +722,7 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
                         })()}
                       </td>
                       <td style={{ padding: '9px 16px', textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: '6px', justifyContent: 'flex-end' }}>
                         {inst.status === 'outstanding' && (
                           <button
                             onClick={e => { e.stopPropagation(); setEditingInst(inst) }}
@@ -687,8 +730,29 @@ export function CreditRow({ credit, installments, onRefresh, onEdit }: {
                             ✎ Izmeni
                           </button>
                         )}
+                        {canEdit && canReturnToUnpaid(inst) && (
+                          <button
+                            disabled={!!unpaying}
+                            title="Rata postaje neplaćena; proknjiženi redovi glavnice i kamate ostaju u P&L-u"
+                            onClick={e => { e.stopPropagation(); returnToUnpaid(inst) }}
+                            style={{ fontFamily: "'Inter',sans-serif", fontSize: '11px', fontWeight: '500', padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(245,166,35,0.35)', background: 'rgba(245,166,35,0.06)', color: '#F5A623', cursor: unpaying ? 'default' : 'pointer', opacity: unpaying ? 0.5 : 1, whiteSpace: 'nowrap' }}>
+                            {unpaying === inst.id ? 'Vraćam…' : 'Vrati na neplaćeno'}
+                          </button>
+                        )}
+                        </div>
                       </td>
                     </tr>
+                    {/* The bank's SEF interest invoices for this instalment,
+                        linked from the SEF inbox. Nothing here is in P&L. */}
+                    {linked.length > 0 && (
+                      <tr data-sef-links={inst.id} style={{ background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
+                        <td />
+                        <td colSpan={6} style={{ padding: '0 16px 9px' }}>
+                          <SefLinkChips links={linked} />
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   )
                 })}
               </tbody>
@@ -782,6 +846,9 @@ export default function Credits() {
 
   // Aggregate stats from DB
   const [stats, setStats] = useState({ overdueCount: 0, nextDueDate: '' })
+  /** The SEF interest invoices linked to instalments, and why they could not be read. */
+  const [sefLinks, setSefLinks] = useState<CreditSefLink[]>([])
+  const [sefLinksFailed, setSefLinksFailed] = useState('')
 
   /**
    * The benchmark history, which is what prices the revolving lines.
@@ -795,6 +862,12 @@ export default function Credits() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    // The SEF invoices linked to instalments, beside the book and never
+    // waited on: a chip that cannot be read must not keep the credits away.
+    Promise.resolve()
+      .then(() => loadCreditSefLinks(supabase))
+      .then(l => { setSefLinks(l); setSefLinksFailed('') },
+        (e: any) => setSefLinksFailed(e?.message || String(e)))
     const { data } = await supabase.from('credits').select('*').order('first_payment_date')
     const all = (data || []) as Credit[]
     setCredits(all)
@@ -902,6 +975,13 @@ export default function Credits() {
   /** The Bank Credits list is the annuity loans, exactly as it was. */
   const filtered = visible.filter(c => c.kind !== 'revolving')
   const revolving = visible.filter(c => c.kind === 'revolving') as unknown as RevolvingCredit[]
+  const sefLinksByInstalment = linksByInstalment(sefLinks)
+  /** A revolving tranche lists no instalments, so its links carry the number and the due date. */
+  const instalmentOf = new Map(instalments.map(i => [i.id, i]))
+  const revolvingSefLinks = sefLinks.flatMap(l => {
+    const i = instalmentOf.get(l.installmentId)
+    return i && i.credit_id ? [{ link: l, creditId: i.credit_id, installmentNo: i.installment_no, dueDate: i.due_date }] : []
+  })
 
   /**
    * What is owed in total: the annuity instalments still outstanding, plus the
@@ -1130,6 +1210,12 @@ export default function Credits() {
         ))}
       </div>
 
+      {sefLinksFailed && (
+        <div style={{ fontSize: '12px', color: '#F5A623', background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.3)', borderRadius: '8px', padding: '8px 12px', marginBottom: '12px' }}>
+          SEF fakture vezane za rate nisu mogle da se pročitaju: {sefLinksFailed}
+        </div>
+      )}
+
       {/* ── Credit list ── */}
       {loading ? (
         <div style={{ minHeight: '300px', padding: '22px 20px', background: '#0D1B2C', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -1144,6 +1230,7 @@ export default function Credits() {
           </div>
         ) : (
           <RevolvingCredits credits={revolving} onRefresh={load}
+            sefLinks={revolvingSefLinks}
             // The tranche hands back its own narrowed shape, so the full row
             // is looked up again here — the dialog edits every column, and
             // half of them are not on `RevolvingCredit`.
@@ -1160,6 +1247,7 @@ export default function Credits() {
           {filtered.map(credit => (
             <CreditRow key={credit.id} credit={credit}
               installments={instalments.filter(i => i.credit_id === credit.id)}
+              sefLinks={sefLinksByInstalment}
               onRefresh={load}
               onEdit={() => setEditing(credit)} />
           ))}

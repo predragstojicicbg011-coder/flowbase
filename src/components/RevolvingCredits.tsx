@@ -7,6 +7,16 @@ import {
   rateOn, revolvingSchedule, outstandingOf, defaultMaturity,
   type RateReset, type ScheduleRow,
 } from '../services/revolvingCredit'
+import SefLinkChips from './SefLinkChips'
+import type { CreditSefLink } from '../services/sef/creditSefLinks'
+
+/** A SEF interest invoice linked to one of a tranche's instalments. */
+export interface TrancheSefLink {
+  link: CreditSefLink
+  creditId: string
+  installmentNo: number
+  dueDate: string
+}
 
 // ── Revolving credits ───────────────────────────────────────────────────────
 //
@@ -130,8 +140,10 @@ export function summarise(
 
 // ═══ The section ═════════════════════════════════════════════════════════════
 
-export default function RevolvingCredits({ credits, onRefresh, onEdit }: {
+export default function RevolvingCredits({ credits, sefLinks, onRefresh, onEdit }: {
   credits: RevolvingCredit[]
+  /** The SEF interest invoices linked to the tranches' instalments, read by the page. */
+  sefLinks?: TrancheSefLink[]
   onRefresh: () => void
   /**
    * Open the tranche itself for correction.
@@ -194,6 +206,7 @@ export default function RevolvingCredits({ credits, onRefresh, onEdit }: {
           key={c.id}
           credit={c}
           resets={resets[c.id] || []}
+          sefLinks={(sefLinks || []).filter(l => l.creditId === c.id)}
           open={openId === c.id}
           onToggle={() => setOpenId(openId === c.id ? null : c.id)}
           onExtend={() => setExtending(c)}
@@ -219,9 +232,10 @@ export default function RevolvingCredits({ credits, onRefresh, onEdit }: {
 
 // ── One tranche ─────────────────────────────────────────────────────────────
 
-function Tranche({ credit, resets, open, onToggle, onExtend, onPrice, onEdit, onRefresh }: {
+function Tranche({ credit, resets, sefLinks, open, onToggle, onExtend, onPrice, onEdit, onRefresh }: {
   credit: RevolvingCredit
   resets: RateReset[]
+  sefLinks: TrancheSefLink[]
   open: boolean
   onToggle: () => void
   onExtend: () => void
@@ -377,6 +391,22 @@ function Tranche({ credit, resets, open, onToggle, onExtend, onPrice, onEdit, on
               <> · <span style={{ color: '#F5A623' }}>{countOf(existing, 'neplaćena rata', 'neplaćene rate', 'neplaćenih rata')} već {plural(existing, 'postoji', 'postoje', 'postoji')} u planu otplate — novi plan zamenjuje rate od ovog meseca nadalje</span></>
             )}
           </div>
+
+          {/* The bank's SEF interest invoices, linked to this line's
+              instalments from the SEF inbox. Nothing here is in P&L. */}
+          {sefLinks.length > 0 && (
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '6px' }}>
+                SEF fakture kamate
+              </div>
+              {sefLinks.map(l => (
+                <div key={l.link.inboxId} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11.5px', color: '#7A9BB8', lineHeight: 1.8 }}>
+                  <span>{`#${l.installmentNo} · dospeva ${fmtDate(l.dueDate)}`}</span>
+                  <SefLinkChips links={[l.link]} />
+                </div>
+              ))}
+            </div>
+          )}
 
           {history.length > 0 && (
             <div style={{ marginBottom: '6px' }}>

@@ -84,14 +84,15 @@ export function deletionWarning(fileName: string | null | undefined, c: Deletion
 export const UNLINKED_WARNING =
   'Proknjižene su pre nego što je izvod pamtio svoje redove glavnice i kamate, pa ih ovo brisanje '
   + 'NE uklanja i NE vraća njihove rate na neplaćene. Pre nego što isti izvod ponovo uvezete, ručno '
-  + 'obrišite te redove glavnice i kamate i vratite rate na neplaćene — inače će otplata biti '
-  + 'proknjižena dvaput, a kao plaćena biće označena sledeća rata.'
+  + 'obrišite te redove glavnice i kamate (strana Transakcije), a njihove rate vratite na neplaćene '
+  + 'dugmetom „Vrati na neplaćeno“ na strani Krediti — inače će otplata biti proknjižena dvaput, a kao '
+  + 'plaćena biće označena sledeća rata.'
 
 /** The same, when the check itself could not be read. */
 export const UNLINKED_UNKNOWN =
   'Nije bilo moguće proveriti otplate kredita ovog izvoda. Ako ih ima i proknjižene su pre nego što '
   + 'je izvod pamtio svoje redove glavnice i kamate, ovo brisanje te redove NE uklanja i NE vraća '
-  + 'njihove rate na neplaćene.'
+  + 'njihove rate na neplaćene. Rata se vraća dugmetom „Vrati na neplaćeno“ na strani Krediti.'
 
 /**
  * What was actually done, in the same terms the warning used.
