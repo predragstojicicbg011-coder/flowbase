@@ -1,4 +1,7 @@
-import { deletionWarning, deletionSummary, gatherDeletion, type DeletionCounts } from './statementDelete'
+import {
+  deletionWarning, deletionSummary, gatherDeletion, UNLINKED_WARNING, UNLINKED_UNKNOWN,
+  type DeletionCounts,
+} from './statementDelete'
 
 const counts = (over: Partial<DeletionCounts> = {}): DeletionCounts => ({
   transactions: 12, passthroughs: 0, invoiceIds: [], closing: [], ...over,
@@ -82,7 +85,9 @@ describe('what it reports afterwards', () => {
 // lines, one credit payment read "transakcija: 3".
 
 /** A client that answers each read by table; the leg count is the
- *  `transactions` read narrowed to `pl_impact = true` (`transactions:legs`). */
+ *  `transactions` read narrowed to `pl_impact = true` (`transactions:legs`),
+ *  the credit bank lines the one narrowed to `pl_impact` not true
+ *  (`transactions:lines`). */
 const client = (answers: Record<string, any>) => ({
   from: (table: string) => {
     const chain: any = {}
@@ -90,6 +95,10 @@ const client = (answers: Record<string, any>) => ({
     for (const m of ['select', 'is', 'in']) chain[m] = () => chain
     chain.eq = (col: string, v: unknown) => {
       if (col === 'pl_impact' && v === true) key = `${table}:legs`
+      return chain
+    }
+    chain.not = (col: string, op: string, v: unknown) => {
+      if (col === 'pl_impact' && op === 'is' && v === true) key = `${table}:lines`
       return chain
     }
     chain.then = (ok: any, bad: any) =>
@@ -144,5 +153,78 @@ describe('the credit legs, counted apart from the lines', () => {
   it('reads as before without the counts', () => {
     expect(deletionSummary({ transactions_deleted: 3, allocations_removed: 0 }))
       .toBe('Obrisano transakcija: 3, uklonjeno raspodela: 0.')
+  })
+})
+
+// ── A credit payment posted before its legs carried the batch ─────────────
+//
+// In MCFlow (and any FlowBase client) every statement posted before
+// 20261125090000 has credit bank lines whose legs carry no batch and whose
+// instalment was never stamped. Deleting such a statement cannot find them:
+// the legs stay in the P&L and the instalment stays paid, and a re-import of
+// the same file (its fingerprints are freed) pays the NEXT instalment. The
+// warning has to say so before the owner agrees.
+
+describe('a credit payment the delete cannot reach', () => {
+  const base = {
+    transactions: { count: 3, error: null },
+    'transactions:legs': { count: 0, error: null },
+    passthrough: { count: 0, error: null },
+    invoice_transaction_links: { data: [], error: null },
+  }
+
+  it('counts the credit bank lines no instalment points to', async () => {
+    const c = await gatherDeletion(client({
+      ...base,
+      'transactions:lines': { data: [{ id: 'old-line' }, { id: 'new-line' }], error: null },
+      credit_installments: { data: [{ transaction_id: 'new-line' }], error: null },
+    }), 'batch-1')
+    expect(c.unlinkedCreditLines).toBe(1)
+  })
+
+  it('counts none when the statement has no credit bank line', async () => {
+    const c = await gatherDeletion(client(base), 'batch-1')
+    expect(c.unlinkedCreditLines).toBe(0)
+  })
+
+  it('cannot tell when a read fails', async () => {
+    const c1 = await gatherDeletion(client({
+      ...base, 'transactions:lines': { data: null, error: { message: 'Failed to fetch' } },
+    }), 'batch-1')
+    expect(c1.unlinkedCreditLines).toBeNull()
+    const c2 = await gatherDeletion(client({
+      ...base,
+      'transactions:lines': { data: [{ id: 'old-line' }], error: null },
+      credit_installments: { data: null, error: { message: 'Failed to fetch' } },
+    }), 'batch-1')
+    expect(c2.unlinkedCreditLines).toBeNull()
+  })
+
+  it('warns, in Serbian, what the delete leaves behind and what to do before re-importing', () => {
+    const w = deletionWarning('izvod.txt', counts({ transactions: 3, unlinkedCreditLines: 2 }))
+    expect(w).toContain('Stavki otplate kredita koje nisu vezane za svoju ratu: 2.\n' + UNLINKED_WARNING)
+    expect(UNLINKED_WARNING).toBe(
+      'Proknjižene su pre nego što je izvod pamtio svoje redove glavnice i kamate, pa ih ovo brisanje '
+      + 'NE uklanja i NE vraća njihove rate na neplaćene. Pre nego što isti izvod ponovo uvezete, ručno '
+      + 'obrišite te redove glavnice i kamate i vratite rate na neplaćene — inače će otplata biti '
+      + 'proknjižena dvaput, a kao plaćena biće označena sledeća rata.')
+    // Still the last word.
+    expect(w.endsWith('Ovo se ne može poništiti odavde.')).toBe(true)
+  })
+
+  it('says it could not check when the count is unknown', () => {
+    expect(deletionWarning('izvod.txt', counts({ unlinkedCreditLines: null }))).toContain(UNLINKED_UNKNOWN)
+  })
+
+  it('says nothing when every credit line is linked, or the count predates the check', () => {
+    expect(deletionWarning('izvod.txt', counts({ unlinkedCreditLines: 0 }))).not.toMatch(/nisu vezane|proveriti/)
+    expect(deletionWarning('izvod.txt', counts())).not.toMatch(/nisu vezane|proveriti/)
+  })
+
+  it('reports a credit reopened', () => {
+    expect(deletionSummary({ transactions_deleted: 3, allocations_removed: 0, installments_reopened: 1, credits_reopened: 1 },
+      { creditLegs: 2 }))
+      .toBe('Obrisano transakcija: 1, redova glavnice i kamate iz otplata kredita: 2, '
+        + 'uklonjeno raspodela: 0, ponovo otvoreno rata kredita: 1, ponovo otvoreno kredita: 1.')
   })
 })

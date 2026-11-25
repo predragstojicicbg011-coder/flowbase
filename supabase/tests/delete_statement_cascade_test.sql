@@ -18,6 +18,10 @@
 --   S2  2026-10, open, paying INV-DS-SEP dated 2026-09-10; September closed.
 --   S3  straddles: one row in closed September, one in October.
 --   S4  2026-10, open, one line: deleted in the same transaction as S1.
+--   S5  2026-10, open, paying INV-DS-SEPDEL dated 2026-09-12 and since
+--       soft-deleted (step 4 restates it all the same).
+--   T9  a bank line outside any statement that paid the last instalment of a
+--       credit, which closed it.
 
 \set ON_ERROR_STOP on
 
@@ -25,11 +29,13 @@ do $$
 declare
   v_co uuid; v_bank uuid; v_cr uuid;
   v_inv_okt uuid; v_inv_sep uuid;
-  v_t1 uuid; v_t4 uuid; v_t5 uuid; v_t6 uuid; v_t7 uuid;
+  v_t1 uuid; v_t4 uuid; v_t5 uuid; v_t6 uuid; v_t7 uuid; v_t8 uuid; v_t9 uuid;
+  v_cr2 uuid; v_inv_del uuid;
   s1 uuid := '0d5c0000-0000-4000-8000-0000000005a1';
   s2 uuid := '0d5c0000-0000-4000-8000-0000000005a2';
   s3 uuid := '0d5c0000-0000-4000-8000-0000000005a3';
   s4 uuid := '0d5c0000-0000-4000-8000-0000000005a4';
+  s5 uuid := '0d5c0000-0000-4000-8000-0000000005a5';
 begin
   insert into auth.users (id, instance_id, aud, role, email, created_at, updated_at)
   select x.id::uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', x.email, now(), now()
@@ -57,6 +63,9 @@ begin
 
   insert into public.credits (company_id, name, bank, principal_amount, currency)
   values (v_co, 'Test kredit (TEST-DS)', 'Test banka', 120000, 'RSD') returning id into v_cr;
+  update public.credits set status = 'closed' where id = v_cr;
+  insert into public.credits (company_id, name, bank, principal_amount, currency, status)
+  values (v_co, 'Test kredit 2 (TEST-DS)', 'Test banka', 5000, 'RSD', 'closed') returning id into v_cr2;
 
   insert into public.invoices (company_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, status)
   values (v_co, 'INV-DS-OKT', '2026-10-05', 'expense', 'RSD', 1000, 1000, 1, 'paid') returning id into v_inv_okt;
@@ -67,6 +76,14 @@ begin
   values (v_co, 'INV-DS-SEP', '2026-09-10', 'expense', 'RSD', 500, 500, 1, 'paid') returning id into v_inv_sep;
   insert into public.transactions (company_id, bank_id, transaction_date, type, currency, amount, amount_rsd, pl_impact, status, import_batch_id, import_hash, note)
   values (v_co, v_bank, '2026-09-28', 'direct', 'RSD', 70, 70, true, 'posted', s3, 'TEST-DS-h31', 'S3 SEPTEMBER LINE') returning id into v_t6;
+  -- S5: a September invoice, paid in October, later soft-deleted.
+  insert into public.invoices (company_id, invoice_number, invoice_date, type, currency, amount, amount_rsd, exchange_rate, status)
+  values (v_co, 'INV-DS-SEPDEL', '2026-09-12', 'expense', 'RSD', 60, 60, 1, 'paid') returning id into v_inv_del;
+  insert into public.transactions (company_id, bank_id, transaction_date, type, currency, amount, amount_rsd, pl_impact, status, import_batch_id, import_hash, note)
+  values (v_co, v_bank, '2026-10-03', 'invoice_payment', 'RSD', 60, 60, false, 'posted', s5, 'TEST-DS-h51', 'S5 PAYMENT') returning id into v_t8;
+  insert into public.invoice_transaction_links (invoice_id, transaction_id, allocated_amount, allocated_amount_rsd)
+  values (v_inv_del, v_t8, 60, 60);
+  update public.invoices set deleted_at = now() where id = v_inv_del;
   insert into public.closed_periods (company_id, period) values (v_co, '2026-09-01');
 
   -- S1: a credit payment, three rows, the instalment on the bank line.
@@ -105,11 +122,23 @@ begin
   insert into public.transactions (company_id, bank_id, transaction_date, type, currency, amount, amount_rsd, pl_impact, status, import_batch_id, import_hash, note)
   values (v_co, v_bank, '2026-10-20', 'direct', 'RSD', 40, 40, true, 'posted', s4, 'TEST-DS-h41', 'S4 LINE') returning id into v_t7;
 
+  -- T9: the last instalment of credit 2, paid by a line outside any statement.
+  insert into public.transactions (company_id, bank_id, transaction_date, type, tx_subtype, currency, amount, amount_rsd, pl_impact, status, note)
+  values (v_co, v_bank, '2026-10-22', 'credit_payment', 'expense', 'RSD', 500, 500, false, 'posted', 'T9 BANK LINE') returning id into v_t9;
+  insert into public.credit_installments (credit_id, installment_no, due_date, principal_amount, interest_amount, total_amount,
+                                          status, transaction_id, paid_date, paid_amount)
+  values (v_cr2, 10, '2026-10-25', 450, 50, 500, 'paid', v_t9, '2026-10-22', 500);
+
   perform set_config('ds.co', v_co::text, true);
   perform set_config('ds.t1', v_t1::text, true);
   perform set_config('ds.t5', v_t5::text, true);
   perform set_config('ds.t6', v_t6::text, true);
   perform set_config('ds.t7', v_t7::text, true);
+  perform set_config('ds.t8', v_t8::text, true);
+  perform set_config('ds.t9', v_t9::text, true);
+  perform set_config('ds.cr', v_cr::text, true);
+  perform set_config('ds.cr2', v_cr2::text, true);
+  perform set_config('ds.s5', s5::text, true);
   perform set_config('ds.okt', v_inv_okt::text, true);
   perform set_config('ds.sep', v_inv_sep::text, true);
   perform set_config('ds.s1', s1::text, true);
@@ -181,7 +210,7 @@ begin
   a := pg_temp.ds_call('0d5c0000-0000-4000-8000-0000000000c1', current_setting('ds.s1'));
   assert split_part(a, '|', 1) = '00000', 'S1: ' || a;
   r := split_part(a, '|', 3)::jsonb;
-  assert r = '{"transactions_deleted":4,"passthroughs_deleted":1,"allocations_removed":1,"installments_reopened":1,"invoices_restated":1,"statement_records_removed":1}'::jsonb,
+  assert r = '{"transactions_deleted":4,"passthroughs_deleted":1,"allocations_removed":1,"installments_reopened":1,"credits_reopened":1,"invoices_restated":1,"statement_records_removed":1}'::jsonb,
     'S1 result: ' || r::text;
 
   assert (select count(*) from public.transactions where import_batch_id = current_setting('ds.s1')::uuid and deleted_at is null) = 0, 'S1 rows still live';
@@ -193,6 +222,11 @@ begin
     'instalment not reopened';
   assert (select status from public.invoices where id = current_setting('ds.okt')::uuid) = 'unpaid', 'INV-DS-OKT not restated';
   assert not exists (select 1 from public.import_logs where filing_ref = current_setting('ds.s1')), 'statement record kept';
+  -- The credit its last payment had closed is open again.
+  assert (select status from public.credits where id = current_setting('ds.cr')::uuid) = 'active', 'credit left closed';
+  -- deleted_by is the caller, though the call passed null.
+  assert (select count(*) from public.transactions where import_batch_id = current_setting('ds.s1')::uuid
+           and deleted_by is distinct from '0d5c0000-0000-4000-8000-0000000000c1') = 0, 'deleted_by is not the caller';
   -- The audit rows carry the caller (the FK to auth.users holds).
   assert exists (select 1 from public.audit_log where table_name = 'transactions' and record_id = current_setting('ds.t1')::uuid
                     and user_id = '0d5c0000-0000-4000-8000-0000000000c1'), 'audit row without the caller';
@@ -242,7 +276,7 @@ declare before text := pg_temp.ds_state(); a text;
 begin
   a := pg_temp.ds_call('0d5c0000-0000-4000-8000-0000000000c2', current_setting('ds.s2'));
   assert a = '23514|Ništa nije obrisano: ovaj izvod je platio fakturu(e) INV-DS-SEP datiranu(e) u zaključanom periodu 2026-09, '
-          || 'pa bi njegovo brisanje promenilo dug po njima u zaključanom mesecu — otključajte 2026-09 u Podešavanja → '
+          || 'pa bi njegovo brisanje promenilo dug po njima u zaključanom mesecu — otključajte 2026-09 u Podešavanjima → '
           || 'Zaključani periodi, pa ponovo obrišite izvod.|', 'S2: ' || a;
   assert pg_temp.ds_state() = before, 'S2 changed something: ' || pg_temp.ds_state();
   assert (select deleted_at is null and import_hash = 'TEST-DS-h21' from public.transactions where id = current_setting('ds.t5')::uuid), 'S2 line touched';
@@ -262,7 +296,9 @@ do $$
 declare before text := pg_temp.ds_state(); a text;
 begin
   a := pg_temp.ds_call('0d5c0000-0000-4000-8000-0000000000c1', current_setting('ds.s3'));
-  assert a like '23514|Period 2026-09 is locked%', 'S3: ' || a;
+  -- Refused before any write, in Serbian: the trigger's English never shows.
+  assert a = '23514|Ništa nije obrisano: izvod ima stavke u zaključanom periodu 2026-09 — otključajte 2026-09 '
+          || 'u Podešavanjima → Zaključani periodi, pa ponovo obrišite izvod.|', 'S3: ' || a;
   assert pg_temp.ds_state() = before, 'S3 changed something: ' || pg_temp.ds_state();
   assert (select count(*) from public.transactions where import_batch_id = current_setting('ds.s3')::uuid and deleted_at is null and import_hash is not null) = 2,
     'S3 rows touched';
@@ -292,6 +328,38 @@ begin
   exception when unique_violation then null;
   end;
   raise notice '7 ok';
+end $$;
+
+-- ══ 8. A deleted invoice in a closed month is asked about too ═══════════════
+
+do $$
+declare before text := pg_temp.ds_state(); a text;
+begin
+  a := pg_temp.ds_call('0d5c0000-0000-4000-8000-0000000000c1', current_setting('ds.s5'));
+  assert a like '23514|Ništa nije obrisano: ovaj izvod je platio fakturu(e) INV-DS-SEPDEL datiranu(e) u zaključanom periodu 2026-09,%', 'S5: ' || a;
+  assert pg_temp.ds_state() = before, 'S5 changed something: ' || pg_temp.ds_state();
+  assert (select deleted_at is null from public.transactions where id = current_setting('ds.t8')::uuid), 'S5 line touched';
+  raise notice '8 ok';
+end $$;
+
+-- ══ 9. The single delete of a line that paid a credit's last instalment ═════
+
+do $$
+declare back text := current_user; r jsonb;
+begin
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', '0d5c0000-0000-4000-8000-0000000000c2', 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+  -- The parameter names somebody else; deleted_by is the caller all the same.
+  r := public.delete_transaction_cascade(current_setting('ds.t9')::uuid, '0d5c0000-0000-4000-8000-0000000000c1');
+  execute format('set local role %I', back);
+  perform set_config('request.jwt.claims', '', true);
+  assert r = '{"invoice_links_removed":0,"installments_unlinked":1,"credits_reopened":1}'::jsonb, 'T9: ' || r::text;
+  assert (select status from public.credits where id = current_setting('ds.cr2')::uuid) = 'active', 'credit 2 left closed';
+  assert (select status || '/' || coalesce(transaction_id::text, 'null') from public.credit_installments
+           where credit_id = current_setting('ds.cr2')::uuid) = 'outstanding/null', 'instalment of credit 2 not reopened';
+  assert (select deleted_by from public.transactions where id = current_setting('ds.t9')::uuid)
+         = '0d5c0000-0000-4000-8000-0000000000c2', 'T9 deleted_by is not the caller';
+  raise notice '9 ok';
 end $$;
 
 reset role;

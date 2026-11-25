@@ -49,7 +49,7 @@ jest.mock('../supabase', () => {
     c.range = (from: number) => { st.from = from; return c }
     ;['order', 'eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'not', 'filter', 'limit', 'ilike', 'or']
       .forEach(m => { c[m] = () => c })
-    c.single = () => Promise.resolve({ data: null, error: null })
+    c.single = () => Promise.resolve({ data: rowsOf(table)[0] ?? null, error: null })
     c.then = (ok: any, err: any) => Promise.resolve(result()).then(ok, err)
     return c
   }
@@ -57,7 +57,7 @@ jest.mock('../supabase', () => {
 })
 
 const tx = (id: string, note: string, over: Record<string, any>) => ({
-  id, note, partners: { name: 'Banka Primer' }, partner_id: 'p1',
+  id, note, partners: { name: 'Banka Primer' }, partner_id: 'p1', bank_id: 'b1', import_batch_id: 'batch-1',
   transaction_date: '2026-10-13', tx_subtype: 'expense',
   companies: { name: 'Gradnja Primer doo' }, banks: { name: 'Banka Primer' },
   amount: 1200, currency: 'RSD', amount_rsd: 1200, amount_eur: null,
@@ -83,16 +83,29 @@ const askedOnDelete = async (note: string): Promise<string> => {
   return text
 }
 
-const LEGS_STAY = 'Brisanje ponovo otvara ratu, ali redovi glavnice i kamate koje je proknjižila '
-  + 'ostaju u P&L-u. Obrišite i ta dva reda, ili umesto toga obrišite ceo izvod — inače će rata '
+const LEGS_STAY = 'Brisanje ponovo otvara ratu, ali redovi glavnice i kamate koje je proknjižila (2 reda) '
+  + 'ostaju u P&L-u. Obrišite i te redove, ili umesto toga obrišite ceo izvod — inače će rata '
   + 'biti proknjižena dvaput kada se ponovo plati.'
 
 describe('deleting a credit payment’s bank line alone', () => {
   it('says the principal and interest rows stay in the P&L when the line settled an instalment', async () => {
-    await openTransactions([tx('t-line', 'KREDIT RATA 4', { type: 'credit_payment', pl_impact: false })], [{ id: 'i1' }])
+    await openTransactions([
+      tx('t-line', 'KREDIT RATA 4', { type: 'credit_payment', pl_impact: false }),
+      tx('t-p', 'GLAVNICA RATA 4', { type: 'credit_payment', pl_impact: true, amount: 1000 }),
+      tx('t-i', 'KAMATA RATA 4', { type: 'credit_payment', pl_impact: true, amount: 200 }),
+    ], [{ id: 'i1' }])
     const text = await askedOnDelete('KREDIT RATA 4')
-    expect(text).toContain('To je stavka izvoda kojom je plaćen kredit; zatvorila je rata kredita: 1.')
+    expect(text).toContain('To je stavka izvoda kojom je plaćen kredit; zatvorila je 1 ratu kredita.')
     expect(text).toContain(LEGS_STAY)
+  })
+
+  it('says one row for an interest-only instalment', async () => {
+    await openTransactions([
+      tx('t-line', 'KREDIT RATA 1', { type: 'credit_payment', pl_impact: false }),
+      tx('t-i', 'KAMATA RATA 1', { type: 'credit_payment', pl_impact: true, amount: 350 }),
+    ], [{ id: 'i1' }])
+    expect(await askedOnDelete('KREDIT RATA 1')).toContain(
+      'ali red glavnice ili kamate koji je proknjižila ostaje u P&L-u. Obrišite i taj red,')
   })
 
   it('asks the plain question for a leg, which reopens nothing', async () => {

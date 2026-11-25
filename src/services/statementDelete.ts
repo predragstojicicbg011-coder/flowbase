@@ -22,6 +22,14 @@ export interface DeletionCounts {
    * Optional so a count built before it existed still reads.
    */
   creditLegs?: number
+  /**
+   * The statement's credit BANK LINES (`credit_payment`, `pl_impact` not true)
+   * that no instalment points to: credit payments posted before 20261125090000,
+   * whose legs carry no batch and whose instalment was never stamped. The
+   * delete cannot find their legs or their instalments. null when it could not
+   * be read; optional so a count built before it existed still reads.
+   */
+  unlinkedCreditLines?: number | null
   passthroughs: number
   /** Distinct invoices this statement allocated against. */
   invoiceIds: string[]
@@ -58,10 +66,32 @@ export function deletionWarning(fileName: string | null | undefined, c: Deletion
         + (c.closing.length > 8 ? ` i još ${c.closing.length - 8}` : ''))
     }
   }
+  const unlinked = c.unlinkedCreditLines
+  if (unlinked === null) {
+    lines.push('')
+    lines.push(UNLINKED_UNKNOWN)
+  } else if ((unlinked ?? 0) > 0) {
+    lines.push('')
+    lines.push(`Stavki otplate kredita koje nisu vezane za svoju ratu: ${unlinked}.`)
+    lines.push(UNLINKED_WARNING)
+  }
   lines.push('')
   lines.push('Ovo se ne može poništiti odavde.')
   return lines.join('\n')
 }
+
+/** What an old credit payment leaves behind when its statement is deleted. */
+export const UNLINKED_WARNING =
+  'Proknjižene su pre nego što je izvod pamtio svoje redove glavnice i kamate, pa ih ovo brisanje '
+  + 'NE uklanja i NE vraća njihove rate na neplaćene. Pre nego što isti izvod ponovo uvezete, ručno '
+  + 'obrišite te redove glavnice i kamate i vratite rate na neplaćene — inače će otplata biti '
+  + 'proknjižena dvaput, a kao plaćena biće označena sledeća rata.'
+
+/** The same, when the check itself could not be read. */
+export const UNLINKED_UNKNOWN =
+  'Nije bilo moguće proveriti otplate kredita ovog izvoda. Ako ih ima i proknjižene su pre nego što '
+  + 'je izvod pamtio svoje redove glavnice i kamate, ovo brisanje te redove NE uklanja i NE vraća '
+  + 'njihove rate na neplaćene.'
 
 /**
  * What was actually done, in the same terms the warning used.
@@ -79,6 +109,7 @@ export function deletionSummary(r: any, counts?: Pick<DeletionCounts, 'creditLeg
     + ((d.passthroughs_deleted ?? 0) > 0 ? `, prolaznih stavki: ${d.passthroughs_deleted}` : '')
     + `, uklonjeno raspodela: ${d.allocations_removed ?? 0}`
     + ((d.installments_reopened ?? 0) > 0 ? `, ponovo otvoreno rata kredita: ${d.installments_reopened}` : '')
+    + ((d.credits_reopened ?? 0) > 0 ? `, ponovo otvoreno kredita: ${d.credits_reopened}` : '')
     + ((d.invoices_restated ?? 0) > 0 ? `, faktura kojima se promenio status: ${d.invoices_restated}` : '')
     + '.'
 }
@@ -110,11 +141,34 @@ export async function gatherDeletion(supabase: any, batchId: string): Promise<De
   return {
     transactions: (txCount ?? 0) - creditLegs,
     creditLegs,
+    unlinkedCreditLines: await countUnlinkedCreditLines(supabase, batchId),
     passthroughs: ptCount ?? 0,
     invoiceIds,
     closing: (affected || [])
       .filter((i: any) => i.calculated_status === 'paid')
       .map((i: any) => i.invoice_number || '(bez broja)'),
+  }
+}
+
+/**
+ * The batch's credit bank lines that no instalment points to (see
+ * `unlinkedCreditLines`). null when either read fails.
+ */
+async function countUnlinkedCreditLines(supabase: any, batchId: string): Promise<number | null> {
+  try {
+    const { data: lines, error } = await supabase.from('transactions').select('id')
+      .eq('import_batch_id', batchId).is('deleted_at', null)
+      .eq('type', 'credit_payment').not('pl_impact', 'is', true)
+    if (error) return null
+    const ids = ((lines || []) as any[]).map(l => l.id as string)
+    if (ids.length === 0) return 0
+    const { data: paid, error: paidErr } = await supabase.from('credit_installments')
+      .select('transaction_id').in('transaction_id', ids)
+    if (paidErr) return null
+    const linked = new Set(((paid || []) as any[]).map(i => i.transaction_id))
+    return ids.filter(id => !linked.has(id)).length
+  } catch {
+    return null
   }
 }
 

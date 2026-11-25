@@ -33,6 +33,8 @@
 // client they are handed, so the page and the dialog stay thin and the write
 // order itself is what the tests assert on.
 
+import { countOf } from '../utils/plural'
+
 // ── The client, only as much of it as these two paths use ──────────────────
 
 export interface WriteError {
@@ -330,49 +332,92 @@ export async function deleteTransactionInSteps(
 /**
  * The question asked before a single transaction is deleted.
  *
- * A credit payment posted from a bank statement or a bulk import is THREE
- * rows: the bank line (`pl_impact` false) and the principal and interest legs
- * beside it (`pl_impact` true). Since 20261125090000 the instalment points at
- * the bank line, so deleting the bank line alone reopens the instalment -- and
- * the two legs stay in the P&L. Pay that instalment again and it is booked
- * twice. The legs cannot be found reliably from here (two payments to the same
- * bank on the same day and statement is a real case), so the owner is told,
- * in plain words, before anything is touched.
+ * A credit payment posted from a bank statement or a bulk import is a bank
+ * line (`pl_impact` false) and, beside it, a principal and an interest leg per
+ * instalment it paid (`pl_impact` true; an interest-only instalment has one).
+ * Since 20261125090000 the instalment points at the bank line, so deleting the
+ * bank line alone reopens the instalment -- and the legs stay in the P&L. Pay
+ * that instalment again and it is booked twice. So the owner is told, in plain
+ * words, before anything is touched, with the number of legs when it can be
+ * told (see `confirmDeleteText`).
  *
  * `settledInstalments` null means the count could not be read; the warning is
  * then given anyway, because a confident silence would be the one wrong answer.
+ * `legs` null means the legs could not be counted; the sentence then names
+ * them without a number.
  */
 export function deleteConfirmText(
   row: { type?: string | null; pl_impact?: boolean | null },
   settledInstalments: number | null,
+  legs: number | null = null,
 ): string {
   const isBankLine = row.type === 'credit_payment' && row.pl_impact !== true
   if (!isBankLine || settledInstalments === 0) return 'Obrisati ovu transakciju?'
+  const one = settledInstalments === null || settledInstalments === 1
   const what = settledInstalments === null
     ? 'To je stavka izvoda kojom je plaćen kredit i možda je zatvorila ratu kredita.'
-    : `To je stavka izvoda kojom je plaćen kredit; zatvorila je rata kredita: ${settledInstalments}.`
-  return [
-    'Obrisati ovu transakciju?',
-    '',
-    what,
-    'Brisanje ponovo otvara ratu, ali redovi glavnice i kamate koje je proknjižila ostaju u P&L-u. '
-      + 'Obrišite i ta dva reda, ili umesto toga obrišite ceo izvod — inače će rata biti '
-      + 'proknjižena dvaput kada se ponovo plati.',
-  ].join('\n')
+    : `To je stavka izvoda kojom je plaćen kredit; zatvorila je ${countOf(settledInstalments, 'ratu kredita', 'rate kredita', 'rata kredita')}.`
+  const reopens = `Brisanje ponovo otvara ${one ? 'ratu' : 'te rate'}`
+  const twice = one
+    ? 'inače će rata biti proknjižena dvaput kada se ponovo plati.'
+    : 'inače će rate biti proknjižene dvaput kada se ponovo plate.'
+  const stay = legs === 0
+    ? `${reopens}.`
+    : legs === 1
+      ? `${reopens}, ali red glavnice ili kamate koji je proknjižila ostaje u P&L-u. `
+        + `Obrišite i taj red, ili umesto toga obrišite ceo izvod — ${twice}`
+      : legs === null
+        ? `${reopens}, ali redovi glavnice i kamate koje je proknjižila ostaju u P&L-u. `
+          + `Obrišite i njih, ili umesto toga obrišite ceo izvod — ${twice}`
+        : `${reopens}, ali redovi glavnice i kamate koje je proknjižila (${countOf(legs, 'red', 'reda', 'redova')}) `
+          + `ostaju u P&L-u. Obrišite i te redove, ili umesto toga obrišite ceo izvod — ${twice}`
+  return ['Obrisati ovu transakciju?', '', what, stay].join('\n')
 }
 
-/** `deleteConfirmText` for a ledger row, asking the database what it settled. */
+/**
+ * `deleteConfirmText` for a ledger row, asking the database what it settled
+ * and how many principal/interest legs it left beside it.
+ *
+ * The legs carry the bank line's batch, date, bank and partner; nothing else
+ * ties a leg to its line. When two credit bank lines of the batch share those
+ * (two payments to the same bank on the same day), whose legs are whose cannot
+ * be told, and the count is left out rather than guessed.
+ */
 export async function confirmDeleteText(
   client: SupabaseLike,
   row: { id: string; type?: string | null; pl_impact?: boolean | null },
 ): Promise<string> {
   if (!(row.type === 'credit_payment' && row.pl_impact !== true)) return deleteConfirmText(row, 0)
+  let settled: number | null
   try {
     const { count, error } = await client.from('credit_installments')
       .select('id', { count: 'exact', head: true }).eq('transaction_id', row.id)
-    return deleteConfirmText(row, !error && typeof count === 'number' ? count : null)
+    settled = !error && typeof count === 'number' ? count : null
   } catch {
-    return deleteConfirmText(row, null)
+    settled = null
+  }
+  if (settled === 0) return deleteConfirmText(row, 0)
+  return deleteConfirmText(row, settled, await countLegs(client, row.id))
+}
+
+/** The legs beside a credit bank line, or null when they cannot be told. */
+async function countLegs(client: SupabaseLike, id: string): Promise<number | null> {
+  try {
+    const { data: line, error } = await client.from('transactions')
+      .select('import_batch_id, transaction_date, bank_id, partner_id').eq('id', id).single()
+    if (error || !line?.import_batch_id) return null
+    let q = client.from('transactions').select('id, pl_impact')
+      .eq('import_batch_id', line.import_batch_id).eq('transaction_date', line.transaction_date)
+      .eq('type', 'credit_payment').is('deleted_at', null)
+    q = line.bank_id ? q.eq('bank_id', line.bank_id) : q.is('bank_id', null)
+    q = line.partner_id ? q.eq('partner_id', line.partner_id) : q.is('partner_id', null)
+    const { data: family, error: famErr } = await q
+    if (famErr || !Array.isArray(family)) return null
+    const lines = family.filter((r: any) => r.pl_impact !== true).length
+    if (lines !== 1) return null
+    return family.filter((r: any) => r.pl_impact === true).length
+  } catch {
+    return null
   }
 }
 

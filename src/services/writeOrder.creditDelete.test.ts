@@ -4,76 +4,146 @@ import { deleteConfirmText, confirmDeleteText, type SupabaseLike } from './write
 //
 // Since 20261125090000 a statement stamps the instalment it paid with the
 // bank line, so deleting that line alone reopens the instalment, while the
-// principal and interest legs it posted stay in the P&L. The question says so.
-
-const LEGS_STAY = 'Brisanje ponovo otvara ratu, ali redovi glavnice i kamate koje je proknjižila '
-  + 'ostaju u P&L-u. Obrišite i ta dva reda, ili umesto toga obrišite ceo izvod — inače će rata '
-  + 'biti proknjižena dvaput kada se ponovo plati.'
+// principal and interest legs it posted stay in the P&L. The question says so,
+// in Serbian that agrees with how many instalments and legs there are.
 
 const bankLine = { id: 't-line', type: 'credit_payment', pl_impact: false }
 const leg = { id: 't-leg', type: 'credit_payment', pl_impact: true }
 const expense = { id: 't-x', type: 'direct', pl_impact: true }
 
-/** A client whose instalment count answers `count`, or fails. */
-const counting = (answer: { count: number | null; error: any } | 'throws') => {
+describe('deleteConfirmText', () => {
+  it('one instalment, two legs', () => {
+    expect(deleteConfirmText(bankLine, 1, 2)).toBe([
+      'Obrisati ovu transakciju?',
+      '',
+      'To je stavka izvoda kojom je plaćen kredit; zatvorila je 1 ratu kredita.',
+      'Brisanje ponovo otvara ratu, ali redovi glavnice i kamate koje je proknjižila (2 reda) ostaju u P&L-u. '
+        + 'Obrišite i te redove, ili umesto toga obrišite ceo izvod — inače će rata biti proknjižena '
+        + 'dvaput kada se ponovo plati.',
+    ].join('\n'))
+  })
+
+  it('an interest-only instalment: one leg', () => {
+    expect(deleteConfirmText(bankLine, 1, 1).split('\n')[3]).toBe(
+      'Brisanje ponovo otvara ratu, ali red glavnice ili kamate koji je proknjižila ostaje u P&L-u. '
+      + 'Obrišite i taj red, ili umesto toga obrišite ceo izvod — inače će rata biti proknjižena '
+      + 'dvaput kada se ponovo plati.')
+  })
+
+  it('three instalments, five legs', () => {
+    const t = deleteConfirmText(bankLine, 3, 5)
+    expect(t).toContain('zatvorila je 3 rate kredita.')
+    expect(t).toContain('Brisanje ponovo otvara te rate, ali redovi glavnice i kamate koje je proknjižila (5 redova) ostaju u P&L-u.')
+    expect(t).toContain('inače će rate biti proknjižene dvaput kada se ponovo plate.')
+  })
+
+  it('five instalments read "5 rata kredita"', () => {
+    expect(deleteConfirmText(bankLine, 5, 10)).toContain('zatvorila je 5 rata kredita.')
+  })
+
+  it('legs that cannot be counted are named without a number', () => {
+    expect(deleteConfirmText(bankLine, 1, null)).toContain(
+      'ali redovi glavnice i kamate koje je proknjižila ostaju u P&L-u. Obrišite i njih,')
+  })
+
+  it('no legs left: only the reopening is said', () => {
+    expect(deleteConfirmText(bankLine, 1, 0).split('\n')[3]).toBe('Brisanje ponovo otvara ratu.')
+  })
+
+  it('warns anyway when the instalment count could not be read', () => {
+    expect(deleteConfirmText(bankLine, null, 2))
+      .toContain('To je stavka izvoda kojom je plaćen kredit i možda je zatvorila ratu kredita.')
+  })
+
+  it('asks the plain question for a leg, an ordinary row, and a bank line that settled nothing', () => {
+    expect(deleteConfirmText(leg, 1, 2)).toBe('Obrisati ovu transakciju?')
+    expect(deleteConfirmText(expense, 1, 2)).toBe('Obrisati ovu transakciju?')
+    expect(deleteConfirmText(bankLine, 0, 2)).toBe('Obrisati ovu transakciju?')
+  })
+})
+
+// ── Asking the database ─────────────────────────────────────────────────────
+
+interface Answers {
+  instalments: { count: number | null; error: any } | 'throws'
+  line?: { data: any; error: any }
+  family?: { data: any; error: any }
+}
+
+/** A client that answers the three reads and records every filter. */
+const fake = (a: Answers) => {
   const asked: string[] = []
   const client: SupabaseLike = {
     rpc: async () => ({ data: null, error: null }),
     from: (table: string) => {
-      asked.push(table)
+      const filters: string[] = []
       const c: any = {}
       c.select = () => c
-      c.eq = (col: string, v: unknown) => { asked.push(`${col}=${v}`); return c }
-      c.then = (ok: any, bad: any) => answer === 'throws'
-        ? Promise.reject(new Error('Failed to fetch')).then(ok, bad)
-        : Promise.resolve(answer).then(ok, bad)
+      c.eq = (col: string, v: unknown) => { filters.push(`${col}=${v}`); return c }
+      c.is = (col: string, v: unknown) => { filters.push(`${col} is ${v}`); return c }
+      c.single = () => { asked.push(`${table} one ${filters.join(',')}`); return Promise.resolve(a.line ?? { data: null, error: null }) }
+      c.then = (ok: any, bad: any) => {
+        asked.push(`${table} ${filters.join(',')}`)
+        if (table === 'credit_installments') {
+          return a.instalments === 'throws'
+            ? Promise.reject(new Error('Failed to fetch')).then(ok, bad)
+            : Promise.resolve(a.instalments).then(ok, bad)
+        }
+        return Promise.resolve(a.family ?? { data: [], error: null }).then(ok, bad)
+      }
       return c
     },
   }
   return { client, asked }
 }
 
-describe('deleteConfirmText', () => {
-  it('names what a credit bank line that settled an instalment leaves behind', () => {
-    expect(deleteConfirmText(bankLine, 1)).toBe([
-      'Obrisati ovu transakciju?',
-      '',
-      'To je stavka izvoda kojom je plaćen kredit; zatvorila je rata kredita: 1.',
-      LEGS_STAY,
-    ].join('\n'))
-  })
-
-  it('warns anyway when the count could not be read', () => {
-    const t = deleteConfirmText(bankLine, null)
-    expect(t).toContain('To je stavka izvoda kojom je plaćen kredit i možda je zatvorila ratu kredita.')
-    expect(t).toContain(LEGS_STAY)
-  })
-
-  it('asks the plain question for a leg, an ordinary row, and a bank line that settled nothing', () => {
-    expect(deleteConfirmText(leg, 1)).toBe('Obrisati ovu transakciju?')
-    expect(deleteConfirmText(expense, 1)).toBe('Obrisati ovu transakciju?')
-    expect(deleteConfirmText(bankLine, 0)).toBe('Obrisati ovu transakciju?')
-  })
-})
+const LINE = { import_batch_id: 'b-1', transaction_date: '2026-10-13', bank_id: 'bank-1', partner_id: null }
 
 describe('confirmDeleteText', () => {
-  it('asks the database which instalments the bank line settled', async () => {
-    const { client, asked } = counting({ count: 2, error: null })
-    expect(await confirmDeleteText(client, bankLine)).toContain('zatvorila je rata kredita: 2.')
-    expect(asked).toEqual(['credit_installments', 'transaction_id=t-line'])
+  it('counts the instalments and the legs beside the bank line', async () => {
+    const { client, asked } = fake({
+      instalments: { count: 1, error: null },
+      line: { data: LINE, error: null },
+      family: { data: [{ id: 't-line', pl_impact: false }, { id: 'p', pl_impact: true }, { id: 'i', pl_impact: true }], error: null },
+    })
+    const t = await confirmDeleteText(client, bankLine)
+    expect(t).toContain('zatvorila je 1 ratu kredita.')
+    expect(t).toContain('(2 reda) ostaju u P&L-u')
+    expect(asked).toEqual([
+      'credit_installments transaction_id=t-line',
+      'transactions one id=t-line',
+      'transactions import_batch_id=b-1,transaction_date=2026-10-13,type=credit_payment,deleted_at is null,bank_id=bank-1,partner_id is null',
+    ])
   })
 
-  it('does not ask for any other row', async () => {
-    const { client, asked } = counting({ count: 2, error: null })
-    expect(await confirmDeleteText(client, leg)).toBe('Obrisati ovu transakciju?')
-    expect(await confirmDeleteText(client, expense)).toBe('Obrisati ovu transakciju?')
-    expect(asked).toEqual([])
+  it('leaves the number out when two bank lines share the batch, day, bank and partner', async () => {
+    const { client } = fake({
+      instalments: { count: 1, error: null },
+      line: { data: LINE, error: null },
+      family: { data: [{ pl_impact: false }, { pl_impact: false }, { pl_impact: true }, { pl_impact: true }], error: null },
+    })
+    expect(await confirmDeleteText(client, bankLine)).toContain('Obrišite i njih,')
   })
 
-  it('warns when the read fails or throws', async () => {
-    expect(await confirmDeleteText(counting({ count: null, error: { message: 'x' } }).client, bankLine))
+  it('leaves the number out for a line with no batch', async () => {
+    const { client } = fake({ instalments: { count: 1, error: null }, line: { data: { ...LINE, import_batch_id: null }, error: null } })
+    expect(await confirmDeleteText(client, bankLine)).toContain('Obrišite i njih,')
+  })
+
+  it('does not ask anything for any other row, nor for legs when nothing was settled', async () => {
+    const other = fake({ instalments: { count: 2, error: null } })
+    expect(await confirmDeleteText(other.client, leg)).toBe('Obrisati ovu transakciju?')
+    expect(await confirmDeleteText(other.client, expense)).toBe('Obrisati ovu transakciju?')
+    expect(other.asked).toEqual([])
+    const none = fake({ instalments: { count: 0, error: null } })
+    expect(await confirmDeleteText(none.client, bankLine)).toBe('Obrisati ovu transakciju?')
+    expect(none.asked).toEqual(['credit_installments transaction_id=t-line'])
+  })
+
+  it('warns when the instalment read fails or throws', async () => {
+    expect(await confirmDeleteText(fake({ instalments: { count: null, error: { message: 'x' } } }).client, bankLine))
       .toContain('možda je zatvorila ratu kredita')
-    expect(await confirmDeleteText(counting('throws').client, bankLine))
+    expect(await confirmDeleteText(fake({ instalments: 'throws' }).client, bankLine))
       .toContain('možda je zatvorila ratu kredita')
   })
 })
