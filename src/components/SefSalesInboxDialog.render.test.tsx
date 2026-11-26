@@ -205,6 +205,17 @@ describe('the sales inbox', () => {
     expect(mockState.invoiceProps.invoice).toMatchObject({ type: 'revenue', document_type: 'advance_invoice', pl_impact: false })
   })
 
+  it('says the status in words on the third line, and keeps Plaćena for a paid one', async () => {
+    mockState.rows = [row({ sef_status: 'Sent' })]
+    const { unmount } = render(<SefSalesInboxDialog onClose={() => {}} onImported={() => {}} />)
+    expect(await screen.findByText(/SEF status Poslata/)).toBeInTheDocument()
+    unmount()
+    mockState.rows = [row({ sef_status: 'Paid' })]
+    await show()
+    expect(screen.getByText(/SEF status Plaćena/)).toBeInTheDocument()
+    expect(screen.queryByText(/SEF status Paid/)).not.toBeInTheDocument()
+  })
+
   it('shows Paid on SEF as information only', async () => {
     mockState.rows = [row({ sef_status: 'Paid' })]
     await show()

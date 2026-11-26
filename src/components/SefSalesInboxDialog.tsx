@@ -22,6 +22,7 @@ import { getBookRates, rateFor } from '../services/bookAmounts'
 import { fetchProjects, type Project } from '../services/projects'
 import type { RentalLease } from '../services/revenuePlan'
 import { proposeLease, proposeProject } from '../services/revenueClassification'
+import { sefStatusWord } from '../services/sef/sefStatusWords'
 
 // The inbox of invoices WE issued, as SEF lists them (direction 'sales').
 //
@@ -510,7 +511,7 @@ export default function SefSalesInboxDialog({ onClose, onImported }: Props) {
               {' · '}Br. {row.document_number || '—'}
             </div>
             <div style={s.meta}>
-              Izdata {fmtDate(row.issue_date || belgradeDay(row.sent_date))} · Dospeva {fmtDate(row.due_date)} · SEF status {paid ? 'Plaćena' : (row.sef_status || '—')}
+              Izdata {fmtDate(row.issue_date || belgradeDay(row.sent_date))} · Dospeva {fmtDate(row.due_date)} · SEF status {sefStatusWord(row.sef_status) ?? '—'}
             </div>
           </div>
           <div style={s.amount}>{fmtAmount(row.amount, row.currency)}</div>

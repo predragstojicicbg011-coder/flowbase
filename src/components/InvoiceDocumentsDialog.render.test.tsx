@@ -91,6 +91,12 @@ describe('the documents of a booked invoice', () => {
     expect(screen.getByText(/Status na SEF-u: Pregledana/)).toBeInTheDocument()
   })
 
+  it('says Odobrena for an approved invoice, the word the owner uses', async () => {
+    mockTables.sef_inbox.push(sefRow({ state: 'imported', imported_invoice_id: 'inv', sef_status: 'Approved' }))
+    render(<InvoiceDocumentsDialog invoiceId="inv" onClose={() => {}} />)
+    expect(await screen.findByText(/Status na SEF-u: Odobrena/)).toBeInTheDocument()
+  })
+
   it('pairs a hand-typed invoice with the waiting SEF row, through the database function', async () => {
     mockTables.sef_inbox.push(sefRow({}))
     const onLinked = jest.fn()

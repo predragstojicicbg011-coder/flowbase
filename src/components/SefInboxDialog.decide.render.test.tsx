@@ -103,7 +103,7 @@ describe('deciding on SEF from the inbox', () => {
     await screen.findByRole('status')
     expect(mockState.invoke).toHaveBeenCalledTimes(1)
     expect(mockState.invoke).toHaveBeenCalledWith('sef-decide', { body: { inbox_id: 'r1', accepted: true, comment: '' } })
-    expect(screen.getByRole('status')).toHaveTextContent(/SEF status: Approved/)
+    expect(screen.getByRole('status')).toHaveTextContent(/SEF status: Odobrena/)
     expect(screen.getByText(/Prihvaćeno na SEF-u .*Osoba A/)).toBeInTheDocument()
     // Final: nothing more is offered.
     expect(screen.queryByText('Odbij na SEF-u')).not.toBeInTheDocument()
@@ -173,7 +173,7 @@ describe('decisions made on SEF outside the app', () => {
     expect(screen.getByText(/može se još samo prihvatiti/)).toBeInTheDocument()
   })
 
-  it.each([['Storno', 'Storno'], ['Cancelled', 'Otkazana']])('offers nothing on a %s invoice', async (status, label) => {
+  it.each([['Storno', 'Stornirana'], ['Cancelled', 'Otkazana']])('offers nothing on a %s invoice', async (status, label) => {
     mockState.rows = [row({ sef_status: status })]
     await show()
     expect(screen.getByText(label)).toBeInTheDocument()

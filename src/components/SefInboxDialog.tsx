@@ -20,6 +20,7 @@ import {
   decideOnSef, readSefDecisionsEnabled, decisionActions, SWITCH_OFF_MESSAGE, type SefDecision,
 } from '../services/sef/sefDecide'
 import { sefDecisionGuard, sefOutsideBadge, sefStatusRank } from '../services/sef/sefDecisionGuard'
+import { sefStatusWord, sefStatusTone, type SefStatusTone } from '../services/sef/sefStatusWords'
 import { useAuth } from '../contexts/AuthContext'
 import { fetchScripts } from '../services/quickFillStore'
 import { getBookRates, rateFor } from '../services/bookAmounts'
@@ -508,7 +509,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     const who = [r.decidedByName, r.decidedAt ? fmtMoment(r.decidedAt) : null].filter(Boolean).join(', ')
     setRowNotice({
       id: row.id,
-      text: `${r.decision === 'accepted' ? 'Prihvaćeno' : 'Odbijeno'} na SEF-u. SEF status: ${r.sefStatus}${who ? ` (${who})` : ''}.`
+      text: `${r.decision === 'accepted' ? 'Prihvaćeno' : 'Odbijeno'} na SEF-u. SEF status: ${sefStatusWord(r.sefStatus) ?? r.sefStatus}${who ? ` (${who})` : ''}.`
         + (r.warning ? ` ${r.warning}` : ''),
     })
   })
@@ -960,7 +961,11 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
     const guardNote = allowed.accept && acceptRefusal ? acceptRefusal.message
       : allowed.reject && rejectRefusal ? 'Faktura je već odbijena na SEF-u van aplikacije — može se još samo prihvatiti.'
       : null
-    const outsideBadge = sefOutsideBadge(row)
+    // Cancelled and Storno are already worn by the status badge; only the
+    // "decided outside the app" note adds something.
+    const outsideBadge = ['cancelled', 'storno'].includes((row.sef_status || '').trim().toLowerCase()) ? null : sefOutsideBadge(row)
+    const statusWord = sefStatusWord(row.sef_status)
+    const statusColors = STATUS_TONE[sefStatusTone(row.sef_status)]
 
     return (
       <div key={row.id} data-row={row.id} style={s.row}>
@@ -968,6 +973,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={s.supplierLine}>
               <span style={s.supplier}>{row.supplier_name || 'Nepoznat dobavljač'}</span>
+              {statusWord && <span data-sef-status style={{ ...s.badge, ...statusColors }}>{statusWord}</span>}
               {isCreditNote(row) && <span style={{ ...s.badge, background: DIALOG.blueFill, color: DIALOG.blue }}>Knjižno odobrenje</span>}
               {/prepayment/i.test(row.document_type || '') && <span style={{ ...s.badge, background: DIALOG.amberFill, color: DIALOG.amber }}>Avansni račun</span>}
               {outsideBadge && (
@@ -989,7 +995,7 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
               {' · '}Br. {row.document_number || '—'}
             </div>
             <div style={s.meta}>
-              Poslato {fmtDate(belgradeDay(row.sent_date))} · Dospeva {fmtDate(row.due_date)} · SEF status {row.sef_status || '—'}
+              Poslato {fmtDate(belgradeDay(row.sent_date))} · Dospeva {fmtDate(row.due_date)}
             </div>
           </div>
           <div style={s.amount}>{fmtAmount(row.amount, row.currency)}</div>
@@ -1047,13 +1053,13 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
 
         {row.sef_decision === 'accepted' && (
           <div style={{ ...s.flag, color: DIALOG.accent, background: DIALOG.accentFill }}>
-            Prihvaćeno na SEF-u{decidedBy(row)} · SEF status {row.sef_status || '—'}
+            Prihvaćeno na SEF-u{decidedBy(row)} · SEF status {sefStatusWord(row.sef_status) ?? '—'}
             {row.sef_decision_comment ? ` · ${row.sef_decision_comment}` : ''}
           </div>
         )}
         {row.sef_decision === 'rejected' && (
           <div style={{ ...s.flag, color: DIALOG.amber, background: DIALOG.amberFill }}>
-            Odbijeno na SEF-u — može se naknadno prihvatiti{decidedBy(row)} · SEF status {row.sef_status || '—'}
+            Odbijeno na SEF-u — može se naknadno prihvatiti{decidedBy(row)} · SEF status {sefStatusWord(row.sef_status) ?? '—'}
             {row.sef_decision_comment ? ` · Razlog: ${row.sef_decision_comment}` : ''}
           </div>
         )}
@@ -1347,6 +1353,16 @@ export default function SefInboxDialog({ onClose, onImported }: Props) {
       )}
     </>
   )
+}
+
+// The badge colours of a SEF status. The word is always written, so colour never carries the meaning alone.
+const STATUS_TONE: Record<SefStatusTone, React.CSSProperties> = {
+  blue: { background: DIALOG.blueFill, color: DIALOG.blue },
+  amber: { background: DIALOG.amberFill, color: DIALOG.amber },
+  green: { background: DIALOG.accentFill, color: DIALOG.accent },
+  red: { background: DIALOG.redFill, color: DIALOG.red },
+  grey: { background: DIALOG.raised, color: DIALOG.dim },
+  neutral: { background: DIALOG.raised, color: DIALOG.dim },
 }
 
 const s: Record<string, React.CSSProperties> = {

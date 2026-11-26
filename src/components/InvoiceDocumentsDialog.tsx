@@ -9,6 +9,7 @@ import {
   type InvoiceDocuments, type LinkCandidate, type UploadedDocument,
 } from '../services/sef/invoiceDocuments'
 import { sefObjectUrl, attachmentLabel, refetchSefPdf, SEF_PDF_URL_SECONDS } from '../services/sef/sefPdf'
+import { sefStatusWord } from '../services/sef/sefStatusWords'
 
 // ─── A booked invoice's documents ───────────────────────────────────────────
 //
@@ -37,11 +38,7 @@ async function reasonFrom(err: any): Promise<string> {
   return err?.message || 'Poziv nije uspeo.'
 }
 
-const SEF_STATUS: Record<string, string> = {
-  new: 'Nova', seen: 'Pregledana', approved: 'Prihvaćena', rejected: 'Odbijena',
-  cancelled: 'Otkazana', storno: 'Stornirana',
-}
-const statusLabel = (s: string | null) => (s ? SEF_STATUS[s.trim().toLowerCase()] || s : '—')
+const statusLabel = (s: string | null) => sefStatusWord(s) ?? '—'
 
 export default function InvoiceDocumentsDialog({ invoiceId, onClose, onLinked }: Props) {
   const { canEdit: keepsBooks } = useAuth()
